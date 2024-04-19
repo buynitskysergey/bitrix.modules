@@ -53,16 +53,28 @@ class LoadListAction extends BaseAction
 			return $this->showErrors();
 		}
 
-		$items = array_map(
-			static fn($workflow) => new WorkflowView($workflow, $currentUserId),
-			array_values($result->getWorkflowStatesList()),
-		);
+		$userIds = [];
+		$items = [];
+		foreach ($result->getWorkflowStatesList() as $workflow)
+		{
+			$workflowView = new WorkflowView($workflow, $currentUserId);
+			$items[] = $workflowView;
 
-		$userIds = array_column($result->getMembersInfo(), 'ID');
+			if (isset($workflow['STARTED_USER_INFO']['ID']))
+			{
+				$userIds[(int)($workflow['STARTED_USER_INFO']['ID'])] = true;
+			}
+
+			$facesIds = $workflowView->getFacesIds();
+			foreach ($facesIds as $userId)
+			{
+				$userIds[(int)$userId] = true;
+			}
+		}
 
 		return [
 			'items' => $items,
-			'users' => UserRepository::getByIds($userIds),
+			'users' => UserRepository::getByIds(array_keys($userIds)),
 			'permissions' => [],
 		];
 	}

@@ -8,41 +8,47 @@ use Bitrix\Main\Service\MicroService\BaseSender;
 
 class ControllerClient extends BaseSender
 {
-	protected ?string $endpoint = null;
-
-	protected ?string $customEndpoint = null;
-
-	public function __construct(string $endpoint = null)
-	{
-		parent::__construct();
-
-		if ($endpoint)
-		{
-			$this->customEndpoint = $endpoint;
-		}
-	}
+	private const SERVICE_MAP = [
+		'ru' => 'https://videocalls.bitrix.info',
+		'eu' => 'https://videocalls-de.bitrix.info',
+		'us' => 'https://videocalls-us.bitrix.info',
+	];
+	private const REGION_RU = ['ru', 'by', 'kz'];
+	private const REGION_EU = ['de', 'en', 'eu', 'fr', 'it', 'pl', 'tr', 'ua', 'uk'];
 
 	/**
+	 * Returns controller service endpoint url.
+	 *
 	 * @return string
+	 * @param string $region Portal region.
 	 */
-	protected function getEndpoint(): string
+	public function getEndpoint(string $region): string
 	{
-		if (is_null($this->endpoint))
-		{
-			$endpoint = Option::get('im', 'call_server_url');
+		$endpoint = Option::get('im', 'call_server_url');
 
-			if (!empty($endpoint))
+		if (empty($endpoint))
+		{
+			if (in_array($region, self::REGION_RU, true))
 			{
-				if (!(mb_strpos($endpoint, 'https://') === 0 || mb_strpos($endpoint, 'http://') === 0))
-				{
-					$endpoint = 'https://' . $endpoint;
-				}
-				$this->endpoint = $endpoint;
+				$endpoint = self::SERVICE_MAP['ru'];
+			}
+			elseif (in_array($region, self::REGION_EU, true))
+			{
+				$endpoint = self::SERVICE_MAP['eu'];
+			}
+			else
+			{
+				$endpoint = self::SERVICE_MAP['us'];
 			}
 		}
+		elseif (!(mb_strpos($endpoint, 'https://') === 0 || mb_strpos($endpoint, 'http://') === 0))
+		{
+			$endpoint = 'https://' . $endpoint;
+		}
 
-		return $this->endpoint;
+		return $endpoint;
 	}
+
 
 	/**
 	 * Returns API endpoint for the service.
@@ -51,7 +57,9 @@ class ControllerClient extends BaseSender
 	 */
 	protected function getServiceUrl(): string
 	{
-		return $this->getEndpoint();
+		$region = \Bitrix\Main\Application::getInstance()->getLicense()->getRegion() ?: 'ru';
+
+		return $this->getEndpoint($region);
 	}
 
 	/**

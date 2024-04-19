@@ -2,7 +2,7 @@
 
 namespace Bitrix\Intranet\Settings;
 
-use Bitrix\Intranet\User;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\ErrorCollection;
 use Bitrix\Main\Result;
 
@@ -41,9 +41,9 @@ abstract class AbstractSettings implements SettingsInterface
 		return new static($data);
 	}
 
-	public function hasAccess(User $user, string $fieldName): bool
+	public function getPermission(): SettingsPermission
 	{
-		return true;
+		return SettingsPermission::initForPage(CurrentUser::get(), static::TYPE);
 	}
 
 	public static function isAvailable(): bool

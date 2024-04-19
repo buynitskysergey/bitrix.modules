@@ -6758,7 +6758,7 @@ class CIMRestService extends IRestService
 	{
 		$res = \Bitrix\Rest\EventTable::getList(array(
 													'filter' => array(
-														'=EVENT_NAME' => toUpper($restEventName),
+														'=EVENT_NAME' => mb_strtoupper($restEventName),
 														"=APPLICATION_TOKEN" => $appCode,
 														'=APP_ID' => $appId,
 													),
@@ -6771,7 +6771,7 @@ class CIMRestService extends IRestService
 
 		$result = \Bitrix\Rest\EventTable::add(array(
 												   "APP_ID" => $appId,
-												   "EVENT_NAME" => toUpper($restEventName),
+												   "EVENT_NAME" => mb_strtoupper($restEventName),
 												   "EVENT_HANDLER" => $restEventHandler,
 												   "APPLICATION_TOKEN" => $appCode,
 												   "USER_ID" => 0,
@@ -6802,7 +6802,7 @@ class CIMRestService extends IRestService
 
 		$res = \Bitrix\Rest\EventTable::getList(array(
 													'filter' => array(
-														'=EVENT_NAME' => toUpper($restEventName),
+														'=EVENT_NAME' => mb_strtoupper($restEventName),
 														'=APP_ID' => $appId,
 														'=APPLICATION_TOKEN' => $appCode,
 													),

@@ -108,7 +108,7 @@ class Mask extends Main\Engine\Controller
 					'title' => $res['TITLE'],
 					'description' => $res['DESCRIPTION'],
 					'src' => $file['SRC'],
-					//TODO ñäåëàòü ìåòîä load ïî âñåì âûáðàííûì äàííûì, ÷òîáû áîëüøå â ÁÄ íå õîäèòü
+					//TODO ÑÐ´ÐµÐ»Ð°Ñ‚ÑŒ Ð¼ÐµÑ‚Ð¾Ð´ load Ð¿Ð¾ Ð²ÑÐµÐ¼ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ð¼ Ð´Ð°Ð½Ð½Ñ‹Ð¼, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð±Ð¾Ð»ÑŒÑˆÐµ Ð² Ð‘Ð” Ð½Ðµ Ñ…Ð¾Ð´Ð¸Ñ‚ÑŒ
 					'editable' => Avatar\Mask\Item::getInstance($res['ID'])->isEditableBy(
 						Avatar\Mask\Consumer::createFromId($currentUser->getId())
 					)

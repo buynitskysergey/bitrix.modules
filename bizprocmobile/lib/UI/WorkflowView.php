@@ -18,6 +18,19 @@ class WorkflowView implements \JsonSerializable
 		$this->tasks = \CBPViewHelper::getWorkflowTasks($workflow['ID'], true, true);
 	}
 
+	public function getFacesIds(): array
+	{
+		$completedTasks = array_reverse($this->tasks['COMPLETED']);
+		$completedUsers = array_merge(...array_column($completedTasks, 'USERS'));
+
+		$runningTask = current($this->tasks['RUNNING']);
+
+		return array_merge(
+			$this->extractUserIds($completedUsers),
+			$this->extractUserIds($runningTask['USERS'] ?? [])
+		);
+	}
+
 	public function jsonSerialize(): array
 	{
 		return [

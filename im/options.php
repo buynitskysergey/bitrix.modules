@@ -425,7 +425,7 @@ $subTabControl->End();
 		</td>
 	</tr>
 <?$tabControl->Buttons();?>
-<script language="JavaScript">
+<script>
 function toogleVideoOptions(el)
 {
 	BX.style(BX('video_group_2'), 'display', el.checked? 'table-row': 'none');

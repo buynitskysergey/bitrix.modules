@@ -45,7 +45,8 @@ class RecentProvider extends BaseProvider
 	private const SEARCH_FLAGS_OPTION = 'searchFlags';
 	private const FLAG_USERS = 'users';
 	private const FLAG_CHATS = 'chats';
-	private const ALLOWED_SEARCH_FLAGS = [self::FLAG_USERS, self::FLAG_CHATS];
+	private const FLAG_BOTS = 'bots';
+	private const ALLOWED_SEARCH_FLAGS = [self::FLAG_USERS, self::FLAG_CHATS, self::FLAG_BOTS];
 	private const WITH_CHAT_BY_USERS_DEFAULT = false;
 	private const SEARCH_FLAGS_DEFAULT = [
 		self::FLAG_USERS => true,
@@ -585,6 +586,11 @@ class RecentProvider extends BaseProvider
 
 		if ($user instanceof UserBot && $user->isBot())
 		{
+			if (!$this->needSearch(self::FLAG_BOTS))
+			{
+				return true;
+			}
+
 			$botData = $user->getBotData()->toRestFormat();
 			if ($botData['isHidden'])
 			{

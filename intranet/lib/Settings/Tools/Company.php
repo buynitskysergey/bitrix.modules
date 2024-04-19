@@ -106,7 +106,7 @@ class Company extends Tool
 					'modulesList' => ['meeting' => 'Y'],
 				]);
 				$event->send();
-				Option::set('bitrix24', 'feature_meetings', 'Y');
+				Option::set('bitrix24', 'feature_meeting', 'Y');
 			}
 		}
 
@@ -134,7 +134,7 @@ class Company extends Tool
 					'modulesList' => ['meeting' => 'N'],
 				]);
 				$event->send();
-				Option::set('bitrix24', 'feature_meetings', 'N');
+				Option::set('bitrix24', 'feature_meeting', 'N');
 			}
 		}
 

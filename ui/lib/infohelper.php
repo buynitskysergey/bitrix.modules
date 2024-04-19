@@ -16,6 +16,7 @@ use Bitrix\Bitrix24;
 /**
  * Class InfoHelper
  * @package Bitrix\UI
+ * @deprecated use Bitrix\UI\InfoHelper\Provider\Slider
  */
 class InfoHelper
 {
@@ -60,7 +61,6 @@ class InfoHelper
 			'user_email' => $currentUser->getEmail(),
 			'user_name' => Encoding::convertEncoding($currentUser->getFirstName(), SITE_CHARSET, 'utf-8'),
 			'user_last_name' => Encoding::convertEncoding($currentUser->getLastName(), SITE_CHARSET, 'utf-8'),
-			'featurePromoterVersion' => 2,
 		];
 
 		if (Loader::includeModule('intranet'))

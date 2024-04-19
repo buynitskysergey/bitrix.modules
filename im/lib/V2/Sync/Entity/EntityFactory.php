@@ -33,6 +33,8 @@ class EntityFactory
 			}
 		}
 
-		return [$chats, $messages, $pins];
+		$dialogIds = new DialogIds($messages, $pins, $chats);
+
+		return [$chats, $messages, $pins, $dialogIds];
 	}
 }

@@ -7,7 +7,6 @@ use Bitrix\Im\Bot;
 use Bitrix\Im\Common;
 use Bitrix\Im\Model\MessageIndexTable;
 use Bitrix\Im\Model\MessageTable;
-use Bitrix\Im\Model\MessageViewedTable;
 use Bitrix\Im\Model\RecentTable;
 use Bitrix\Im\Recent;
 use Bitrix\Im\V2\Chat;
@@ -518,12 +517,7 @@ class DeleteService
 		$this->updateRecent();
 		if (!is_null($this->chatLastMessage))
 		{
-			$isMessageRead = !!MessageViewedTable::query()
-				->addFilter('MESSAGE_ID', $this->chatLastMessage['ID'])
-				->fetch();
-
 			$this->chat->setLastMessageId((int)($this->chatLastMessage['ID'] ?? 0));
-			$this->chat->setLastMessageStatus($isMessageRead ? \IM_MESSAGE_STATUS_DELIVERED : \IM_MESSAGE_STATUS_RECEIVED);
 		}
 
 		$this->chat->setPrevMessageId($this->chatPrevMessageId ?? 0);

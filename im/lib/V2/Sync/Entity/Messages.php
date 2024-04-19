@@ -13,6 +13,7 @@ class Messages implements Entity
 	private array $addedMessageIds = [];
 	private array $updatedMessageIds = [];
 	private array $completeDeletedMessageIds = [];
+	private MessageCollection $fullMessages;
 
 	public function add(Event $event): void
 	{
@@ -41,9 +42,16 @@ class Messages implements Entity
 		}
 	}
 
+	public function getFullMessages(): MessageCollection
+	{
+		$this->fullMessages ??= new MessageCollection($this->messageIds);
+
+		return $this->fullMessages;
+	}
+
 	public function getData(): array
 	{
-		$fullMessages = new MessageCollection($this->messageIds);
+		$fullMessages = $this->getFullMessages();
 		[$messages, $updatedMessages] = $this->divideByEventType($fullMessages);
 
 		return [

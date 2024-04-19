@@ -65,7 +65,8 @@ class Params extends Registry
 		FORWARD_CONTEXT_ID = 'FORWARD_CONTEXT_ID',
 		FORWARD_USER_ID = 'FORWARD_USER_ID',
 		REPLY_ID = 'REPLY_ID',
-		BETA = 'BETA'
+		BETA = 'BETA',
+		COPILOT_PROMPT_CODE = 'COPILOT_PROMPT_CODE'
 	;
 
 	//todo: Move it into CRM module
@@ -240,6 +241,10 @@ class Params extends Registry
 		self::BETA => [
 			'type' => Param::TYPE_BOOL,
 			'default' => false,
+		],
+		self::COPILOT_PROMPT_CODE => [
+			'type' => Param::TYPE_STRING,
+			'isHidden' => true,
 		],
 
 		//todo: Move it into CRM module

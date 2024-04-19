@@ -152,7 +152,7 @@ class Sharing extends Controller
 			'shortUrl' => $linkInfo['url'],
 			'isRestriction' => false,
 			'settings' => $this->getSettings($linkInfo),
- 		]);
+		]);
 	}
 
 	private function getLinkInfoCrm(int $entityId, int $ownerId): array

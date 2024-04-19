@@ -728,7 +728,8 @@ class CIMMessageParam
 			'USERS' => [],
 			'CRM_FORM_ID' => '',
 			'CRM_FORM_SEC' => '',
-			'CRM_FORM_FILLED' => 'N'
+			'CRM_FORM_FILLED' => 'N',
+			'COPILOT_PROMPT_CODE' => null,
 		];
 
 		return $arDefault;
@@ -1160,7 +1161,7 @@ class CIMMessageParamAttach
 
 	private static function removeNewLine($text)
 	{
-		$text = preg_replace('/\R/'.BX_UTF_PCRE_MODIFIER, ' ', $text);
+		$text = preg_replace('/\R/u', ' ', $text);
 		return $text;
 	}
 

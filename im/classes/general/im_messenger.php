@@ -1,6 +1,7 @@
 <?
 use Bitrix\Im\Integration\Imopenlines;
 use Bitrix\Im\Message;
+use Bitrix\Im\V2\Message\Params;
 use Bitrix\Im\V2\Sync;
 use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Localization\Loc;
@@ -422,6 +423,14 @@ class CIMMessenger
 			}
 		}
 
+		if (isset($arFields['COPILOT']) && is_array($arFields['COPILOT']))
+		{
+			if (isset($arFields['COPILOT'][Params::COPILOT_PROMPT_CODE]) && is_string($arFields['COPILOT'][Params::COPILOT_PROMPT_CODE]))
+			{
+				$arFields['PARAMS'][Params::COPILOT_PROMPT_CODE] = $arFields['COPILOT'][Params::COPILOT_PROMPT_CODE];
+			}
+		}
+
 
 		if ($arFields['MESSAGE_TYPE'] == IM_MESSAGE_PRIVATE)
 		{
@@ -695,7 +704,7 @@ class CIMMessenger
 								'ID' => $messageID,
 								'TEMPLATE_ID' => $arFields['TEMPLATE_ID'] ?? null,
 								'FILE_TEMPLATE_ID' => $arFields['FILE_TEMPLATE_ID'] ?? null,
-								'PREV_ID' => $prevMessageId,
+								'PREV_ID' => self::getRealPrevId($messageID, $chatId),
 								'CHAT_ID' => $chatId,
 								'TO_USER_ID' => $arParams['TO_USER_ID'],
 								'FROM_USER_ID' => $arParams['FROM_USER_ID'],
@@ -1218,7 +1227,7 @@ class CIMMessenger
 							'ID' => $messageID,
 							'TEMPLATE_ID' => $arFields['TEMPLATE_ID'] ?? null,
 							'FILE_TEMPLATE_ID' => $arFields['FILE_TEMPLATE_ID'] ?? null,
-							'PREV_ID' => $prevMessageId,
+							'PREV_ID' => self::getRealPrevId($messageID, $chatId),
 							'CHAT_ID' => $chatId,
 							'TO_CHAT_ID' => $arParams['TO_CHAT_ID'],
 							'FROM_USER_ID' => $arParams['FROM_USER_ID'],
@@ -3031,7 +3040,7 @@ class CIMMessenger
 	public static function GetDefaultTelephonyLine($userId = null)
 	{
 		if(!\Bitrix\Main\Loader::includeModule('voximplant'))
-			return array();
+			return '';
 
 		if(is_null($userId))
 			$userId = self::GetCurrentUserId();
@@ -4489,8 +4498,8 @@ class CIMMessenger
 		$params['MESSAGE'] = preg_replace("/\[b]([^[]*(?:\[(?!b]|\/b])[^[]*)*)\[\/b]/i", "$1", $params['MESSAGE']);
 		$params['MESSAGE'] = preg_replace("/\[i]([^[]*(?:\[(?!i]|\/i])[^[]*)*)\[\/i]/i", "$1", $params['MESSAGE']);
 		$params['MESSAGE'] = preg_replace("/\[u]([^[]*(?:\[(?!u]|\/u])[^[]*)*)\[\/u]/i", "$1", $params['MESSAGE']);
-		$params['MESSAGE'] = preg_replace("/\\[url\\](.*?)\\[\\/url\\]/i".BX_UTF_PCRE_MODIFIER, "$1", $params['MESSAGE']);
-		$params['MESSAGE'] = preg_replace("/\\[url\\s*=\\s*((?:[^\\[\\]]++|\\[ (?: (?>[^\\[\\]]+) | (?:\\1) )* \\])+)\\s*\\](.*?)\\[\\/url\\]/ixs".BX_UTF_PCRE_MODIFIER, "$2", $params['MESSAGE']);
+		$params['MESSAGE'] = preg_replace("/\\[url\\](.*?)\\[\\/url\\]/iu", "$1", $params['MESSAGE']);
+		$params['MESSAGE'] = preg_replace("/\\[url\\s*=\\s*((?:[^\\[\\]]++|\\[ (?: (?>[^\\[\\]]+) | (?:\\1) )* \\])+)\\s*\\](.*?)\\[\\/url\\]/ixsu", "$2", $params['MESSAGE']);
 		$params['MESSAGE'] = preg_replace_callback("/\[USER=([0-9]{1,})\]\[\/USER\]/i", Array('\Bitrix\Im\Text', 'modifyShortUserTag'), $params['MESSAGE']);
 		$params['MESSAGE'] = preg_replace("/\[USER=([0-9]+)( REPLACE)?](.+?)\[\/USER]/i", "$3", $params['MESSAGE']);
 		$params['MESSAGE'] = preg_replace("/\[CHAT=([0-9]{1,})\](.*?)\[\/CHAT\]/i", "$2", $params['MESSAGE']);
@@ -4570,8 +4579,8 @@ class CIMMessenger
 		$message['message']['text'] = preg_replace("/\[CODE\](.*?)\[\/CODE\]/si", " ".$codeIcon." ", $message['message']['text']);
 		$message['message']['text'] = preg_replace("/\[s\].*?\[\/s\]/i", "-", $message['message']['text']);
 		$message['message']['text'] = preg_replace("/\[[bui]\](.*?)\[\/[bui]\]/i", "$1", $message['message']['text']);
-		$message['message']['text'] = preg_replace("/\\[url\\](.*?)\\[\\/url\\]/i".BX_UTF_PCRE_MODIFIER, "$1", $message['message']['text']);
-		$message['message']['text'] = preg_replace("/\\[url\\s*=\\s*((?:[^\\[\\]]++|\\[ (?: (?>[^\\[\\]]+) | (?:\\1) )* \\])+)\\s*\\](.*?)\\[\\/url\\]/ixs".BX_UTF_PCRE_MODIFIER, "$2", $message['message']['text']);
+		$message['message']['text'] = preg_replace("/\\[url\\](.*?)\\[\\/url\\]/iu", "$1", $message['message']['text']);
+		$message['message']['text'] = preg_replace("/\\[url\\s*=\\s*((?:[^\\[\\]]++|\\[ (?: (?>[^\\[\\]]+) | (?:\\1) )* \\])+)\\s*\\](.*?)\\[\\/url\\]/ixsu", "$2", $message['message']['text']);
 		$message['message']['text'] = preg_replace_callback("/\[USER=([0-9]{1,})\]\[\/USER\]/i", Array('\Bitrix\Im\Text', 'modifyShortUserTag'), $message['message']['text']);
 		$message['message']['text'] = preg_replace("/\[USER=([0-9]+)( REPLACE)?](.+?)\[\/USER]/i", "$3", $message['message']['text']);
 		$message['message']['text'] = preg_replace("/\[CHAT=([0-9]{1,})\](.*?)\[\/CHAT\]/i", "$2", $message['message']['text']);
@@ -4583,8 +4592,8 @@ class CIMMessenger
 		$message['message']['text'] = preg_replace_callback("/\[ICON\=([^\]]*)\]/i", Array("CIMMessenger", "PrepareMessageForPushIconCallBack"), $message['message']['text']);
 		$message['message']['text'] = preg_replace('#\-{54}.+?\-{54}#s', " ".$quoteIcon." ", str_replace(array("#BR#"), Array(" "), $message['message']['text']));
 		$message['message']['text'] = preg_replace('/^(>>(.*)(\n)?)/mi', " ".$quoteIcon." ", str_replace(array("#BR#"), Array(" "), $message['message']['text']));
-		$message['message']['text'] = preg_replace("/\\[color\\s*=\\s*([^\\]]+)\\](.*?)\\[\\/color\\]/is".BX_UTF_PCRE_MODIFIER, "$2", $message['message']['text']);
-		$message['message']['text'] = preg_replace("/\\[size\\s*=\\s*([^\\]]+)\\](.*?)\\[\\/size\\]/is".BX_UTF_PCRE_MODIFIER, "$2", $message['message']['text']);
+		$message['message']['text'] = preg_replace("/\\[color\\s*=\\s*([^\\]]+)\\](.*?)\\[\\/color\\]/isu", "$2", $message['message']['text']);
+		$message['message']['text'] = preg_replace("/\\[size\\s*=\\s*([^\\]]+)\\](.*?)\\[\\/size\\]/isu", "$2", $message['message']['text']);
 
 		return trim($message['message']['text']);
 	}
@@ -5057,8 +5066,22 @@ class CIMMessenger
 			return false;
 		}
 
-		/** @see \Bitrix\Mobile\AppTabs\Chat::isCopilotMobileBetaEnabled */
-		return \CUserOptions::GetOption('immobile', 'copilot_mobile_beta_available', 'N') === 'Y';
+		/** @see \Bitrix\Mobile\AppTabs\Chat::isCopilotMobileEnabled */
+		return \Bitrix\Main\Config\Option::get('immobile', 'copilot_mobile_chat_enabled', 'N') === 'Y';
+	}
+
+	protected static function getRealPrevId(int $messageId, int $chatId): int
+	{
+		$result = \Bitrix\Im\Model\MessageTable::query()
+			->setSelect(['ID'])
+			->where('CHAT_ID', $chatId)
+			->where('ID', '<', $messageId)
+			->setOrder(['DATE_CREATE' => 'DESC', 'ID' => 'DESC'])
+			->setLimit(1)
+			->fetch() ?: []
+		;
+
+		return (int)($result['ID'] ?? 0);
 	}
 
 	private static function GetEventByCounterGroup($events, $maxUserInGroup = 100)

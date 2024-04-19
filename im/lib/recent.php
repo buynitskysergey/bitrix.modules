@@ -36,6 +36,7 @@ class Recent
 		$skipOpenlinesOption = $options['SKIP_OPENLINES'] ?? null;
 		$skipChat = $options['SKIP_CHAT'] ?? null;
 		$skipDialog = $options['SKIP_DIALOG'] ?? null;
+		$byChatIds = isset($options['CHAT_IDS']);
 
 		if (isset($options['FORCE_OPENLINES']) && $options['FORCE_OPENLINES'] === 'Y')
 		{
@@ -85,7 +86,7 @@ class Recent
 			}
 			$ormParams['filter']['>=DATE_UPDATE'] = $options['LAST_SYNC_DATE'];
 		}
-		else if ($options['ONLY_OPENLINES'] !== 'Y')
+		else if ($options['ONLY_OPENLINES'] !== 'Y' && !$byChatIds)
 		{
 			$ormParams['filter']['>=DATE_UPDATE'] = (new \Bitrix\Main\Type\DateTime())->add('-30 days');
 		}
@@ -103,7 +104,7 @@ class Recent
 				'=ITEM_TYPE' => IM_MESSAGE_OPEN_LINE
 			];
 		}
-		else
+		elseif (!$byChatIds)
 		{
 			$skipTypes[] = \Bitrix\Im\V2\Chat::IM_TYPE_COPILOT;
 			if ($options['SKIP_OPENLINES'] === 'Y')
@@ -503,6 +504,7 @@ class Recent
 			'MESSAGE_CODE' => 'CODE.PARAM_VALUE',
 			'USER_LAST_ACTIVITY_DATE' => 'USER.LAST_ACTIVITY_DATE',
 			'MESSAGE_DATE' => 'MESSAGE.DATE_CREATE',
+			'CHAT_LAST_MESSAGE_STATUS_BOOL' => 'MESSAGE.NOTIFY_READ'
 		];
 
 		$additionalInfoFields = [
@@ -1686,7 +1688,7 @@ class Recent
 		$rows = static::fillCounters($rows, $userId);
 		$rows = static::fillFiles($rows);
 
-		return static::fillLastMessageStatuses($rows, $userId);
+		return static::fillLastMessageStatuses($rows);
 	}
 
 	/**
@@ -1731,23 +1733,12 @@ class Recent
 		return $rows;
 	}
 
-	protected static function fillLastMessageStatuses(array $rows, int $userId): array
+	protected static function fillLastMessageStatuses(array $rows): array
 	{
-		$messageIds = [];
-
-		foreach ($rows as $row)
-		{
-			if (isset($row['MESSAGE_AUTHOR_ID']) && (int)$row['MESSAGE_AUTHOR_ID'] === $userId)
-			{
-				$messageIds[] = (int)$row['MESSAGE_ID'];
-			}
-		}
-
-		$messageStatuses = (new ViewedService($userId))->getMessageStatuses($messageIds);
-
 		foreach ($rows as $key => $row)
 		{
-			$rows[$key]['CHAT_LAST_MESSAGE_STATUS'] = $messageStatuses[(int)($row['MESSAGE_ID'] ?? 0)] ?? \IM_MESSAGE_STATUS_RECEIVED;
+			$boolStatus = $row['CHAT_LAST_MESSAGE_STATUS_BOOL'] ?? 'N';
+			$rows[$key]['CHAT_LAST_MESSAGE_STATUS'] = $boolStatus === 'Y' ? \IM_MESSAGE_STATUS_DELIVERED : \IM_MESSAGE_STATUS_RECEIVED;
 		}
 
 		return $rows;

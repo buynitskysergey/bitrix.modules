@@ -9,24 +9,12 @@ class SettingsPermission
 {
 	const READ = 1 << 0;
 	const EDIT = 1 << 2;
-
-	private int $permissionBitwise;
+	const NO_ACCESS = 0;
 
 	public function __construct(
-		private CurrentUser $user
+		private int $permissionBitwise
 	)
 	{
-		if (
-			$this->user->isAdmin() ||
-			(Loader::includeModule('bitrix24') && $this->user->canDoOperation('bitrix24_config'))
-		)
-		{
-			$this->permissionBitwise = static::READ | static::EDIT;
-		}
-		else
-		{
-			$this->permissionBitwise = 0;//static::READ;
-		}
 	}
 
 	public function canRead(): bool
@@ -36,11 +24,65 @@ class SettingsPermission
 
 	public function canEdit(): bool
 	{
-		return $this->permissionBitwise & static::READ;
+		return $this->permissionBitwise & static::EDIT;
 	}
 
 	public function getPermission(): int
 	{
 		return $this->permissionBitwise;
+	}
+
+	static public function initByUser(CurrentUser $user): static
+	{
+		if (Loader::includeModule("intranet") && Loader::includeModule("bitrix24"))
+		{
+			if ($user->CanDoOperation('bitrix24_config'))
+			{
+				return new static(static::READ | static::EDIT);
+			}
+			else
+			{
+				return new static(static::READ);
+			}
+		}
+		else
+		{
+			if ($user->isAdmin())
+			{
+				return new static(static::READ | static::EDIT);
+			}
+			else
+			{
+				return new static(static::READ);
+			}
+		}
+	}
+
+	static public function initForPage(CurrentUser $user, string $pageType): static
+	{
+		$notAdminRight = $pageType === ToolsSettings::TYPE ? static::READ : static::NO_ACCESS;
+
+		if (Loader::includeModule("intranet") && Loader::includeModule("bitrix24"))
+		{
+			if ($user->CanDoOperation('bitrix24_config'))
+			{
+				return new static(static::READ | static::EDIT);
+			}
+			else
+			{
+				return new static($notAdminRight);
+			}
+		}
+		else
+		{
+			if ($user->isAdmin())
+			{
+				return new static(static::READ | static::EDIT);
+			}
+			else
+			{
+				return new static($notAdminRight);
+			}
+		}
 	}
 }
