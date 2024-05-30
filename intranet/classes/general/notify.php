@@ -431,7 +431,7 @@ class CIntranetNotify
 				$parserLog->arUserfields = $arFields["UF"];
 				$parserLog->bMobile = (isset($arParams["MOBILE"]) && $arParams["MOBILE"] === "Y");
 				$arResult["EVENT_FORMATTED"]["MESSAGE"] = htmlspecialcharsbx($parserLog->convert(htmlspecialcharsback($arResult["EVENT_FORMATTED"]["MESSAGE"]), $arAllow));
-				$arResult["EVENT_FORMATTED"]["MESSAGE"] = preg_replace("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/is".BX_UTF_PCRE_MODIFIER, "\\2", $arResult["EVENT_FORMATTED"]["MESSAGE"]);
+				$arResult["EVENT_FORMATTED"]["MESSAGE"] = preg_replace("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/isu", "\\2", $arResult["EVENT_FORMATTED"]["MESSAGE"]);
 			}
 			else
 			{

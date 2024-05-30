@@ -169,6 +169,8 @@ class NotifyChat extends Chat
 			'USER_ID' => $params['AUTHOR_ID'],
 		]);
 
+		$chat->isFilledNonCachedData = false;
+
 		return $result->setResult([
 			'CHAT_ID' => $chat->getChatId(),
 			'CHAT' => $chat,

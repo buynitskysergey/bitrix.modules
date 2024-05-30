@@ -318,6 +318,7 @@ class TimeLineManager
 
 		if (
 			is_null($message)
+			|| is_null($this->taskRepository->getTask())
 			|| ResultTable::isResult($message->getId(), $this->taskRepository->getTask()?->getId())
 		)
 		{

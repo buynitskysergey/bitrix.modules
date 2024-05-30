@@ -104,7 +104,9 @@ class Invite extends Main\Engine\Controller
 				'=ID' => $userId
 			],
 			'select' => [
-				'EMAIL', 'CONFIRM_CODE'
+				'EMAIL',
+				'CONFIRM_CODE',
+				'PHONE' => 'PHONE_AUTH.PHONE_NUMBER',
 			]
 		]);
 		$userFields = $res->fetch();
@@ -117,7 +119,7 @@ class Invite extends Main\Engine\Controller
 			return null;
 		}
 
-		if (empty($userFields['EMAIL']))
+		if (empty($userFields['EMAIL']) && empty($userFields['PHONE']))
 		{
 			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROLLER_INVITE_FAILED'), 'INTRANET_CONTROLLER_INVITE_FAILED'));
 			return null;
@@ -134,7 +136,14 @@ class Invite extends Main\Engine\Controller
 
 		if (!$extranet)
 		{
-			$result = \CIntranetInviteDialog::reinviteUser(SITE_ID, $userId);
+			if ($userFields['EMAIL'])
+			{
+				$result = \CIntranetInviteDialog::reinviteUser(SITE_ID, $userId);
+			}
+			else
+			{
+				$result = \CIntranetInviteDialog::reinviteUserByPhone($userId);
+			}
 		}
 		else
 		{

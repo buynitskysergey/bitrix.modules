@@ -56,6 +56,12 @@ class MarketAppInstaller
 
 		if (isset($installResult['errorDescription']))
 		{
+			MarketDashboardLogger::logErrors([new Error($installResult['errorDescription'])], [
+				'message' => 'Cannot install rest application',
+				'app_code' => $code,
+				'version' => $version ?? 'no version',
+			]);
+
 			$result->addError(new Error($installResult['errorDescription']));
 
 			return $result;
@@ -64,6 +70,11 @@ class MarketAppInstaller
 		$importResult = $this->importConfiguration($installResult['id']);
 		if (!$importResult->isSuccess())
 		{
+			MarketDashboardLogger::logErrors($importResult->getErrors(), [
+				'message' => 'Cannot import configuration',
+				'app_code' => $code,
+				'version' => $version ?? 'no version',
+			]);
 			$result->addErrors($importResult->getErrors());
 		}
 

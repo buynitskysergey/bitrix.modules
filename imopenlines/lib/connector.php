@@ -229,6 +229,7 @@ class Connector
 							'VOTE_SESSION' => $voteSession? 'Y': 'N',
 							'OPERATOR_ID' => $params['message']['params']['IMOL_FORCE_OPERATOR'] ?? 0,
 							'USER_LANG' => $sourceLang ?? '',
+							'CRM_TRACKER_REF' => $params['ref']['source'] ?? '',
 						]);
 						if (
 							$resultLoadSession ||

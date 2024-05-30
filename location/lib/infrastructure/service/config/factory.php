@@ -23,6 +23,7 @@ use Bitrix\Location\Service\AddressService;
 use Bitrix\Location\Infrastructure\Service\ErrorService;
 use Bitrix\Location\Service\FormatService;
 use Bitrix\Location\Service\LocationService;
+use Bitrix\Location\Service\StaticMapService;
 use Bitrix\Main\Config\Option;
 
 class Factory implements IFactory
@@ -99,6 +100,7 @@ class Factory implements IFactory
 				];
 				break;
 
+			case StaticMapService::class:
 			case SourceService::class:
 				$result = [
 					'source' => self::obtainSource()

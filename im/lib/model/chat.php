@@ -7,6 +7,8 @@ use Bitrix\Im\V2\Sync;
 use Bitrix\Main\Entity;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Event;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Search\MapBuilder;
 
@@ -41,9 +43,9 @@ use Bitrix\Main\Search\MapBuilder;
  *
  * <<< ORMENTITYANNOTATION
  * @method static EO_Chat_Query query()
- * @method static EO_Chat_Result getByPrimary($primary, array $parameters = array())
+ * @method static EO_Chat_Result getByPrimary($primary, array $parameters = [])
  * @method static EO_Chat_Result getById($id)
- * @method static EO_Chat_Result getList(array $parameters = array())
+ * @method static EO_Chat_Result getList(array $parameters = [])
  * @method static EO_Chat_Entity getEntity()
  * @method static \Bitrix\Im\Model\EO_Chat createObject($setDefaultValues = true)
  * @method static \Bitrix\Im\Model\EO_Chat_Collection createCollection()
@@ -181,7 +183,7 @@ class ChatTable extends Entity\DataManager
 			),
 			'LAST_MESSAGE_STATUS' => array(
 				'data_type' => 'string',
-				'default_value' => IM_MESSAGE_STATUS_RECEIVED,
+				'default_value' => "IM_MESSAGE_STATUS_RECEIVED",
 				'validation' => array(__CLASS__, 'validateMessageStatus'),
 			),
 			'DATE_CREATE' => array(
@@ -233,6 +235,24 @@ class ChatTable extends Entity\DataManager
 		);
 	}
 
+	public static function withRelation(Query $query, ?int $userId): void
+	{
+		$join = Join::on('this.ID', 'ref.CHAT_ID');
+		if ($userId !== null)
+		{
+			$join->where('ref.USER_ID', $userId);
+		}
+		$query->registerRuntimeField(
+			'RELATION',
+			new Reference(
+				'RELATION',
+				RelationTable::class,
+				$join,
+				['join_type' => Join::TYPE_LEFT]
+			)
+		);
+	}
+
 	public static function onAfterUpdate(\Bitrix\Main\ORM\Event $event)
 	{
 		$fields = $event->getParameter("fields");
@@ -253,13 +273,11 @@ class ChatTable extends Entity\DataManager
 			Chat::cleanCache($chatId);
 		}
 
-		if (!Chat::getInstance($chatId) instanceof Chat\OpenLineChat)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
-				static fn () => Chat::getInstance($chatId)->getRelations()->getUserIds()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
+			static fn () => Chat::getInstance($chatId)->getRelations()->getUserIds(),
+			Chat::getInstance($chatId)->getType()
+		);
 
 		return new Entity\EventResult();
 	}

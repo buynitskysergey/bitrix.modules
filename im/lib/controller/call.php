@@ -39,7 +39,7 @@ class Call extends Engine\Controller
 		$lockName = static::getLockNameWithEntityId($entityType, $entityId, $currentUserId);
 		if (!Application::getConnection()->lock($lockName, static::LOCK_TTL))
 		{
-			$this->errorCollection[] = new Error("Could not get exclusive lock", "could_not_lock");
+			$this->addError(new Error("Could not get exclusive lock", "could_not_lock"));
 			return null;
 		}
 
@@ -51,7 +51,7 @@ class Call extends Engine\Controller
 			{
 				if (!$call->getAssociatedEntity()->checkAccess($currentUserId))
 				{
-					$this->errorCollection[] = new Error("You can not access this call", 'access_denied');
+					$this->addError(new Error("You can not access this call", 'access_denied'));
 					Application::getConnection()->unlock($lockName);
 					return null;
 				}
@@ -63,7 +63,7 @@ class Call extends Engine\Controller
 
 					if (!$addedUser)
 					{
-						$this->errorCollection[] = new Error("User limit reached", "user_limit_reached");
+						$this->addError(new Error("User limit reached", "user_limit_reached"));
 						Application::getConnection()->unlock($lockName);
 						return null;
 					}
@@ -86,7 +86,7 @@ class Call extends Engine\Controller
 
 				if (!$call->getAssociatedEntity()->canStartCall($currentUserId))
 				{
-					$this->errorCollection[] = new Error("You can not create this call", 'access_denied');
+					$this->addError(new Error("You can not create this call", 'access_denied'));
 					Application::getConnection()->unlock($lockName);
 					return null;
 				}
@@ -101,9 +101,10 @@ class Call extends Engine\Controller
 		}
 		catch(\Exception $e)
 		{
-			$this->errorCollection[] = new Error(
+			$this->addError(new Error(
 				"Can't initiate a call. Server error. (" . ($status ?? "") . ")",
-				"call_init_error");
+				"call_init_error")
+			);
 
 			Application::getConnection()->unlock($lockName);
 			return null;
@@ -145,7 +146,7 @@ class Call extends Engine\Controller
 
 		if (!$this->checkCallAccess($parentCall, $currentUserId))
 		{
-			$this->errorCollection[] = new Error("You do not have access to the parent call", "access_denied");
+			$this->addError(new Error("You do not have access to the parent call", "access_denied"));
 			return null;
 		}
 
@@ -186,7 +187,7 @@ class Call extends Engine\Controller
 
 		if (!$call->getAssociatedEntity()->checkAccess($currentUserId))
 		{
-			$this->errorCollection[] = new Error("You can not access this call", 'access_denied');
+			$this->addError(new Error("You can not access this call", 'access_denied'));
 			return null;
 		}
 
@@ -195,7 +196,7 @@ class Call extends Engine\Controller
 			$addedUser = $call->addUser($currentUserId);
 			if (!$addedUser)
 			{
-				$this->errorCollection[] = new Error("User limit reached",  "user_limit_reached");
+				$this->addError(new Error("User limit reached",  "user_limit_reached"));
 				return null;
 			}
 			$call->getSignaling()->sendUsersJoined($currentUserId, [$currentUserId]);
@@ -221,7 +222,7 @@ class Call extends Engine\Controller
 		}
 		if (!$this->checkCallAccess($call, $currentUserId))
 		{
-			$this->errorCollection[] = new Error("You do not have access to the parent call", "access_denied");
+			$this->addError(new Error("You do not have access to the parent call", "access_denied"));
 			return null;
 		}
 
@@ -246,7 +247,7 @@ class Call extends Engine\Controller
 		}
 		if (!$this->checkCallAccess($call, $currentUserId))
 		{
-			$this->errorCollection[] = new Error("You do not have access to the parent call", "access_denied");
+			$this->addError(new Error("You do not have access to the parent call", "access_denied"));
 			return null;
 		}
 
@@ -260,9 +261,10 @@ class Call extends Engine\Controller
 		];
 	}
 
-	public function inviteAction($callId, array $userIds, $video = "N", $legacyMobile = "N", $repeated = "N")
+	public function inviteAction($callId, array $userIds, $video = "N", $show = "Y", $legacyMobile = "N", $repeated = "N")
 	{
 		$isVideo = ($video === "Y");
+		$isShow = ($show === "Y");
 		$isLegacyMobile = ($legacyMobile === "Y");
 		$isRepeated = ($repeated === "Y");
 		$currentUserId = $this->getCurrentUser()->getId();
@@ -290,14 +292,14 @@ class Call extends Engine\Controller
 			return null;
 		}
 
-		$this->inviteUsers($call, $userIds, $isLegacyMobile, $isVideo, $isRepeated);
+		$this->inviteUsers($call, $userIds, $isLegacyMobile, $isVideo, $isShow, $isRepeated);
 
 		Application::getConnection()->unlock($lockName);
 
 		return true;
 	}
 
-	public function inviteUsers(\Bitrix\Im\Call\Call $call, $userIds, $isLegacyMobile, $isVideo, $isRepeated)
+	public function inviteUsers(\Bitrix\Im\Call\Call $call, $userIds, $isLegacyMobile, $isVideo, $isShow, $isRepeated)
 	{
 		$usersToInvite = [];
 		foreach ($userIds as $userId)
@@ -349,7 +351,8 @@ class Call extends Engine\Controller
 		$call->getSignaling()->sendUsersInvited(
 			$this->getCurrentUser()->getId(),
 			$otherUsers,
-			$usersToInvite
+			$usersToInvite,
+			$isShow
 		);
 
 		if ($call->getState() === \Bitrix\Im\Call\Call::STATE_NEW)
@@ -660,7 +663,6 @@ class Call extends Engine\Controller
 
 	public function hangupAction($callId, $callInstanceId, $retransmit = true)
 	{
-		$currentUserId = $this->getCurrentUser()->getId();
 		$call = Registry::getCallWithId($callId);
 		if (!$call)
 		{
@@ -668,6 +670,7 @@ class Call extends Engine\Controller
 			return null;
 		}
 
+		$currentUserId = $this->getCurrentUser()->getId();
 		if (!$this->checkCallAccess($call, $currentUserId))
 		{
 			return null;
@@ -701,9 +704,32 @@ class Call extends Engine\Controller
 		}
 	}
 
+	public function finishAction(int $callId): ?array
+	{
+		$call = Registry::getCallWithId($callId);
+		if (!$call)
+		{
+			$this->addError(new Error(Loc::getMessage("IM_REST_CALL_ERROR_CALL_NOT_FOUND"), "call_not_found"));
+			return null;
+		}
+		$currentUserId = $this->getCurrentUser()->getId();
+		if (!$this->checkCallAccess($call, $currentUserId))
+		{
+			$this->addError(new Error("You do not have access to the parent call", "access_denied"));
+			return null;
+		}
+
+		$call->setActionUserId($currentUserId)->finish();
+
+		return [
+			'call' => $call->toArray($currentUserId),
+			'connectionData' => $call->getConnectionData($currentUserId),
+			'logToken' => $call->getLogToken($currentUserId)
+		];
+	}
+
 	public function getUsersAction($callId, array $userIds = [])
 	{
-		$currentUserId = $this->getCurrentUser()->getId();
 		$call = Registry::getCallWithId($callId);
 		if (!$call)
 		{
@@ -711,11 +737,13 @@ class Call extends Engine\Controller
 			return null;
 		}
 
+		$currentUserId = $this->getCurrentUser()->getId();
 		if (!$this->checkCallAccess($call, $currentUserId))
 		{
-			$this->errorCollection[] = new Error("You do not have access to the call", "access_denied");
+			$this->addError(new Error("You do not have access to the call", "access_denied"));
 			return null;
 		}
+
 		if (empty($userIds))
 		{
 			$allowedUserIds = $call->getUsers();
@@ -730,7 +758,7 @@ class Call extends Engine\Controller
 
 		if (empty($allowedUserIds))
 		{
-			$this->errorCollection[] = new Error("Users are not part of the call", "access_denied");
+			$this->addError(new Error("Users are not part of the call", "access_denied"));
 			return null;
 		}
 
@@ -744,7 +772,7 @@ class Call extends Engine\Controller
 
 		if (!$call || !$this->checkCallAccess($call, $currentUserId))
 		{
-			$this->errorCollection[] = new Error("Call is not found or you do not have access to the call", "access_denied");
+			$this->addError(new Error("Call is not found or you do not have access to the call", "access_denied"));
 			return null;
 		}
 
@@ -790,7 +818,7 @@ class Call extends Engine\Controller
 	{
 		if (!$call->checkAccess($userId))
 		{
-			$this->errorCollection[] = new Error("You don't have access to the call " . $call->getId() . "; (current user id: " . $userId . ")", 'access_denied');
+			$this->addError(new Error("You don't have access to the call " . $call->getId() . "; (current user id: " . $userId . ")", 'access_denied'));
 			return false;
 		}
 

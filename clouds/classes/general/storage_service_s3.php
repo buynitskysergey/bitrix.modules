@@ -63,15 +63,15 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$useHttps = $arSettings['USE_HTTPS'] ?? 'N';
 
 		$result = '
-		<tr id="SETTINGS_0_'.$htmlID.'" style="display:'.($cur_SERVICE_ID === $this->GetID() || !$bServiceSet? '': 'none').'" class="settings-tr adm-detail-required-field">
+		<tr id="SETTINGS_0_'.$htmlID.'" style="display:'.$show.'" class="settings-tr adm-detail-required-field">
 			<td>'.GetMessage("CLO_STORAGE_S3_EDIT_HOST").':</td>
 			<td><input type="hidden" name="SETTINGS['.$htmlID.'][HOST]" id="'.$htmlID.'HOST" value="'.htmlspecialcharsbx($arSettings['HOST']).'"><input type="text" size="55" name="'.$htmlID.'INP_HOST" id="'.$htmlID.'INP_HOST" value="'.htmlspecialcharsbx($arSettings['HOST']).'" '.($arBucket['READ_ONLY'] == 'Y'? '"disabled"': '').' onchange="BX(\''.$htmlID.'HOST\').value = this.value"></td>
 		</tr>
-		<tr id="SETTINGS_1_'.$htmlID.'" style="display:'.($cur_SERVICE_ID === $this->GetID() || !$bServiceSet? '': 'none').'" class="settings-tr adm-detail-required-field">
+		<tr id="SETTINGS_1_'.$htmlID.'" style="display:'.$show.'" class="settings-tr adm-detail-required-field">
 			<td>'.GetMessage("CLO_STORAGE_S3_EDIT_ACCESS_KEY").':</td>
 			<td><input type="hidden" name="SETTINGS['.$htmlID.'][ACCESS_KEY]" id="'.$htmlID.'ACCESS_KEY" value="'.htmlspecialcharsbx($arSettings['ACCESS_KEY']).'"><input type="text" size="55" name="'.$htmlID.'INP_ACCESS_KEY" id="'.$htmlID.'INP_ACCESS_KEY" value="'.htmlspecialcharsbx($arSettings['ACCESS_KEY']).'" '.($arBucket['READ_ONLY'] === 'Y'? '"disabled"': '').' onchange="BX(\''.$htmlID.'ACCESS_KEY\').value = this.value"></td>
 		</tr>
-		<tr id="SETTINGS_2_'.$htmlID.'" style="display:'.($cur_SERVICE_ID === $this->GetID() || !$bServiceSet? '': 'none').'" class="settings-tr adm-detail-required-field">
+		<tr id="SETTINGS_2_'.$htmlID.'" style="display:'.$show.'" class="settings-tr adm-detail-required-field">
 			<td>'.GetMessage("CLO_STORAGE_S3_EDIT_SECRET_KEY").':</td>
 			<td><input type="hidden" name="SETTINGS['.$htmlID.'][SECRET_KEY]" id="'.$htmlID.'SECRET_KEY" value="'.htmlspecialcharsbx($arSettings['SECRET_KEY']).'"><input type="text" size="55" name="'.$htmlID.'INP_SECRET_KEY" id="'.$htmlID.'INP_SECRET_KEY" value="'.htmlspecialcharsbx($arSettings['SECRET_KEY']).'" autocomplete="off" '.($arBucket['READ_ONLY'] === 'Y'? '"disabled"': '').' onchange="BX(\''.$htmlID.'SECRET_KEY\').value = this.value"></td>
 		</tr>
@@ -162,7 +162,7 @@ class CCloudStorageService_S3 extends CCloudStorageService
 	 * @param string|resource $content
 	 * @return array[string]string
 	*/
-	function SignRequest($arSettings, $RequestMethod, $bucket, $RequestURI, $ContentType, $additional_headers, $params = "", $content = "")
+	function SignRequest($arSettings, $RequestMethod, $bucket, $RequestURI, $ContentType, $additional_headers, $params = "", $content = "", $Service = 's3')
 	{
 		if (is_resource($content))
 		{
@@ -217,7 +217,6 @@ class CCloudStorageService_S3 extends CCloudStorageService
 
 		$Algorithm = "AWS4-HMAC-SHA256";
 		$Region = $this->location? $this->location: 'us-east-1';
-		$Service = "s3";
 		$Scope = $RequestDate."/".$Region."/".$Service."/aws4_request";
 
 		$StringToSign = "";
@@ -478,7 +477,6 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		);
 
 		$this->SetLocation($arBucket["LOCATION"]);
-		$marker = $pageSize > 0? $filePath.$pageMarker: '';
 		while(true)
 		{
 			$response = $this->SendRequest(
@@ -570,8 +568,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$response = $this->SendRequest(
 			$arBucket["SETTINGS"],
 			'PUT',
-			$arBucket["BUCKET"],
-			'/',
+			'',
+			'/' . $arBucket["BUCKET"],
 			'',
 			$content
 		);
@@ -606,8 +604,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$response = $this->SendRequest(
 			$arBucket["SETTINGS"],
 			'GET',
-			$arBucket["BUCKET"],
-			'/',
+			'',
+			'/' . $arBucket["BUCKET"],
 			'?max-keys=1'.($arBucket["PREFIX"] != ""? '&prefix='.$arBucket["PREFIX"].'/': '')
 		);
 
@@ -662,7 +660,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$response = $this->SendRequest(
 			$arBucket["SETTINGS"],
 			'DELETE',
-			$arBucket["BUCKET"]
+			'',
+			'/' . $arBucket["BUCKET"]
 		);
 
 		if(
@@ -705,15 +704,10 @@ class CCloudStorageService_S3 extends CCloudStorageService
 			$host = $arBucket["CNAME"];
 			$pref = "";
 		}
-		elseif ($proto === "https" && mb_strpos($arBucket["BUCKET"], ".") !== false)
+		else
 		{
 			$host = $arBucket["SETTINGS"]["HOST"];
 			$pref = $arBucket["BUCKET"];
-		}
-		else
-		{
-			$host = $arBucket["BUCKET"].".".$arBucket["SETTINGS"]["HOST"];
-			$pref = "";
 		}
 
 		if(is_array($arFile))
@@ -761,8 +755,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'HEAD',
-			$arBucket["BUCKET"],
-			$filePath
+			'',
+			'/' . $arBucket["BUCKET"] . $filePath
 		);
 
 		if($this->status == 200)
@@ -818,8 +812,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'PUT',
-			$arBucket["BUCKET"],
-			CCloudUtil::URLEncode($filePath, "UTF-8", true),
+			'',
+			'/' . $arBucket["BUCKET"] . CCloudUtil::URLEncode($filePath, "UTF-8", true),
 			'',
 			'',
 			$additional_headers
@@ -862,8 +856,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 			$this->SendRequest(
 				$arBucket["SETTINGS"],
 				'HEAD',
-				$arBucket["BUCKET"],
-				CCloudUtil::URLEncode("/".($arBucket["PREFIX"]? $arBucket["PREFIX"]."/": "").($arFile["SUBDIR"]? $arFile["SUBDIR"]."/": "").$arFile["FILE_NAME"], "UTF-8", true)
+				'',
+				'/' . $arBucket["BUCKET"] . CCloudUtil::URLEncode("/".($arBucket["PREFIX"]? $arBucket["PREFIX"]."/": "").($arFile["SUBDIR"]? $arFile["SUBDIR"]."/": "").$arFile["FILE_NAME"], "UTF-8", true)
 			);
 
 			$fileSize = false;
@@ -891,8 +885,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 			$response = $this->SendRequest(
 				$arBucket["SETTINGS"],
 				'POST',
-				$arBucket["BUCKET"],
-				CCloudUtil::URLEncode($filePath, "UTF-8", true),
+				'',
+				'/' . $arBucket["BUCKET"] . CCloudUtil::URLEncode($filePath, "UTF-8", true),
 				'?uploads=',
 				'',
 				$additional_headers
@@ -937,8 +931,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 				$response = $this->SendRequest(
 					$arBucket["SETTINGS"],
 					'PUT',
-					$arBucket["BUCKET"],
-					CCloudUtil::URLEncode($filePath, "UTF-8", true),
+					'',
+					'/' . $arBucket["BUCKET"] . CCloudUtil::URLEncode($filePath, "UTF-8", true),
 					'?partNumber='.($part_no + 1).'&uploadId='.rawurlencode($uploadId),
 					'',
 					$additional_headers
@@ -984,8 +978,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 			$this->SendRequest(
 				$arBucket["SETTINGS"],
 				'POST',
-				$arBucket["BUCKET"],
-				CCloudUtil::URLEncode($filePath, "UTF-8", true),
+				'',
+				'/' . $arBucket["BUCKET"] . CCloudUtil::URLEncode($filePath, "UTF-8", true),
 				'?uploadId='.rawurlencode($uploadId),
 				"<CompleteMultipartUpload>".$data."</CompleteMultipartUpload>"
 			);
@@ -1028,8 +1022,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'DELETE',
-			$arBucket["BUCKET"],
-			$filePath
+			'',
+			'/' . $arBucket["BUCKET"] . $filePath
 		);
 
 		if (
@@ -1091,8 +1085,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'PUT',
-			$arBucket["BUCKET"],
-			$filePath,
+			'',
+			'/' . $arBucket["BUCKET"] . $filePath,
 			'',
 			(array_key_exists("content", $arFile)? $arFile["content"]: fopen($arFile["tmp_name"], "rb")),
 			$additional_headers
@@ -1177,8 +1171,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 			$response = $this->SendRequest(
 				$arBucket["SETTINGS"],
 				'GET',
-				$arBucket["BUCKET"],
-				'/',
+				'',
+				'/' . $arBucket["BUCKET"],
 				'?'.($bRecursive? '': 'delimiter=%2F&').'prefix='.str_replace($search, $replace, rawurlencode($filePath))
 					.'&marker='.rawurlencode($marker)
 			);
@@ -1282,8 +1276,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'HEAD',
-			$arBucket["BUCKET"],
-			$filePath
+			'',
+			'/' . $arBucket["BUCKET"] . $filePath
 		);
 
 		if($this->status == 200)
@@ -1340,8 +1334,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$response = $this->SendRequest(
 			$arBucket["SETTINGS"],
 			'POST',
-			$arBucket["BUCKET"],
-			$filePathU,
+			'',
+			'/' . $arBucket["BUCKET"] . $filePathU,
 			'?uploads=',
 			'',
 			$additional_headers
@@ -1403,8 +1397,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'PUT',
-			$arBucket["BUCKET"],
-			$filePath,
+			'',
+			'/' . $arBucket["BUCKET"] . $filePath,
 			'?partNumber='.($part_no + 1).'&uploadId='.rawurlencode($NS["UploadId"]),
 			$data
 		);
@@ -1471,8 +1465,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 		$this->SendRequest(
 			$arBucket["SETTINGS"],
 			'POST',
-			$arBucket["BUCKET"],
-			$filePath,
+			'',
+			'/' . $arBucket["BUCKET"] . $filePath,
 			'?uploadId='.rawurlencode($NS["UploadId"]),
 			"<CompleteMultipartUpload>".$data."</CompleteMultipartUpload>"
 		);
@@ -1528,8 +1522,8 @@ class CCloudStorageService_S3 extends CCloudStorageService
 			$this->SendRequest(
 				$arBucket["SETTINGS"],
 				'DELETE',
-				$arBucket["BUCKET"],
-				$filePath,
+				'',
+				'/' . $arBucket["BUCKET"] . $filePath,
 				'?uploadId='.rawurlencode($NS["UploadId"]),
 				''
 			);

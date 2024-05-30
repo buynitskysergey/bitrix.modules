@@ -1,5 +1,5 @@
 <?php
-return array(
+return [
 	'controllers' => [
 		'value' => [
 			'namespaces' => [
@@ -8,7 +8,7 @@ return array(
 			],
 			'defaultNamespace' => '\\Bitrix\\Tasks\\Rest\\Controllers',
 			'restIntegration' => [
-				'enabled'=>true
+				'enabled' => true,
 			],
 		],
 		'readonly' => true,
@@ -72,8 +72,20 @@ return array(
 					],
 				],
 			],
+			'filters' => [
+				[
+					'id' => 'tasks.userDataFilter',
+					'entityId' => 'user',
+					'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\UserDataFilter',
+				],
+				[
+					'id' => 'tasks.projectDataFilter',
+					'entityId' => 'project',
+					'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\ProjectDataFilter',
+				],
+			],
 			'extensions' => ['tasks.entity-selector'],
 		],
 		'readonly' => true,
 	],
-);
+];

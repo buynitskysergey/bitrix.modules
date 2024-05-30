@@ -37,18 +37,15 @@ class WorkgroupDataProvider extends \Bitrix\Main\Filter\EntityDataProvider
 	 */
 	protected function getFieldName($fieldID): string
 	{
-		switch ($fieldID)
+		$name = match ($fieldID)
 		{
-			case 'OWNER':
-				$name = (
-					ModuleManager::isModuleInstalled('intranet')
-						? Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}_INTRANET")
-						: Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}")
-				);
-				break;
-			default:
-				$name = Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}");
-		}
+			'OWNER' => ModuleManager::isModuleInstalled('intranet')
+				? Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}_INTRANET")
+				: Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}")
+			,
+			'LANDING' => Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}_MSGVER_1"),
+			default => Loc::getMessage("SOCIALNETWORK_WORKGROUP_FILTER_{$fieldID}"),
+		};
 
 		if ($name === null)
 		{

@@ -773,7 +773,7 @@ class CIntranetUtils
 	protected static function __dept_field_replace($str)
 	{
 		return preg_replace(
-			'/<option([^>]*)>'.GetMessage('MAIN_NO').'<\/option>/i'.BX_UTF_PCRE_MODIFIER,
+			'/<option([^>]*)>'.GetMessage('MAIN_NO').'<\/option>/iu',
 			'<option\\1>'.GetMessage('MAIN_ALL').'</option>',
 			$str
 		);
@@ -1731,7 +1731,7 @@ class CIntranetUtils
 		if (isModuleInstalled('bitrix24'))
 		{
 			$learnmoreLink = getMessage('INTR_MAIL_DOMAIN_LEARNMOREB24_LINK');
-			$supportLink   = getMessage('INTR_MAIL_DOMAIN_SUPPORTB24_LINK');
+			$supportLink   = getMessage('INTR_MAIL_DOMAIN_SUPPORTB24_LINK_MSGVER_1');
 		}
 		else
 		{

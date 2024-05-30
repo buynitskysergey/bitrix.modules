@@ -9,7 +9,6 @@ namespace Bitrix\Seo;
 
 use Bitrix\Main\Application;
 use Bitrix\Main\Context;
-use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\SystemException;
@@ -345,7 +344,11 @@ class Service
 	public static function getAuthorizeData($engine, $clientType = false): array
 	{
 		$checkKey = "";
-		if(Loader::includeModule("socialservices") && CurrentUser::get()->getId())
+		$session = Application::getInstance()
+			->getSession()
+		;
+
+		if (Loader::includeModule("socialservices") && $session->isAccessible())
 		{
 			$checkKey = \CSocServAuthManager::GetUniqueKey();
 		}

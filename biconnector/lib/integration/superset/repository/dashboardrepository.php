@@ -91,6 +91,14 @@ final class DashboardRepository
 		return $dashboard;
 	}
 
+	public function getCount(array $ormParams): int
+	{
+		$ormParams['select'] = ['ID'];
+		$ormParams['count_total'] = true;
+
+		return SupersetDashboardTable::getList($ormParams)->getCount();
+	}
+
 	/**
 	 * Load data from proxy
 	 *
@@ -123,32 +131,6 @@ final class DashboardRepository
 		}
 
 		return $result;
-	}
-
-	private function synchronizeDashboards(EO_SupersetDashboard_Collection $dashboardList, ?array $proxyData): void
-	{
-		if (empty($proxyData))
-		{
-			return;
-		}
-
-		/** @var EO_SupersetDashboard $dashboard */
-		foreach ($dashboardList as $dashboard)
-		{
-			$dashboardExternalId = (int)$dashboard->getExternalId();
-			if (
-				isset($proxyData[$dashboardExternalId])
-				&& $proxyData[$dashboardExternalId] instanceof Dto\Dashboard
-			)
-			{
-				$title = $proxyData[$dashboardExternalId]->title;
-				if ($dashboard->getTitle() !== $title)
-				{
-					$dashboard->setTitle($title);
-					$dashboard->save();
-				}
-			}
-		}
 	}
 
 	private function synchronizeDashboard(EO_SupersetDashboard $dashboard, Dto\Dashboard $proxyData): void

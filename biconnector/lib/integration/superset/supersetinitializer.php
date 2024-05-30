@@ -5,10 +5,13 @@ namespace Bitrix\BIConnector\Integration\Superset;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable;
 use Bitrix\BIConnector\Superset\ActionFilter\ProxyAuth;
+use Bitrix\BIConnector\Superset\Dashboard\EmbeddedFilter;
 use Bitrix\BIConnector\Superset\KeyManager;
 use Bitrix\BIConnector\Superset\Logger\SupersetInitializerLogger;
 use Bitrix\BIConnector\Superset\MarketDashboardManager;
+use Bitrix\BIConnector\Superset\SystemDashboardManager;
 use Bitrix\BIConnector\Superset\UI\DashboardManager;
 use Bitrix\Bitrix24\Feature;
 use Bitrix\Main\Config\Option;
@@ -16,6 +19,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Result;
 use Bitrix\Main\Error;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Rest\AppTable;
 
 final class SupersetInitializer
 {
@@ -24,10 +28,12 @@ final class SupersetInitializer
 	public const SUPERSET_STATUS_FROZEN = 'FROZEN';
 	public const SUPERSET_STATUS_DISABLED = 'DISABLED';
 	public const SUPERSET_STATUS_DOESNT_EXISTS = 'DOESNT_EXISTS'; // If portal startup superset first time
+	public const SUPERSET_STATUS_DELETED_BY_CLIENT = 'DELETED_BY_CLIENT';
 
 	public const FREEZE_REASON_TARIFF = 'TARIFF';
 
 	private const LAST_STARTUP_ATTEMPT_OPTION = 'last_superset_startup_attempt';
+	public const ERROR_DELETE_INSTANCE_OPTION = 'error_superset_delete_instance';
 
 	/**
 	 * @return string current superset status
@@ -261,7 +267,11 @@ final class SupersetInitializer
 	{
 		$status = self::getSupersetStatus();
 
-		return $status !== self::SUPERSET_STATUS_DOESNT_EXISTS && $status !== self::SUPERSET_STATUS_DISABLED;
+		return
+			$status !== self::SUPERSET_STATUS_DOESNT_EXISTS
+			&& $status !== self::SUPERSET_STATUS_DISABLED
+			&& $status !== self::SUPERSET_STATUS_DELETED_BY_CLIENT
+		;
 	}
 
 	public static function isSupersetLoad(): bool
@@ -332,6 +342,13 @@ final class SupersetInitializer
 			return;
 		}
 
+		if (self::getSupersetStatus() === self::SUPERSET_STATUS_DELETED_BY_CLIENT)
+		{
+			self::setSupersetStatus(self::SUPERSET_STATUS_DOESNT_EXISTS);
+
+			return;
+		}
+
 		if (Loader::includeModule('bitrix24'))
 		{
 			$params = [
@@ -389,5 +406,63 @@ final class SupersetInitializer
 		}
 
 		return $agentName;
+	}
+
+	public static function deleteInstance(): Result
+	{
+		$result = new Result();
+		$response = ProxyIntegrator::getInstance()->deleteSuperset();
+		if ($response->hasErrors())
+		{
+			$result->addErrors($response->getErrors());
+
+			return $result;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Clears all data abount BI Constructor - tables and market apps.
+	 *
+	 * @return void
+	 */
+	public static function clearSupersetData(): void
+	{
+		$dashboards = SupersetDashboardTable::getList(['select' => ['*', 'APP']])->fetchCollection();
+		foreach ($dashboards as $dashboard)
+		{
+			$app = $dashboard->getApp();
+			if ($app)
+			{
+				AppTable::uninstall($app->getCode());
+				AppTable::update($app->getId(), ['ACTIVE' => 'N', 'INSTALLED' => 'N']);
+			}
+
+			$dashboard->delete();
+		}
+
+		$apps = AppTable::getList()->fetchCollection();
+		foreach ($apps as $app)
+		{
+			if ($app->getCode() && MarketDashboardManager::isDatasetAppByAppCode($app->getCode()))
+			{
+				AppTable::uninstall($app->getCode());
+				AppTable::update($app->getId(), ['ACTIVE' => 'N', 'INSTALLED' => 'N']);
+			}
+		}
+
+		foreach (SupersetUserTable::getList()->fetchCollection() as $user)
+		{
+			$user->delete();
+		}
+
+		Option::delete('biconnector', ['name' => EmbeddedFilter\DateTime::CONFIG_PERIOD_OPTION_NAME]);
+		Option::delete('biconnector', ['name' => EmbeddedFilter\DateTime::CONFIG_DATE_START_OPTION_NAME]);
+		Option::delete('biconnector', ['name' => EmbeddedFilter\DateTime::CONFIG_DATE_END_OPTION_NAME]);
+		Option::delete('biconnector', ['name' => SystemDashboardManager::OPTION_NEW_DASHBOARD_NOTIFICATION_LIST]);
+		Option::delete('biconnector', ['name' => self::ERROR_DELETE_INSTANCE_OPTION]);
+
+		// TODO Clear permission and tag tables
 	}
 }

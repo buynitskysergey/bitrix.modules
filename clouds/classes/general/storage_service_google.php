@@ -257,7 +257,7 @@ class CCloudStorageService_GoogleStorage extends CCloudStorageService
 				$URI = $arBucket["PREFIX"]."/".$URI;
 		}
 
-		$proto = $APPLICATION->IsHTTPS()? "https": "http";
+		$proto = \Bitrix\Main\Context::getCurrent()->getRequest()->isHttps()? "https": "http";
 
 		if ($encoded)
 		{

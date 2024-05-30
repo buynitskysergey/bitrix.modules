@@ -200,8 +200,9 @@ class Messenger
 		try
 		{
 			$taskService = new TaskService();
+			$chat = Chat::getInstance($chatId);
 
-			if (!Chat::getInstance($chatId)->hasAccess())
+			if (!$chat->hasAccess() || !$chat->canDo(Chat\Permission::ACTION_CREATE_TASK))
 			{
 				return;
 			}

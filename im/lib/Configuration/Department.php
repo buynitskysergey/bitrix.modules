@@ -8,6 +8,7 @@ class Department
 {
 	/** @var int */
 	private $id;
+	private static ?int $topDepartmentId = null;
 
 	public function __construct(int $id = 0)
 	{
@@ -108,6 +109,11 @@ class Department
 			return false;
 		}
 
+		if (self::$topDepartmentId !== null)
+		{
+			return self::$topDepartmentId;
+		}
+
 		$departmentId = false;
 		$res = \CIBlock::GetList([], ["CODE" => "departments"]);
 		if ($iblock = $res->Fetch())
@@ -124,6 +130,7 @@ class Department
 				$departmentId = (int)$department['ID'];
 			}
 		}
+		self::$topDepartmentId = $departmentId;
 
 		return $departmentId;
 	}

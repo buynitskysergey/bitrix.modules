@@ -31,6 +31,9 @@ CModule::AddAutoloadClasses(
 		"CCloudStorageService_GoogleStorage" =>  "classes/general/storage_service_google.php",
 		"CCloudSecurityService_AmazonS3" => "classes/general/security_service_s3.php",
 		"CCloudSecurityService_HotBox" => "classes/general/security_service_hotbox.php",
+		"CCloudSecurityService_STS" => "classes/general/security_service_sts.php",
+		"CCloudSecurityService_Amazon" => "classes/general/security_service_amazon.php",
+		"CCloudSecurityService_Yandex" => "classes/general/security_service_yandex.php",
 	)
 );
 

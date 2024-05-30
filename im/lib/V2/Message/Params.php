@@ -64,9 +64,11 @@ class Params extends Registry
 		FORWARD_ID = 'FORWARD_ID',
 		FORWARD_CONTEXT_ID = 'FORWARD_CONTEXT_ID',
 		FORWARD_USER_ID = 'FORWARD_USER_ID',
+		FORWARD_CHAT_TITLE = 'FORWARD_CHAT_TITLE',
 		REPLY_ID = 'REPLY_ID',
 		BETA = 'BETA',
-		COPILOT_PROMPT_CODE = 'COPILOT_PROMPT_CODE'
+		COPILOT_PROMPT_CODE = 'COPILOT_PROMPT_CODE',
+		COPILOT_ROLE = 'COPILOT_ROLE'
 	;
 
 	//todo: Move it into CRM module
@@ -235,6 +237,10 @@ class Params extends Registry
 			'type' => Param::TYPE_STRING,
 			'isHidden' => true,
 		],
+		self::FORWARD_CHAT_TITLE => [
+			'type' => Param::TYPE_STRING,
+			'isHidden' => true,
+		],
 		self::REPLY_ID => [
 			'type' => Param::TYPE_INT,
 		],
@@ -243,6 +249,10 @@ class Params extends Registry
 			'default' => false,
 		],
 		self::COPILOT_PROMPT_CODE => [
+			'type' => Param::TYPE_STRING,
+			'isHidden' => true,
+		],
+		self::COPILOT_ROLE => [
 			'type' => Param::TYPE_STRING,
 			'isHidden' => true,
 		],

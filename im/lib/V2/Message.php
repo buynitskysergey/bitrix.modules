@@ -1651,14 +1651,17 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		return $this->userIdsFromMention;
 	}
 
-	public function getEnrichedParams(): Params
+	public function getEnrichedParams(bool $withUrl = true): Params
 	{
 		$params = clone $this->getParams();
 
-		$url = $this->getUrl();
-		if (isset($url))
+		if ($withUrl)
 		{
-			$params->get(Params::ATTACH)->addValue($url->getUrlAttach());
+			$url = $this->getUrl();
+			if (isset($url))
+			{
+				$params->get(Params::ATTACH)->addValue($url->getUrlAttach());
+			}
 		}
 
 		if ($this->isCompletelyEmpty())
@@ -1713,9 +1716,13 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			return null;
 		}
 
+		$contextId = $this->getParams()->get(Params::FORWARD_CONTEXT_ID)->getValue();
+
 		return [
-			'id' => $this->getParams()->get(Params::FORWARD_CONTEXT_ID)->getValue(),
+			'id' => $contextId,
 			'userId' => (int)$this->getParams()->get(Params::FORWARD_USER_ID)->getValue(),
+			'chatTitle' => $this->getParams()->get(Params::FORWARD_CHAT_TITLE)->getValue() ?? null,
+			'chatType' => Im\V2\Message\Forward\ForwardService::getChatTypeByContextId($contextId),
 		];
 	}
 
@@ -1727,6 +1734,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	{
 		$dateCreate = $this->getDateCreate();
 		$authorId = $this->getNotifyEvent() === Notify::EVENT_SYSTEM ? 0 : $this->getAuthorId();
+		$messageShortInfo = $option['MESSAGE_SHORT_INFO'] ?? false;
 		$onlyCommonRest = [
 			'id' => $this->getId(),
 			'chat_id' => $this->getChatId(),
@@ -1737,7 +1745,8 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			'replaces' => $this->getReplaceMap(),
 			'uuid' => $this->getUuid(),
 			'forward' => $this->getForwardInfo(),
-			'params' => $this->getEnrichedParams()->toRestFormat(),
+			'params' => $this->getEnrichedParams(!$messageShortInfo)->toRestFormat(),
+			'viewedByOthers' => $this->isViewedByOthers(),
 		];
 		$rest = $onlyCommonRest;
 
@@ -1746,7 +1755,6 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			$rest = array_merge($onlyCommonRest, [
 				'unread' => $this->isUnread(),
 				'viewed' => $this->isViewed(),
-				'viewedByOthers' => $this->isViewedByOthers(),
 			]);
 		}
 

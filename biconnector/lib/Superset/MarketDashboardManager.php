@@ -76,7 +76,7 @@ final class MarketDashboardManager
 			{
 				MarketDashboardLogger::logErrors($response->getErrors(),[
 					'message' => 'System dashboard installation error',
-					'code' => $appCode,
+					'app_code' => $appCode,
 				]);
 			}
 
@@ -139,7 +139,7 @@ final class MarketDashboardManager
 				? 'System dashboard was successfully updated'
 				: 'System dashboard was successfully installed'
 			;
-			MarketDashboardLogger::logInfo($logMessage, ['code' => $appCode]);
+			MarketDashboardLogger::logInfo($logMessage, ['app_code' => $appCode]);
 
 			SystemDashboardManager::notifyUserDashboardModification($dashboard, $isDashboardExists);
 		}
@@ -209,7 +209,7 @@ final class MarketDashboardManager
 			{
 				MarketDashboardLogger::logErrors($response->getErrors(), [
 					'message' => 'System dataset installation error',
-					'code' => $appCode,
+					'app_code' => $appCode,
 				]);
 			}
 
@@ -220,7 +220,7 @@ final class MarketDashboardManager
 
 		if (self::isSystemAppByAppCode($appCode))
 		{
-			MarketDashboardLogger::logInfo('System dataset was successfully installed', ['code' => $appCode]);
+			MarketDashboardLogger::logInfo('System dataset was successfully installed', ['app_code' => $appCode]);
 		}
 
 		return $result;

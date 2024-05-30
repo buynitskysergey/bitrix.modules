@@ -11,7 +11,7 @@ class CCloudSecurityService_HotBox
 		$this->service = CCloudStorageService_HotBox::GetObjectInstance();
 	}
 
-	function GetObject()
+	public static function GetObject()
 	{
 		return new CCloudSecurityService_HotBox();
 	}

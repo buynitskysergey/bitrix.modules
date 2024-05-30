@@ -60,21 +60,7 @@ class Settings
 		return \Bitrix\Main\Config\Option::get('immobile', 'should_show_chat_m1_update_hint', 'Y') === 'Y';
 	}
 
-	public static function setCopilotMobileBeta(string $value): bool
-	{
-		return \CUserOptions::SetOption('immobile', 'copilot_mobile_beta_available', $value);
-	}
-	public function isCopilotAvailable(): bool
-	{
-		return \Bitrix\Im\V2\Chat\CopilotChat::isAvailable();
-	}
-
-	public static function isCopilotMobileBetaEnabled(): bool
-	{
-		return \CUserOptions::GetOption('immobile', 'copilot_mobile_beta_available', 'N') === 'Y';
-	}
-
-	public static function isCopilotEnabled(): bool
+	public static function isCopilotAvailable(): bool
 	{
 		if (!\Bitrix\Main\Loader::includeModule('im'))
 		{
@@ -82,5 +68,10 @@ class Settings
 		}
 
 		return \Bitrix\Im\V2\Chat\CopilotChat::isAvailable();
+	}
+
+	public static function isCopilotAddUsersEnabled(): bool
+	{
+		return \Bitrix\Main\Config\Option::get('im', 'im_add_users_to_copilot_chat', 'N') === 'Y';
 	}
 }

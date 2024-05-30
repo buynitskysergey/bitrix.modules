@@ -651,6 +651,11 @@ class CCloudStorageBucket extends CAllCloudStorageBucket
 			$arFields["FAILOVER_DELETE_DELAY"] = (int)$arFields["FAILOVER_DELETE_DELAY"];
 		}
 
+		if(array_key_exists("CNAME", $arFields))
+		{
+			$arFields["CNAME"] = preg_replace('#^https?://#i', '', $arFields["CNAME"]);
+		}
+
 		if(!empty($aMsg))
 		{
 			$e = new CAdminException($aMsg);
@@ -987,14 +992,24 @@ class CCloudStorageBucket extends CAllCloudStorageBucket
 		if($this->_ID <= 0)
 			return false;
 
-		$this->service = CCloudStorage::GetServiceByID($this->SERVICE_ID);
-		if(!is_object($this->service))
-			return false;
-
 		unset($arFields["FILE_COUNT"]);
 		unset($arFields["SERVICE_ID"]);
 		unset($arFields["LOCATION"]);
 		unset($arFields["BUCKET"]);
+
+		if (
+			array_key_exists('SETTINGS', $arFields)
+			&& is_array($arFields['SETTINGS'])
+			&& isset($arFields['SETTINGS']['MIGRATE_TO'])
+			&& $arFields['SETTINGS']['MIGRATE_TO']
+		)
+		{
+			$this->SERVICE_ID = $arFields['SERVICE_ID'] = $arFields['SETTINGS']['MIGRATE_TO'];
+		}
+
+		$this->service = CCloudStorage::GetServiceByID($this->SERVICE_ID);
+		if(!is_object($this->service))
+			return false;
 
 		if(!$this->CheckFields($arFields, $this->_ID))
 			return false;

@@ -18,7 +18,9 @@ use Bitrix\Im\V2\Result;
 use Bitrix\Im\V2\Service\Context;
 use Bitrix\Im\V2\Sync;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\Loader;
+use Bitrix\Main\ORM\Query\Query;
 
 class ReadService
 {
@@ -54,13 +56,11 @@ class ReadService
 		$counter = $this->counterService->getByChat($message->getChatId());
 		$viewResult = $this->viewedService->addTo($message);
 		$this->updateDateRecent($message->getChatId());
-		if (!$message->getChat() instanceof Chat\OpenLineChat)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $message->getChatId()),
-				$this->getContext()->getUserId()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $message->getChatId()),
+			$this->getContext()->getUserId(),
+			$message->getChat()->getType()
+		);
 
 		$viewedMessages = [];
 		if ($viewResult->isSuccess())
@@ -84,13 +84,11 @@ class ReadService
 		;
 		$this->viewedService->add($messagesToView);
 		$this->updateDateRecent($chat->getChatId());
-		if (!$chat instanceof Chat\OpenLineChat)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chat->getChatId()),
-				$this->getContext()->getUserId()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chat->getChatId()),
+			$this->getContext()->getUserId(),
+			$chat->getType()
+		);
 
 		return (new Result())->setResult(['COUNTER' => $counter, 'VIEWED_MESSAGES' => $messagesToView]);
 	}
@@ -131,15 +129,35 @@ class ReadService
 		$counter = 0;
 		//$this->viewedController->addAllFromChat($chatId);
 		$this->updateDateRecent($chatId);
-		if (!Chat::getInstance($chatId) instanceof Chat\OpenLineChat)
+		$chat = Chat::getInstance($chatId);
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
+			$this->getContext()->getUserId(),
+			$chat->getType()
+		);
+
+		if ($chat instanceof Chat\ChannelChat)
 		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
-				$this->getContext()->getUserId()
-			);
+			$userId = $this->getContext()->getUserId();
+			Application::getInstance()->addBackgroundJob(fn () => $this->withContextUser($userId)->readChildren($chat));
 		}
 
 		return (new Result())->setResult(['COUNTER' => $counter, 'VIEWED_MESSAGES' => new MessageCollection()]);
+	}
+
+	public function readChildren(Chat $parentChat): array
+	{
+		$childrenToRead = CounterService::getChildrenWithCounters($parentChat, $this->getContext()->getUserId());
+
+		if (empty($childrenToRead))
+		{
+			return $childrenToRead;
+		}
+
+		$this->setLastIdForReadByIds($childrenToRead);
+		$this->counterService->deleteByChatIds($childrenToRead);
+
+		return $childrenToRead;
 	}
 
 	public function readAll(): void
@@ -162,13 +180,11 @@ class ReadService
 		}
 		$this->counterService->addStartingFrom($message->getMessageId(), $relation);
 		$this->viewedService->deleteStartingFrom($message);
-		if (!$message->getChat() instanceof Chat\OpenLineChat)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $message->getChatId()),
-				$this->getContext()->getUserId()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $message->getChatId()),
+			$this->getContext()->getUserId(),
+			$message->getChat()->getType()
+		);
 
 		return new Result();
 	}
@@ -229,7 +245,7 @@ class ReadService
 	 */
 	public function getCountersForUsers(Message $message, RelationCollection $relations): array
 	{
-		return $this->counterService->getByChatForEachUsers($message->getChatId(), $relations->getUserIds());
+		return $this->counterService->getByChatForEachUsers($message->getChatId(), $relations->getUserIds(), 100);
 	}
 
 	/**
@@ -427,6 +443,33 @@ class ReadService
 		return $this;
 	}
 
+	private function getChildrenToReadIds(Chat $parentChat): array
+	{
+		$parentId = $parentChat->getId();
+		if (!$parentId)
+		{
+			return [];
+		}
+
+		$query = ChatTable::query()
+			->setSelect(['ID'])
+			->where('PARENT_ID', $parentId)
+		;
+		$alias = Application::getConnection()->getSqlHelper()->quote($query->getInitAlias());
+
+		$subQuery = MessageUnreadTable::query()
+			->setSelect(['CHAT_ID'])
+			->where('USER_ID', $this->getContext()->getUserId())
+			->where('CHAT_ID', new SqlExpression('?#', "{$alias}.ID"))
+		;
+
+		return $query
+			->whereIn('ID', $subQuery)
+			->fetchCollection()
+			->getIdList()
+		;
+	}
+
 	private function setLastIdForReadAll(): void
 	{
 		$connection = Application::getConnection();
@@ -441,6 +484,28 @@ class ReadService
 			' b_im_chat C ',
 			" C.ID = R.CHAT_ID AND R.MESSAGE_TYPE NOT IN ('" . IM_MESSAGE_OPEN_LINE . "', '" . IM_MESSAGE_SYSTEM . "')
 				AND R.USER_ID = {$this->getContext()->getUserId()}"
+		));
+	}
+
+	private function setLastIdForReadByIds(array $chatIds): void
+	{
+		if (empty($chatIds))
+		{
+			return;
+		}
+
+		$chatIdsString = implode(',', $chatIds);
+		$connection = Application::getConnection();
+		$helper = $connection->getSqlHelper();
+
+		$connection->queryExecute($helper->prepareCorrelatedUpdate(
+			'b_im_relation',
+			'R',
+			[
+				'LAST_ID' => 'C.LAST_MESSAGE_ID',
+			],
+			' b_im_chat C ',
+			" C.ID = R.CHAT_ID AND R.CHAT_ID IN ({$chatIdsString}) AND R.USER_ID = {$this->getContext()->getUserId()}"
 		));
 	}
 

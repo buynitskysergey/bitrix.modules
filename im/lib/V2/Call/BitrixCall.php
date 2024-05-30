@@ -6,41 +6,54 @@ use Bitrix\Im\Call\Call;
 use Bitrix\Im\Call\Util;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\Web\JWT;
+use Bitrix\Main\SystemException;
 
 class BitrixCall extends Call
 {
-	protected function initCall()
+	/**
+	 * @return void
+	 * @throws SystemException
+	 */
+	protected function initCall(): void
 	{
 		if (!$this->endpoint)
 		{
 			$this->uuid = Util::generateUUID();
 			$this->secretKey = Random::getString(10, true);
 
-			$callControllerClient = new ControllerClient();
-			$createResult = $callControllerClient->createCall(
-				$this->getUuid(),
-				$this->getSecretKey(),
-				$this->getInitiatorId(),
-				$this->getId()
-			);
+			if (!$this->getId())
+			{
+				$this->save();
+			}
+
+			$createResult = (new ControllerClient())->createCall($this);
 
 			if (!$createResult->isSuccess())
 			{
-				$this->finish();
+				parent::finish();
 
-				throw new \Exception($createResult->getErrorMessages()[0]);
+				throw new SystemException($createResult->getErrorMessages()[0]);
 			}
 			$callData = $createResult->getData();
 			if (!$callData['endpoint'])
 			{
-				$this->finish();
+				parent::finish();
 
-				throw new \Exception('Empty endpoint');
+				throw new SystemException('Empty endpoint');
 			}
 
 			$this->setEndpoint($callData['endpoint']);
 			$this->save();
 		}
+	}
+
+	public function finish(): void
+	{
+		if ($this->getState() != static::STATE_FINISHED)
+		{
+			(new ControllerClient())->finishCall($this);
+		}
+		parent::finish();
 	}
 
 	protected function generateJwt(int $userId): string

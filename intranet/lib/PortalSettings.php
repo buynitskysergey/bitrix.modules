@@ -62,11 +62,23 @@ class PortalSettings
 		if (!isset($this->siteName))
 		{
 			$siteName = Main\Config\Option::get('main', 'site_name', '', $this->siteId);
-			if (strlen($siteName) <= 0)
+			if ($siteName === '')
 			{
 				$siteName = Main\Config\Option::get('main', 'site_name');
 			}
-			$this->siteName = strlen($siteName) > 0 ? $siteName : Main\Context::getCurrent()->getServer()->getServerName();
+
+			if ($siteName <> '')
+			{
+				$this->siteName = $siteName;
+			}
+			elseif ($this->siteTitle <> 0)
+			{
+				$this->siteName = $this->siteTitle;
+			}
+			else
+			{
+				$this->siteName = '';
+			}
 		}
 
 		return $this->siteName;
@@ -76,7 +88,12 @@ class PortalSettings
 	{
 		$result = new Main\Result();
 		$siteName = trim($siteName);
-		$siteName  = $siteName <> '' ? $siteName : Main\Context::getCurrent()->getServer()->getServerName();
+
+		if ($siteName === '' && $this->siteTitle <> '')
+		{
+			$siteName = $this->siteTitle;
+		}
+
 		$currentSiteName = $this->getName();
 
 		if ($siteName <> '' && $siteName !== $currentSiteName)
@@ -118,7 +135,7 @@ class PortalSettings
 
 	protected function getTitleByDefault(): string
 	{
-		return $this->getName();
+		return Main\Context::getCurrent()->getServer()->getServerName();
 	}
 
 	public function canCurrentUserEditTitle(): bool

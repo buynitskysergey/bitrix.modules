@@ -5,9 +5,12 @@ namespace Bitrix\Im\V2\Message\Forward;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Entity\File\FileItem;
+use Bitrix\Im\V2\Integration\AI\RoleManager;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Im\V2\Result;
+use Bitrix\Imbot\Bot\CopilotChatBot;
+use Bitrix\Main\Loader;
 
 class ForwardService
 {
@@ -22,6 +25,7 @@ class ForwardService
 		Message\Params::FORWARD_CONTEXT_ID => Message\Params::FORWARD_CONTEXT_ID,
 		Message\Params::FORWARD_ID => Message\Params::FORWARD_ID,
 		Message\Params::FORWARD_USER_ID => Message\Params::FORWARD_USER_ID,
+		Message\Params::FORWARD_CHAT_TITLE => Message\Params::FORWARD_CHAT_TITLE,
 		Message\Params::REPLY_ID => Message\Params::REPLY_ID,
 	];
 
@@ -43,7 +47,7 @@ class ForwardService
 		$uuidMap = [];
 		foreach ($forwardingMessages as $forwardingMessage)
 		{
-			if ($forwardingMessage->getChat()->hasAccess($this->getContext()->getUserId()))
+			if ($this->canForward($forwardingMessage))
 			{
 				$forwardMessageResult = $this->createForwardMessage($forwardingMessage);
 				if ($forwardMessageResult->hasResult())
@@ -57,6 +61,20 @@ class ForwardService
 		}
 
 		return $result->setResult($uuidMap);
+	}
+
+	public static function getChatTypeByContextId(string $contextId): string
+	{
+		$dialogId = Chat::getDialogIdByContextId($contextId);
+
+		if (!str_starts_with($dialogId, 'chat'))
+		{
+			return \Bitrix\Im\Chat::getType(['TYPE' => Chat::IM_TYPE_PRIVATE]);
+		}
+
+		$chatId = mb_substr($dialogId, 4);
+
+		return Chat::getInstance($chatId)->getExtendedType();
 	}
 
 	/**
@@ -111,6 +129,10 @@ class ForwardService
 			$newParams[Message\Params::FORWARD_ID] = $forwardingMessage->getId();
 			$newParams[Message\Params::FORWARD_CONTEXT_ID] = $forwardingMessage->getContextId();
 			$newParams[Message\Params::FORWARD_USER_ID] = $userId;
+			if ($forwardingMessage->getChat() instanceof Chat\OpenChannelChat)
+			{
+				$newParams[Message\Params::FORWARD_CHAT_TITLE] = $forwardingMessage->getChat()->getDisplayedTitle();
+			}
 		}
 
 		if ($forwardingMessage->getParams()->isSet(Message\Params::FILE_ID))
@@ -126,6 +148,16 @@ class ForwardService
 			}
 
 			$newParams[Message\Params::FILE_ID] = $newFileIds;
+		}
+
+		if (Loader::includeModule('imbot') && $forwardingMessage->getAuthorId() === CopilotChatBot::getBotId())
+		{
+			if ($forwardingMessage->getParams()->isSet(Message\Params::COPILOT_ROLE))
+			{
+				$copilotRole = $forwardingMessage->getParams()->get(Message\Params::COPILOT_ROLE)->getValue();
+			}
+
+			$newParams[Message\Params::COPILOT_ROLE] = $copilotRole ?? RoleManager::getDefaultRoleCode();
 		}
 
 		return $result->setResult($newParams);
@@ -165,5 +197,12 @@ class ForwardService
 		}
 
 		return $result;
+	}
+
+	private function canForward(Message $message): bool
+	{
+		$chat = $message->getChat();
+
+		return $chat->hasAccess($this->getContext()->getUserId()) && !($chat instanceof Chat\CommentChat);
 	}
 }

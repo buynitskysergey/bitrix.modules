@@ -148,6 +148,35 @@ class OpenLineChat extends EntityChat
 		return in_array($connectorType, \Bitrix\ImOpenlines\Connector::getListCanUpdateOwnMessage(), true);
 	}
 
+	public function canDeleteOwnMessage(): bool
+	{
+		if (!Loader::includeModule('imopenlines'))
+		{
+			return false;
+		}
+
+		[$connectorType] = explode("|", $this->getEntityId() ?? '');
+
+		return in_array($connectorType, \Bitrix\ImOpenlines\Connector::getListCanDeleteOwnMessage(), true);
+	}
+
+	public function canDeleteMessage(): bool
+	{
+		if (!Loader::includeModule('imopenlines'))
+		{
+			return false;
+		}
+
+		[$connectorType] = explode("|", $this->getEntityId() ?? '');
+
+		return in_array($connectorType, \Bitrix\ImOpenlines\Connector::getListCanDeleteMessage(), true);
+	}
+
+	protected function needToSendMessageUserDelete(): bool
+	{
+		return true;
+	}
+
 	protected function prepareParams(array $params = []): Result
 	{
 		$params['AUTHOR_ID'] = 0;
@@ -160,6 +189,11 @@ class OpenLineChat extends EntityChat
 		{
 			\CPullWatch::Add($this->getContext()->getUserId(), "IM_PUBLIC_{$this->getId()}", true);
 		}
+	}
+
+	public function needToSendPublicPull(): bool
+	{
+		return true;
 	}
 
 	/**
@@ -252,33 +286,9 @@ class OpenLineChat extends EntityChat
 		return $this;
 	}
 
-	protected function sendPushUsersAdd(array $usersToAdd, RelationCollection $oldRelations): array
-	{
-		$pushMessage = parent::sendPushUsersAdd($usersToAdd, $oldRelations);
-
-		if (Loader::includeModule('pull'))
-		{
-			\CPullWatch::AddToStack('IM_PUBLIC_' . $this->getId(), $pushMessage);
-		}
-
-		return $pushMessage;
-	}
-
 	protected function addUsersToRelation(array $usersToAdd, array $managerIds = [], ?bool $hideHistory = null)
 	{
 		parent::addUsersToRelation($usersToAdd, $managerIds, false);
-	}
-
-	public function startRecordVoice(): void
-	{
-		if (!Loader::includeModule('pull'))
-		{
-			return;
-		}
-
-		parent::startRecordVoice();
-		$pushFormatter = new PushFormat();
-		\CPullWatch::AddToStack('IM_PUBLIC_'.$this->getId(), $pushFormatter->formatStartRecordVoice($this));
 	}
 
 	protected function addIndex(): \Bitrix\Im\V2\Chat
@@ -303,14 +313,5 @@ class OpenLineChat extends EntityChat
 		ChatIndexTable::updateIndex($this->getId(), $this->getTitle());
 
 		return $this;
-	}
-
-	public function sendPushUpdateMessage(Message $message): void
-	{
-		parent::sendPushUpdateMessage($message);
-		$pushFormat = new Message\PushFormat();
-		$push = $pushFormat->formatMessageUpdate($message);
-		$push['params']['dialogId'] = $this->getDialogId();
-		\CPullWatch::AddToStack('IM_PUBLIC_' . $message->getChatId(), $push);
 	}
 }

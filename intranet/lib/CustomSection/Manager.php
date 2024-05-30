@@ -24,12 +24,12 @@ class Manager
 	public const ERROR_CODE_SECTION_NOT_AVAILABLE = 'CUSTOM_SECTION_MANAGER_SECTION_NOT_AVAILABLE';
 	public const ERROR_CODE_COMPONENT_NOT_FOUND = 'CUSTOM_SECTION_MANAGER_COMPONENT_NOT_FOUND';
 
-	public const VALID_CODE_REGEX = '|^[a-z0-9_.-]+$|' . BX_UTF_PCRE_MODIFIER;
+	public const VALID_CODE_REGEX = '|^[a-z0-9_.-]+$|u';
 
 	public const COUNTER_INFIX = '_custom_section_';
 
 	protected const SECTION_ROOT_URL_TEMPLATE = '/page/#customSectionCode#/';
-	protected const PAGE_URL_REGEX = "|^/page/(?'customSectionCode'[\\w]+)/(?'pageCode'[\\w]+)/?|" . BX_UTF_PCRE_MODIFIER;
+	protected const PAGE_URL_REGEX = "|^/page/(?'customSectionCode'[\\w]+)/(?'pageCode'[\\w]+)/?|u";
 	protected const PAGE_URL_TEMPLATE = self::SECTION_ROOT_URL_TEMPLATE . '#pageCode#/';
 
 	protected const MODULE_ID = 'intranet';

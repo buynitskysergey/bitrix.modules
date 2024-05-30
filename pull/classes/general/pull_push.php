@@ -418,12 +418,12 @@ class CPushManager
 				$result['PARAMS'] = $fields['PARAMS'];
 			}
 
-			if ($fields['MESSAGE'] <> '')
+			if (isset($fields['MESSAGE']) && $fields['MESSAGE'] <> '')
 			{
 				$result['MESSAGE'] = $fields['MESSAGE'];
 			}
 
-			if ($fields['SOUND'] <> '')
+			if (isset($fields['SOUND']) && $fields['SOUND'] <> '')
 			{
 				$result['SOUND'] = $fields['SOUND'];
 			}
@@ -582,7 +582,7 @@ class CPushManager
 				continue;
 			}
 
-			if ($options['IMPORTANT'] == 'Y')
+			if (isset($options['IMPORTANT']) && $options['IMPORTANT'] == 'Y')
 			{
 				$result[$user['ID']]['mode'] = self::SEND_IMMEDIATELY;
 				continue;
@@ -686,7 +686,7 @@ class CPushManager
 	private function getAppIDAliases($appId)
 	{
 		$aliases = [];
-		if(self::$appAliases[$appId])
+		if (isset(self::$appAliases[$appId]))
 		{
 			return self::$appAliases[$appId];
 		}
@@ -788,8 +788,8 @@ class CPushManager
 			$arDevice["APP_ID"] = \Bitrix\Main\Config\Option::get("mobileapp", "app_id_replaced_".$arDevice["APP_ID"], $arDevice["APP_ID"]);
 			$mode = $this->getAppMode($arDevice["APP_ID"]);
 
-			$tmpMessage = $arTmpMessages["USER_" . $arDevice["USER_ID"]];
-			$voipMessage = $arVoipMessages["USER_" . $arDevice["USER_ID"]];
+			$tmpMessage = $arTmpMessages["USER_" . $arDevice["USER_ID"]] ?? null;
+			$voipMessage = $arVoipMessages["USER_" . $arDevice["USER_ID"]] ?? null;
 
 			if(is_array($tmpMessage))
 			{

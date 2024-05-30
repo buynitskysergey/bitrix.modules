@@ -38,6 +38,7 @@ class Call
 	protected $id;
 	protected $type;
 	protected $initiatorId;
+	protected ?int $actionUserId = null;
 	protected $isPublic = false;
 	protected $publicId;
 	protected $provider;
@@ -90,6 +91,20 @@ class Call
 	public function getInitiatorId()
 	{
 		return $this->initiatorId;
+	}
+
+	/**
+	 * @return int|null
+	 */
+	public function getActionUserId(): ?int
+	{
+		return $this->actionUserId;
+	}
+
+	public function setActionUserId(int $byUserId): self
+	{
+		$this->actionUserId = $byUserId;
+		return $this;
 	}
 
 	/**
@@ -347,9 +362,9 @@ class Call
 		$this->endpoint = $endpoint;
 	}
 
-	public function finish()
+	public function finish(): void
 	{
-		if($this->endDate instanceof DateTime)
+		if ($this->endDate instanceof DateTime)
 		{
 			return;
 		}
@@ -659,6 +674,16 @@ class Call
 		return (int)Option::get('im', 'call_server_max_users');
 	}
 
+	public static function getMaxCallLimit(): int
+	{
+		if (!\Bitrix\Main\Loader::includeModule('bitrix24'))
+		{
+			return 0;
+		}
+
+		return (int)\Bitrix\Bitrix24\Feature::getVariable('im_call_extensions_limit');
+	}
+
 	/**
 	 * Use this constructor only for creating new calls
 	 */
@@ -876,10 +901,6 @@ class Call
 		{
 			return true;
 		}
-		if (!ModuleManager::isModuleInstalled("voximplant"))
-		{
-			return false;
-		}
 
 		return (bool)Option::get("im", "call_server_enabled");
 	}
@@ -889,19 +910,24 @@ class Call
 	 */
 	public static function isBitrixCallServerEnabled(): bool
 	{
-		return self::isBitrixCallEnabled();
+		return self::isCallServerEnabled();
 	}
 
 	public static function isBitrixCallEnabled(): bool
 	{
-		$isEnabled = Option::get('im', 'bitrix_call_enabled', 'N');
-
-		return $isEnabled === 'Y';
+		return self::isCallServerEnabled();
 	}
 
 	public static function isIosBetaEnabled(): bool
 	{
 		$isEnabled = Option::get('im', 'call_beta_ios', 'N');
+
+		return $isEnabled === 'Y';
+	}
+
+	public static function isNewCallLayoutEnabled(): bool
+	{
+		$isEnabled = Option::get('im', 'new_call_layout_enabled', 'N');
 
 		return $isEnabled === 'Y';
 	}

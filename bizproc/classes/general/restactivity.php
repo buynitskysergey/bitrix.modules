@@ -403,7 +403,10 @@ class CBPRestActivity extends CBPActivity implements
 		$workflowParameters,
 		$workflowVariables,
 		$currentValues = null,
-		$formName = ""
+		$formName = "",
+		$popupWindow = null,
+		$currentSiteId = null,
+		$workflowConstants = null
 	)
 	{
 		if (!Loader::includeModule('rest'))
@@ -434,6 +437,7 @@ class CBPRestActivity extends CBPActivity implements
 			'workflowVariables' => $workflowVariables,
 			'currentValues' => $currentValues,
 			'formName' => $formName,
+			'workflowConstants' => $workflowConstants,
 		]);
 
 		$map = [
@@ -563,7 +567,8 @@ class CBPRestActivity extends CBPActivity implements
 						'properties' => $properties,
 						'current_values' => $appCurrentValues,
 						'document_type' => $dialog->getDocumentType(),
-						'document_fields' => $documentService->GetDocumentFields($dialog->getDocumentType())
+						'document_fields' => $documentService->GetDocumentFields($dialog->getDocumentType()),
+						'template' => $dialog->getTemplateExpressions(),
 					],
 					'PARAM' => array(
 						'FRAME_WIDTH' => '100%',

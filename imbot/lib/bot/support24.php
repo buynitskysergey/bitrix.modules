@@ -1112,6 +1112,7 @@ class Support24 extends Network implements MenuBot, SupportBot, SupportQuestion
 
 		// welcome message
 		$message = '';
+		$isPositiveWelcome = false;
 		if (
 			self::isActivePartnerSupport()
 			&& !self::isUserIntegrator($messageFields['USER_ID'])
@@ -1124,12 +1125,14 @@ class Support24 extends Network implements MenuBot, SupportBot, SupportQuestion
 			if (self::isUserIntegrator($messageFields['USER_ID']))
 			{
 				$message = self::getMessage('WELCOME_INTEGRATOR');
+				$isPositiveWelcome = true;
 			}
 			else if (self::isActiveFreeSupport())
 			{
 				if (self::isActiveFreeSupportForUser($messageFields['USER_ID']))
 				{
 					$message = self::getMessage('WELCOME');
+					$isPositiveWelcome = true;
 				}
 				else
 				{
@@ -1146,16 +1149,19 @@ class Support24 extends Network implements MenuBot, SupportBot, SupportQuestion
 			if (self::isUserIntegrator($messageFields['USER_ID']))
 			{
 				$message = self::getMessage('WELCOME_INTEGRATOR');
+				$isPositiveWelcome = true;
 			}
 			else if (self::isActivePaidSupportForUser($messageFields['USER_ID']))
 			{
 				$message = self::getMessage('WELCOME');
+				$isPositiveWelcome = true;
 			}
 			else
 			{
 				$message = self::getMessage('WELCOME_LIMITED');
 			}
 		}
+
 		if (!empty($message))
 		{
 			\CUserOptions::setOption(
@@ -1166,11 +1172,14 @@ class Support24 extends Network implements MenuBot, SupportBot, SupportQuestion
 				$messageFields['USER_ID']
 			);
 
-			self::sendMessage([
-				'DIALOG_ID' => $messageFields['USER_ID'],
-				'MESSAGE' => $message,
-				'URL_PREVIEW' => 'N'
-			]);
+			if (!$isPositiveWelcome || $joinFields['CHAT_ENTITY_TYPE'] !== self::CHAT_ENTITY_TYPE)
+			{
+				self::sendMessage([
+					'DIALOG_ID' => $messageFields['USER_ID'],
+					'MESSAGE' => $message,
+					'URL_PREVIEW' => 'N'
+				]);
+			}
 		}
 
 		if (

@@ -3,6 +3,7 @@
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main\Text\Emoji;
+use Bitrix\Main;
 use Bitrix\Socialnetwork\Helper\Path;
 use Bitrix\Socialnetwork\Item\Workgroup;
 use Bitrix\Socialnetwork\UserToGroupTable;
@@ -276,10 +277,10 @@ class CAllSocNetUserToGroup
 						"NOTIFY_MODULE" => "socialnetwork",
 						"NOTIFY_EVENT" => "invite_group",
 						"NOTIFY_TAG" => "SOCNET|INVITE_GROUP|" . (int)$relationFields["USER_ID"] . "|" . (int)$relationFields["ID"],
-						"NOTIFY_MESSAGE" => str_replace(
-							"#NAME#",
-							$relationFields["GROUP_NAME"],
-							Loc::getMessage('SONET_UG_EXCLUDE_MESSAGE')
+						"NOTIFY_MESSAGE" => fn (?string $languageId = null) => Loc::getMessage(
+							'SONET_UG_EXCLUDE_MESSAGE',
+							["#NAME#" => $relationFields["GROUP_NAME"]],
+							$languageId
 						),
 					];
 
@@ -384,6 +385,38 @@ class CAllSocNetUserToGroup
 		}
 
 		return false;
+	}
+
+	public static function GetGroupUsers(int $groupId): array
+	{
+		return UserToGroupTable::query()
+			->setSelect([ 'USER_ID', 'GROUP_ID', 'ROLE', 'AUTO_MEMBER' ])
+			->where('GROUP_ID', $groupId)
+			->fetchAll()
+		;
+	}
+
+	public static function AddUsersToGroup(int $groupId, array $userIds): Main\Result
+	{
+		if (empty($userIds))
+		{
+			return (new Main\Result())->addError(new Main\Error('$userIds is empty'));
+		}
+
+		$users = [];
+		foreach($userIds as $userId)
+		{
+			$users[] = [
+				'USER_ID' => $userId,
+				'GROUP_ID' => $groupId,
+				'ROLE' => UserToGroupTable::ROLE_USER,
+				'DATE_CREATE' => new Main\Type\DateTime(),
+				'DATE_UPDATE' => new Main\Type\DateTime(),
+				'INITIATED_BY_USER_ID' => $userId,
+			];
+		}
+
+		return UserToGroupTable::addMulti($users, true);
 	}
 
 	/***************************************/
@@ -822,7 +855,7 @@ class CAllSocNetUserToGroup
 							truncateText($groupFields["NAME"], 150),
 							Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT_EMPTY')
 						),
-						"NOTIFY_MESSAGE" => str_replace(
+						"NOTIFY_MESSAGE" => fn (?string $languageId = null) => str_replace(
 							[
 								"#TEXT#",
 								"#GROUP_NAME#",
@@ -832,8 +865,8 @@ class CAllSocNetUserToGroup
 								"<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>"
 							],
 							(empty($message)
-								? Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT_EMPTY')
-								: Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT')
+								? Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT_EMPTY', null, $languageId)
+								: Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT', null, $languageId)
 							)
 						),
 						"NOTIFY_BUTTONS" => [
@@ -852,9 +885,23 @@ class CAllSocNetUserToGroup
 
 					$groupUrl = $serverName.str_replace("#group_id#", $groupId, Path::get('group_path_template'));
 
-					$messageFields["NOTIFY_MESSAGE_OUT"] = $messageFields["NOTIFY_MESSAGE"];
-					$messageFields["NOTIFY_MESSAGE_OUT"] .= "\n\n".GetMessage("SONET_UG_GROUP_LINK").$groupUrl;
-					$messageFields['NOTIFY_MESSAGE_OUT'] .= "\n\n".GetMessage("SONET_UG_REQUEST_CONFIRM_REJECT").": ".$requestConfirmUrl;
+					$messageFields["NOTIFY_MESSAGE_OUT"] = fn (?string $languageId = null) => str_replace(
+						[
+							"#TEXT#",
+							"#GROUP_NAME#",
+						],
+						[
+							$message,
+							"<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>"
+						],
+						(empty($message)
+							? Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT_EMPTY', null, $languageId)
+							: Loc::getMessage('SONET_UG_REQUEST_CONFIRM_TEXT', null, $languageId)
+						)
+					)
+						. "\n\n".Loc::getMessage("SONET_UG_GROUP_LINK", null, $languageId).$groupUrl
+						. "\n\n".Loc::getMessage("SONET_UG_REQUEST_CONFIRM_REJECT", null, $languageId).": ".$requestConfirmUrl
+					;
 
 					CIMNotify::Add($messageFields);
 				}
@@ -999,18 +1046,18 @@ class CAllSocNetUserToGroup
 				"NOTIFY_MODULE" => "socialnetwork",
 				"NOTIFY_EVENT" => "invite_group_btn",
 				"NOTIFY_TAG" => "SOCNET|INVITE_GROUP|" . $userId . "|" . $relationId,
-				"NOTIFY_TITLE" => str_replace(
+				"NOTIFY_TITLE" => fn (?string $languageId = null) => str_replace(
 					"#GROUP_NAME#",
 					truncateText($groupFields["NAME"], 150),
-					GetMessage("SONET_UG_INVITE_CONFIRM_TEXT_EMPTY")
+					Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT_EMPTY", null, $languageId)
 				),
-				"NOTIFY_MESSAGE" => str_replace(
+				"NOTIFY_MESSAGE" => fn (?string $languageId = null) => str_replace(
 					[ "#TEXT#", "#GROUP_NAME#" ],
 					[ $message, $groupFields["NAME"] ],
 					(
 						empty($message)
-							? Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT_EMPTY")
-							: Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT")
+							? Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT_EMPTY", null, $languageId)
+							: Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT", null, $languageId)
 					)
 				),
 				"NOTIFY_BUTTONS" => [
@@ -1072,10 +1119,20 @@ class CAllSocNetUserToGroup
 			$requestUrl = $serverName.str_replace(array("#USER_ID#", "#user_id#"), $userId, $requestUrl);
 			$groupUrl = $serverName.str_replace("#group_id#", $groupId, Path::get('group_path_template', $siteId));
 
-			$messageFields['NOTIFY_MESSAGE_OUT'] = $messageFields['NOTIFY_MESSAGE'];
-			$messageFields['NOTIFY_MESSAGE_OUT'] .= "\n\n" . Loc::getMessage('SONET_UG_GROUP_LINK') . $groupUrl;
-			$messageFields['NOTIFY_MESSAGE_OUT'] .= "\n\n" . Loc::getMessage('SONET_UG_INVITE_CONFIRM') . ": " . $requestUrl . '?INVITE_GROUP=' . $relationId . '&CONFIRM=Y';
-			$messageFields['NOTIFY_MESSAGE_OUT'] .= "\n\n" . Loc::getMessage('SONET_UG_INVITE_REJECT') . ": " . $requestUrl . '?INVITE_GROUP=' . $relationId . '&CONFIRM=N';
+			$messageFields['NOTIFY_MESSAGE_OUT'] = fn (?string $languageId = null) =>
+				str_replace(
+					[ "#TEXT#", "#GROUP_NAME#" ],
+					[ $message, $groupFields["NAME"] ],
+					(
+					empty($message)
+						? Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT_EMPTY", null, $languageId)
+						: Loc::getMessage("SONET_UG_INVITE_CONFIRM_TEXT", null, $languageId)
+					)
+				)
+				. "\n\n" . Loc::getMessage('SONET_UG_GROUP_LINK', null, $languageId) . $groupUrl
+				. "\n\n" . Loc::getMessage('SONET_UG_INVITE_CONFIRM', null, $languageId) . ": " . $requestUrl . '?INVITE_GROUP=' . $relationId . '&CONFIRM=Y'
+				. "\n\n" . Loc::getMessage('SONET_UG_INVITE_REJECT', null, $languageId) . ": " . $requestUrl . '?INVITE_GROUP=' . $relationId . '&CONFIRM=N'
+			;
 
 			CIMNotify::Add($messageFields);
 		}
@@ -1252,16 +1309,20 @@ class CAllSocNetUserToGroup
 						"NOTIFY_MODULE" => "socialnetwork",
 						"NOTIFY_EVENT" => "invite_group",
 						"NOTIFY_TAG" => "SOCNET|INVITE_GROUP|" . (int)$relationFields["USER_ID"] . "|" . (int)$relationFields["ID"],
-						"NOTIFY_MESSAGE" => str_replace(
-							"#NAME#",
-							"<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$arGroup["NAME"]."</a>",
-							GetMessage("SONET_UG_CONFIRM_MEMBER_MESSAGE_G")
-						),
-						"NOTIFY_MESSAGE_OUT" => str_replace(
-							"#NAME#",
-							$arGroup["NAME"],
-							GetMessage("SONET_UG_CONFIRM_MEMBER_MESSAGE_G")." (".$serverName.$groupUrl.")"
-						)
+						"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_CONFIRM_MEMBER_MESSAGE_G",
+								['#NAME#' => "<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$arGroup["NAME"]."</a>"],
+								$languageId
+							)
+						,
+						"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_CONFIRM_MEMBER_MESSAGE_G",
+								['#NAME#' => $arGroup['NAME']],
+								$languageId
+							)
+							. " (".$serverName.$groupUrl.")"
 					);
 
 					CIMNotify::DeleteBySubTag("SOCNET|REQUEST_GROUP|".$relationFields["USER_ID"]."|".$relationFields["GROUP_ID"]."|".$relationFields["ID"]);
@@ -1419,11 +1480,15 @@ class CAllSocNetUserToGroup
 				$arMessageFields = array(
 					"FROM_USER_ID" => $userId,
 					"TO_USER_ID" => $arRelation["USER_ID"],
-					"MESSAGE" => str_replace(
-						'#NAME#',
-						$groupFields['NAME'],
-						Loc::getMessage('SONET_UG_REJECT_MEMBER_MESSAGE_G')
-					),
+					"MESSAGE" => fn (?string $languageId = null) =>
+						Loc::getMessage(
+							'SONET_UG_REJECT_MEMBER_MESSAGE_G',
+							[
+								'#NAME#' => $groupFields['NAME']
+							],
+							$languageId
+						)
+					,
 					"=DATE_CREATE" => CDatabase::CurrentTimeFunction(),
 					"MESSAGE_TYPE" => SONET_MESSAGE_SYSTEM
 				);
@@ -1562,16 +1627,21 @@ class CAllSocNetUserToGroup
 						"NOTIFY_MODULE" => "socialnetwork",
 						"NOTIFY_EVENT" => "invite_group",
 						"NOTIFY_TAG" => "SOCNET|INVITE_GROUP|" . (int)$arResult['USER_ID'] . "|". $relationID,
-						"NOTIFY_MESSAGE" => str_replace(
-							"#NAME#",
-							"<a href=\"".$domainName.$url."\" class=\"bx-notifier-item-action\">".$arResult["GROUP_NAME"]."</a>",
-							GetMessage("SONET_UG_CONFIRM_MEMBER_MESSAGE_G")
-						),
-						"NOTIFY_MESSAGE_OUT" => str_replace(
-							"#NAME#",
-							$arResult["GROUP_NAME"],
-							GetMessage("SONET_UG_CONFIRM_MEMBER_MESSAGE_G")." (".$serverName.$url.")"
-						)
+						"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_CONFIRM_MEMBER_MESSAGE_G",
+								['#NAME#' => "<a href=\"".$domainName.$url."\" class=\"bx-notifier-item-action\">".$arResult["GROUP_NAME"]."</a>"],
+								$languageId
+							)
+						,
+						"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_CONFIRM_MEMBER_MESSAGE_G",
+								['#NAME#' => $arResult['GROUP_NAME']],
+								$languageId
+							)
+							. " (".$serverName.$url.")"
+						,
 					);
 					CIMNotify::Add($arMessageFields);
 
@@ -1592,12 +1662,20 @@ class CAllSocNetUserToGroup
 							"NOTIFY_MODULE" => "socialnetwork",
 							"NOTIFY_EVENT" => "invite_group",
 							"NOTIFY_TAG" => "SOCNET|INVITE_GROUP_SUCCESS|" . (int)$arResult["GROUP_ID"],
-							"NOTIFY_MESSAGE" => str_replace(
-								"#NAME#",
-								"<a href=\"".$domainName.$url."\" class=\"bx-notifier-item-action\">".$arResult["GROUP_NAME"]."</a>",
-								GetMessage("SONET_UG_CONFIRM_MEMBER_MESSAGE")
-							),
-							"NOTIFY_MESSAGE_OUT" => str_replace("#NAME#", $arResult["GROUP_NAME"], GetMessage("SONET_UG_CONFIRM_MEMBER_MESSAGE")." (".$serverName.$url.")"),
+							"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+								Loc::getMessage(
+									"SONET_UG_CONFIRM_MEMBER_MESSAGE",
+									["#NAME#" => "<a href=\"".$domainName.$url."\" class=\"bx-notifier-item-action\">".$arResult["GROUP_NAME"]."</a>"],
+									$languageId
+								)
+							,
+							"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+								Loc::getMessage(
+									"SONET_UG_CONFIRM_MEMBER_MESSAGE",
+									['#NAME#' => $arResult['GROUP_NAME'],
+									$languageId]
+								)
+								." (".$serverName . $url.")",
 						);
 						CIMNotify::Add($arMessageFields);
 
@@ -1727,17 +1805,22 @@ class CAllSocNetUserToGroup
 						"NOTIFY_MODULE" => "socialnetwork",
 						"NOTIFY_EVENT" => "invite_group",
 						"NOTIFY_TAG" => "SOCNET|INVITE_GROUP_REJECT|" . (int)$arResult["GROUP_ID"],
-						"NOTIFY_MESSAGE" => str_replace(
-							"#NAME#",
-							"<a href=\"".$domainName.$url."\" class=\"bx-notifier-item-action\">".$arResult["GROUP_NAME"]."</a>",
-							GetMessage("SONET_UG_REJECT_MEMBER_MESSAGE")
-						),
-						"NOTIFY_MESSAGE_OUT" => str_replace(
-							"#NAME#",
-							$arResult["GROUP_NAME"],
-							GetMessage("SONET_UG_REJECT_MEMBER_MESSAGE")." (".$serverName.$url.")"
-						)
+						"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_REJECT_MEMBER_MESSAGE",
+								["#NAME#" => "<a href=\"".$domainName.$url."\" class=\"bx-notifier-item-action\">".$arResult["GROUP_NAME"]."</a>"],
+								$languageId
+							)
+						,
+						"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_REJECT_MEMBER_MESSAGE",
+								['#NAME#' => $arResult['GROUP_NAME']],
+								$languageId
+							) . " (".$serverName.$url.")"
+						,
 					);
+
 					CIMNotify::Add($arMessageFields);
 				}
 			}
@@ -1878,16 +1961,21 @@ class CAllSocNetUserToGroup
 						"NOTIFY_MODULE" => "socialnetwork",
 						"NOTIFY_EVENT" => "moderators_group",
 						"NOTIFY_TAG" => "SOCNET|MOD_GROUP|" . (int)$userID . "|" . $groupId . "|" . $arRelation["ID"] . "|" . $arRelation["USER_ID"],
-						"NOTIFY_MESSAGE" => str_replace(
-							array("#NAME#"),
-							array("<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$arGroup["NAME"]."</a>"),
-							GetMessage("SONET_UG_MOD2MEMBER_MESSAGE")
-						),
-						"NOTIFY_MESSAGE_OUT" => str_replace(
-							array("#NAME#"),
-							array($arGroup["NAME"]),
-							GetMessage("SONET_UG_MOD2MEMBER_MESSAGE")
-						)." (".$serverName.$groupUrl.")"
+						"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_MOD2MEMBER_MESSAGE",
+								['#NAME#' => "<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$arGroup["NAME"]."</a>"],
+								$languageId
+							)
+						,
+						"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+							Loc::getMessage(
+								"SONET_UG_MOD2MEMBER_MESSAGE",
+								['#NAME#' => $arGroup["NAME"]],
+								$languageId
+							)
+							. " (".$serverName.$groupUrl.")"
+						,
 					);
 
 					CIMNotify::Add($arMessageFields);
@@ -2167,7 +2255,13 @@ class CAllSocNetUserToGroup
 				$arMessageFields = array(
 					"FROM_USER_ID" => $userID,
 					"TO_USER_ID" => $arRelation["USER_ID"],
-					"MESSAGE" => str_replace("#NAME#", $arGroup["NAME"], GetMessage("SONET_UG_BANMEMBER_MESSAGE")),
+					"MESSAGE" => fn (?string $languageId = null) => Loc::getMessage(
+						"SONET_UG_BANMEMBER_MESSAGE",
+						[
+							"#NAME#" => $arGroup["NAME"]
+						],
+						$languageId
+					),
 					"=DATE_CREATE" => CDatabase::CurrentTimeFunction(),
 					"MESSAGE_TYPE" => SONET_MESSAGE_SYSTEM
 				);
@@ -2270,7 +2364,13 @@ class CAllSocNetUserToGroup
 				CSocNetMessages::Add(array(
 					"FROM_USER_ID" => $userID,
 					"TO_USER_ID" => $arRelation["USER_ID"],
-					"MESSAGE" => str_replace("#NAME#", $arGroup["NAME"], GetMessage("SONET_UG_UNBANMEMBER_MESSAGE")),
+					"MESSAGE" => fn (?string $languageId = null) => Loc::getMessage(
+						"SONET_UG_UNBANMEMBER_MESSAGE",
+						[
+							"#NAME#" => $arGroup["NAME"]
+						],
+						$languageId
+					),
 					"=DATE_CREATE" => CDatabase::CurrentTimeFunction(),
 					"MESSAGE_TYPE" => SONET_MESSAGE_SYSTEM
 				));
@@ -2514,16 +2614,21 @@ class CAllSocNetUserToGroup
 				"NOTIFY_MODULE" => "socialnetwork",
 				"NOTIFY_EVENT" => "owner_group",
 				"NOTIFY_TAG" => "SOCNET|OWNER_GROUP|".$groupId,
-				"NOTIFY_MESSAGE" => str_replace(
-					"#NAME#",
-					"<a href=\"".$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>",
-					GetMessage("SONET_UG_OWNER2MEMBER_MESSAGE")
-				),
-				"NOTIFY_MESSAGE_OUT" => str_replace(
-					"#NAME#",
-					$groupFields["NAME"],
-					GetMessage("SONET_UG_OWNER2MEMBER_MESSAGE")." (".$serverName.$groupUrl.")"
-				)
+				"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+					Loc::getMessage(
+						"SONET_UG_OWNER2MEMBER_MESSAGE",
+						['#NAME#' => "<a href=\"".$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>"],
+						$languageId
+					)
+				,
+				"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+					Loc::getMessage(
+						"SONET_UG_OWNER2MEMBER_MESSAGE",
+						["#NAME#" => $groupFields['NAME']],
+						$languageId
+					)
+					." (".$serverName.$groupUrl.")"
+				,
 			);
 
 			CIMNotify::Add($messageFields);
@@ -2560,16 +2665,20 @@ class CAllSocNetUserToGroup
 				"NOTIFY_MODULE" => "socialnetwork",
 				"NOTIFY_EVENT" => "owner_group",
 				"NOTIFY_TAG" => "SOCNET|OWNER_GROUP|".$groupId,
-				"NOTIFY_MESSAGE" => str_replace(
-					"#NAME#",
-					"<a href=\"".$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>",
-					GetMessage("SONET_UG_MEMBER2OWNER_MESSAGE")
-				),
-				"NOTIFY_MESSAGE_OUT" => str_replace(
-					"#NAME#",
-					$groupFields["NAME"],
-					GetMessage("SONET_UG_MEMBER2OWNER_MESSAGE")." (".$serverName.$groupUrl.")"
-				)
+				"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+					Loc::getMessage(
+						"SONET_UG_MEMBER2OWNER_MESSAGE",
+						["#NAME#" => "<a href=\"".$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>"],
+						$languageId
+					)
+				,
+				"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+					Loc::getMessage(
+						"SONET_UG_MEMBER2OWNER_MESSAGE",
+						["#NAME#" => $groupFields['NAME']],
+						$languageId
+					) . " (".$serverName.$groupUrl.")"
+				,
 			);
 
 			CIMNotify::Add($messageFields);
@@ -3179,13 +3288,25 @@ class CAllSocNetUserToGroup
 				SITE_ID
 			);
 
-			$arMessageFields["NOTIFY_MESSAGE"] = GetMessage($messageCode.$gender_suffix, Array(
-				"#group_name#" => "<a href=\"".$arTmp["URLS"]["GROUP_PAGE"]."\" class=\"bx-notifier-item-action\">".$arNotifyParams["GROUP_NAME"]."</a>",
-			));
+			$arMessageFields["NOTIFY_MESSAGE"] = fn (?string $languageId = null) =>
+			Loc::getMessage(
+				$messageCode.$gender_suffix,
+				[
+					"#group_name#" => "<a href=\"".$arTmp["URLS"]["GROUP_PAGE"]."\" class=\"bx-notifier-item-action\">".$arNotifyParams["GROUP_NAME"]."</a>",
+				],
+				$languageId
+			);
 
-			$arMessageFields["NOTIFY_MESSAGE_OUT"] = GetMessage($messageCode.$gender_suffix, Array(
-				"#group_name#" => $arNotifyParams["GROUP_NAME"],
-			))." (".$arTmp["SERVER_NAME"].$arTmp["URLS"]["GROUP_PAGE"].")";
+			$arMessageFields["NOTIFY_MESSAGE_OUT"] = fn (?string $languageId = null) =>
+				Loc::getMessage(
+					$messageCode.$gender_suffix,
+					[
+						"#group_name#" => $arNotifyParams["GROUP_NAME"],
+					],
+					$languageId
+				)
+				." (".$arTmp["SERVER_NAME"].$arTmp["URLS"]["GROUP_PAGE"].")"
+			;
 
 			CIMNotify::Add($arMessageFields);
 		}
@@ -3302,16 +3423,20 @@ class CAllSocNetUserToGroup
 			"NOTIFY_MODULE" => "socialnetwork",
 			"NOTIFY_EVENT" => "moderators_group",
 			"NOTIFY_TAG" => "SOCNET|MOD_GROUP|" . $userId . "|".$groupId."|".$relationFields["ID"]."|".$relationFields["USER_ID"],
-			"NOTIFY_MESSAGE" => str_replace(
-				array("#NAME#"),
-				array("<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>"),
-				GetMessage("SONET_UG_MEMBER2MOD_MESSAGE")
-			),
-			"NOTIFY_MESSAGE_OUT" => str_replace(
-					array("#NAME#"),
-					array($groupFields["NAME"]),
-					Loc::getMessage("SONET_UG_MEMBER2MOD_MESSAGE")
-				)." (".$serverName.$groupUrl.")"
+			"NOTIFY_MESSAGE" => fn (?string $languageId = null) =>
+				Loc::getMessage(
+					"SONET_UG_MEMBER2MOD_MESSAGE",
+					['#NAME#' => "<a href=\"".$domainName.$groupUrl."\" class=\"bx-notifier-item-action\">".$groupFields["NAME"]."</a>"],
+					$languageId
+				)
+			,
+			"NOTIFY_MESSAGE_OUT" => fn (?string $languageId = null) =>
+				Loc::getMessage(
+					"SONET_UG_MEMBER2MOD_MESSAGE",
+					['#NAME#' => $groupFields["NAME"]],
+					$languageId
+				)
+				." (".$serverName.$groupUrl.")"
 		);
 
 		CIMNotify::add($arMessageFields);

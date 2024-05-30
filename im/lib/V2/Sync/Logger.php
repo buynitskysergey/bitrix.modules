@@ -4,6 +4,7 @@ namespace Bitrix\Im\V2\Sync;
 
 use Bitrix\Im\Model\EO_Log_Collection;
 use Bitrix\Im\Model\LogTable;
+use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Entity\User\User;
 use Bitrix\Main\Application;
@@ -18,6 +19,10 @@ class Logger
 
 	public const DEFAULT_EXPIRY_INTERVAL = '+4 weeks';
 	public const FAST_EXPIRY_INTERVAL = '+1 days';
+	protected const CHAT_TYPE_BLACKLIST = [
+		Chat::IM_TYPE_OPEN_LINE,
+		Chat::IM_TYPE_COMMENT,
+	];
 
 	private static Logger $instance;
 
@@ -36,9 +41,14 @@ class Logger
 		return self::$instance;
 	}
 
-	public function add(Event $event, $userId): void
+	public function add(Event $event, $userId, ?string $chatType = null): void
 	{
 		if (!SyncService::isEnable())
+		{
+			return;
+		}
+
+		if (!$this->needToLog($chatType))
 		{
 			return;
 		}
@@ -73,6 +83,16 @@ class Logger
 		LogTable::deleteByFilter(['<=DATE_DELETE' => $now]);
 	}
 
+	protected function needToLog(?string $chatType): bool
+	{
+		if ($chatType === null)
+		{
+			return true;
+		}
+
+		return !in_array($chatType, self::CHAT_TYPE_BLACKLIST, true);
+	}
+
 	private function addDeferred(): void
 	{
 		if (!Loader::includeModule('pull'))
@@ -85,14 +105,7 @@ class Logger
 
 		foreach ($groupedEvents as ['event' => $event, 'user' => $userId])
 		{
-			if (count($userId) === 1)
-			{
-				LogTable::merge(...$this->getMergeParam($event, $userId));
-			}
-			else
-			{
-				LogTable::multiplyMerge(...$this->getMultiplyMergeParam($event, $userId));
-			}
+			LogTable::multiplyMerge(...$this->getMultiplyMergeParam($event, $userId));
 		}
 		$this->events = [];
 		$this->isAlreadyPlanned = false;

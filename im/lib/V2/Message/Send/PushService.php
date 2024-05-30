@@ -277,11 +277,15 @@ class PushService
 			;
 		}
 
-		if ($chat->getType() == Chat::IM_TYPE_OPEN || $chat->getType() == Chat::IM_TYPE_OPEN_LINE)
+		$watchPullMessage = $pullMessage;
+		$watchPullMessage['params']['message']['params']['NOTIFY'] = 'N';
+		if ($chat->needToSendPublicPull())
 		{
-			$watchPullMessage = $pullMessage;
-			$watchPullMessage['params']['message']['params']['NOTIFY'] = 'N';
 			\CPullWatch::AddToStack('IM_PUBLIC_'. $chat->getChatId(), $watchPullMessage);
+		}
+		if ($chat->getType() === Chat::IM_TYPE_OPEN_CHANNEL)
+		{
+			Chat\OpenChannelChat::sendSharedPull($watchPullMessage);
 		}
 
 		$groups = $this->getEventByCounterGroup($events);
@@ -381,6 +385,22 @@ class PushService
 			'files' => $message->getFilesDiskData(),
 			'notify' => 'Y',
 		];
+	}
+
+	public function getEventGroups(array $event, array $userIds, int $chatId): array
+	{
+		$counters = (new Message\CounterService())->getByChatForEachUsers($chatId, $userIds, 100);
+		$events = [];
+
+		foreach ($counters as $userId => $counter)
+		{
+			$eventForUser = $event;
+			$eventForUser['groupId'] = $counter;
+			$eventForUser['params']['counter'] = $counter;
+			$events[$userId] = $eventForUser;
+		}
+
+		return $this->getEventByCounterGroup($events, 100);
 	}
 
 	/**

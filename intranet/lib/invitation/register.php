@@ -602,7 +602,14 @@ class Register
 			\CIntranetInviteDialog::InviteUser($userData, $messageText, array('checkB24' => false));
 			$reinvitedUserIds[] = (int)$userData['ID'];
 		}
-		// TODO: reinvite: self::InviteUserByPhone($userData)
+
+		foreach ($resPhone['PHONE_TO_REINVITE'] as $userData)
+		{
+			$userId = (int)$userData['ID'];
+
+			\CIntranetInviteDialog::reinviteUserByPhone($userId, array('checkB24' => true));
+			$reinvitedUserIds[] = $userId;
+		}
 
 		$transferedUserIds = [];
 		if (!empty($resEmail["TRANSFER_USER"]))

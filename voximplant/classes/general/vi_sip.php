@@ -68,7 +68,7 @@ class CVoxImplantSip
 			}
 		}
 
-		$melodyLang = ToUpper(LANGUAGE_ID);
+		$melodyLang = mb_strtoupper(LANGUAGE_ID);
 		if($melodyLang === 'KZ')
 		{
 			$melodyLang = 'RU';

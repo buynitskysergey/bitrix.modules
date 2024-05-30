@@ -634,7 +634,7 @@ class ThemePicker
 
 		foreach ($this->getStandardThemes() as $theme)
 		{
-			if (!preg_match('/^(dark|light):pattern-(.+)/is' . BX_UTF_PCRE_MODIFIER, $theme['id'], $matches))
+			if (!preg_match('/^(dark|light):pattern-(.+)/isu', $theme['id'], $matches))
 			{
 				continue;
 			}

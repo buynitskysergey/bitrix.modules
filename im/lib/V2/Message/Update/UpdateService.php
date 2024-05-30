@@ -218,12 +218,10 @@ class UpdateService
 
 		Bot::onMessageUpdate($this->message->getId(), $messageFields);
 
-		if ($chat->getType() !== Chat::IM_TYPE_OPEN_LINE)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::UPDATED_MESSAGE_ENTITY, $this->message->getId()),
-				static fn () => $chat->getRelations()->getUserIds()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::UPDATED_MESSAGE_ENTITY, $this->message->getId()),
+			static fn () => $chat->getRelations()->getUserIds(),
+			$chat->getType()
+		);
 	}
 }

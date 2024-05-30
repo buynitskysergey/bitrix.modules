@@ -543,6 +543,8 @@ class Workgroup extends Base
 				&& !$permissions['UserIsOwner']
 				&& !$permissions['UserIsScrumMaster']
 			),
+			'FOLLOW' => $permissions['UserIsMember'],
+			'PIN' => $permissions['UserIsMember'],
 			'EDIT_FEATURES' => $canEditFeatures,
 		];
 	}
@@ -699,13 +701,16 @@ class Workgroup extends Base
 
 		foreach ($this->getAllowedFeatures() as $featureId => $feature)
 		{
-			$features[] = [
-				'featureName' => $featureId,
-				'name' => Loc::getMessage('SOCIALNETWORK_WORKGROUP_'.strtoupper($featureId)),
-				'customName' => $baseFeatures[$featureId]['FEATURE_NAME'] ?? '',
-				'id' => $baseFeatures[$featureId]['ID'],
-				'active' => $baseFeatures[$featureId]['ACTIVE'] === 'Y',
-			];
+			if (array_key_exists($featureId, $baseFeatures))
+			{
+				$features[] = [
+					'featureName' => $featureId,
+					'name' => Loc::getMessage('SOCIALNETWORK_WORKGROUP_'.strtoupper($featureId)),
+					'customName' => $baseFeatures[$featureId]['FEATURE_NAME'] ?? '',
+					'id' => $baseFeatures[$featureId]['ID'],
+					'active' => $baseFeatures[$featureId]['ACTIVE'] === 'Y',
+				];
+			}
 		}
 
 		return $features;
@@ -1604,7 +1609,7 @@ class Workgroup extends Base
 		return $chatId;
 	}
 
-	public function setFeaturesAction(int $groupId, array $features): bool
+	public function setFeatureAction(int $groupId, array $feature): bool
 	{
 		if (
 			!Helper\Workgroup\Access::canModify([
@@ -1620,23 +1625,46 @@ class Workgroup extends Base
 
 		$allowedFeatures = array_keys(\CSocNetAllowed::getAllowedFeatures());
 
-		foreach ($features as $feature)
-		{
-			$featureId = is_string($feature['featureName'] ?? null) ? $feature['featureName'] : '';
-			$customName = is_string($feature['customName'] ?? null) ? $feature['customName'] : false;
-			$featureActive = is_string($feature['active'] ?? null) && $feature['active'] === 'true';
+		$featureId = is_string($feature['featureName'] ?? null) ? $feature['featureName'] : '';
+		$customName = is_string($feature['customName'] ?? null) ? $feature['customName'] : false;
+		$featureActive = is_string($feature['active'] ?? null) && $feature['active'] === 'true';
 
-			if (in_array($featureId, $allowedFeatures, true))
-			{
-				\CSocNetFeatures::setFeature(
-					SONET_ENTITY_GROUP,
-					$groupId,
-					$featureId,
-					$featureActive,
-					$customName,
-				);
-			}
+		$activeFeatures = \CSocNetFeatures::GetActiveFeatures(SONET_ENTITY_GROUP, $groupId);
+
+		if (in_array($featureId, $allowedFeatures, true))
+		{
+			\CSocNetFeatures::setFeature(
+				SONET_ENTITY_GROUP,
+				$groupId,
+				$featureId,
+				$featureActive,
+				$customName,
+			);
 		}
+
+		$action = '';
+
+		if ($featureActive === in_array($featureId ,$activeFeatures))
+		{
+			$action = 'change';
+		}
+
+		if ($featureActive && !in_array($featureId ,$activeFeatures))
+		{
+			$action = 'add';
+		}
+
+		if (!$featureActive && in_array($featureId ,$activeFeatures))
+		{
+			$action = 'delete';
+		}
+
+		$this->sendPush(PushEventDictionary::EVENT_SPACE_FEATURE_CHANGE, [
+				'GROUP_ID' => $groupId,
+				'FEATURE' => $feature,
+				'ACTION' => $action,
+			]
+		);
 
 		return true;
 	}

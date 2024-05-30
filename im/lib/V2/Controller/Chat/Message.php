@@ -4,6 +4,7 @@ namespace Bitrix\Im\V2\Controller\Chat;
 
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Controller\BaseController;
+use Bitrix\Im\V2\Controller\Filter\CheckActionAccess;
 use Bitrix\Im\V2\Controller\Filter\CheckMessageDisappearingDuration;
 use Bitrix\Im\V2\Controller\Filter\CheckMessageSend;
 use Bitrix\Im\V2\Controller\Filter\UpdateStatus;
@@ -65,15 +66,7 @@ class Message extends BaseController
 				MessageCollection::class,
 				'messages',
 				function($className, array $ids) {
-					if (count($ids) > self::MAX_MESSAGES_COUNT)
-					{
-						$this->addError(new MessageError(MessageError::TOO_MANY_MESSAGES));
-
-						return null;
-					}
-					$ids = array_map('intval', $ids);
-
-					return new MessageCollection($ids);
+					return $this->getMessagesByIds($ids);
 				}
 			),
 
@@ -152,6 +145,16 @@ class Message extends BaseController
 			'send' => [
 				'+prefilters' => [
 					new CheckMessageSend(),
+				],
+			],
+			'pin' => [
+				'+prefilters' => [
+					new CheckActionAccess(Chat\Permission::ACTION_PIN_MESSAGE),
+				],
+			],
+			'unpin' => [
+				'+prefilters' => [
+					new CheckActionAccess(Chat\Permission::ACTION_PIN_MESSAGE),
 				],
 			],
 		];
@@ -413,7 +416,7 @@ class Message extends BaseController
 		$chat = $message->getChat();
 		if (!($chat instanceof Chat\PrivateChat))
 		{
-			$this->addError(new Chat\ChatError(Chat\ChatError::WRONG_TYPE));
+			$this->addError(new Chat\ChatError(Chat\ChatError::WRONG_CHAT_TYPE));
 
 			return null;
 		}

@@ -992,6 +992,14 @@ class CIMRestService extends IRestService
 		{
 			$config['ONLY_COPILOT'] = 'Y';
 		}
+		if (isset($arParams['ONLY_CHANNEL']) && $arParams['ONLY_CHANNEL'] === 'Y')
+		{
+			$config['ONLY_CHANNEL'] = 'Y';
+		}
+		if (isset($arParams['CAN_MANAGE_MESSAGES']) && $arParams['CAN_MANAGE_MESSAGES'] === 'Y')
+		{
+			$config['CAN_MANAGE_MESSAGES'] = 'Y';
+		}
 		if ($skipChatParam === 'Y')
 		{
 			$config['SKIP_CHAT'] = 'Y';
@@ -1344,6 +1352,14 @@ class CIMRestService extends IRestService
 			{
 				$add['ENTITY_ID'] = $arParams['ENTITY_ID'];
 			}
+		}
+
+		if (isset($arParams['COPILOT_MAIN_ROLE']))
+		{
+			$add['CHAT_PARAMS'][] = [
+				'PARAM_NAME' => \Bitrix\Im\V2\Chat\Param\Params::COPILOT_MAIN_ROLE,
+				'PARAM_VALUE' => $arParams['COPILOT_MAIN_ROLE']
+			];
 		}
 
 		global $USER;
@@ -2341,7 +2357,7 @@ class CIMRestService extends IRestService
 		$chatId = $task->getChatId();
 		$chat = \Bitrix\Im\V2\Chat::getInstance($chatId);
 
-		if (!$chat->hasAccess())
+		if (!$chat->hasAccess() || !$chat->canDo(\Bitrix\Im\V2\Chat\Permission::ACTION_CREATE_TASK))
 		{
 			throw new \Bitrix\Rest\RestException('You do not have access to this chat', Bitrix\Im\V2\Rest\RestError::ACCESS_ERROR, \CRestServer::STATUS_FORBIDDEN);
 		}
@@ -2506,7 +2522,7 @@ class CIMRestService extends IRestService
 			throw new \Bitrix\Rest\RestException('CALENDAR_ID can`t be empty', 'CALENDAR_ID_EMPTY', \CRestServer::STATUS_WRONG_REQUEST);
 		}
 
-		if (!$chat->hasAccess())
+		if (!$chat->hasAccess() || !$chat->canDo(\Bitrix\Im\V2\Chat\Permission::ACTION_CREATE_MEETING))
 		{
 			throw new \Bitrix\Rest\RestException('You do not have access to this chat', Bitrix\Im\V2\Rest\RestError::ACCESS_ERROR, \CRestServer::STATUS_FORBIDDEN);
 		}
@@ -2567,7 +2583,7 @@ class CIMRestService extends IRestService
 		$chatId = $calendar->getChatId();
 		$chat = \Bitrix\Im\V2\Chat::getInstance($chatId);
 
-		if (!$chat->hasAccess())
+		if (!$chat->hasAccess() || !$chat->canDo(\Bitrix\Im\V2\Chat\Permission::ACTION_CREATE_MEETING))
 		{
 			throw new \Bitrix\Rest\RestException('You do not have access to this chat', Bitrix\Im\V2\Rest\RestError::ACCESS_ERROR, \CRestServer::STATUS_FORBIDDEN);
 		}

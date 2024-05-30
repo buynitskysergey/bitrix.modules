@@ -200,6 +200,7 @@ class FavoriteChat extends PrivateChat
 			'CHAT_ID' => $chat->getChatId(),
 			'CHAT' => $chat,
 		]);
+		$chat->isFilledNonCachedData = false;
 
 		return $result;
 	}

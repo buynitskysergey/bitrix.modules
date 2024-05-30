@@ -104,6 +104,24 @@ class FileItem implements RestEntity, PopupDataAggregatable
 		return $this;
 	}
 
+	public function markAsFile(): self
+	{
+		$diskFile = $this->getDiskFile();
+		if (!$diskFile)
+		{
+			return $this;
+		}
+
+		$fileType = (int)$diskFile->getTypeFile();
+
+		if ($fileType === TypeFile::IMAGE || $fileType === TypeFile::VIDEO)
+		{
+			$diskFile->changeCode(\Bitrix\Im\V2\Link\File\FileItem::MEDIA_ORIGINAL_CODE);
+		}
+
+		return $this;
+	}
+
 	public function getCopy(?Storage $storage = null): ?self
 	{
 		$userId = $this->getContext()->getUserId();

@@ -13,7 +13,6 @@ use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\ModuleManager;
-use Bitrix\Main\Text\Encoding;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Localization\Loc;
@@ -332,7 +331,6 @@ class Output extends Base\Output
 				$params['DATA'] = $data;
 
 				$params = Converter::convertStubInEmpty($params);
-				$params = Encoding::convertEncoding($params, SITE_CHARSET, 'UTF-8');
 
 				$params['DATA'] = \base64_encode(\serialize($params['DATA']));
 				$params['BX_HASH'] = self::requestSign($this->type, \md5(implode('|', $params)));

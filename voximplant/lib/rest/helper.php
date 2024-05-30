@@ -571,7 +571,7 @@ class Helper
 		$hasRecord = ($fields['RECORD_URL'] != '');
 		if ($hasRecord)
 		{
-			if (defined('BX_UTF') && !mb_check_encoding($fields['RECORD_URL'], 'UTF-8'))
+			if (!mb_check_encoding($fields['RECORD_URL'], 'UTF-8'))
 			{
 				$result->addError(new Error('RECORD_URL contains invalid symbols for UTF-8 encoding'));
 				return $result;

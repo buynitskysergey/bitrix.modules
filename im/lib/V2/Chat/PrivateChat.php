@@ -72,7 +72,7 @@ class PrivateChat extends Chat implements PopupDataAggregatable
 		return $this;
 	}
 
-	public function setCanPost(string $canPost): Chat
+	public function setManageMessages(string $manageMessages): Chat
 	{
 		return $this;
 	}
@@ -682,6 +682,8 @@ class PrivateChat extends Chat implements PopupDataAggregatable
 			$botJoinFields['FROM_USER_ID'] = $params['FROM_USER_ID'];
 			\Bitrix\Im\Bot::onJoinChat($params['TO_USER_ID'], $botJoinFields);
 		}
+
+		$chat->isFilledNonCachedData = false;
 
 		return $result->setResult([
 			'CHAT_ID' => $chat->getChatId(),

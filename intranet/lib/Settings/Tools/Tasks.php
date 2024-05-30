@@ -3,6 +3,7 @@
 namespace Bitrix\Intranet\Settings\Tools;
 
 use Bitrix\Bitrix24\Feature;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
@@ -71,7 +72,6 @@ class Tasks extends Tool
 
 	public function getSubgroups(): array
 	{
-		global $USER;
 		$result = [];
 
 		$settingsPath = $this->getSubgroupSettingsPath();
@@ -84,7 +84,7 @@ class Tasks extends Tool
 				'code' => $this->getSubgroupCode($id),
 				'enabled' => $this->isEnabledSubgroupById($id),
 				'menu_item_id' => $menuId,
-				'settings_path' => $settingsPath[$id] ? str_replace("#USER_ID#", $USER->GetID(), $settingsPath[$id]) : null,
+				'settings_path' => $settingsPath[$id] ? str_replace("#USER_ID#", CurrentUser::get()->getId(), $settingsPath[$id]) : null,
 				'default' => $id === 'base_tasks',
 			];
 		}

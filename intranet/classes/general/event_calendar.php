@@ -530,7 +530,6 @@ class CEventCalendar
 	{
 		global $APPLICATION;
 		$sectionId = ($_REQUEST['section_id'] == 'none') ? 'none' : intval($_REQUEST['section_id']);
-		CUtil::JSPostUnEscape();
 
 		// Export calendar
 		if ($action == 'export')

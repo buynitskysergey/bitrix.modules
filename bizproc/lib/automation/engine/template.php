@@ -159,12 +159,13 @@ class Template
 				$this->getDocumentType(), //documentType
 				$robot['Name'] ?? null, //activityName
 				$copy->template['TEMPLATE'], //arWorkflowTemplate
-				[], //arWorkflowParameters
-				[], //arWorkflowVariables
+				$copy->getParameters(), //arWorkflowParameters
+				$copy->template['VARIABLES'] ?? [], //arWorkflowVariables
 				$request, //arCurrentValues = null
 				'bizproc_automation_robot_dialog', //formName = ""
 				null, //popupWindow = null
-				SITE_ID //siteId = ''
+				SITE_ID, //siteId = ''
+				$copy->template['CONSTANTS'] ?? [], //$arWorkflowConstants
 			)
 		);
 	}

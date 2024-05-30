@@ -30,6 +30,8 @@ class Event
 	private static $linesDepartmentsDelete = [];
 	private static $linesDepartmentsUpdate = [];
 
+	private static array $parentDepartments = [];
+
 	//initialization
 	/**
 	 * @param $configLine
@@ -867,6 +869,11 @@ class Event
 	 */
 	public static function getParentDepartments($departments, $recursion = true, $includeCurrentDepartment = true): array
 	{
+		if (!empty(self::$parentDepartments))
+		{
+			return self::$parentDepartments;
+		}
+
 		$result = [];
 
 		foreach ($departments as $department)
@@ -881,7 +888,7 @@ class Event
 				}
 			}
 		}
-
+		self::$parentDepartments = $result;
 		return $result;
 	}
 

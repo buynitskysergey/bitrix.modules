@@ -661,7 +661,10 @@ class CIntranetInviteDialog
 		}
 		else
 		{
-			// TODO: reinvite: self::InviteUserByPhone($userData)
+			foreach($arEmailToReinvite as $userData)
+			{
+				self::reinviteUserByPhone((int)$userData['ID']);
+			}
 		}
 
 		$siteIdByDepartmentId = $arGroups = false;
@@ -1055,8 +1058,44 @@ class CIntranetInviteDialog
 		return ($res ?: explode('<br>', $obUser->LAST_ERROR));
 	}
 
+	private static function cannotSendInvite(): bool
+	{
+		return
+			Loader::includeModule('bitrix24')
+			&& !CBitrix24::IsNfrLicense()
+			&& (
+				!CBitrix24::IsLicensePaid()
+				|| CBitrix24::IsDemoLicense()
+			)
+		;
+	}
+
+	public static function reinviteUserByPhone(int $userId, array $params = []): bool
+	{
+		if (Loader::includeModule('bitrix24'))
+		{
+			if (
+				isset($params['checkB24'])
+				&& $params['checkB24'] === true
+				&& self::cannotSendInvite()
+			)
+			{
+				return false;
+			}
+
+			return \Bitrix\Bitrix24\Integration\Network\ProfileService::getInstance()->reInviteUserByPhone($userId)->isSuccess();
+		}
+		else
+		{
+			// TODO: from portal sms provider
+		}
+
+		return false;
+	}
+
 	public static function InviteUserByPhone($arUser, $params = array())
 	{
+		// TODO: from portal sms provider
 	}
 
 	public static function InviteUser($arUser, $messageText, $params = array())
@@ -1069,14 +1108,7 @@ class CIntranetInviteDialog
 			|| $params['checkB24'] !== false
 		)
 		{
-			if (
-				Loader::includeModule('bitrix24')
-				&& !CBitrix24::IsNfrLicense()
-				&& (
-					!CBitrix24::IsLicensePaid()
-					|| CBitrix24::IsDemoLicense()
-				)
-			)
+			if (self::cannotSendInvite())
 			{
 				$messageText = Loc::getMessage("BX24_INVITE_DIALOG_INVITE_MESSAGE_TEXT_1");
 			}

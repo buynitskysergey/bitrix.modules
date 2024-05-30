@@ -139,7 +139,7 @@ class CCloudStorageService_OpenStackStorage extends CCloudStorageService
 				$this->result = '';
 
 				$logRequest = false;
-				if (defined("BX_CLOUDS_TRACE") && $verb !== "GET" && $verb !== "HEAD")
+				if (defined("BX_CLOUDS_TRACE") && $this->verb !== "GET" && $this->verb !== "HEAD")
 				{
 					$stime = microtime(1);
 					$logRequest = array(
@@ -190,7 +190,7 @@ class CCloudStorageService_OpenStackStorage extends CCloudStorageService
 					$this->result = '';
 
 					$logRequest = false;
-					if (defined("BX_CLOUDS_TRACE") && $verb !== "GET" && $verb !== "HEAD")
+					if (defined("BX_CLOUDS_TRACE") && $this->verb !== "GET" && $this->verb !== "HEAD")
 					{
 						$stime = microtime(1);
 						$logRequest = array(
@@ -293,7 +293,7 @@ class CCloudStorageService_OpenStackStorage extends CCloudStorageService
 		$this->result = '';
 
 		$logRequest = false;
-		if (defined("BX_CLOUDS_TRACE") && $verb !== "GET" && $verb !== "HEAD")
+		if (defined("BX_CLOUDS_TRACE") && $this->verb !== "GET" && $this->verb !== "HEAD")
 		{
 			$stime = microtime(1);
 			$logRequest = array(
@@ -442,7 +442,7 @@ class CCloudStorageService_OpenStackStorage extends CCloudStorageService
 		if ($forceHttp === "Y")
 			$proto = "http";
 		else
-			$proto = ($APPLICATION->IsHTTPS()? "https": "http");
+			$proto = (\Bitrix\Main\Context::getCurrent()->getRequest()->isHttps() ? "https" : "http");
 
 		if($arBucket["CNAME"])
 		{
@@ -547,6 +547,7 @@ class CCloudStorageService_OpenStackStorage extends CCloudStorageService
 			false,
 			array(
 				"X-Copy-From" => $fileSource,
+				"Content-Type" => $arFile["CONTENT_TYPE"],
 			)
 		);
 

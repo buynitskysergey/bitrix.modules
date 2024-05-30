@@ -400,6 +400,11 @@ class Task
 			throw new TaskUpdateException();
 		}
 
+		if (null === $task)
+		{
+			return false;
+		}
+
 		$this->changes = $this->getChanges($fields);
 
 		$this->setStageId($task);
@@ -2211,7 +2216,7 @@ class Task
 	 * @throws SystemException
 	 * @throws Exception
 	 */
-	private function save(array $data): TaskObject
+	private function save(array $data): ?TaskObject
 	{
 		$handler = new TaskFieldHandler($this->userId, $data);
 		$data = $handler->getFieldsToDb();

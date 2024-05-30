@@ -2,6 +2,7 @@
 namespace Bitrix\Im\Model;
 
 use Bitrix\Im\Internals\Query;
+use Bitrix\Im\V2\Common\UpdateByFilterTrait;
 use Bitrix\Main\Application;
 use Bitrix\Main\Entity;
 use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
@@ -50,6 +51,7 @@ use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
 class RelationTable extends Entity\DataManager
 {
 	use DeleteByFilterTrait;
+	use UpdateByFilterTrait;
 
 	/**
 	 * Returns DB table name for entity.

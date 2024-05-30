@@ -125,7 +125,7 @@ class Crm extends Tool
 			$biConnectorSubgroups = ['bi_analytics', 'bi_analytics_microsoft', 'bi_analytics_google', 'bi_analytics_yandex', 'bi_constructor'];
 			$subgroupsId = array_diff_key($subgroupsId, array_flip($biConnectorSubgroups));
 		}
-		elseif (Option::get('biconnector', 'release_bi_superset', 'N') !== 'Y')
+		elseif (!Loader::includeModule('bitrix24') || !Feature::isFeatureEnabled('bi_constructor'))
 		{
 			unset($subgroupsId['bi_constructor']);
 		}

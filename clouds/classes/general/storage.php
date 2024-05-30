@@ -237,6 +237,7 @@ class CCloudStorage
 		else
 			$bImmediate = $arResizeParams[5];
 
+		$callbackData['bImmediate'] = $bImmediate;
 		$callbackData["cacheID"] = $arFile["ID"]."/".md5(serialize($arResizeParams));
 		$callbackData["cacheOBJ"] = new CPHPCache;
 		$callbackData["fileDIR"] = "/"."resize_cache/".$callbackData["cacheID"]."/".$arFile["SUBDIR"];
@@ -296,7 +297,6 @@ class CCloudStorage
 					)
 				)
 				{
-					$callbackData["delayedResize"] = true;
 					$callbackData["cacheSTARTED"] = false;
 					$bNeedResize = false;
 					$callbackData["cacheOBJ"]->AbortDataCache();
@@ -475,9 +475,15 @@ class CCloudStorage
 			return false;
 		}
 
+		$delayedResize = $callbackData['bImmediate'] ? false : COption::GetOptionString("clouds", "delayed_resize") === "Y";
 		foreach (GetModuleEvents("clouds", "OnAfterResizeImage", true) as $arEvent)
 		{
-			ExecuteModuleEventEx($arEvent, [$callbackData["delayedResize"] ?? false, &$cacheImageFile]);
+			$cacheImageFileBefore = $cacheImageFile;
+			ExecuteModuleEventEx($arEvent, [$delayedResize, &$cacheImageFile]);
+			if ($cacheImageFile !== $cacheImageFileBefore && $cacheImageFile)
+			{
+				$arCloudImageSizeCache[$cacheImageFile] = $arCloudImageSizeCache[$cacheImageFileBefore];
+			}
 		}
 
 		return true;
@@ -1354,26 +1360,6 @@ class CCloudStorage
 			}
 			else
 			{
-				$imgArray = CFile::GetImageSize($arFile["tmp_name"], true, false);
-				if (is_array($imgArray) && $imgArray[2] == IMAGETYPE_JPEG)
-				{
-					$exifData = CFile::ExtractImageExif($arFile["tmp_name"]);
-					if ($exifData && isset($exifData['Orientation']))
-					{
-						$properlyOriented = CFile::ImageHandleOrientation($exifData['Orientation'], $arFile["tmp_name"]);
-						if ($properlyOriented)
-						{
-							$jpgQuality = intval(COption::GetOptionString('main', 'image_resize_quality', '95'));
-							if ($jpgQuality <= 0 || $jpgQuality > 100)
-								$jpgQuality = 95;
-
-							imagejpeg($properlyOriented, $arFile["tmp_name"], $jpgQuality);
-							clearstatcache(true, $arFile["tmp_name"]);
-						}
-						$arFile['size'] = filesize($arFile["tmp_name"]);
-					}
-				}
-
 				if (!$bucket->SaveFile($filePath, $arFile))
 				{
 					return false;
@@ -1527,6 +1513,7 @@ class CCloudStorage
 			"filter" => array(
 				"<TIMESTAMP_X" => $date,
 			),
+			"limit" => 100, // ~10 sec
 		));
 		while ($saveFile = $savedFiles->fetchObject())
 		{

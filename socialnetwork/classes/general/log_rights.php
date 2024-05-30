@@ -295,7 +295,7 @@ class CSocNetLogRights
 				b_sonet_log_right R
 			".$sFilter.$sOrder;
 
-		return $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		return $DB->Query($strSql);
 	}
 
 	public static function SetForSonet($logID, $entity_type, $entity_id, $feature, $operation, $bNew = false)
@@ -420,7 +420,7 @@ class CSocNetLogRights
 					SLR.GROUP_CODE IN ('G2'".($userID > 0 ? ", 'AU'" : "").")
 				
 			";
-		$result = $DB->Query($strSql, false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+		$result = $DB->Query($strSql);
 		if ($ar = $result->fetch())
 		{
 			return true;
@@ -435,7 +435,7 @@ class CSocNetLogRights
 					AND UA.USER_ID = ".$userID."
 			";
 
-			$result = $DB->Query($strSql, false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+			$result = $DB->Query($strSql);
 			if ($ar = $result->fetch())
 			{
 				return true;
@@ -457,7 +457,7 @@ class CSocNetLogRights
 				OR (SLR.GROUP_CODE = 'G2')
 			)";
 
-		$result = $DB->Query($strSql, false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+		$result = $DB->Query($strSql);
 		if($ar = $result->Fetch())
 		{
 			return true;
@@ -480,7 +480,7 @@ class CSocNetLogRights
 			INNER JOIN b_user_access UA ON 0=1 OR (UA.ACCESS_CODE = SLR.GROUP_CODE AND UA.USER_ID = ".intval($userID).") 
 			WHERE SLR.LOG_ID = ".intval($logID);
 
-		$result = $DB->Query($strSql, false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+		$result = $DB->Query($strSql);
 		if($ar = $result->Fetch())
 		{
 			return true;

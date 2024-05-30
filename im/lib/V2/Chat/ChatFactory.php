@@ -203,8 +203,12 @@ class ChatFactory
 				$chat = new VideoConfChat($params);
 				break;
 
-			case $entityType === Chat::IM_TYPE_CHANNEL:
+			case $type === Chat::IM_TYPE_CHANNEL:
 				$chat = new ChannelChat($params);
+				break;
+
+			case $type === Chat::IM_TYPE_OPEN_CHANNEL:
+				$chat = new OpenChannelChat($params);
 				break;
 
 			case $type === Chat::IM_TYPE_OPEN:
@@ -473,13 +477,20 @@ class ChatFactory
 		$params['TYPE'] = $params['TYPE'] ?? Chat::IM_TYPE_CHAT;
 
 		// Temporary workaround for Open chat type
-		if ($params['SEARCHABLE'] === 'Y' && $params['TYPE'] === Chat::IM_TYPE_CHAT)
+		if (($params['SEARCHABLE'] ?? 'N') === 'Y')
 		{
-			$params['TYPE'] = Chat::IM_TYPE_OPEN;
-		}
-		else
-		{
-			$params['SEARCHABLE'] = 'N';
+			if ($params['TYPE'] === Chat::IM_TYPE_CHAT)
+			{
+				$params['TYPE'] = Chat::IM_TYPE_OPEN;
+			}
+			elseif ($params['TYPE'] === Chat::IM_TYPE_CHANNEL)
+			{
+				$params['TYPE'] = Chat::IM_TYPE_OPEN_CHANNEL;
+			}
+			else
+			{
+				$params['SEARCHABLE'] = 'N';
+			}
 		}
 
 		switch ($params['ENTITY_TYPE'])
@@ -512,6 +523,9 @@ class ChatFactory
 						break;
 					case Chat::IM_TYPE_CHANNEL:
 						$addResult = (new ChannelChat())->add($params);
+						break;
+					case Chat::IM_TYPE_OPEN_CHANNEL:
+						$addResult = (new OpenChannelChat())->add($params);
 						break;
 					case Chat::IM_TYPE_PRIVATE:
 						$addResult = (new PrivateChat)->add($params);

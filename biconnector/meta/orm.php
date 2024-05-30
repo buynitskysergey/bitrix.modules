@@ -206,7 +206,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_Dashboard_Collection merge(?EO_Dashboard_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_Dashboard_Collection merge(?\Bitrix\BIConnector\EO_Dashboard_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_Dashboard_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -385,7 +385,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_DashboardUser_Collection merge(?EO_DashboardUser_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_DashboardUser_Collection merge(?\Bitrix\BIConnector\EO_DashboardUser_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_DashboardUser_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -527,7 +527,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_DictionaryCache_Collection merge(?EO_DictionaryCache_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_DictionaryCache_Collection merge(?\Bitrix\BIConnector\EO_DictionaryCache_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_DictionaryCache_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -663,7 +663,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_DictionaryData_Collection merge(?EO_DictionaryData_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_DictionaryData_Collection merge(?\Bitrix\BIConnector\EO_DictionaryData_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_DictionaryData_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -822,26 +822,26 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method bool isSourceFilled()
 	 * @method bool isSourceChanged()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard fillSource()
-	 * @method \Bitrix\Main\Type\Date getDateCreate()
-	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard setDateCreate(\Bitrix\Main\Type\Date|\Bitrix\Main\DB\SqlExpression $dateCreate)
+	 * @method \Bitrix\Main\Type\DateTime getDateCreate()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard setDateCreate(\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $dateCreate)
 	 * @method bool hasDateCreate()
 	 * @method bool isDateCreateFilled()
 	 * @method bool isDateCreateChanged()
-	 * @method \Bitrix\Main\Type\Date remindActualDateCreate()
-	 * @method \Bitrix\Main\Type\Date requireDateCreate()
+	 * @method \Bitrix\Main\Type\DateTime remindActualDateCreate()
+	 * @method \Bitrix\Main\Type\DateTime requireDateCreate()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard resetDateCreate()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard unsetDateCreate()
-	 * @method \Bitrix\Main\Type\Date fillDateCreate()
-	 * @method \Bitrix\Main\Type\Date getDateModify()
-	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard setDateModify(\Bitrix\Main\Type\Date|\Bitrix\Main\DB\SqlExpression $dateModify)
+	 * @method \Bitrix\Main\Type\DateTime fillDateCreate()
+	 * @method \Bitrix\Main\Type\DateTime getDateModify()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard setDateModify(\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $dateModify)
 	 * @method bool hasDateModify()
 	 * @method bool isDateModifyFilled()
 	 * @method bool isDateModifyChanged()
-	 * @method \Bitrix\Main\Type\Date remindActualDateModify()
-	 * @method \Bitrix\Main\Type\Date requireDateModify()
+	 * @method \Bitrix\Main\Type\DateTime remindActualDateModify()
+	 * @method \Bitrix\Main\Type\DateTime requireDateModify()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard resetDateModify()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard unsetDateModify()
-	 * @method \Bitrix\Main\Type\Date fillDateModify()
+	 * @method \Bitrix\Main\Type\DateTime fillDateModify()
 	 * @method null|\int getCreatedById()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard setCreatedById(null|\int|\Bitrix\Main\DB\SqlExpression $createdById)
 	 * @method bool hasCreatedById()
@@ -852,6 +852,17 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard resetCreatedById()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard unsetCreatedById()
 	 * @method null|\int fillCreatedById()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection getTags()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection requireTags()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fillTags()
+	 * @method bool hasTags()
+	 * @method bool isTagsFilled()
+	 * @method bool isTagsChanged()
+	 * @method void addToTags(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag $supersetTag)
+	 * @method void removeFromTags(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag $supersetTag)
+	 * @method void removeAllTags()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard resetTags()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard unsetTags()
 	 *
 	 * Common methods:
 	 * ---------------
@@ -920,12 +931,15 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard[] getSourceList()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard_Collection getSourceCollection()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard_Collection fillSource()
-	 * @method \Bitrix\Main\Type\Date[] getDateCreateList()
-	 * @method \Bitrix\Main\Type\Date[] fillDateCreate()
-	 * @method \Bitrix\Main\Type\Date[] getDateModifyList()
-	 * @method \Bitrix\Main\Type\Date[] fillDateModify()
+	 * @method \Bitrix\Main\Type\DateTime[] getDateCreateList()
+	 * @method \Bitrix\Main\Type\DateTime[] fillDateCreate()
+	 * @method \Bitrix\Main\Type\DateTime[] getDateModifyList()
+	 * @method \Bitrix\Main\Type\DateTime[] fillDateModify()
 	 * @method null|\int[] getCreatedByIdList()
 	 * @method null|\int[] fillCreatedById()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection[] getTagsList()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection getTagsCollection()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fillTags()
 	 *
 	 * Common methods:
 	 * ---------------
@@ -951,7 +965,7 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_SupersetDashboard_Collection merge(?EO_SupersetDashboard_Collection $collection)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard_Collection merge(?\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_SupersetDashboard_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -985,6 +999,458 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard_Collection wakeUpCollection($rows)
 	 */
 	class EO_SupersetDashboard_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable:biconnector\lib\integration\superset\model\supersetdashboardtagtable.php */
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * EO_SupersetDashboardTag
+	 * @see \Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getDashboardId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag setDashboardId(\int|\Bitrix\Main\DB\SqlExpression $dashboardId)
+	 * @method bool hasDashboardId()
+	 * @method bool isDashboardIdFilled()
+	 * @method bool isDashboardIdChanged()
+	 * @method \int remindActualDashboardId()
+	 * @method \int requireDashboardId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag resetDashboardId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag unsetDashboardId()
+	 * @method \int fillDashboardId()
+	 * @method \int getTagId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag setTagId(\int|\Bitrix\Main\DB\SqlExpression $tagId)
+	 * @method bool hasTagId()
+	 * @method bool isTagIdFilled()
+	 * @method bool isTagIdChanged()
+	 * @method \int remindActualTagId()
+	 * @method \int requireTagId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag resetTagId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag unsetTagId()
+	 * @method \int fillTagId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag getTag()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag remindActualTag()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag requireTag()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag setTag(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag $object)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag resetTag()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag unsetTag()
+	 * @method bool hasTag()
+	 * @method bool isTagFilled()
+	 * @method bool isTagChanged()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag fillTag()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard getDashboard()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard remindActualDashboard()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard requireDashboard()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag setDashboard(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard $object)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag resetDashboard()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag unsetDashboard()
+	 * @method bool hasDashboard()
+	 * @method bool isDashboardFilled()
+	 * @method bool isDashboardChanged()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard fillDashboard()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag set($fieldName, $value)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag reset($fieldName)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag wakeUp($data)
+	 */
+	class EO_SupersetDashboardTag {
+		/* @var \Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable */
+		static public $dataClass = '\Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * EO_SupersetDashboardTag_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getDashboardIdList()
+	 * @method \int[] fillDashboardId()
+	 * @method \int[] getTagIdList()
+	 * @method \int[] fillTagId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag[] getTagList()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection getTagCollection()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fillTag()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard[] getDashboardList()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection getDashboardCollection()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard_Collection fillDashboard()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag $object)
+	 * @method bool has(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag getByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag[] getAll()
+	 * @method bool remove(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag $object)
+	 * @method void removeByPrimary($primary)
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection merge(?\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_SupersetDashboardTag_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable */
+		static public $dataClass = '\Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable';
+	}
+}
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_SupersetDashboardTag_Result exec()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag fetchObject()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_SupersetDashboardTag_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag fetchObject()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection fetchCollection()
+	 */
+	class EO_SupersetDashboardTag_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag createObject($setDefaultValues = true)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection createCollection()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag wakeUpObject($row)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboardTag_Collection wakeUpCollection($rows)
+	 */
+	class EO_SupersetDashboardTag_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable:biconnector\lib\integration\superset\model\supersettagtable.php */
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * EO_SupersetTag
+	 * @see \Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getUserId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag setUserId(\int|\Bitrix\Main\DB\SqlExpression $userId)
+	 * @method bool hasUserId()
+	 * @method bool isUserIdFilled()
+	 * @method bool isUserIdChanged()
+	 * @method \int remindActualUserId()
+	 * @method \int requireUserId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag resetUserId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag unsetUserId()
+	 * @method \int fillUserId()
+	 * @method \string getTitle()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag setTitle(\string|\Bitrix\Main\DB\SqlExpression $title)
+	 * @method bool hasTitle()
+	 * @method bool isTitleFilled()
+	 * @method bool isTitleChanged()
+	 * @method \string remindActualTitle()
+	 * @method \string requireTitle()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag resetTitle()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag unsetTitle()
+	 * @method \string fillTitle()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag set($fieldName, $value)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag reset($fieldName)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag wakeUp($data)
+	 */
+	class EO_SupersetTag {
+		/* @var \Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable */
+		static public $dataClass = '\Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * EO_SupersetTag_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getUserIdList()
+	 * @method \int[] fillUserId()
+	 * @method \string[] getTitleList()
+	 * @method \string[] fillTitle()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag $object)
+	 * @method bool has(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag getByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag[] getAll()
+	 * @method bool remove(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag $object)
+	 * @method void removeByPrimary($primary)
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection merge(?\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_SupersetTag_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable */
+		static public $dataClass = '\Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable';
+	}
+}
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_SupersetTag_Result exec()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag fetchObject()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_SupersetTag_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag fetchObject()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fetchCollection()
+	 */
+	class EO_SupersetTag_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag createObject($setDefaultValues = true)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection createCollection()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag wakeUpObject($row)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection wakeUpCollection($rows)
+	 */
+	class EO_SupersetTag_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable:biconnector\lib\integration\superset\model\supersetusertable.php */
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * EO_SupersetUser
+	 * @see \Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getUserId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser setUserId(\int|\Bitrix\Main\DB\SqlExpression $userId)
+	 * @method bool hasUserId()
+	 * @method bool isUserIdFilled()
+	 * @method bool isUserIdChanged()
+	 * @method \int remindActualUserId()
+	 * @method \int requireUserId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser resetUserId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser unsetUserId()
+	 * @method \int fillUserId()
+	 * @method \string getClientId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser setClientId(\string|\Bitrix\Main\DB\SqlExpression $clientId)
+	 * @method bool hasClientId()
+	 * @method bool isClientIdFilled()
+	 * @method bool isClientIdChanged()
+	 * @method \string remindActualClientId()
+	 * @method \string requireClientId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser resetClientId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser unsetClientId()
+	 * @method \string fillClientId()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser set($fieldName, $value)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser reset($fieldName)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser wakeUp($data)
+	 */
+	class EO_SupersetUser {
+		/* @var \Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable */
+		static public $dataClass = '\Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * EO_SupersetUser_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getUserIdList()
+	 * @method \int[] fillUserId()
+	 * @method \string[] getClientIdList()
+	 * @method \string[] fillClientId()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser $object)
+	 * @method bool has(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser getByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser[] getAll()
+	 * @method bool remove(\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser $object)
+	 * @method void removeByPrimary($primary)
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection merge(?\Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_SupersetUser_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable */
+		static public $dataClass = '\Bitrix\BIConnector\Integration\Superset\Model\SupersetUserTable';
+	}
+}
+namespace Bitrix\BIConnector\Integration\Superset\Model {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_SupersetUser_Result exec()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser fetchObject()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_SupersetUser_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser fetchObject()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection fetchCollection()
+	 */
+	class EO_SupersetUser_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser createObject($setDefaultValues = true)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection createCollection()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser wakeUpObject($row)
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection wakeUpCollection($rows)
+	 */
+	class EO_SupersetUser_Entity extends \Bitrix\Main\ORM\Entity {}
 }
 /* ORMENTITYANNOTATION:Bitrix\BIConnector\KeyTable:biconnector\lib\keytable.php */
 namespace Bitrix\BIConnector {
@@ -1216,7 +1682,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_Key_Collection merge(?EO_Key_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_Key_Collection merge(?\Bitrix\BIConnector\EO_Key_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_Key_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -1395,7 +1861,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_KeyUser_Collection merge(?EO_KeyUser_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_KeyUser_Collection merge(?\Bitrix\BIConnector\EO_KeyUser_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_KeyUser_Collection implements \ArrayAccess, \Iterator, \Countable {
@@ -1682,7 +2148,7 @@ namespace Bitrix\BIConnector {
 	 * @method void next() Iterator
 	 * @method bool valid() Iterator
 	 * @method int count() Countable
-	 * @method EO_Log_Collection merge(?EO_Log_Collection $collection)
+	 * @method \Bitrix\BIConnector\EO_Log_Collection merge(?\Bitrix\BIConnector\EO_Log_Collection $collection)
 	 * @method bool isEmpty()
 	 */
 	class EO_Log_Collection implements \ArrayAccess, \Iterator, \Countable {

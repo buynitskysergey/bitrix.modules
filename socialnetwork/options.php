@@ -1479,7 +1479,7 @@ unset($value);
 $tabControl->BeginNextTab();?>
 <?require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/admin/group_rights.php");?>
 <?$tabControl->Buttons();?>
-<script language="JavaScript">
+<script>
 function RestoreDefaults()
 {
 	if (confirm('<?echo AddSlashes(GetMessage("MAIN_HINT_RESTORE_DEFAULTS_WARNING"))?>'))

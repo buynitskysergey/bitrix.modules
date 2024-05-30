@@ -367,8 +367,11 @@ function ForumAddMessage(
 		$arFieldsG["USE_SMILES"] = ($arFieldsG["USE_SMILES"] == "Y" ? "Y" : "N");
 		if (array_key_exists("ATTACH_IMG", $arFieldsG))
 		{
+			if (!empty($arFieldsG["ATTACH_IMG"]))
+			{
+				$arFieldsG["FILES"] = [$arFieldsG["ATTACH_IMG"]];
+			}
 			unset($arFieldsG["ATTACH_IMG"]);
-			$arFieldsG["FILES"] = [$arFieldsG["ATTACH_IMG"]];
 		}
 		$GLOBALS["USER_FIELD_MANAGER"]->EditFormAddFields("FORUM_MESSAGE", $arFieldsG);
 		//endregion

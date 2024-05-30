@@ -283,12 +283,12 @@ class Chat extends AbstractEntity
 	{
 		$initiatorId = $this->call->getInitiatorId();
 		$initiator = \Bitrix\Im\User::getInstance($initiatorId);
-		if($state === Call::STATE_INVITING && $prevState === Call::STATE_NEW)
+		if ($state === Call::STATE_INVITING && $prevState === Call::STATE_NEW)
 		{
 			// todo: return the call method when the calls are supported in the mobile
 			//$this->sendMessagesCallStart();
 		}
-		else if($state === Call::STATE_FINISHED)
+		elseif($state === Call::STATE_FINISHED)
 		{
 			$message = Loc::getMessage("IM_CALL_INTEGRATION_CHAT_CALL_FINISHED");
 			$mute = true;
@@ -297,6 +297,17 @@ class Chat extends AbstractEntity
 			{
 				return $userId != $initiatorId;
 			}));
+
+			$byUserId = $this->call->getActionUserId();
+			if ($byUserId)
+			{
+				$user = \Bitrix\Im\User::getInstance($byUserId);
+				if ($user)
+				{
+					Loc::loadMessages($_SERVER["DOCUMENT_ROOT"].'/bitrix/modules/im/classes/general/im_call.php');
+					$message = Loc::getMessage('IM_CALL_CHAT_CLOSE_'.$user->getGender(), ['#USER_NAME#' => $user->getFullName()]);
+				}
+			}
 
 			if(count($userIds) == 1)
 			{

@@ -37,20 +37,20 @@ class GeneralChat extends GroupChat
 		return self::ENTITY_TYPE_GENERAL;
 	}
 
-	public function hasPostAccess(?int $userId = null): bool
+	public function hasManageMessagesAccess(?int $userId = null): bool
 	{
 		if ($this->getId() === null || $this->getId() === 0)
 		{
 			return false;
 		}
 
-		if ($this->getCanPost() === Chat::MANAGE_RIGHTS_NONE)
+		if ($this->getManageMessages() === Chat::MANAGE_RIGHTS_NONE)
 		{
 			return false;
 		}
 
 		$userId ??= $this->getContext()->getUserId();
-		if ($this->getCanPost() === Chat::MANAGE_RIGHTS_MEMBER)
+		if ($this->getManageMessages() === Chat::MANAGE_RIGHTS_MEMBER)
 		{
 			return true;
 		}
@@ -60,7 +60,7 @@ class GeneralChat extends GroupChat
 			return true;
 		}
 
-		if ($this->getCanPost() === Chat::MANAGE_RIGHTS_OWNER)
+		if ($this->getManageMessages() === Chat::MANAGE_RIGHTS_OWNER)
 		{
 			return false;
 		}
@@ -247,6 +247,7 @@ class GeneralChat extends GroupChat
 		self::cleanGeneralChatCache(self::ID_CACHE_ID);
 		self::cleanGeneralChatCache(self::MANAGERS_CACHE_ID);
 		self::cleanCache($chat->getChatId());
+		$chat->isFilledNonCachedData = false;
 
 		return $result;
 	}
@@ -391,7 +392,9 @@ class GeneralChat extends GroupChat
 			'PUSH' => 'N',
 			'PARAMS' => [
 				'COMPONENT_ID' => 'ChatCreationMessage',
-			]
+				'NOTIFY' => 'N',
+			],
+			'SKIP_COUNTER_INCREMENTS' => 'Y',
 		]);
 	}
 
@@ -411,7 +414,7 @@ class GeneralChat extends GroupChat
 	public function getRightsForIntranetConfig(): array
 	{
 		$result['generalChatCanPostList'] = self::getCanPostList();
-		$result['generalChatCanPost'] = $this->getCanPost();
+		$result['generalChatCanPost'] = $this->getManageMessages();
 		$result['generalChatShowManagersList'] = self::MANAGE_RIGHTS_MANAGERS;
 		$managerIds = $this->getRelations([
 			'FILTER' => [
@@ -508,6 +511,11 @@ class GeneralChat extends GroupChat
 			"PUSH" => 'N',
 			"SKIP_USER_CHECK" => 'Y',
 		]);
+	}
+
+	protected function needToSendMessageUserDelete(): bool
+	{
+		return true;
 	}
 
 	protected function sendMessageUserDelete(int $userId, bool $skipRecent = false): void

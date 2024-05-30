@@ -56,7 +56,7 @@ class CheckMessageSend extends Base
 		}
 
 		$userRole = $chat->getRole();
-		$chatRole = $chat->getCanPost();
+		$chatRole = $chat->getManageMessages();
 
 		return Chat\Permission::compareRole($userRole, $chatRole);
 	}

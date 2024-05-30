@@ -19,7 +19,9 @@ use Bitrix\Im\V2\Link\Url\UrlService;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Relation;
 use Bitrix\Im\V2\Result;
+use Bitrix\Im\V2\Service\Context;
 use Bitrix\Im\V2\Sync;
+use Bitrix\ImOpenlines\Connector;
 use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
@@ -29,7 +31,10 @@ use Bitrix\Pull\Event;
 
 class DeleteService
 {
-	use ContextCustomer;
+	use ContextCustomer
+	{
+		setContext as private defaultSetContext;
+	}
 
 	public const DELETE_NONE = 0; // cannot be deleted
 	public const DELETE_SOFT = 1; // replacement with the text "message deleted"
@@ -165,82 +170,77 @@ class DeleteService
 			return self::DELETE_COMPLETE;
 		}
 
-		$userId = $this->getContext()->getUserId();
-
-		// not chat access
-		if (!$this->chat->hasAccess($userId))
+		if (!$this->chat->hasAccess($this->getContext()->getUserId()))
 		{
 			return self::DELETE_NONE;
 		}
 
-		// get user role in this chat
-		$removerRole = self::ROLE_USER;
-		if ($userId === $this->chat->getAuthorId())
+		if ($this->chat instanceof Chat\OpenLineChat && Loader::includeModule('imopenlines'))
 		{
-			if ($this->chat->getType() !== Chat::IM_TYPE_PRIVATE)
+			$resultForOpenLine = $this->checkForOpenLine();
+
+			if ($resultForOpenLine !== null)
 			{
-				$removerRole =  self::ROLE_OWNER;
+				return $resultForOpenLine;
 			}
 		}
-		else
+
+		if (!$this->isOwnMessage())
 		{
-			$relation = $this->chat->getSelfRelation();
-			if ($relation && $relation->getManager())
+			if ($this->chat->canDo(Chat\Permission::ACTION_DELETE_OTHERS_MESSAGE))
 			{
-				$removerRole = self::ROLE_MANAGER;
+				return $this->chat instanceof Chat\CommentChat ? self::DELETE_SOFT : self::DELETE_COMPLETE;
 			}
-			elseif ($relation->getUser()->getExternalAuthId() === Bot::EXTERNAL_AUTH_ID)
+
+			return self::DELETE_NONE;
+		}
+
+		if ($this->chat instanceof Chat\ChannelChat || $this->chat instanceof Chat\GeneralChat)
+		{
+			if ($this->chat->canDo(Chat\Permission::MANAGE_MESSAGES))
 			{
 				return self::DELETE_COMPLETE;
 			}
-		}
 
-		// determine the owner of the message
-		$messageOwner = self::MESSAGE_OWN_OTHER;
-		if ($messageAuthor = $this->message->getAuthor())
-		{
-			if ($messageAuthor->getId() === $userId)
-			{
-				$messageOwner = self::MESSAGE_OWN_SELF;
-			}
-			elseif($messageAuthor->getId() === $this->chat->getAuthorId())
-			{
-				$messageOwner = self::ROLE_OWNER;
-			}
-			else
-			{
-				$relations = $this->chat->getRelations(['USER_ID' => $messageAuthor->getId()]);
-				if ($user = $relations->getByUserId($messageAuthor->getId(), $this->chat->getChatId()))
-				{
-					$messageOwner = self::ROLE_USER;
-					if ($user->getManager())
-					{
-						$messageOwner = self::ROLE_MANAGER;
-					}
-				}
-			}
-		}
-
-		if ($removerRole <= $messageOwner)
-		{
 			return self::DELETE_NONE;
 		}
 
-		if (
-			$messageAuthor === self::ROLE_OWNER
-			&& in_array($this->chat->getType(), [Chat::IM_TYPE_OPEN, Chat::IM_TYPE_CHANNEL], true)
-		)
-		{
-			return self::DELETE_COMPLETE;
-		}
-
-		// message was read by someone other than the author
-		if ($this->message->isViewedByOthers())
+		if ($this->chat instanceof Chat\CommentChat)
 		{
 			return self::DELETE_SOFT;
 		}
 
-		return self::DELETE_HARD;
+		if (!$this->message->isViewedByOthers())
+		{
+			return self::DELETE_HARD;
+		}
+
+		return self::DELETE_SOFT;
+	}
+
+	protected function checkForOpenLine(): ?int
+	{
+		if ($this->getContext()->getUser()->isBot())
+		{
+			return self::DELETE_COMPLETE;
+		}
+
+		if ($this->isOwnMessage() && !$this->chat->canDeleteOwnMessage())
+		{
+			return self::DELETE_NONE;
+		}
+
+		if (!$this->isOwnMessage() && !$this->chat->canDeleteMessage())
+		{
+			return self::DELETE_NONE;
+		}
+
+		return null;
+	}
+
+	protected function isOwnMessage(): bool
+	{
+		return $this->getContext()->getUserId() === $this->message->getAuthorId();
 	}
 
 	private function deleteSoft(): Result
@@ -251,13 +251,11 @@ class DeleteService
 			'IS_DELETED' => 'Y'
 		]);
 		$this->message->save();
-		if (!$this->chat instanceof Chat\OpenLineChat)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::DELETE_EVENT, Sync\Event::UPDATED_MESSAGE_ENTITY, $this->message->getId()),
-				fn () => $this->chat->getRelations()->getUserIds()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::DELETE_EVENT, Sync\Event::UPDATED_MESSAGE_ENTITY, $this->message->getId()),
+			fn () => $this->chat->getRelations()->getUserIds(),
+			$this->chat->getType()
+		);
 
 		$this->sendPullMessage();
 
@@ -286,13 +284,11 @@ class DeleteService
 		$this->recountChat();
 		$this->sendPullMessage(true);
 		$this->message->delete();
-		if (!$this->chat instanceof Chat\OpenLineChat)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::COMPLETE_DELETE_EVENT, Sync\Event::MESSAGE_ENTITY, $this->message->getId()),
-				fn () => $this->chat->getRelations()->getUserIds()
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::COMPLETE_DELETE_EVENT, Sync\Event::MESSAGE_ENTITY, $this->message->getId()),
+			fn () => $this->chat->getRelations()->getUserIds(),
+			$this->chat->getType()
+		);
 
 		return new Result();
 	}
@@ -316,9 +312,20 @@ class DeleteService
 				Event::add($pullForGroup['users'], $pullForGroup['event']);
 			}
 
-			if (in_array($this->chat->getType(), [Chat::IM_TYPE_OPEN, Chat::IM_TYPE_OPEN_LINE], true))
+			$pullMessage['extra']['is_shared_event'] = true;
+
+			if ($this->chat->getType() === Chat::IM_TYPE_COMMENT)
+			{
+				\CPullWatch::AddToStack('IM_PUBLIC_COMMENT_' . $this->chat->getParentChatId(), $pullMessage);
+			}
+
+			if ($this->chat->needToSendPublicPull())
 			{
 				\CPullWatch::AddToStack('IM_PUBLIC_' . $this->chat->getChatId(), $pullMessage);
+			}
+			if ($this->chat->getType() === Chat::IM_TYPE_OPEN_CHANNEL && $this->needUpdateRecent)
+			{
+				Chat\OpenChannelChat::sendSharedPull($pullMessage, $this->chat->getId());
 			}
 		}
 
@@ -355,6 +362,9 @@ class DeleteService
 			'senderId' => $this->message->getAuthorId(),
 			'params' => ['IS_DELETED' => 'Y', 'URL_ID' => [], 'FILE_ID' => [], 'KEYBOARD' => 'N', 'ATTACH' => []],
 			'chatId' => $this->chat->getChatId(),
+			'unread' => false,
+			'muted' => false,
+			'counter' => 0,
 		];
 
 		if (!$this->chat instanceof Chat\PrivateChat)
@@ -442,11 +452,21 @@ class DeleteService
 		$connection = Application::getConnection();
 
 		// delete chats with PARENT_MID
-		$childChatResult = Chat\ChatFactory::getInstance()->findChat(['PARENT_MID' => $this->message->getId()]);
+		/*$childChatResult = Chat\ChatFactory::getInstance()->findChat(['PARENT_MID' => $this->message->getId()]);
 		if ($childChatResult->hasResult())
 		{
 			$childChat = Chat\ChatFactory::getInstance()->getChat($childChatResult->getResult());
 			$childChat->deleteChat();
+		}*/
+		if ($this->chat instanceof Chat\ChannelChat)
+		{
+			$result = Chat\CommentChat::get($this->message, false);
+			if ($result->isSuccess())
+			{
+				/** @var Chat\CommentChat $chat */
+				$chat = $result->getResult();
+				Message\CounterService::deleteByChatIdForAll($chat->getId());
+			}
 		}
 
 		(new \Bitrix\Im\V2\Link\Favorite\FavoriteService())->unmarkMessageAsFavoriteForAll($this->message);
@@ -550,6 +570,7 @@ class DeleteService
 		{
 			$update = [
 				'DATE_MESSAGE' => $this->chatLastMessage['DATE_CREATE'],
+				'DATE_LAST_ACTIVITY' => $this->chatLastMessage['DATE_CREATE'],
 				'DATE_UPDATE' => $this->chatLastMessage['DATE_CREATE'],
 				'ITEM_MID' => $this->chatLastMessage['ID'] ?? 0,
 			];
@@ -743,5 +764,13 @@ class DeleteService
 		}
 
 		return $this->chatLastMessage;
+	}
+
+	public function setContext(?Context $context): self
+	{
+		$this->message->setContext($context);
+		$this->chat->setContext($context);
+
+		return $this;
 	}
 }

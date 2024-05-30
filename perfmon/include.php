@@ -1,5 +1,4 @@
 <?php
-
 $db_type = \Bitrix\Main\Application::getConnection()->getType();
 
 CModule::AddAutoloadClasses(

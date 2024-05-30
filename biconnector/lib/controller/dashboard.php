@@ -6,6 +6,8 @@ use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorResponse;
 use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
 use Bitrix\BIConnector\Integration\Superset\Model;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable;
+use Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetController;
 use Bitrix\BIConnector\Superset\Dashboard\EmbeddedFilter;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
@@ -293,6 +295,56 @@ class Dashboard extends Controller
 		];
 	}
 
+	public function setDashboardTagsAction(Model\Dashboard $dashboard, array $tags = []): ?bool
+	{
+		$userId = $this->getCurrentUser()->getId();
+
+		$userTags = SupersetTagTable::getList([
+			'filter' => [
+				'=USER_ID' => $userId,
+				'=ID' => $tags,
+			],
+			'select' => ['ID'],
+		]);
+
+		$tags = array_column($userTags->fetchAll(), 'ID');
+
+		$ormParams = [
+			'filter' => [
+				'=TAG.USER_ID' => $userId,
+				'=DASHBOARD_ID' => $dashboard->getId(),
+			],
+		];
+		$existed = [];
+		$elements = SupersetDashboardTagTable::getList($ormParams);
+		foreach ($elements->fetchCollection() as $element)
+		{
+			if (!in_array($element->getId(), $tags, true))
+			{
+				$element->delete();
+			}
+			else
+			{
+				$existed[] = $element->getId();
+			}
+		}
+
+		if (count($tags) !== count($existed))
+		{
+			$newTags = array_diff($tags, $existed);
+
+			foreach ($newTags as $tagId)
+			{
+				SupersetDashboardTagTable::add([
+					'TAG_ID' => $tagId,
+					'DASHBOARD_ID' => $dashboard->getId(),
+				]);
+			}
+		}
+
+		return true;
+	}
+
 	public function createEmptyDashboardAction(): ?array
 	{
 		$name = Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_EMPTY_DASHBOARD_NAME');
@@ -439,8 +491,6 @@ class Dashboard extends Controller
 	{
 		$result = new Result();
 		$newTitle = trim($newTitle);
-
-		$currentTitle = htmlspecialcharsbx($dashboard->getTitle());
 
 		if (empty($dashboard->getEditUrl()))
 		{

@@ -1,6 +1,9 @@
 <?
 IncludeModuleLangFile(__FILE__);
 
+/**
+ * @deprecated Use \CCloudSecurityService_Amazon
+ */
 class CCloudSecurityService_AmazonS3
 {
 	protected $status = 0;

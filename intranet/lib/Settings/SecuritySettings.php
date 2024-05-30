@@ -9,6 +9,7 @@ use Bitrix\Intranet\Settings\Controls\Selector;
 use Bitrix\Intranet\Settings\Controls\Switcher;
 use Bitrix\Intranet\Settings\Search\SearchEngine;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\ErrorCollection;
 use Bitrix\Main\Loader;
@@ -212,7 +213,7 @@ class SecuritySettings extends AbstractSettings
 				Loc::getMessage('INTRANET_SETTINGS_SECTION_TITLE_ACCESS_IP'),
 				'ui-icon-set --attention-i-circle',
 				false,
-				isset($data['IP_ACCESS_RIGHTS_ENABLED']),
+				$data['IP_ACCESS_RIGHTS_ENABLED'],
 				bannerCode: 'limit_admin_ip',
 			);
 			$data['sectionBlackList'] = new Section(
@@ -278,7 +279,7 @@ class SecuritySettings extends AbstractSettings
 
 	private function getOtpSettings(): array
 	{
-		global $USER;
+		$currentUser = CurrentUser::get();
 
 		$result = [];
 
@@ -289,10 +290,10 @@ class SecuritySettings extends AbstractSettings
 
 		$result['SECURITY_MODULE'] = true;
 		$result['SECURITY_OTP_ENABLED'] = Security\Mfa\Otp::isOtpEnabled();
-		$result['SECURITY_IS_USER_OTP_ACTIVE'] = \CSecurityUser::IsUserOtpActive($USER->GetID());
+		$result['SECURITY_IS_USER_OTP_ACTIVE'] = \CSecurityUser::IsUserOtpActive($currentUser->getId());
 		$result['SECURITY_OTP_DAYS'] = Security\Mfa\Otp::getSkipMandatoryDays();
 		$result['SECURITY_OTP'] = Security\Mfa\Otp::isMandatoryUsing();
-		$result['SECURITY_OTP_PATH'] = SITE_DIR . 'company/personal/user/' . $USER->getId() . '/common_security/?page=otpConnected';
+		$result['SECURITY_OTP_PATH'] = SITE_DIR . 'company/personal/user/' . $currentUser->getId() . '/common_security/?page=otpConnected';
 
 		if ($result['SECURITY_OTP'] && $this->isCloud)
 		{

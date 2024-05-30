@@ -2,6 +2,7 @@
 
 namespace Bitrix\Intranet\ActionFilter;
 
+use Bitrix\Main;
 use Bitrix\Main\Engine;
 use Bitrix\Main\Error;
 use Bitrix\Main\Event;
@@ -15,8 +16,7 @@ class InviteAccessControl extends Engine\ActionFilter\Base
 		if (!Intranet\Invitation::canCurrentUserInvite())
 		{
 			$this->addError(new Error(
-				'Access denied.',
-				'INTRANET_CONTROLLER_INVITE_NO_PERMISSIONS'
+				Main\Localization\Loc::getMessage('INTRANET_INVITE_ACCESS_CONTROL_ACCESS_DENIED')
 			));
 
 			return new EventResult(EventResult::ERROR, null, null, $this);

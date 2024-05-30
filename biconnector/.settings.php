@@ -1,6 +1,7 @@
 <?php
 
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardTagProvider;
 
 return [
 	'controllers' => [
@@ -22,7 +23,15 @@ return [
 						'className' => SupersetDashboardProvider::class,
 					],
 				],
+				[
+					'entityId' => 'biconnector-superset-dashboard-tag',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => SupersetDashboardTagProvider::class,
+					],
+				],
 			],
+			'extensions' => ['biconnector.entity-selector'],
 		],
 		'readonly' => true,
 	],

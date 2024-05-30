@@ -7,7 +7,10 @@ use Bitrix\Im\Notify;
 use Bitrix\Im\Color;
 use Bitrix\Im\Model\RelationTable;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Chat\Copilot\CopilotPopupItem;
 use Bitrix\Im\V2\Entity\User\UserPopupItem;
+use Bitrix\Im\V2\Integration\AI\RoleManager;
+use Bitrix\Im\V2\Integration\HumanResources\Structure;
 use Bitrix\Im\V2\Link\Url\UrlService;
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Message\MessageError;
@@ -23,6 +26,8 @@ use Bitrix\Im\V2\Rest\PopupData;
 use Bitrix\Im\V2\Rest\PopupDataAggregatable;
 use Bitrix\Im\V2\Result;
 use Bitrix\Im\V2\Service\Context;
+use Bitrix\Imbot\Bot\CopilotChatBot;
+use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Pull\Event;
 use CPullWatch;
@@ -58,12 +63,20 @@ class GroupChat extends Chat implements PopupDataAggregatable
 	protected function checkAccessWithoutCaching(int $userId): bool
 	{
 		$options = [
-			'SELECT' => ['ID', 'CHAT_ID', 'USER_ID', 'START_ID'],
-			'FILTER' => ['USER_ID' => $userId, 'CHAT_ID' => $this->getChatId()],
-			'LIMIT' => 1,
+			'FILTER' => ['USER_ID' => $userId],
 		];
 
 		return $this->getRelations($options)->hasUser($userId, $this->getChatId());
+	}
+
+	protected function linkToStructureNodes(array $structureNodes): void
+	{
+		if (empty($structureNodes))
+		{
+			return;
+		}
+
+		(new Structure($this))->link($structureNodes);
 	}
 
 	public function add(array $params, ?Context $context = null): Result
@@ -90,7 +103,14 @@ class GroupChat extends Chat implements PopupDataAggregatable
 			return $result->addError(new ChatError(ChatError::CREATION_ERROR));
 		}
 
-		$chat->addUsersToRelation([$chat->getAuthorId()], $params['MANAGERS'] ?? [], false);
+		$usersToInvite = $chat->filterUsersToAdd($chat->getUserIds());
+		$addedUsers = $usersToInvite;
+		if ($chat->getAuthorId())
+		{
+			$addedUsers[$chat->getAuthorId()] = $chat->getAuthorId();
+			unset($usersToInvite[$chat->getAuthorId()]);
+		}
+		$chat->addUsersToRelation($addedUsers, $params['MANAGERS'] ?? [], false);
 		$needToSendGreetingMessages = !$skipAddMessage && ($chat->needToSendGreetingMessages() || $forceSendGreetingMessages);
 		if ($needToSendGreetingMessages)
 		{
@@ -98,17 +118,17 @@ class GroupChat extends Chat implements PopupDataAggregatable
 			$chat->sendBanner($this->getContext()->getUserId());
 		}
 
-		$usersToInvite = $chat->filterUsersToAdd($chat->getUserIds());
-		$addedUsers = $usersToInvite;
-		$addedUsers[$chat->getAuthorId()] = $chat->getAuthorId();
-
-		$chat->addUsersToRelation($usersToInvite, $params['MANAGERS'] ?? [], false);
 		if (!$skipAddMessage)
 		{
 			$chat->sendMessageUsersAdd($usersToInvite);
 		}
+		$chat->linkToStructureNodes($params['STRUCTURE_NODES'] ?? []);
 		$chat->sendEventUsersAdd($addedUsers);
-		$chat->sendDescriptionMessage($this->getContext()->getUserId());
+
+		if (!$skipAddMessage)
+		{
+			$chat->sendDescriptionMessage();
+		}
 		$chat->addIndex();
 
 		$result->setResult([
@@ -117,8 +137,15 @@ class GroupChat extends Chat implements PopupDataAggregatable
 		]);
 
 		self::cleanCache($chat->getChatId());
+		$chat->isFilledNonCachedData = false;
+		$chat->onUserAddAfterChatCreate($usersToInvite);
 
 		return $result;
+	}
+
+	protected function onUserAddAfterChatCreate(array $addedUsers): void
+	{
+		return;
 	}
 
 	protected function filterParams(array $params): array
@@ -188,11 +215,14 @@ class GroupChat extends Chat implements PopupDataAggregatable
 			$params['OWNER_ID'] = $this->getContext()->getUserId();
 		}
 
+		[$users, $structureNodes] = Structure::splitEntities($params['MEMBER_ENTITIES'] ?? []);
+
 		$params['MANAGERS'] ??= [];
 		$params['MANAGERS'] = array_unique(array_merge($params['MANAGERS'], [$params['AUTHOR_ID']]));
 
-		$params['USERS'] = array_unique(array_merge($params['USERS'], $params['MANAGERS']));
+		$params['USERS'] = array_filter(array_unique(array_merge($params['USERS'], $params['MANAGERS'], $users)));
 		$params['USER_COUNT'] = count($params['USERS']);
+		$params['STRUCTURE_NODES'] = $structureNodes;
 
 		if (
 			isset($params['AVATAR'])
@@ -229,6 +259,52 @@ class GroupChat extends Chat implements PopupDataAggregatable
 	protected function addUsersToRelation(array $usersToAdd, array $managerIds = [], ?bool $hideHistory = null)
 	{
 		parent::addUsersToRelation($usersToAdd, $managerIds, $hideHistory ?? \CIMSettings::GetStartChatMessage() == \CIMSettings::START_MESSAGE_LAST);
+	}
+
+	public function addManagers(array $userIds): self
+	{
+		return $this->changeManagers($userIds, true);
+	}
+
+	public function deleteManagers(array $userIds): self
+	{
+		return $this->changeManagers($userIds, false);
+	}
+
+	protected function changeManagers(array $userIds, bool $isManager): self
+	{
+		$relations = $this->getRelations();
+
+		foreach ($userIds as $userId)
+		{
+			$relation = $relations->getByUserId($userId, $this->getChatId());
+			if ($relation === null)
+			{
+				continue;
+			}
+
+			$relation->setManager($isManager);
+		}
+
+		$relations->save(true);
+		$this->sendPushManagersChange();
+
+		return $this;
+	}
+
+	protected function sendPushManagersChange(): void
+	{
+		$push = [
+			'module_id' => 'im',
+			'command' => 'chatManagers',
+			'params' => [
+				'dialogId' => $this->getDialogId(),
+				'chatId' => $this->getId(),
+				'list' => $this->getManagerList()
+			],
+			'extra' => \Bitrix\Im\Common::getPullExtra()
+		];
+		\Bitrix\Pull\Event::add($this->getRelations()->getUserIds(), $push);
 	}
 
 	public function checkTitle(): Result
@@ -292,15 +368,22 @@ class GroupChat extends Chat implements PopupDataAggregatable
 		$pushFormat = new Message\PushFormat();
 		$push = $pushFormat->formatMessageUpdate($message);
 		$push['params']['dialogId'] = $this->getDialogId();
-		Event::add($this->getUsersForPush(true, false), $push);
-	}
-
-	protected function sendPushReadOpponent(MessageCollection $messages, int $lastId): array
-	{
-		$pushMessage = parent::sendPushReadOpponent($messages, $lastId);
-		CPullWatch::AddToStack("IM_PUBLIC_{$this->chatId}", $pushMessage);
-
-		return $pushMessage;
+		if ($this->getType() === self::IM_TYPE_COMMENT)
+		{
+			\CPullWatch::AddToStack('IM_PUBLIC_COMMENT_' . $message->getChat()->getParentChatId(), $push);
+		}
+		else
+		{
+			Event::add($this->getUsersForPush(true, false), $push);
+		}
+		if ($this->needToSendPublicPull())
+		{
+			\CPullWatch::AddToStack('IM_PUBLIC_' . $message->getChatId(), $push);
+		}
+		if ($this->getType() === Chat::IM_TYPE_OPEN_CHANNEL && $message->getId() === $message->getChat()->getLastMessageId())
+		{
+			OpenChannelChat::sendSharedPull($push);
+		}
 	}
 
 	protected function sendGreetingMessage(?int $authorId = null)
@@ -322,7 +405,11 @@ class GroupChat extends Chat implements PopupDataAggregatable
 				'FROM_USER_ID' => $author->getId(),
 				'MESSAGE' => $messageText,
 				'SYSTEM' => 'Y',
-				'PUSH' => 'N'
+				'PUSH' => 'N',
+				'SKIP_COUNTER_INCREMENTS' => 'Y',
+				'PARAMS' => [
+					'NOTIFY' => 'N',
+				],
 			]);
 		}
 
@@ -379,7 +466,9 @@ class GroupChat extends Chat implements PopupDataAggregatable
 				'PUSH' => 'N',
 				'PARAMS' => [
 					'COMPONENT_ID' => 'ChatCreationMessage',
-				]
+					'NOTIFY' => 'N',
+				],
+				'SKIP_COUNTER_INCREMENTS' => 'Y',
 			]);
 		}
 	}
@@ -670,6 +759,7 @@ class GroupChat extends Chat implements PopupDataAggregatable
 		return $result;
 	}
 
+
 	protected function sendDescriptionMessage(?int $authorId = null): void
 	{
 		if (!$this->getDescription())
@@ -690,10 +780,29 @@ class GroupChat extends Chat implements PopupDataAggregatable
 		]);
 	}
 
+	protected function getCopilotRoles(): array
+	{
+		if (
+			Loader::includeModule('imbot')
+			&& in_array(CopilotChatBot::getBotId(), $this->getRelations()->getUserIds(), true)
+		)
+		{
+			$copilotRoles = (new RoleManager())->getMainRole($this->getChatId());
+		}
+
+		return isset($copilotRoles) ? [$this->getDialogId() => $copilotRoles] : [];
+	}
+
 	public function getPopupData(array $excludedList = []): PopupData
 	{
 		$userIds = [$this->getContext()->getUserId()];
 
-		return new PopupData([new UserPopupItem($userIds)], $excludedList);
+		return new PopupData(
+			[
+				new UserPopupItem($userIds),
+				new CopilotPopupItem($this->getCopilotRoles(), CopilotPopupItem::ENTITIES['chat']),
+			],
+			$excludedList
+		);
 	}
 }

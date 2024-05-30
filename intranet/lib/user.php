@@ -199,7 +199,7 @@ class User
 			&& (
 				(
 					is_array($fields["UF_DEPARTMENT"])
-					&& (int)$fields["UF_DEPARTMENT"][0] > 0
+					&& (int)($fields["UF_DEPARTMENT"][0] ?? null) > 0
 				)
 				|| (
 					!is_array($fields["UF_DEPARTMENT"])

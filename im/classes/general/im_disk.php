@@ -185,7 +185,6 @@ class CIMDisk
 	{
 		$post = \Bitrix\Main\Context::getCurrent()->getRequest()->getPostList()->toArray();
 		$post['PARAMS'] = \CUtil::JsObjectToPhp($post['REG_PARAMS']);
-		$post['PARAMS'] = \Bitrix\Main\Text\Encoding::convertEncoding($post['PARAMS'], 'UTF-8', LANG_CHARSET);
 		$post['MESSAGE_HIDDEN'] = $post['REG_MESSAGE_HIDDEN'] == 'Y'? 'Y': 'N';
 		$post['PARAMS']['TEXT'] = $post['PARAMS']['TEXT']? trim($post['PARAMS']['TEXT']): '';
 
@@ -380,7 +379,7 @@ class CIMDisk
 
 			$orm = \Bitrix\Im\Model\ChatTable::getById($result['CHAT_ID']);
 			$chat = $orm->fetch();
-			if ($chat['TYPE'] == \IM_MESSAGE_OPEN || $chat['TYPE'] == \IM_MESSAGE_OPEN_LINE)
+			if (CIMMessenger::needToSendPublicPull($chat['TYPE']))
 			{
 				\CPullWatch::AddToStack('IM_PUBLIC_'.$chat['ID'], $pullMessage);
 			}
@@ -452,6 +451,8 @@ class CIMDisk
 		$fileService = new IM\V2\Link\File\FileService();
 		if (\Bitrix\Main\Loader::includeModule('pull') && !$fileService->isMigrationFinished())
 		{
+			$orm = \Bitrix\Im\Model\ChatTable::getById($chatId);
+			$chat = $orm->fetch();
 			$pullMessage = Array(
 				'module_id' => 'im',
 				'command' => 'fileDelete',
@@ -461,11 +462,16 @@ class CIMDisk
 				),
 				'extra' => \Bitrix\Im\Common::getPullExtra()
 			);
-			\Bitrix\Pull\Event::add($notifyUsers, $pullMessage);
+			if ($chat['TYPE'] === IM\V2\Chat::IM_TYPE_COMMENT)
+			{
+				\CPullWatch::AddToStack('IM_PUBLIC_'.$chat['PARENT_ID'], $pullMessage);
+			}
+			else
+			{
+				\Bitrix\Pull\Event::add($notifyUsers, $pullMessage);
+			}
 
-			$orm = \Bitrix\Im\Model\ChatTable::getById($chatId);
-			$chat = $orm->fetch();
-			if ($chat['TYPE'] == \IM_MESSAGE_OPEN || $chat['TYPE'] == \IM_MESSAGE_OPEN_LINE)
+			if (CIMMessenger::needToSendPublicPull($chat['TYPE']))
 			{
 				\CPullWatch::AddToStack('IM_PUBLIC_'.$chat['ID'], $pullMessage);
 			}
@@ -549,9 +555,9 @@ class CIMDisk
 			if (mb_substr($fileId, 0, 6) == 'upload')
 			{
 				$newFile = self::IncreaseFileVersionDisk($chatId, mb_substr($fileId, 6), $skipUserCheck? 0: $userId);
-				if ($asFile)
+				if ($asFile && $newFile)
 				{
-					$newFile->changeCode(IM\V2\Link\File\FileItem::MEDIA_ORIGINAL_CODE);
+					(new IM\V2\Entity\File\FileItem($newFile, $chatId))->markAsFile();
 				}
 			}
 			else
@@ -1196,9 +1202,13 @@ class CIMDisk
 					'extra' => \Bitrix\Im\Common::getPullExtra()
 				);
 				\Bitrix\Pull\Event::add(array_keys($chatRelation), $pullMessage);
-				if ($chat['TYPE'] == \IM_MESSAGE_OPEN  || $chat['TYPE'] == \IM_MESSAGE_OPEN_LINE)
+				if (CIMMessenger::needToSendPublicPull($chat['TYPE']))
 				{
 					\CPullWatch::AddToStack('IM_PUBLIC_'.$chat['ID'], $pullMessage);
+				}
+				if ($chat['TYPE'] === IM\V2\Chat::IM_TYPE_OPEN_CHANNEL)
+				{
+					IM\V2\Chat\OpenChannelChat::sendSharedPull($pullMessage);
 				}
 			}
 		}
@@ -1281,9 +1291,13 @@ class CIMDisk
 			);
 			\Bitrix\Pull\Event::add(array_keys($chatRelation), $pullMessage);
 
-			if ($chat['TYPE'] == \IM_MESSAGE_OPEN || $chat['TYPE'] == \IM_MESSAGE_OPEN_LINE)
+			if (CIMMessenger::needToSendPublicPull($chat['TYPE']))
 			{
 				\CPullWatch::AddToStack('IM_PUBLIC_'.$chat['ID'], $pullMessage);
+			}
+			if ($chat['TYPE'] === IM\V2\Chat::IM_TYPE_OPEN_CHANNEL)
+			{
+				IM\V2\Chat\OpenChannelChat::sendSharedPull($pullMessage);
 			}
 		}
 
@@ -1796,6 +1810,7 @@ class CIMDisk
 				'select' => [
 					'TYPE',
 					'DISK_FOLDER_ID',
+					'PARENT_ID'
 				],
 				'filter' => [
 					'ID' => $chatId,
@@ -1806,11 +1821,6 @@ class CIMDisk
 		}
 
 		if (!$chat)
-		{
-			return false;
-		}
-
-		if (in_array($chat['TYPE'], [IM\V2\Chat::IM_TYPE_COMMENT], true))
 		{
 			return false;
 		}
@@ -1838,61 +1848,110 @@ class CIMDisk
 			}
 		}
 
-		if (!$folderId && $createFolder === true)
+		if ($folderId || !$createFolder)
 		{
-			$chatType = $chat['TYPE'];
-			$driver = \Bitrix\Disk\Driver::getInstance();
-			$storageModel = self::GetStorage();
-			if (!$storageModel)
+			return $folderModel;
+		}
+
+		$chatType = $chat['TYPE'];
+		$withRights = true;
+
+		if ($chatType === IM\V2\Chat::IM_TYPE_COMMENT)
+		{
+			$folderModel = self::createSubFolder($chatId, (int)$chat['PARENT_ID']);
+			$withRights = false;
+		}
+		else
+		{
+			$folderModel = self::createFolder($chatId, $chatType);
+		}
+
+		if ($folderModel)
+		{
+			IM\Model\ChatTable::update($chatId, ['DISK_FOLDER_ID' => $folderModel->getId()]);
+
+			if (isset(self::$chatList[$chatId]))
 			{
-				return false;
+				self::$chatList[$chatId]['DISK_FOLDER_ID'] = $folderModel->getId();
 			}
+			self::$folderList[$folderId] = $folderModel;
 
-			$accessProvider = new \Bitrix\Im\Access\ChatAuthProvider;
-			$rightsManager = $driver->getRightsManager();
-
-			$accessCodes = [];
-			// allow for access code `CHATxxx`
-			$accessCodes[] = [
-				'ACCESS_CODE' => $accessProvider->generateAccessCode($chatId),
-				'TASK_ID' => $rightsManager->getTaskIdByName($rightsManager::TASK_EDIT)
-			];
-			if ($chatType === IM\V2\Chat::IM_TYPE_OPEN)
+			if ($withRights)
 			{
-				// allow reading for top department, access code `DRxxx`
-				$departmentCode = self::GetTopDepartmentCode();
-				if ($departmentCode)
-				{
-					$accessCodes[] = Array(
-						'ACCESS_CODE' => $departmentCode,
-						'TASK_ID' => $rightsManager->getTaskIdByName($rightsManager::TASK_READ)
-					);
-				}
-			}
-
-			$folderModel = $storageModel->addFolder(
-				[
-					'NAME' => 'chat'.$chatId,
-					'CREATED_BY' => self::GetUserId()
-				],
-				$accessCodes,
-				true
-			);
-			if ($folderModel)
-			{
-				IM\Model\ChatTable::update($chatId, ['DISK_FOLDER_ID' => $folderModel->getId()]);
-
-				if (isset(self::$chatList[$chatId]))
-				{
-					self::$chatList[$chatId]['DISK_FOLDER_ID'] = $folderModel->getId();
-				}
-				self::$folderList[$folderId] = $folderModel;
-
-				$accessProvider->updateChatCodesByRelations($chatId);
+				(new \Bitrix\Im\Access\ChatAuthProvider)->updateChatCodesByRelations($chatId);
 			}
 		}
 
 		return $folderModel;
+	}
+
+	/**
+	 * @param int $chatId
+	 * @param int $parentId
+	 * @return Disk\Folder|Disk\Internals\Model|false|null
+	 */
+	protected static function createSubFolder(int $chatId, int $parentId)
+	{
+		$parentChat = IM\V2\Chat::getInstance($parentId);
+		$parentFolder = $parentChat->getOrCreateDiskFolder();
+		if (!$parentFolder)
+		{
+			return false;
+		}
+		return $parentFolder->addSubFolder(
+			[
+				'NAME' => 'chat'.$chatId,
+				'CREATED_BY' => self::GetUserId()
+			],
+			[],
+			true
+		);
+	}
+
+	/**
+	 * @param int $chatId
+	 * @param string $chatType
+	 * @return Disk\Folder|false|null
+	 */
+	protected static function createFolder(int $chatId, string $chatType)
+	{
+		$driver = \Bitrix\Disk\Driver::getInstance();
+		$storageModel = self::GetStorage();
+		if (!$storageModel)
+		{
+			return false;
+		}
+
+		$accessProvider = new \Bitrix\Im\Access\ChatAuthProvider;
+		$rightsManager = $driver->getRightsManager();
+
+		$accessCodes = [];
+		// allow for access code `CHATxxx`
+		$accessCodes[] = [
+			'ACCESS_CODE' => $accessProvider->generateAccessCode($chatId),
+			'TASK_ID' => $rightsManager->getTaskIdByName($rightsManager::TASK_EDIT)
+		];
+		if ($chatType === IM\V2\Chat::IM_TYPE_OPEN || $chatType === IM\V2\Chat::IM_TYPE_OPEN_CHANNEL)
+		{
+			// allow reading for top department, access code `DRxxx`
+			$departmentCode = self::GetTopDepartmentCode();
+			if ($departmentCode)
+			{
+				$accessCodes[] = Array(
+					'ACCESS_CODE' => $departmentCode,
+					'TASK_ID' => $rightsManager->getTaskIdByName($rightsManager::TASK_READ)
+				);
+			}
+		}
+
+		return $storageModel->addFolder(
+			[
+				'NAME' => 'chat'.$chatId,
+				'CREATED_BY' => self::GetUserId()
+			],
+			$accessCodes,
+			true
+		);
 	}
 
 	/**
@@ -1939,6 +1998,11 @@ class CIMDisk
 		if (!$chat)
 		{
 			return false;
+		}
+
+		if ($chat['TYPE'] === IM\V2\Chat::IM_TYPE_COMMENT)
+		{
+			return true;
 		}
 
 		$folderModel = self::getFolderModel($chatId, false);

@@ -133,6 +133,11 @@ final class SupersetDashboardTable extends DataManager
 
 			(new Fields\IntegerField('CREATED_BY_ID'))
 				->configureNullable(),
+
+			(new Fields\Relations\ManyToMany('TAGS', SupersetTagTable::class))
+				->configureMediatorTableName('b_biconnector_superset_dashboard_tag')
+				->configureLocalPrimary('ID', 'DASHBOARD_ID')
+				->configureRemotePrimary('ID', 'TAG_ID'),
 		];
 	}
 }

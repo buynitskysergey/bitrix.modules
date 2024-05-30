@@ -11,12 +11,14 @@ use Bitrix\Im\V2\Service\Context;
 use Bitrix\Im\V2\Message\Params;
 use Bitrix\ImBot\Bot;
 use Bitrix\Imbot\Bot\CopilotChatBot;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 
 class CopilotChat extends GroupChat
 {
 	private const COUNTER_CHAT_CODE = 'copilot_chat_counter';
+	private const COPILOT_ROLE_UPDATED = 'COPILOT_ROLE_UPDATED';
 
 	public function __construct($source = null)
 	{
@@ -169,19 +171,37 @@ class CopilotChat extends GroupChat
 		return;
 	}
 
-	protected function sendBanner(?int $authorId = null): void
+	public function sendBanner(?int $authorId = null, ?string $copilotName = null, ?bool $isUpdate = false): void
 	{
+		if (!isset($copilotName))
+		{
+			$roleManager = new Im\V2\Integration\AI\RoleManager();
+			$copilotCode = $roleManager->getMainRole($this->getChatId());
+			$copilotName = $roleManager->getRoles([$copilotCode], $this->getContext()->getUserId())[$copilotCode]['name'];
+		}
+
+		if (Option::get('im', 'im_copilot_chat_roles_available', 'N') === 'N')
+		{
+			$copilotName = 'CoPilot';
+		}
+
 		\CIMMessage::Add([
 			'MESSAGE_TYPE' => $this->getType(),
 			'TO_CHAT_ID' => $this->getChatId(),
 			'FROM_USER_ID' => Bot\CopilotChatBot::getBotId(),
-			'MESSAGE' => Loc::getMessage('IM_CHAT_CREATE_COPILOT_WELCOME'),
+			"SYSTEM" => 'Y',
+			'MESSAGE' => $isUpdate
+				? Loc::getMessage('IM_CHAT_CREATE_COPILOT_WELCOME_UPDATE', ['#COPILOT_NAME#' => $copilotName])
+				: Loc::getMessage('IM_CHAT_CREATE_COPILOT_WELCOME_CREATE', ['#COPILOT_NAME#' => $copilotName])
+			,
 			'SKIP_USER_CHECK' => 'Y',
 			'PUSH' => 'N',
 			'SKIP_COUNTER_INCREMENTS' => 'Y',
 			'PARAMS' => [
 				Params::COMPONENT_ID => Bot\CopilotChatBot::MESSAGE_COMPONENT_START,
+				Params::COMPONENT_PARAMS => [self::COPILOT_ROLE_UPDATED => $isUpdate],
 				Params::NOTIFY => 'N',
+				Params::COPILOT_ROLE => (new Im\V2\Integration\AI\RoleManager())->getMainRole($this->getId()),
 			]
 		]);
 	}
@@ -203,7 +223,7 @@ class CopilotChat extends GroupChat
 			'FROM_USER_ID' => Bot\CopilotChatBot::getBotId(),
 			"SYSTEM" => 'Y',
 			'MESSAGE' => Loc::getMessage(
-				"IM_CHAT_CREATE_COPILOT_COLLECTIVE_{$author->getGender()}",
+				"IM_CHAT_CREATE_COPILOT_COLLECTIVE_{$author->getGender()}_MSGVER_1",
 				[
 					'#USER_1_NAME#' => htmlspecialcharsback($author->getName()),
 					'#USER_2_NAME#' => $this->getUsersForBanner($addedUsers)
@@ -217,6 +237,7 @@ class CopilotChat extends GroupChat
 					'AUTHOR_ID' => $author->getId(),
 					'ADDED_USERS' => array_values($addedUsers),
 				],
+				Params::COPILOT_ROLE => (new Im\V2\Integration\AI\RoleManager())->getMainRole($this->getId()),
 			],
 		]);
 	}
@@ -327,15 +348,5 @@ class CopilotChat extends GroupChat
 		}
 
 		return parent::deleteUser($userId, $withMessage, $skipRecent);
-	}
-
-	public function toRestFormat(array $option = []): array
-	{
-		$chatData = parent::toRestFormat($option);
-
-		$providerName = Im\V2\Integration\AI\AIHelper::getProviderName();
-		$chatData['aiProvider'] = $providerName;
-
-		return $chatData;
 	}
 }

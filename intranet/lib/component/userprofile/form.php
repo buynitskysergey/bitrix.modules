@@ -92,6 +92,19 @@ class Form
 			}
 		}
 
+		$emailHint = [
+			"link_template" => "mailto:#LINK#",
+		];
+		if (Loader::includeModule('bitrix24'))
+		{
+			$emailHint['help'] = Loc::getMessage(
+				'INTRANET_USER_PROFILE_FIELD_HELP_PASSWORD_TAB',
+				[
+					'#HELP_LINK#' => '/company/personal/user/'.$this->userId.'/common_security/?page=auth'
+				]
+			);
+		}
+
 		$fields = array(
 			array(
 				"title" => Loc::getMessage("INTRANET_USER_PROFILE_FIELD_NAME"),
@@ -115,12 +128,10 @@ class Form
 				"showAlways" => true
 			),
 			array(
-				"title" => Loc::getMessage("INTRANET_USER_PROFILE_FIELD_EMAIL"),
+				"title" => Loc::getMessage("INTRANET_USER_PROFILE_FIELD_EMAIL_MSG_1"),
 				"name" => "EMAIL",
 				"type" => "link",
-				"data" => array(
-					"link_template" => "mailto:#LINK#"
-				),
+				"data" => $emailHint,
 				"editable" => true
 			),
 			array(
@@ -438,7 +449,7 @@ class Form
 				"editable" => true
 			),
 			array(
-				"title" => Loc::getMessage("INTRANET_USER_PROFILE_FIELD_EMAIL"),
+				"title" => Loc::getMessage("INTRANET_USER_PROFILE_FIELD_EMAIL_MSG_1"),
 				"name" => "EMAIL",
 				"type" => "link",
 				"data" => array(

@@ -319,20 +319,16 @@ class QueueManager
 		if(
 			empty(self::$structureDepartments) &&
 			Loader::includeModule('iblock')
+			&& Loader::includeModule('intranet')
 		)
 		{
 			$departmentIblockId = self::getIdIblockStructure();
 
 			if($departmentIblockId > 0)
 			{
-				$raw = \CIBlockSection::GetList(
-					['left_margin'=>'asc', 'SORT'=>'ASC'],
-					['ACTIVE'=>'Y', 'IBLOCK_ID'=>$departmentIblockId],
-					false,
-					['ID', 'NAME', 'DEPTH_LEVEL', 'UF_HEAD', 'IBLOCK_SECTION_ID']
-				);
+				$departments = \CIntranetUtils::GetStructure();
 
-				while($row = $raw->GetNext(true, false))
+				foreach($departments['DATA'] as $row)
 				{
 					self::$structureDepartments[$row['ID']] = [
 						'id' => (int)$row['ID'],
@@ -413,7 +409,6 @@ class QueueManager
 	{
 		$result = [];
 		$idDepartment = (int)$idDepartment;
-
 		$structureDepartments = self::getStructureDepartments();
 		$currentDepartment = $structureDepartments[$idDepartment];
 

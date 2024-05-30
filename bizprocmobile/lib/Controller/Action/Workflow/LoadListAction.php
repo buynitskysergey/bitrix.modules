@@ -4,6 +4,7 @@ namespace Bitrix\BizprocMobile\Controller\Action\Workflow;
 
 use Bitrix\Bizproc;
 use Bitrix\Bizproc\Api\Data\WorkflowStateService\WorkflowStateToGet;
+use Bitrix\Bizproc\Api\Data\WorkflowStateService\WorkflowStateFilter;
 use Bitrix\Bizproc\Api\Service\WorkflowStateService;
 use Bitrix\BizprocMobile\UI\WorkflowView;
 use Bitrix\Main\UI\PageNavigation;
@@ -26,9 +27,14 @@ class LoadListAction extends BaseAction
 
 		$toGet->setFilterUserId($currentUserId);
 
-		if (isset($extra['filterPresetId']))
+		if (!empty($extra['filterPresetId']))
 		{
 			$toGet->setFilterPresetId($extra['filterPresetId']);
+		}
+
+		if (!empty($extra['filterSearchQuery']) && is_string($extra['filterSearchQuery']))
+		{
+			$toGet->setFilterSearchQuery($extra['filterSearchQuery']);
 		}
 
 		if (!empty($extra['filterParams']['ID']) && is_array($extra['filterParams']['ID']))

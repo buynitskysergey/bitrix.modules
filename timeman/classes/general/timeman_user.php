@@ -39,7 +39,7 @@ class CTimeManUser
 
 	public function __construct($USER_ID = 0, $site_id = SITE_ID)
 	{
-		$this->USER_ID = $USER_ID > 0 ? $USER_ID : $GLOBALS['USER']->GetID();
+		$this->USER_ID = (is_numeric($USER_ID) && $USER_ID > 0) ? $USER_ID : $GLOBALS['USER']->GetID();
 		$this->SITE_ID = $site_id;
 		$this->bTasksEnabled = CModule::IncludeModule('tasks');
 	}

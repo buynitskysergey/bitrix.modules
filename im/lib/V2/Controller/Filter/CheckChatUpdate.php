@@ -29,12 +29,14 @@ class CheckChatUpdate extends Base
 	private const UPDATE_SETTINGS = [
 		'setOwner',
 		'setManagers',
+		'addManagers',
+		'deleteManagers',
 		'setManageUsersAdd',
 		'setManageUsersDelete',
 		'setManageUI',
 		'setManageSettings',
 		'setDisappearingDate',
-		'setCanPost',
+		'setManageMessages',
 	];
 
 	public function onBeforeAction(Event $event)

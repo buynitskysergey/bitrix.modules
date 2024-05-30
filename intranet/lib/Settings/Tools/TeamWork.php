@@ -3,6 +3,7 @@
 namespace Bitrix\Intranet\Settings\Tools;
 
 use Bitrix\Intranet\UI\LeftMenu\Preset;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
@@ -91,7 +92,6 @@ class TeamWork extends Tool
 
 	public function getSubgroups(): array
 	{
-		global $USER;
 		$result = [];
 
 		$settingsPath = $this->getSubgroupSettingsPath();
@@ -121,7 +121,7 @@ class TeamWork extends Tool
 				'code' => $this->getSubgroupCode($id),
 				'enabled' => $this->isEnabledSubgroupById($id),
 				'menu_item_id' => $menuId,
-				'settings_path' => !empty($settingsPath[$id]) ? str_replace("#USER_ID#", $USER->GetID(), $settingsPath[$id]) : null,
+				'settings_path' => !empty($settingsPath[$id]) ? str_replace("#USER_ID#", CurrentUser::get()->getId(), $settingsPath[$id]) : null,
 				'settings_title' => $settingsTitle[$id] ?? null,
 			];
 		}

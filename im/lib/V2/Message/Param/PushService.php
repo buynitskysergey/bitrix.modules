@@ -46,11 +46,22 @@ class PushService
 		$messageParams = $params->toPullFormat($extraParams);
 		$pullParams['params']['params'] = $messageParams;
 
-		\Bitrix\Pull\Event::add($users, $pullParams);
+		if ($chat->getType() === Chat::IM_TYPE_COMMENT)
+		{
+			CPullWatch::AddToStack('IM_PUBLIC_COMMENT_' . $chat->getParentChatId(), $pullParams);
+		}
+		else
+		{
+			\Bitrix\Pull\Event::add($users, $pullParams);
+		}
 
-		if ($chat->getType() === IM_MESSAGE_OPEN || $chat->getType() === IM_MESSAGE_OPEN_LINE)
+		if ($chat->needToSendPublicPull())
 		{
 			CPullWatch::AddToStack('IM_PUBLIC_' . $chat->getId(), $pullParams);
+		}
+		if ($chat->getType() === Chat::IM_TYPE_OPEN_CHANNEL && $message->getId() === $chat->getLastMessageId())
+		{
+			Chat\OpenChannelChat::sendSharedPull($pullParams);
 		}
 	}
 

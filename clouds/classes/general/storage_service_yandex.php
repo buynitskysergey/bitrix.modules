@@ -55,15 +55,25 @@ class CCloudStorageService_Yandex extends CCloudStorageService_S3
 			$arSettings = array("ACCESS_KEY" => "", "SECRET_KEY" => "");
 
 		$htmlID = htmlspecialcharsbx($this->GetID());
+		$show = (($cur_SERVICE_ID == $this->GetID()) || !$bServiceSet)? '': 'none';
+		$useHttps = $arSettings['USE_HTTPS'] ?? 'N';
 
 		$result = '
-		<tr id="SETTINGS_0_'.$htmlID.'" style="display:'.($cur_SERVICE_ID === $this->GetID() || !$bServiceSet? '': 'none').'" class="settings-tr adm-detail-required-field">
+		<tr id="SETTINGS_0_'.$htmlID.'" style="display:'.$show.'" class="settings-tr adm-detail-required-field">
 			<td>'.GetMessage("CLO_STORAGE_YANDEX_EDIT_ACCESS_KEY").':</td>
 			<td><input type="hidden" name="SETTINGS['.$htmlID.'][ACCESS_KEY]" id="'.$htmlID.'ACCESS_KEY" value="'.htmlspecialcharsbx($arSettings['ACCESS_KEY']).'"><input type="text" size="55" name="'.$htmlID.'INP_ACCESS_KEY" id="'.$htmlID.'INP_ACCESS_KEY" value="'.htmlspecialcharsbx($arSettings['ACCESS_KEY']).'" '.($arBucket['READ_ONLY'] === 'Y'? '"disabled"': '').' onchange="BX(\''.$htmlID.'ACCESS_KEY\').value = this.value"></td>
 		</tr>
-		<tr id="SETTINGS_1_'.$htmlID.'" style="display:'.($cur_SERVICE_ID === $this->GetID() || !$bServiceSet? '': 'none').'" class="settings-tr adm-detail-required-field">
+		<tr id="SETTINGS_1_'.$htmlID.'" style="display:'.$show.'" class="settings-tr adm-detail-required-field">
 			<td>'.GetMessage("CLO_STORAGE_YANDEX_EDIT_SECRET_KEY").':</td>
-			<td><input type="hidden" name="SETTINGS['.$htmlID.'][SECRET_KEY]" id="'.$htmlID.'SECRET_KEY" value="'.htmlspecialcharsbx($arSettings['SECRET_KEY']).'"><input type="text" size="55" name="'.$htmlID.'INP_SECRET_KEY" id="'.$htmlID.'INP_SECRET_KEY" value="'.htmlspecialcharsbx($arSettings['SECRET_KEY']).'" autocomplete="off" '.($arBucket['READ_ONLY'] === 'Y'? '"disabled"': '').' onchange="BX(\''.$htmlID.'SECRET_KEY\').value = this.value"></td>
+			<td><input type="hidden" name="SETTINGS['.$htmlID.'][SECRET_KEY]" id="'.$htmlID.'SECRET_KEY" value="'.htmlspecialcharsbx($arSettings['SECRET_KEY']).'"><input type="text" size="55" name="'.$htmlID.'INP_SECRET_KEY" id="'.$htmlID.'INP_SECRET_KEY" value="'.htmlspecialcharsbx($arSettings['SECRET_KEY']).'" autocomplete="off" '.($arBucket['READ_ONLY'] === 'Y'? '"disabled"': '').' onchange="BX(\''.$htmlID.'SECRET_KEY\').value = this.value">'.(
+				array_key_exists("SESSION_TOKEN", $arSettings) ?
+				'<input type="hidden" name="SETTINGS['.$htmlID.'][SESSION_TOKEN]" id="'.$htmlID.'SESSION_TOKEN" value="'.htmlspecialcharsbx($arSettings['SESSION_TOKEN']).'">' :
+				''
+			).'</td>
+		</tr>
+		<tr id="SETTINGS_3_'.$htmlID.'" style="display:'.$show.'" class="settings-tr">
+			<td nowrap>'.GetMessage("CLO_STORAGE_YANDEX_EDIT_USE_HTTPS").':</td>
+			<td><input type="hidden" name="SETTINGS['.$htmlID.'][USE_HTTPS]" id="'.$htmlID.'KEY" value="N"><input type="checkbox" name="SETTINGS['.$htmlID.'][USE_HTTPS]" id="'.$htmlID.'USE_HTTPS" value="Y" '.($useHttps == 'Y'? 'checked="checked"': '').'></td>
 		</tr>
 		';
 		return $result;
@@ -81,6 +91,7 @@ class CCloudStorageService_Yandex extends CCloudStorageService_S3
 		$result = array(
 			"ACCESS_KEY" => is_array($arSettings)? trim($arSettings["ACCESS_KEY"]): '',
 			"SECRET_KEY" => is_array($arSettings)? trim($arSettings["SECRET_KEY"]): '',
+			"USE_HTTPS" => is_array($arSettings) && $arSettings["USE_HTTPS"] == "Y"? "Y": "N",
 		);
 		if(is_array($arSettings) && array_key_exists("SESSION_TOKEN", $arSettings))
 		{
@@ -235,4 +246,16 @@ class CCloudStorageService_Yandex extends CCloudStorageService_S3
 		$this->streamTimeout = 3600;
 		return parent::CompleteMultipartUpload($arBucket, $NS);
 	}
-}
+	/**
+	 * @param int $status
+	 * @param string $result
+	 * @return bool
+	*/
+	protected function checkForTokenExpiration($status, $result)
+	{
+		if ($status == 400 && mb_strpos($result, 'ExpiredToken') !== false)
+			return true;
+		if ($status == 403 && mb_strpos($result, 'The request signature we calculated does not match the signature you provided.') !== false)
+			return true;
+		return false;
+	}}

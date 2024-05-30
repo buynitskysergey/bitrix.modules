@@ -19,7 +19,20 @@ use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
  * </ul>
  *
  * @package Bitrix\BIConnector\Integration\Superset\Model
- **/
+ *
+ * DO NOT WRITE ANYTHING BELOW THIS
+ *
+ * <<< ORMENTITYANNOTATION
+ * @method static EO_SupersetUser_Query query()
+ * @method static EO_SupersetUser_Result getByPrimary($primary, array $parameters = [])
+ * @method static EO_SupersetUser_Result getById($id)
+ * @method static EO_SupersetUser_Result getList(array $parameters = [])
+ * @method static EO_SupersetUser_Entity getEntity()
+ * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser createObject($setDefaultValues = true)
+ * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection createCollection()
+ * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser wakeUpObject($row)
+ * @method static \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser_Collection wakeUpCollection($rows)
+ */
 
 class SupersetUserTable extends DataManager
 {

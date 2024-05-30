@@ -5,21 +5,31 @@ namespace Bitrix\Im;
 use Bitrix\Im\Model\LinkReminderTable;
 use Bitrix\Im\Model\MessageUnreadTable;
 use Bitrix\Im\Model\RecentTable;
+use Bitrix\Im\V2\Chat\Copilot\CopilotPopupItem;
 use Bitrix\Im\V2\Chat\EntityLink;
-use Bitrix\Im\V2\Integration\AI\AIHelper;
+use Bitrix\Im\V2\Chat\Permission;
+use Bitrix\Im\V2\Integration\AI\RoleManager;
+use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Message\CounterService;
 use Bitrix\Im\V2\Entity\File\FileCollection;
 use Bitrix\Im\V2\Entity\File\FileItem;
+use Bitrix\Im\V2\Message\Param;
+use Bitrix\Im\V2\Message\MessagePopupItem;
 use Bitrix\Im\V2\Message\ReadService;
-use Bitrix\Im\V2\Message\ViewedService;
+use Bitrix\Im\V2\Message\Send\PushService;
+use Bitrix\Im\V2\RelationCollection;
+use Bitrix\Im\V2\Rest\RestAdapter;
 use Bitrix\Im\V2\Settings\UserConfiguration;
 use Bitrix\Im\V2\Sync;
 use Bitrix\Imbot\Bot\CopilotChatBot;
 use Bitrix\Main\Application, Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\DB\SqlExpression;
+use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Fields\ExpressionField;
+use Bitrix\Main\Type\DateTime;
+use Bitrix\Pull\Event;
 
 Loc::loadMessages(__FILE__);
 
@@ -230,6 +240,8 @@ class Recent
 
 		$onlyOpenlinesOption = $options['ONLY_OPENLINES'] ?? null;
 		$onlyCopilotOption = $options['ONLY_COPILOT'] ?? null;
+		$onlyChannelOption = $options['ONLY_CHANNEL'] ?? null;
+		$canManageMessagesOption = $options['CAN_MANAGE_MESSAGES'] ?? null;
 		$skipChatOption = $options['SKIP_CHAT'] ?? null;
 		$skipDialogOption = $options['SKIP_DIALOG'] ?? null;
 		$lastMessageDateOption = $options['LAST_MESSAGE_DATE'] ?? null;
@@ -266,6 +278,12 @@ class Recent
 				'=ITEM_TYPE' => IM_MESSAGE_OPEN_LINE
 			];
 		}
+		elseif ($onlyChannelOption === 'Y')
+		{
+			$ormParams['filter'][] = [
+				'=ITEM_TYPE' => [\Bitrix\Im\V2\Chat::IM_TYPE_OPEN_CHANNEL, \Bitrix\Im\V2\Chat::IM_TYPE_CHANNEL],
+			];
+		}
 		else
 		{
 			$skipTypes = [];
@@ -293,7 +311,7 @@ class Recent
 
 		if ($lastMessageDateOption instanceof \Bitrix\Main\Type\DateTime)
 		{
-			$ormParams['filter']['<=DATE_MESSAGE'] = $lastMessageDateOption;
+			$ormParams['filter']['<=DATE_LAST_ACTIVITY'] = $lastMessageDateOption;
 		}
 		else if (isset($options['OFFSET']))
 		{
@@ -315,15 +333,20 @@ class Recent
 			$ormParams['order'] = [
 				'PINNED' => 'DESC',
 				'PIN_SORT' => 'ASC',
-				'DATE_MESSAGE' => 'DESC',
+				'DATE_LAST_ACTIVITY' => 'DESC',
 			];
 		}
 		else
 		{
 			$ormParams['order'] = [
 				'PINNED' => 'DESC',
-				'DATE_MESSAGE' => 'DESC',
+				'DATE_LAST_ACTIVITY' => 'DESC',
 			];
+		}
+
+		if ($canManageMessagesOption === 'Y')
+		{
+			$ormParams = Permission::getRoleGetListFilter($ormParams, 'MANAGE_MESSAGES', 'RELATION', 'CHAT');
 		}
 
 		$orm = \Bitrix\Im\Model\RecentTable::getList($ormParams);
@@ -331,6 +354,8 @@ class Recent
 		$counter = 0;
 		$result = [];
 		$files = [];
+		$messageIdsWithCopilotRole = [];
+		$copilotData = [];
 
 		$rows = $orm->fetchAll();
 		$rows = self::prepareRows($rows, $userId);
@@ -365,7 +390,47 @@ class Recent
 			}
 
 			$result[$id] = $item;
+
+			if (!$shortInfo && $onlyCopilotOption === 'Y')
+			{
+				$copilotChatRole = (new RoleManager())->getMainRole((int)$item['CHAT_ID']);
+				if (isset($copilotChatRole))
+				{
+					$copilotData['chats'][$item['ID']] = $copilotChatRole;
+				}
+			}
+
+			if (
+				!$shortInfo
+				&& (isset($item['USER']['BOT']) && $item['USER']['BOT'] === true)
+				&& Loader::includeModule('imbot')
+				&& (int)$item['MESSAGE']['AUTHOR_ID'] === CopilotChatBot::getBotId()
+			)
+			{
+				$messageIdsWithCopilotRole[] = (int)$item['MESSAGE']['ID'];
+			}
 		}
+
+		if (!$shortInfo && !empty($messageIdsWithCopilotRole))
+		{
+			$copilotMessageRoles = self::fillCopilotMessageRoles($messageIdsWithCopilotRole);
+
+			foreach ($result as $item)
+			{
+				if (in_array((int)$item['MESSAGE']['ID'], $messageIdsWithCopilotRole, true))
+				{
+					$copilotData['messages'][(int)$item['MESSAGE']['ID']] =
+						$copilotMessageRoles[(int)$item['MESSAGE']['ID']] ?? RoleManager::getDefaultRoleCode()
+					;
+				}
+			}
+		}
+
+		if (!$shortInfo && $onlyCopilotOption === 'Y')
+		{
+			$copilotData = self::prepareCopilotData($copilotData, $userId);
+		}
+
 		if ($showOpenlines && !$onlyCopilotOption && Loader::includeModule('imopenlines'))
 		{
 			if (!isset($options['SKIP_UNDISTRIBUTED_OPENLINES']) || $options['SKIP_UNDISTRIBUTED_OPENLINES'] !== 'Y')
@@ -391,7 +456,8 @@ class Recent
 			$objectToReturn = [
 				'items' => $result,
 				'hasMorePages' => $ormParams['limit'] == $counter, // TODO remove this later
-				'hasMore' => $ormParams['limit'] == $counter
+				'hasMore' => $ormParams['limit'] == $counter,
+				'copilot' => !empty($copilotData) ? $copilotData : null,
 			];
 
 			if (!isset($options['LAST_MESSAGE_DATE']))
@@ -402,10 +468,50 @@ class Recent
 			return $objectToReturn;
 		}
 
+		$converter = new Converter(Converter::TO_SNAKE | Converter::TO_UPPER | Converter::KEYS);
+
 		return [
 			'ITEMS' => $result,
 			'HAS_MORE_PAGES' => $ormParams['limit'] == $counter, // TODO remove this later
-			'HAS_MORE' => $ormParams['limit'] == $counter
+			'HAS_MORE' => $ormParams['limit'] == $counter,
+			'COPILOT' => !empty($copilotData) ? $converter->process($copilotData) : null,
+		];
+	}
+
+	private static function fillCopilotMessageRoles(array $messageIdsWithCopilotRole): array
+	{
+		$copilotMessageRoles = [];
+
+		$collection = Param::getDataClass()::query()
+			->setSelect(['MESSAGE_ID', 'PARAM_VALUE'])
+			->whereIn('MESSAGE_ID', $messageIdsWithCopilotRole)
+			->where('PARAM_NAME', \Bitrix\Im\V2\Message\Params::COPILOT_ROLE)
+			->fetchCollection()
+		;
+
+		foreach ($collection as $item)
+		{
+			$copilotMessageRoles[(int)$item->getMessageId()] = $item->getParamValue();
+		}
+
+		return $copilotMessageRoles;
+	}
+
+	private static function prepareCopilotData(array $copilotData, int $userId): array
+	{
+		$roleManager = new RoleManager();
+		$recentCopilotRoles = $roleManager->getRecentKeyRoles((int)$userId);
+		$copilotRoles = array_merge($copilotData['chats'] ?? [], $copilotData['messages'] ?? [], $recentCopilotRoles);
+
+		$chats = CopilotPopupItem::convertArrayData($copilotData['chats'] ?? [], CopilotPopupItem::ENTITIES['chat']);
+		$messages = CopilotPopupItem::convertArrayData($copilotData['messages'] ?? [], CopilotPopupItem::ENTITIES['messageCollection']);
+		$roles = $roleManager->getRoles(array_unique($copilotRoles), $userId);
+
+		return [
+			'chats' => !empty($chats) ? $chats : null,
+			'messages' => !empty($messages) ? $messages : null,
+			'roles' => !empty($roles) ? $roles : null,
+			'recommendedRoles' => !empty($recentCopilotRoles) ? $recentCopilotRoles : null,
 		];
 	}
 
@@ -487,7 +593,10 @@ class Recent
 			'RELATION_USER_ID' => 'RELATION.USER_ID',
 			'RELATION_NOTIFY_BLOCK' => 'RELATION.NOTIFY_BLOCK',
 			'RELATION_IS_MANAGER' => 'RELATION.MANAGER',
+			'RELATION_LAST_ID' => 'RELATION.LAST_ID',
 			'CHAT_ID' => 'CHAT.ID',
+			'CHAT_PARENT_ID' => 'CHAT.PARENT_ID',
+			'CHAT_PARENT_MID' => 'CHAT.PARENT_MID',
 			'CHAT_TITLE' => 'CHAT.TITLE',
 			'CHAT_TYPE' => 'CHAT.TYPE',
 			'CHAT_AVATAR' => 'CHAT.AVATAR',
@@ -503,8 +612,6 @@ class Recent
 			'CHAT_USER_COUNT' => 'CHAT.USER_COUNT',
 			'MESSAGE_CODE' => 'CODE.PARAM_VALUE',
 			'USER_LAST_ACTIVITY_DATE' => 'USER.LAST_ACTIVITY_DATE',
-			'MESSAGE_DATE' => 'MESSAGE.DATE_CREATE',
-			'CHAT_LAST_MESSAGE_STATUS_BOOL' => 'MESSAGE.NOTIFY_READ'
 		];
 
 		$additionalInfoFields = [
@@ -529,6 +636,7 @@ class Recent
 			'CHAT_MANAGE_UI' => 'CHAT.MANAGE_UI',
 			'CHAT_MANAGE_SETTINGS' => 'CHAT.MANAGE_SETTINGS',
 			'CHAT_CAN_POST' => 'CHAT.CAN_POST',
+			'CHAT_LAST_MESSAGE_STATUS_BOOL' => 'MESSAGE.NOTIFY_READ',
 		];
 
 		$shortRuntime = [
@@ -733,21 +841,21 @@ class Recent
 				'FILE' => $row['MESSAGE_FILE'],
 				'AUTHOR_ID' =>  (int)$row['MESSAGE_AUTHOR_ID'],
 				'ATTACH' => $attach,
-				'DATE' => $row['MESSAGE_DATE']?: $row['DATE_UPDATE'],
+				'DATE' => $row['DATE_MESSAGE']?: $row['DATE_UPDATE'],
 				'STATUS' => $row['CHAT_LAST_MESSAGE_STATUS'],
 				'UUID' => $row['MESSAGE_UUID_VALUE'],
 			];
 		}
 		else
 		{
-			$row['MESSAGE_DATE'] ??= null;
+			$row['DATE_MESSAGE'] ??= null;
 			$message = [
 				'ID' => (int)($row['ITEM_MID'] ?? 0),
 				'TEXT' => "",
 				'FILE' => false,
 				'AUTHOR_ID' =>  0,
 				'ATTACH' => false,
-				'DATE' => $row['MESSAGE_DATE']?: $row['DATE_UPDATE'],
+				'DATE' => $row['DATE_MESSAGE']?: $row['DATE_UPDATE'],
 				'STATUS' => $row['CHAT_LAST_MESSAGE_STATUS'],
 			];
 		}
@@ -760,10 +868,12 @@ class Recent
 			'TITLE' => [],
 			'MESSAGE' => $message,
 			'COUNTER' => (int)$row['COUNTER'],
+			'LAST_ID' => (int)($row['RELATION_LAST_ID'] ?? 0),
 			'PINNED' => $row['PINNED'] === 'Y',
 			'UNREAD' => $row['UNREAD'] === 'Y',
 			'HAS_REMINDER' => isset($row['HAS_REMINDER']) && $row['HAS_REMINDER'] === 'Y',
-			'DATE_UPDATE' => $row['DATE_UPDATE']
+			'DATE_UPDATE' => $row['DATE_UPDATE'],
+			'DATE_LAST_ACTIVITY' => $row['DATE_LAST_ACTIVITY'],
 		];
 
 		if ($isUser)
@@ -837,6 +947,8 @@ class Recent
 			$item['TITLE'] = $row['CHAT_TITLE'];
 			$item['CHAT'] = [
 				'ID' => (int)$row['ITEM_CID'],
+				'PARENT_CHAT_ID' => (int)$row['CHAT_PARENT_ID'],
+				'PARENT_MESSAGE_ID' => (int)$row['CHAT_PARENT_MID'],
 				'NAME' => $row['CHAT_TITLE'],
 				'OWNER' => (int)$row['CHAT_AUTHOR_ID'],
 				'EXTRANET' => $row['CHAT_EXTRANET'] == 'Y',
@@ -856,14 +968,15 @@ class Recent
 				'RESTRICTIONS' => $restrictions,
 				'ROLE' => self::getRole($row),
 				'ENTITY_LINK' => EntityLink::getInstance(\CIMChat::initChatByArray($row))->toArray(),
-				'AI_PROVIDER' => $chatType === 'copilot' ? AIHelper::getProviderName() : null,
 				'PERMISSIONS' => [
 					'MANAGE_USERS_ADD' => mb_strtolower($row['CHAT_MANAGE_USERS_ADD'] ?? ''),
 					'MANAGE_USERS_DELETE' => mb_strtolower($row['CHAT_MANAGE_USERS_DELETE'] ?? ''),
 					'MANAGE_UI' => mb_strtolower($row['CHAT_MANAGE_UI'] ?? ''),
 					'MANAGE_SETTINGS' => mb_strtolower($row['CHAT_MANAGE_SETTINGS'] ?? ''),
+					'MANAGE_MESSAGES' => mb_strtolower($row['CHAT_CAN_POST'] ?? ''),
 					'CAN_POST' => mb_strtolower($row['CHAT_CAN_POST'] ?? ''),
 				],
+				'IS_NEW' => \CIMChat::isNewChat($row['CHAT_TYPE'], $row['CHAT_DATE_CREATE']),
 			];
 			if ($row["CHAT_ENTITY_TYPE"] == 'LINES')
 			{
@@ -1128,13 +1241,11 @@ class Recent
 
 		$connection->unlock("PIN_SORT_CHAT_{$userId}");
 
-		if ($element['ITEM_TYPE'] !== \Bitrix\Im\V2\Chat::IM_TYPE_OPEN_LINE)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
-				$userId
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
+			$userId,
+			$element['ITEM_TYPE']
+		);
 
 		self::clearCache($element['USER_ID']);
 
@@ -1318,6 +1429,77 @@ class Recent
 		RecentTable::updateByFilter($filter, $fields);
 	}
 
+	public static function raiseChat(\Bitrix\Im\V2\Chat $chat, RelationCollection $relations, ?DateTime $lastActivity = null): void
+	{
+		$userIds = $relations->getUserIds();
+		if (empty($userIds))
+		{
+			return;
+		}
+		$message = new Message($chat->getLastMessageId());
+		$dateMessage = $message->getDateCreate() ?? new DateTime();
+		$dateCreate = $lastActivity ?? $dateMessage;
+		$fields = [];
+
+		foreach ($relations as $relation)
+		{
+			$userId = $relation->getUserId();
+			if ($userId)
+			{
+				$fields[] = [
+					'USER_ID' => $userId,
+					'ITEM_TYPE' => $chat->getType(),
+					'ITEM_ID' => $chat->getId(),
+					'ITEM_MID' => $chat->getLastMessageId(),
+					'ITEM_CID' => $chat->getId(),
+					'ITEM_RID' => $relation->getId(),
+					'DATE_MESSAGE' => $dateMessage,
+					'DATE_UPDATE' => $dateCreate,
+					'DATE_LAST_ACTIVITY' => $dateCreate,
+				];
+			}
+		}
+
+		static::merge($fields, ['DATE_LAST_ACTIVITY' => $dateCreate, 'DATE_UPDATE' => $dateCreate]);
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chat->getId()),
+			$userIds,
+			$chat->getType()
+		);
+
+		static::sendPullRecentUpdate($chat, $userIds, $dateCreate);
+	}
+
+	public static function sendPullRecentUpdate(\Bitrix\Im\V2\Chat $chat, array $userIds, ?DateTime $lastCommentDate): void
+	{
+		$messages = new MessagePopupItem([$chat->getLastMessageId()], true);
+		$restAdapter = new RestAdapter($messages);
+		$pull = $restAdapter->toRestFormat([
+			'WITHOUT_OWN_REACTIONS' => true,
+			'MESSAGE_ONLY_COMMON_FIELDS' => true,
+		]);
+		$pull['chat'] = $chat->toPullFormat();
+		$pull['lastActivityDate'] = $lastCommentDate;
+
+		$event = [
+			'module_id' => 'im',
+			'command' => 'recentUpdate',
+			'params' => $pull,
+			'extra' => Common::getPullExtra()
+		];
+		$events = (new PushService())->getEventGroups($event, $userIds, $chat->getId());
+
+		foreach ($events as $event)
+		{
+			Event::add($event['users'], $event['event']);
+		}
+	}
+
+	public static function merge(array $fields, array $update): void
+	{
+		RecentTable::multiplyMerge($fields, $update, ['USER_ID', 'ITEM_TYPE', 'ITEM_ID']);
+	}
+
 	public static function unread($dialogId, $unread, $userId = null, ?int $markedId = null)
 	{
 		$userId = \Bitrix\Im\Common::getUserId($userId);
@@ -1383,13 +1565,11 @@ class Recent
 		//\Bitrix\Im\Counter::clearCache($element['USER_ID']);
 		CounterService::clearCache((int)$element['USER_ID']);
 		$chatId = (int)$element['ITEM_CID'];
-		if ($element['ITEM_TYPE'] !== \Bitrix\Im\V2\Chat::IM_TYPE_OPEN_LINE)
-		{
-			Sync\Logger::getInstance()->add(
-				new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
-				$userId
-			);
-		}
+		Sync\Logger::getInstance()->add(
+			new Sync\Event(Sync\Event::ADD_EVENT, Sync\Event::CHAT_ENTITY, $chatId),
+			$userId,
+			$element['ITEM_TYPE']
+		);
 
 		$pullInclude = \Bitrix\Main\Loader::includeModule("pull");
 		if ($pullInclude)

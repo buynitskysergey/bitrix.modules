@@ -5,11 +5,16 @@ namespace Bitrix\Im\V2\Controller;
 use Bitrix\Im\Common;
 use Bitrix\Im\Dialog;
 use Bitrix\Im\Recent;
+use Bitrix\Im\V2\Chat\ChannelChat;
 use Bitrix\Im\V2\Chat\ChatError;
 use Bitrix\Im\V2\Chat\ChatFactory;
+use Bitrix\Im\V2\Chat\CommentChat;
 use Bitrix\Im\V2\Chat\GeneralChat;
+use Bitrix\Im\V2\Chat\GroupChat;
+use Bitrix\Im\V2\Chat\OpenChannelChat;
 use Bitrix\Im\V2\Chat\OpenChat;
 use Bitrix\Im\V2\Chat\OpenLineChat;
+use Bitrix\Im\V2\Chat\Param\Params;
 use Bitrix\Im\V2\Chat\PrivateChat;
 use Bitrix\Im\V2\Controller\Chat\Pin;
 use Bitrix\Im\V2\Controller\Filter\ChatTypeFilter;
@@ -17,7 +22,7 @@ use Bitrix\Im\V2\Controller\Filter\CheckAvatarId;
 use Bitrix\Im\V2\Controller\Filter\CheckAvatarIdInFields;
 use Bitrix\Im\V2\Controller\Filter\CheckChatAccess;
 use Bitrix\Im\V2\Controller\Filter\CheckChatAddParams;
-use Bitrix\Im\V2\Controller\Filter\CheckChatCanPost;
+use Bitrix\Im\V2\Controller\Filter\CheckChatManageMessages;
 use Bitrix\Im\V2\Controller\Filter\CheckChatManageUpdate;
 use Bitrix\Im\V2\Controller\Filter\CheckChatOwner;
 use Bitrix\Im\V2\Controller\Filter\CheckChatUpdate;
@@ -108,6 +113,20 @@ class Chat extends BaseController
 					new CheckChatUpdate(),
 				]
 			],
+			'addManagers' => [
+				'+prefilters' => [
+					new CheckChatAccess(),
+					new CheckChatUpdate(),
+					new ChatTypeFilter([GroupChat::class]),
+				]
+			],
+			'deleteManagers' => [
+				'+prefilters' => [
+					new CheckChatAccess(),
+					new CheckChatUpdate(),
+					new ChatTypeFilter([GroupChat::class]),
+				]
+			],
 			'setManageUsersAdd' => [
 				'+prefilters' => [
 					new CheckChatAccess(),
@@ -143,10 +162,10 @@ class Chat extends BaseController
 					new CheckDisappearingDuration(),
 				]
 			],
-			'setCanPost' => [
+			'setManageMessages' => [
 				'+prefilters' => [
 					new CheckChatAccess(),
-					new CheckChatCanPost(),
+					new CheckChatManageMessages(),
 					new CheckChatUpdate(),
 				]
 			],
@@ -168,12 +187,12 @@ class Chat extends BaseController
 			],
 			'join' => [
 				'+prefilters' => [
-					new ChatTypeFilter([OpenChat::class, OpenLineChat::class, GeneralChat::class]),
+					new ChatTypeFilter([OpenChat::class, OpenLineChat::class, GeneralChat::class, OpenChannelChat::class, CommentChat::class]),
 				],
 			],
 			'extendPullWatch' => [
 				'+prefilters' => [
-					new ChatTypeFilter([OpenChat::class, OpenLineChat::class]),
+					new ChatTypeFilter([OpenChat::class, OpenLineChat::class, ChannelChat::class]),
 				],
 			],
 			'read' => [
@@ -268,7 +287,7 @@ class Chat extends BaseController
 		}
 		$userId = (int)$filter['userId'];
 		$chats = \Bitrix\Im\V2\Chat::getSharedChatsWithUser($userId, $this->getLimit($limit), $offset);
-		\Bitrix\Im\V2\Chat::fillRole($chats);
+		\Bitrix\Im\V2\Chat::fillSelfRelations($chats);
 		$result = ['chats' => []];
 
 		foreach ($chats as $chat)
@@ -351,6 +370,14 @@ class Chat extends BaseController
 		)
 		{
 			unset($fields['conferencePassword']);
+		}
+
+		if (isset($fields['copilotMainRole']))
+		{
+			$fields['chatParams'][] = [
+				'paramName' => Params::COPILOT_MAIN_ROLE,
+				'paramValue' => $fields['copilotMainRole']
+			];
 		}
 
 		$data = self::recursiveWhiteList($fields, \Bitrix\Im\V2\Chat::AVAILABLE_PARAMS);
@@ -445,9 +472,9 @@ class Chat extends BaseController
 			{
 				$chat->setManageSettings($fields['manageSettings']);
 			}
-			if (isset($fields['canPost']))
+			if (isset($fields['manageMessages']))
 			{
-				$chat->setCanPost($fields['canPost']);
+				$chat->setManageMessages($fields['manageMessages']);
 			}
 			if (isset($fields['managers']))
 			{
@@ -519,7 +546,7 @@ class Chat extends BaseController
 	 */
 	public function extendPullWatchAction(\Bitrix\Im\V2\Chat $chat): ?array
 	{
-		if ($chat instanceof OpenChat || $chat instanceof OpenLineChat)
+		if ($chat instanceof OpenChat || $chat instanceof OpenLineChat || $chat instanceof ChannelChat)
 		{
 			$chat->extendPullWatch();
 		}
@@ -675,6 +702,26 @@ class Chat extends BaseController
 	}
 
 	/**
+	 * @restMethod im.v2.Chat.addManagers
+	 */
+	public function addManagersAction(GroupChat $chat, array $userIds): ?array
+	{
+		$chat->addManagers($userIds);
+
+		return ['result' => true];
+	}
+
+	/**
+	 * @restMethod im.v2.Chat.deleteManagers
+	 */
+	public function deleteManagersAction(GroupChat $chat, array $userIds): ?array
+	{
+		$chat->deleteManagers($userIds);
+
+		return ['result' => true];
+	}
+
+	/**
 	 * @restMethod im.v2.Chat.setManageUsersAdd
 	 */
 	public function setManageUsersAddAction(\Bitrix\Im\V2\Chat $chat, string $rightsLevel)
@@ -736,11 +783,11 @@ class Chat extends BaseController
 	}
 
 	/**
-	 * @restMethod im.v2.Chat.setCanPost
+	 * @restMethod im.v2.Chat.setManageMessages
 	 */
-	public function setCanPostAction(\Bitrix\Im\V2\Chat $chat, string $rightsLevel)
+	public function setManageMessagesAction(\Bitrix\Im\V2\Chat $chat, string $rightsLevel)
 	{
-		$chat->setCanPost($rightsLevel);
+		$chat->setManageMessages($rightsLevel);
 		$result = $chat->save();
 		if (!$result->isSuccess())
 		{
@@ -792,24 +839,6 @@ class Chat extends BaseController
 		Recent::sortPin($chat, $newPosition, $user->getId());
 
 		return ['result' => true];
-	}
-
-	private function load(\Bitrix\Im\V2\Chat $chat, int $messageLimit, int $pinLimit, bool $ignoreMark = false, ?Message $targetMessage = null): array
-	{
-		$messageLimit = $this->getLimit($messageLimit);
-		$pinLimit = $this->getLimit($pinLimit);
-		$messageService = new MessageService($targetMessage ?? $chat->getLoadContextMessage($ignoreMark));
-		$messages = $messageService->getMessageContext($messageLimit, Message::REST_FIELDS)->getResult();
-		$pins = PinCollection::find(
-			['CHAT_ID' => $chat->getChatId(), 'START_ID' => $chat->getStartId() ?: null],
-			['ID' => 'DESC'],
-			$pinLimit
-		);
-		$restAdapter = new RestAdapter($chat, $messages, $pins);
-
-		$rest = $restAdapter->toRestFormat();
-
-		return $messageService->fillContextPaginationData($rest, $messages, $messageLimit);
 	}
 
 	private function getValidatedType(?string $type): string

@@ -823,6 +823,9 @@ class Bot
 				$joinFields['CHAT_TYPE'] == IM_MESSAGE_CHAT
 				|| $joinFields['CHAT_TYPE'] == IM_MESSAGE_OPEN_LINE
 				|| $joinFields['CHAT_TYPE'] == \Bitrix\Im\V2\Chat::IM_TYPE_COPILOT
+				|| $joinFields['CHAT_TYPE'] == \Bitrix\Im\V2\Chat::IM_TYPE_CHANNEL
+				|| $joinFields['CHAT_TYPE'] == \Bitrix\Im\V2\Chat::IM_TYPE_OPEN_CHANNEL
+				|| $joinFields['CHAT_TYPE'] == \Bitrix\Im\V2\Chat::IM_TYPE_COMMENT
 			)
 			&& $joinFields['FROM_USER_ID'] != $joinFields['BOT_ID']
 		)

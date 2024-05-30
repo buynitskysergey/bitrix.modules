@@ -2,6 +2,7 @@
 
 namespace Bitrix\BIConnector\Integration\Superset\Integrator;
 
+use Bitrix\BIConnector\Integration\Superset\CultureFormatter;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Logger\IntegratorEventLogger;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Logger\IntegratorLogger;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
@@ -518,6 +519,7 @@ final class ProxyIntegrator implements SupersetIntegrator
 			action: self::PROXY_ACTION_IMPORT_DASHBOARD,
 			requestParams: [
 				'filePath' => $filePath,
+				'currency' => CultureFormatter::getPortalCurrencySymbol(),
 				'appCode' => $appCode,
 			],
 			requiredFields: ['dashboards'],
@@ -719,7 +721,10 @@ final class ProxyIntegrator implements SupersetIntegrator
 	{
 		$result = $this->performRequest(
 			action: self::PROXY_ACTION_IMPORT_DATASET,
-			requestParams: ['filePath' => $filePath],
+			requestParams: [
+				'filePath' => $filePath,
+				'currency' => CultureFormatter::getPortalCurrencySymbol(),
+			],
 			isMultipart: true,
 		);
 

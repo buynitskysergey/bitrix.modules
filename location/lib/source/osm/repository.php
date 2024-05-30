@@ -2,9 +2,11 @@
 
 namespace Bitrix\Location\Source\Osm;
 
+use Bitrix\Location\Entity\Location;
 use Bitrix\Location\Geometry\Converter\Manager;
 use Bitrix\Location\Geometry\Type\Point;
 use Bitrix\Location\Infrastructure\Service\DisputedAreaService;
+use Bitrix\Location\Repository\Location\Capability\IFindByCoords;
 use Bitrix\Location\Repository\Location\Capability\IFindByExternalId;
 use Bitrix\Location\Repository\Location\Capability\ISupportAutocomplete;
 use Bitrix\Location\Repository\Location\IRepository;
@@ -12,14 +14,18 @@ use Bitrix\Location\Repository\Location\ISource;
 use Bitrix\Location\Source\BaseRepository;
 use Bitrix\Location\Source\Osm\Api\Api;
 use Bitrix\Location\Source\Osm\Converters\Factory;
-use Bitrix\Location\Entity;
 
 /**
  * Class Repository
  * @package Bitrix\Location\Source\Osm
  * @internal
  */
-final class Repository extends BaseRepository implements IRepository, IFindByExternalId, ISupportAutocomplete, ISource
+final class Repository extends BaseRepository implements
+	IRepository,
+	IFindByExternalId,
+	IFindByCoords,
+	ISupportAutocomplete,
+	ISource
 {
 	/** @var string  */
 	protected static $sourceCode = 'OSM';
@@ -85,6 +91,50 @@ final class Repository extends BaseRepository implements IRepository, IFindByExt
 		}
 
 		return $location;
+	}
+
+	public function findByCoords(
+		float $lat,
+		float $lng,
+		int $zoom,
+		string $languageId
+	): ?Location
+	{
+		$reverse = $this->api->reverse(
+			[
+				'lat' => $lat,
+				'lng' => $lng,
+				'zoom' => $zoom,
+				'addressdetails' => 0,
+				'accept-language' => $this->osmSource->convertLang($languageId),
+			]
+		);
+
+		if (
+			!(
+				isset($reverse['osm_type'])
+				&& isset($reverse['osm_id'])
+			)
+		)
+		{
+			return null;
+		}
+
+		$externalId = ExternalIdBuilder::buildExternalId(
+			NodeTypeMap::getShortNodeTypeCode($reverse['osm_type']),
+			$reverse['osm_id']
+		);
+
+		if (!$externalId)
+		{
+			return null;
+		}
+
+		return $this->findByExternalId(
+			$externalId,
+			self::$sourceCode,
+			$languageId
+		);
 	}
 
 	/**

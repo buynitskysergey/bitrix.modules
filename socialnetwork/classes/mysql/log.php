@@ -77,7 +77,7 @@ class CSocNetLog extends CAllSocNetLog
 			$strSql =
 				"INSERT INTO b_sonet_log(".$arInsert[0].") ".
 				"VALUES(".$arInsert[1].")";
-			$DB->Query($strSql, False, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 
 			$ID = (int)$DB->LastID();
 
@@ -103,7 +103,7 @@ class CSocNetLog extends CAllSocNetLog
 					SELECT ".$ID.", LID
 					FROM b_lang
 					WHERE LID IN ('".implode("', '", $arSiteID)."')
-				", false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+				");
 				}
 
 				if (isset($arFields["TAG"]))
@@ -134,8 +134,8 @@ class CSocNetLog extends CAllSocNetLog
 
 		CSocNetLogTools::SetCacheLastLogID("log", $ID);
 
-		\Bitrix\Socialnetwork\Internals\EventService\Service::addEvent(
-			\Bitrix\Socialnetwork\Internals\EventService\EventDictionary::EVENT_SPACE_LIVEFEED_POST_ADD,
+		Service::addEvent(
+			EventDictionary::EVENT_SPACE_LIVEFEED_POST_ADD,
 			[
 				'SONET_LOG_ID' => (int)$ID,
 				'EVENT_ID' => $arFields['EVENT_ID'] ?? '',
@@ -157,6 +157,7 @@ class CSocNetLog extends CAllSocNetLog
 			$APPLICATION->ThrowException(GetMessage("SONET_L_WRONG_PARAMETER_ID"), "ERROR_NO_ID");
 			return false;
 		}
+		$logRightsBeforeUpdate = \Bitrix\Socialnetwork\Item\LogRight::get((int)$ID);
 
 		$str_SiteID = '';
 
@@ -205,19 +206,19 @@ class CSocNetLog extends CAllSocNetLog
 				"UPDATE b_sonet_log SET ".
 				"	".$strUpdate." ".
 				"WHERE ID = ".$ID." ";
-			$DB->Query($strSql, False, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 
 			if (!empty($arSiteID))
 			{
 				$strSql = "DELETE FROM b_sonet_log_site WHERE LOG_ID=".$ID;
-				$DB->Query($strSql, false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+				$DB->Query($strSql);
 
 				$strSql = $helper->getInsertIgnore("b_sonet_log_site", "(LOG_ID, SITE_ID)",
 					"SELECT " . $ID . ", LID " .
 					"FROM b_lang " .
 					"WHERE LID IN (" . $str_SiteID . ") "
 				);
-				$DB->Query($strSql, false, "FILE: ".__FILE__."<br> LINE: ".__LINE__);
+				$DB->Query($strSql);
 			}
 
 			if (isset($arFields["TAG"]))
@@ -297,11 +298,12 @@ class CSocNetLog extends CAllSocNetLog
 			->where('ID', (int)$ID)
 			->fetch()
 		;
-		\Bitrix\Socialnetwork\Internals\EventService\Service::addEvent(
-			\Bitrix\Socialnetwork\Internals\EventService\EventDictionary::EVENT_SPACE_LIVEFEED_POST_UPD,
+		Service::addEvent(
+			EventDictionary::EVENT_SPACE_LIVEFEED_POST_UPD,
 			[
 				'SONET_LOG_ID' => (int)$ID,
 				'EVENT_ID' => $log['EVENT_ID'] ?? null,
+				'LOG_RIGHTS_BEFORE_UPDATE' => $logRightsBeforeUpdate,
 			]
 		);
 
@@ -999,7 +1001,7 @@ class CSocNetLog extends CAllSocNetLog
 
 			//echo "!1!=".htmlspecialcharsbx($strSql)."<br>";
 
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			if ($arRes = $dbRes->Fetch())
 			{
 				return $arRes["CNT"];
@@ -1169,7 +1171,7 @@ class CSocNetLog extends CAllSocNetLog
 
 				//echo "!2.1!=".htmlspecialcharsbx($strSql_tmp)."<br>";
 
-				$dbRes = $DB->Query($strSql_tmp, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$dbRes = $DB->Query($strSql_tmp);
 				$cnt = 0;
 				if ($arSqls["GROUPBY"] == '')
 				{
@@ -1180,7 +1182,7 @@ class CSocNetLog extends CAllSocNetLog
 				}
 				else
 				{
-					// ÒÎËÜÊÎ ÄËß MYSQL!!! ÄËß ORACLE ÄÐÓÃÎÉ ÊÎÄ
+					// Ð¢ÐžÐ›Ð¬ÐšÐž Ð”Ð›Ð¯ MYSQL!!! Ð”Ð›Ð¯ ORACLE Ð”Ð Ð£Ð“ÐžÐ™ ÐšÐžÐ”
 					$cnt = $dbRes->SelectedRowsCount();
 				}
 
@@ -1208,7 +1210,7 @@ class CSocNetLog extends CAllSocNetLog
 			}
 			//echo "!3!=".htmlspecialcharsbx($strSql)."<br>";
 
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			$dbRes->SetUserFields($USER_FIELD_MANAGER->GetUserFields("SONET_LOG"));
 		}
 
@@ -1390,8 +1392,8 @@ class CSocNetLog extends CAllSocNetLog
 			$cache->CleanDir("/sonet/log/" . (int)($ID / 1000) . "/" . $ID . "/comments/");
 		}
 
-		\Bitrix\Socialnetwork\Internals\EventService\Service::addEvent(
-			\Bitrix\Socialnetwork\Internals\EventService\EventDictionary::EVENT_SPACE_LIVEFEED_POST_DEL,
+		Service::addEvent(
+			EventDictionary::EVENT_SPACE_LIVEFEED_POST_DEL,
 			[
 				'SONET_LOG_ID' => (int)$ID,
 				'EVENT_ID' => $logFields['EVENT_ID'] ?? null,

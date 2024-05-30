@@ -2,6 +2,7 @@
 
 namespace Bitrix\Im\V2\Message;
 
+use Bitrix\Im\Model\ChatTable;
 use Bitrix\Im\Model\EO_MessageUnread;
 use Bitrix\Im\Model\EO_MessageUnread_Collection;
 use Bitrix\Im\Model\MessageTable;
@@ -16,7 +17,9 @@ use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Im\V2\Relation;
 use Bitrix\Im\V2\RelationCollection;
 use Bitrix\Im\V2\Service\Context;
+use Bitrix\Main\Application;
 use Bitrix\Main\Data\Cache;
+use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\Type\DateTime;
@@ -47,6 +50,7 @@ class CounterService
 		'CHAT_UNREAD' => [],
 		'LINES' => [],
 		'COPILOT' => [],
+		'CHANNEL_COMMENT' => [],
 	];
 
 	protected static array $staticCounterCache = [];
@@ -76,14 +80,19 @@ class CounterService
 		return $totalUnreadMessages + count($unreadUnmutedChats);
 	}
 
-	public function getByChatForEachUsers(int $chatId, ?array $userIds = null): array
+	public function getByChatForEachUsers(int $chatId, ?array $userIds = null, ?int $maxCounter = null): array
 	{
 		$result = [];
 		$countForEachUsers = $this->getCountUnreadMessagesByChatIdForEachUsers($chatId, $userIds);
 
 		foreach ($countForEachUsers as $countForUser)
 		{
-			$result[(int)$countForUser['USER_ID']] = (int)$countForUser['COUNT'];
+			$count = (int)$countForUser['COUNT'];
+			if (isset($maxCounter))
+			{
+				$count = min($maxCounter, $count);
+			}
+			$result[(int)$countForUser['USER_ID']] = $count;
 		}
 
 		if ($userIds === null)
@@ -267,6 +276,22 @@ class CounterService
 		static::clearCache($this->getContext()->getUserId());
 	}
 
+	public static function deleteByChatIdForAll(int $chatId): void
+	{
+		MessageUnreadTable::deleteByFilter(['=CHAT_ID' => $chatId]);
+	}
+
+	public function deleteByChatIds(array $chatIds): void
+	{
+		if (empty($chatIds))
+		{
+			return;
+		}
+
+		MessageUnreadTable::deleteByFilter(['=CHAT_ID' => $chatIds, '=USER_ID' => $this->getContext()->getUserId()]);
+		static::clearCache($this->getContext()->getUserId());
+	}
+
 	/*public function deleteByChatIdForAll(int $chatId): void
 	{
 		MessageUnreadTable::deleteByFilter(['=CHAT_ID' => $chatId]);
@@ -284,6 +309,34 @@ class CounterService
 
 		MessageUnreadTable::deleteByFilter($filter);
 		static::clearCache($this->getContext()->getUserId());
+	}
+
+	public static function getChildrenWithCounters(Chat $parentChat, ?int $userId = null): array
+	{
+		$parentId = $parentChat->getId();
+		if (!$parentId)
+		{
+			return [];
+		}
+
+		$query = MessageUnreadTable::query()
+			->setSelect(['CHAT_ID'])
+			->where('PARENT_ID', $parentId)
+			->addGroup('CHAT_ID')
+		;
+
+		if (isset($userId))
+		{
+			$query->where('USER_ID', $userId);
+		}
+
+		$parentIds = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$parentIds[] = isset($row['CHAT_ID']) ? (int)$row['CHAT_ID'] : 0;
+		}
+
+		return $parentIds;
 	}
 
 	public function addForEachUser(Message $message, RelationCollection $relations): void
@@ -534,6 +587,7 @@ class CounterService
 	protected function countUnreadMessages(?array $chatIds = null): void
 	{
 		$counters = $this->getCountersForEachChat($chatIds);
+		$chatIdToParentIdMap = $this->getMapChatIdToParentId($counters);
 
 		foreach ($counters as $counter)
 		{
@@ -554,6 +608,10 @@ class CounterService
 			else if ($counter['CHAT_TYPE'] === Chat::IM_TYPE_COPILOT)
 			{
 				$this->setFromCopilot($chatId, $count);
+			}
+			else if ($counter['CHAT_TYPE'] === Chat::IM_TYPE_COMMENT)
+			{
+				$this->setFromComment($chatId, $chatIdToParentIdMap[$chatId] ?? null, $count);
 			}
 			else
 			{
@@ -598,11 +656,63 @@ class CounterService
 		$this->counters['COPILOT'][$id] = $count;
 	}
 
+	protected function setFromComment(int $id, ?int $parentId, int $count): void
+	{
+		if ($parentId === null || $parentId === 0)
+		{
+			return;
+		}
+
+		$this->counters['TYPE']['ALL'] += $count;
+		$this->counters['CHANNEL_COMMENT'][$parentId][$id] = $count;
+	}
+
 	protected function setFromChat(int $id, int $count): void
 	{
 		$this->counters['TYPE']['ALL'] += $count;
 		$this->counters['TYPE']['CHAT'] += $count;
 		$this->counters['CHAT'][$id] = $count;
+	}
+
+	protected function getMapChatIdToParentId(array $counters): array
+	{
+		$commentChatIds = $this->getCommentChatIdsOnly($counters);
+
+		if (empty($commentChatIds))
+		{
+			return [];
+		}
+
+		$raw = ChatTable::query()
+			->setSelect(['ID', 'PARENT_ID'])
+			->whereIn('ID', $commentChatIds)
+			->fetchAll()
+		;
+		$result = [];
+
+		foreach ($raw as $row)
+		{
+			$chatId = (int)$row['ID'];
+			$parentId = (int)($row['PARENT_ID'] ?? 0);
+			$result[$chatId] = $parentId;
+		}
+
+		return $result;
+	}
+
+	protected function getCommentChatIdsOnly(array $counters): array
+	{
+		$result = [];
+
+		foreach ($counters as $counter)
+		{
+			if ($counter['CHAT_TYPE'] === Chat::IM_TYPE_COMMENT)
+			{
+				$result[] = (int)$counter['CHAT_ID'];
+			}
+		}
+
+		return $result;
 	}
 
 	protected function getUnreadChats(?bool $isMuted = null): array
@@ -725,6 +835,7 @@ class CounterService
 			'USER_ID' => $relation->getUserId(),
 			'CHAT_TYPE' => $relation->getMessageType(),
 			'IS_MUTED' => $relation->getNotifyBlock() ? 'Y' : 'N',
+			'PARENT_ID' => $message->getChat()->getParentChatId() ?? 0,
 		];
 	}
 }

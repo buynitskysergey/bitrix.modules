@@ -104,11 +104,12 @@ class ReactionService
 	private function sendNotification(ReactionItem $reaction): void
 	{
 		$authorId = $this->message->getAuthorId();
+		$chat = Chat::getInstance($reaction->getChatId());
 		if (
 			$authorId === 0
 			|| $authorId === $this->getContext()->getUserId()
-			|| Chat::getInstance($reaction->getChatId())->getEntityType() === 'LIVECHAT'
-			|| !Chat::getInstance($reaction->getChatId())->hasAccess($authorId)
+			|| $chat->getEntityType() === 'LIVECHAT'
+			|| !$chat->hasAccess($authorId)
 		)
 		{
 			return;
@@ -158,6 +159,23 @@ class ReactionService
 					'#DIALOG_ID#' => $chat->getDialogContextId(),
 					'#MESSAGE_ID#' => $this->message->getMessageId(),
 					'#QOUTED_MESSAGE#' => $this->message->getForPush(),
+					'#REACTION_NAME#' => $reaction->getLocName($languageId),
+				],
+				$languageId);
+		}
+
+		if ($chat instanceof Chat\CommentChat)
+		{
+			$parentChat = $chat->getParentChat();
+
+			return fn (?string $languageId = null) => Loc::getMessage(
+				"{$code}_COMMENT",
+				[
+					'#CONTEXT_START#' => "[CONTEXT={$parentChat->getDialogId()}/{$chat->getParentMessageId()}]",
+					'#CONTEXT_END#' => "[/CONTEXT]",
+					'#QOUTED_MESSAGE#' => $this->message->getForPush(),
+					'#CHAT_ID#' => $parentChat->getChatId(),
+					'#CHAT_TITLE#' => $parentChat->getTitle(),
 					'#REACTION_NAME#' => $reaction->getLocName($languageId),
 				],
 				$languageId);

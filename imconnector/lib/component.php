@@ -19,7 +19,7 @@ class Component
 	 */
 	static public function getJsLangMessageSetting()
 	{
-		return '<script type="text/javascript">
+		return '<script>
 			BX.message({
 				IMCONNECTOR_COMPONENT_SETTINGS_CONFIRM_DISABLE_TITLE: \'' . GetMessageJS('IMCONNECTOR_COMPONENT_SETTINGS_CONFIRM_DISABLE_TITLE') . '\',
 				IMCONNECTOR_COMPONENT_SETTINGS_CONFIRM_DISABLE: \'' . GetMessageJS('IMCONNECTOR_COMPONENT_SETTINGS_CONFIRM_DISABLE') . '\',

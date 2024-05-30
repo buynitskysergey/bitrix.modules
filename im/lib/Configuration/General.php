@@ -556,6 +556,11 @@ class General extends Base
 			{
 				$decodedSettings[$decodedName] = $value;
 			}
+
+			if ($decodedName === 'backgroundImageId')
+			{
+				$decodedSettings[$decodedName] = (int)$value;
+			}
 		}
 
 		return $decodedSettings;

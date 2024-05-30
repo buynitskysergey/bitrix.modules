@@ -43,11 +43,17 @@ class Service
 	 */
 	public static function addEvent(string $type, array $data): void
 	{
+		// TODO: spaces stub
+		return;
+
 		self::getInstance()->storeEvent($type, $data);
 	}
 
 	public static function proceedEvents(): void
 	{
+		// TODO: spaces stub
+		return;
+
 		if ((EventCollection::getInstance())->isEmpty())
 		{
 			Application::getConnection()->unlock(self::LOCK_KEY);
@@ -57,6 +63,7 @@ class Service
 		$service = self::getInstance();
 
 		(new EventService\Processors\WorkGroupEventProcessor())->process();
+		(new EventService\Processors\SpaceEventPreProcessor())->process();
 		(new EventService\Processors\SpaceEventProcessor())->process();
 
 		$service->done();

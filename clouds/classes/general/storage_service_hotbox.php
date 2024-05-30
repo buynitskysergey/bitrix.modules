@@ -145,7 +145,7 @@ class CCloudStorageService_HotBox extends CCloudStorageService_S3
 	*/
 	function GetFileSRC($arBucket, $arFile, $encoded = true)
 	{
-		$proto = CMain::IsHTTPS()? "https": "http";
+		$proto = \Bitrix\Main\Context::getCurrent()->getRequest()->isHttps()? "https": "http";
 
 		if($arBucket["CNAME"] != "")
 		{
@@ -199,5 +199,20 @@ class CCloudStorageService_HotBox extends CCloudStorageService_S3
 			return false;
 
 		return parent::DeleteBucket($arBucket);
+	}
+	/**
+	 * @param int $status
+	 * @param string $result
+	 * @return bool
+	*/
+	protected function checkForTokenExpiration($status, $result)
+	{
+		if ($status == 400 && mb_strpos($result, 'ExpiredToken') !== false)
+			return true;
+		if ($status == 400 && mb_strpos($result, 'token is malformed') !== false)
+			return true;
+		if ($status == 403 && mb_strpos($result, 'The AWS Access Key Id you provided does not exist in our records.') !== false)
+			return true;
+		return false;
 	}
 }

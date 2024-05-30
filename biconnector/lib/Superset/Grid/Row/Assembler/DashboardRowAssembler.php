@@ -34,6 +34,9 @@ class DashboardRowAssembler extends RowAssembler
 			new Field\ActionFieldAssembler([
 				'EDIT_URL',
 			]),
+			new Field\TagFieldAssembler([
+				'TAGS',
+			]),
 			new Field\BasedOnFieldAssembler([
 				'SOURCE_ID',
 			]),

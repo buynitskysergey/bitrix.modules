@@ -208,7 +208,6 @@ class DealProductRow
 				'PARENT' => self::getParentDescription($helper),
 				'SUPERPARENT' => self::getSuperParentDescription(),
 				'SUPERSUPERPARENT' => self::getSuperSuperParentDescription(),
-				'INSTOCK' => self::getInstockDescription($helper),
 			],
 		];
 
@@ -225,33 +224,6 @@ class DealProductRow
 			$fieldInfo['FIELD_DESCRIPTION_FULL'] = $messages['CRM_BIC_DEAL_PRODUCT_ROW_FIELD_' . $fieldCode . '_FULL'] ?? '';
 		}
 		unset($fieldInfo);
-	}
-
-	private static function getInstockDescription(\Bitrix\Main\DB\SqlHelper $helper): array
-	{
-		if (
-			Loader::includeModule('catalog')
-			&& Loader::includeModule('sale')
-		)
-		{
-			return [
-				'FIELD_NAME' =>
-					'CONVERT(' .
-					$helper->getIsNullFunction('(SELECT SUM(CDE.AMOUNT) FROM b_catalog_docs_element as CDE LEFT JOIN b_catalog_store_docs CSD ON CSD.ID = CDE.DOC_ID WHERE CDE.ELEMENT_ID = PR.PRODUCT_ID AND CSD.DOC_TYPE IN (\'A\', \'S\') AND CSD.STATUS = \'Y\' AND CSD.DATE_STATUS <= (SELECT CREATED_TIME FROM b_crm_deal_stage_history CDSH WHERE CDSH.OWNER_ID = PR.OWNER_ID AND CDSH.STAGE_ID=\'WON\') AND D.STAGE_ID = \'WON\')', 0) .
-					' - ' .
-					$helper->getIsNullFunction('(SELECT SUM(SB.QUANTITY) FROM b_sale_basket as SB LEFT JOIN b_sale_order_dlv_basket SODB ON SODB.BASKET_ID = SB.ID LEFT JOIN b_sale_order_delivery SOD ON SOD.ID = SODB.ORDER_DELIVERY_ID LEFT JOIN b_crm_shipment_realization CSR ON CSR.SHIPMENT_ID = SOD.ID WHERE SB.PRODUCT_ID = PR.PRODUCT_ID AND SOD.DEDUCTED = \'Y\' AND SOD.DATE_DEDUCTED <= (SELECT CREATED_TIME FROM b_crm_deal_stage_history CDSH WHERE CDSH.OWNER_ID = PR.OWNER_ID AND CDSH.STAGE_ID=\'WON\') AND CSR.IS_REALIZATION = \'Y\' AND D.STAGE_ID = \'WON\')', 0) .
-					', DECIMAL(18,4))'
-				,
-				'FIELD_TYPE' => 'double',
-				'TABLE_ALIAS' => 'D',
-				'LEFT_JOIN' => 'LEFT JOIN b_crm_deal D ON D.ID = PR.OWNER_ID',
-			];
-		}
-
-		return [
-			'FIELD_NAME' => 'null',
-			'FIELD_TYPE' => 'double',
-		];
 	}
 
 	private static function getParentDescription(\Bitrix\Main\DB\SqlHelper $helper): array

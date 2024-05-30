@@ -77,6 +77,24 @@ class Promotion
 			"DEVICE_TYPE" => self::DEVICE_TYPE_ALL
 		];
 
+		$result[] = [
+			"ID" => 'im:channel-create:04032024:all',
+			"USER_TYPE" => self::USER_TYPE_ALL,
+			"DEVICE_TYPE" => self::DEVICE_TYPE_ALL
+		];
+
+		$result[] = [
+			"ID" => 'im:add-users-to-copilot-chat:09042024:all',
+			"USER_TYPE" => self::USER_TYPE_ALL,
+			"DEVICE_TYPE" => self::DEVICE_TYPE_ALL
+		];
+
+		$result[] = [
+			"ID" => 'im:change-role-copilot-chat:09042024:all',
+			"USER_TYPE" => self::USER_TYPE_ALL,
+			"DEVICE_TYPE" => self::DEVICE_TYPE_ALL
+		];
+
 		if (!\Bitrix\Im\Settings::isLegacyChatActivated())
 		{
 			$result[] = [

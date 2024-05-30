@@ -54,12 +54,18 @@ class DepartmentRepository
 
 	public function getAllChildDepartmentsIds($depId)
 	{
-		$departments = (array)\CIntranetUtils::getSubDepartments($depId);
+		$departments = (array) \CIntranetUtils::getSubDepartments($depId);
+		$allDepartments = $departments;
+
 		foreach ($departments as $childId)
 		{
-			$departments = array_merge($departments, $this->getAllChildDepartmentsIds($childId));
+			$childDepartments = $this->getAllChildDepartmentsIds($childId);
+			$allDepartments = array_merge($allDepartments, $childDepartments);
 		}
-		return array_map('intval', $departments);
+
+		$allDepartments = array_unique($allDepartments);
+
+		return array_map('intval', $allDepartments);
 	}
 
 	public function getDirectParentIdsByDepartmentId($departmentId)
@@ -135,7 +141,9 @@ class DepartmentRepository
 	public function getUsersOfDepartment($depId)
 	{
 		$structure = \CIntranetUtils::getStructure();
+
 		$employees = array_map('intval', (array) ($structure['DATA'][$depId]['EMPLOYEES'] ?? null));
+
 		return empty($employees) ? [] : $employees;
 	}
 
