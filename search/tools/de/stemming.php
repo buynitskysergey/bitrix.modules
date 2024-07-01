@@ -215,6 +215,6 @@ function stemming_de($word)
 
 function stemming_upper_de($sText)
 {
-	return str_replace(array("Ä", "Ö", "Ü"), array("A", "O", "U"), ToUpper($sText, "de"));
+	return str_replace(array("Ä", "Ö", "Ü"), array("A", "O", "U"), mb_strtoupper($sText));
 }
 ?>

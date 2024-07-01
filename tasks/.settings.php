@@ -1,14 +1,18 @@
 <?php
-return [
+
+use Bitrix\Tasks\Integration\UI\EntitySelector;
+
+return array(
 	'controllers' => [
 		'value' => [
 			'namespaces' => [
 				'\\Bitrix\\Tasks\\Rest\\Controllers' => 'api',
 				'\\Bitrix\\Tasks\\Scrum\\Controllers' => 'scrum',
+				'\\Bitrix\\Tasks\\Flow\\Controllers' => 'flow',
 			],
 			'defaultNamespace' => '\\Bitrix\\Tasks\\Rest\\Controllers',
 			'restIntegration' => [
-				'enabled' => true,
+				'enabled'=>true
 			],
 		],
 		'readonly' => true,
@@ -26,49 +30,56 @@ return [
 					'entityId' => 'task',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\TaskProvider',
+						'className' => EntitySelector\TaskProvider::class,
 					],
 				],
 				[
 					'entityId' => 'task-tag',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\TaskTagProvider',
+						'className' => EntitySelector\TaskTagProvider::class,
 					],
 				],
 				[
 					'entityId' => 'task-template',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\TaskTemplateProvider',
+						'className' => EntitySelector\TaskTemplateProvider::class,
 					],
 				],
 				[
 					'entityId' => 'scrum-user',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\ScrumUserProvider',
+						'className' => EntitySelector\ScrumUserProvider::class,
 					],
 				],
 				[
 					'entityId' => 'sprint-selector',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\SprintSelectorProvider',
+						'className' => EntitySelector\SprintSelectorProvider::class,
 					],
 				],
 				[
 					'entityId' => 'epic-selector',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\EpicSelectorProvider',
+						'className' => EntitySelector\EpicSelectorProvider::class,
 					],
 				],
 				[
 					'entityId' => 'template-tag',
 					'provider' => [
 						'moduleId' => 'tasks',
-						'className' => '\\Bitrix\\Tasks\\Integration\\UI\\EntitySelector\\TemplateTagProvider',
+						'className' => EntitySelector\TemplateTagProvider::class,
+					],
+				],
+				[
+					'entityId' => 'flow',
+					'provider' => [
+						'moduleId' => 'tasks',
+						'className' => EntitySelector\FlowProvider::class,
 					],
 				],
 			],
@@ -88,4 +99,23 @@ return [
 		],
 		'readonly' => true,
 	],
-];
+	'services' => [
+		'value' => [
+			'tasks.flow.command.addCommandHandler' => [
+				'className' => \Bitrix\Tasks\Flow\Control\Command\AddCommandHandler::class,
+			],
+			'tasks.flow.command.updateCommandHandler' => [
+				'className' => \Bitrix\Tasks\Flow\Control\Command\UpdateCommandHandler::class,
+			],
+			'tasks.flow.command.deleteCommandHandler' => [
+				'className' => \Bitrix\Tasks\Flow\Control\Command\DeleteCommandHandler::class,
+			],
+			'tasks.flow.socialnetwork.project.service' => [
+				'className' => \Bitrix\Tasks\Flow\Integration\Socialnetwork\GroupService::class,
+			],
+			'tasks.flow.kanban.service' => [
+				'className' => \Bitrix\Tasks\Flow\Kanban\KanbanService::class,
+			]
+		],
+	],
+);

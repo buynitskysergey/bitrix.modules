@@ -103,7 +103,7 @@ class Stream implements Tabable
 		$tabs = [
 			[
 				'id' => 'stream',
-				'title' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM'),
+				'title' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM2'),
 				'component' => [
 					'name' => 'JSStackComponent',
 					'componentCode' => 'web: ' . $newsWebPath,
@@ -112,7 +112,7 @@ class Stream implements Tabable
 						'settings' => [
 							'titleParams' => [
 								'useLargeTitleMode' => true,
-								'text' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM'),
+								'text' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM2'),
 							],
 							'page' => [
 								'preload' => false,
@@ -307,7 +307,7 @@ class Stream implements Tabable
 
 	public function getTitle()
 	{
-		return Loc::getMessage("TAB_NAME_NEWS");
+		return Loc::getMessage("TAB_NAME_NEWS2");
 	}
 
 	public function setContext($context)
@@ -317,7 +317,7 @@ class Stream implements Tabable
 
 	public function getShortTitle()
 	{
-		return Loc::getMessage("TAB_NAME_NEWS_SHORT");
+		return Loc::getMessage("TAB_NAME_NEWS_SHORT2");
 	}
 
 	public function getId()

@@ -76,7 +76,7 @@ class StringType extends BaseType
 			'REGEXP' => $regExp,
 			'MIN_LENGTH' => $min,
 			'MAX_LENGTH' => $max,
-			'DEFAULT_VALUE' => is_array($userField['SETTINGS']) ? $userField['SETTINGS']['DEFAULT_VALUE'] : '',
+			'DEFAULT_VALUE' => is_array($userField['SETTINGS']) ? ($userField['SETTINGS']['DEFAULT_VALUE'] ?? '') : '',
 		];
 	}
 
@@ -190,7 +190,7 @@ class StringType extends BaseType
 	 * array('CUserTypeString', 'onBeforeGetPublicView')
 	 * );
 	 * You can do the same for editing:
-	 * onBeforeGetPublicEdit (EDIT_COMPONENT_NAME è EDIT_COMPONENT_TEMPLATE)
+	 * onBeforeGetPublicEdit (EDIT_COMPONENT_NAME Ð¸ EDIT_COMPONENT_TEMPLATE)
 	 */
 	/*
 		public static function onBeforeGetPublicView($event)

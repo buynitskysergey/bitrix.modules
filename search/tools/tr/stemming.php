@@ -8,5 +8,5 @@ function stemming_letter_tr()
 
 function stemming_upper_tr($sText)
 {
-	return str_replace(array("İ"), array("I"), ToUpper($sText));
+	return str_replace(array("İ"), array("I"), mb_strtoupper($sText));
 }

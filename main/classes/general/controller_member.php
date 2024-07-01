@@ -2,7 +2,7 @@
 ##############################################
 # Bitrix Site Manager                        #
 # Copyright (c) 2002-2007 Bitrix             #
-# http://www.bitrixsoft.com                  #
+# https://www.bitrixsoft.com                 #
 # mailto:sources@bitrixsoft.com              #
 ##############################################
 IncludeModuleLangFile(__FILE__);
@@ -24,9 +24,9 @@ class CControllerClient
 
 		$prefix = COption::GetOptionString("main", "auth_controller_prefix", "controller");
 		if(
-			($prefix!='' && mb_substr(mb_strtolower($arParams["LOGIN"]), 0, mb_strlen($prefix) + 1) == $prefix.'\\')
+			($prefix!='' && str_starts_with(mb_strtolower($arParams["LOGIN"]), $prefix . '\\'))
 			||
-			($prefix=='' && strpos($arParams["LOGIN"], "\\") === false)
+			($prefix=='' && !str_contains($arParams["LOGIN"], "\\"))
 		)
 		{
 			$site = $prefix;
@@ -87,7 +87,7 @@ class CControllerClient
 			$password = $arParams["PASSWORD"];
 
 			$url = mb_strtolower(trim($site, " \t\r\n./"));
-			if(mb_substr($url, 0, 7) != "http://" && mb_substr($url, 0, 8) != "https://")
+			if(!str_starts_with($url, "http://") && !str_starts_with($url, "https://"))
 				$url = array("http://".$url, "https://".$url);
 
 			$dbr_mem = CControllerMember::GetList(
@@ -122,7 +122,7 @@ class CControllerClient
 		}
 
 		////////////////////////////////////////////////////////
-		/// сравнивать не просто логин, а полностью\логин
+		/// СЃСЂР°РІРЅРёРІР°С‚СЊ РЅРµ РїСЂРѕСЃС‚Рѕ Р»РѕРіРёРЅ, Р° РїРѕР»РЅРѕСЃС‚СЊСЋ\Р»РѕРіРёРЅ
 		/////////////////////////
 		if(is_array($arUser) && mb_strtolower($arUser['LOGIN']) == mb_strtolower($login))
 		{
@@ -1016,15 +1016,15 @@ class __CControllerPacket
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-// Базовый класс для классов типа Request:
+// Р‘Р°Р·РѕРІС‹Р№ РєР»Р°СЃСЃ РґР»СЏ РєР»Р°СЃСЃРѕРІ С‚РёРїР° Request:
 //
-// Для использования на контроллере:
-// CControllerServerRequestTo - Класс для отправки запроса клиенту
-// CControllerServerRequestFrom - Класс для получения запроса от клиента
+// Р”Р»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РЅР° РєРѕРЅС‚СЂРѕР»Р»РµСЂРµ:
+// CControllerServerRequestTo - РљР»Р°СЃСЃ РґР»СЏ РѕС‚РїСЂР°РІРєРё Р·Р°РїСЂРѕСЃР° РєР»РёРµРЅС‚Сѓ
+// CControllerServerRequestFrom - РљР»Р°СЃСЃ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ Р·Р°РїСЂРѕСЃР° РѕС‚ РєР»РёРµРЅС‚Р°
 //
-// Для использования на клиенте:
-// CControllerClientRequestTo - Класс для отправки запроса на сервер
-// CControllerClientRequestFrom - Класс для получения запроса от сервера
+// Р”Р»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РЅР° РєР»РёРµРЅС‚Рµ:
+// CControllerClientRequestTo - РљР»Р°СЃСЃ РґР»СЏ РѕС‚РїСЂР°РІРєРё Р·Р°РїСЂРѕСЃР° РЅР° СЃРµСЂРІРµСЂ
+// CControllerClientRequestFrom - РљР»Р°СЃСЃ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ Р·Р°РїСЂРѕСЃР° РѕС‚ СЃРµСЂРІРµСЂР°
 ///////////////////////////////////////////////////////////////////////////////////////////
 class __CControllerPacketRequest extends __CControllerPacket
 {
@@ -1032,10 +1032,10 @@ class __CControllerPacketRequest extends __CControllerPacket
 	protected $hostname = '';
 
 	///////////////////////////////////
-	//Для работе в классах получающих результаты (CControllerClientRequestFrom, CControllerServerRequestFrom):
+	//Р”Р»СЏ СЂР°Р±РѕС‚Рµ РІ РєР»Р°СЃСЃР°С… РїРѕР»СѓС‡Р°СЋС‰РёС… СЂРµР·СѓР»СЊС‚Р°С‚С‹ (CControllerClientRequestFrom, CControllerServerRequestFrom):
 	///////////////////////////////////
 
-	// заполняет объект переменными, пришедшими в $_REQUEST
+	// Р·Р°РїРѕР»РЅСЏРµС‚ РѕР±СЉРµРєС‚ РїРµСЂРµРјРµРЅРЅС‹РјРё, РїСЂРёС€РµРґС€РёРјРё РІ $_REQUEST
 	public function InitFromRequest()
 	{
 		$this->member_id = $_REQUEST['member_id'];
@@ -1092,7 +1092,7 @@ class __CControllerPacketRequest extends __CControllerPacket
 	}
 
 	///////////////////////////////////////
-	// Для работы в классах отправляющих запросы (CControllerClientRequestTo, CControllerServerRequestTo):
+	// Р”Р»СЏ СЂР°Р±РѕС‚С‹ РІ РєР»Р°СЃСЃР°С… РѕС‚РїСЂР°РІР»СЏСЋС‰РёС… Р·Р°РїСЂРѕСЃС‹ (CControllerClientRequestTo, CControllerServerRequestTo):
 	///////////////////////////////////////
 
 	/**
@@ -1160,20 +1160,20 @@ class __CControllerPacketRequest extends __CControllerPacket
 
 		$server_port = 80;
 		$server_name = mb_strtolower(trim($url, "/ \r\n\t"));
-		if (mb_substr($server_name, 0, 7) == 'http://')
+		if (str_starts_with($server_name, 'http://'))
 		{
-			$server_name = mb_substr($server_name, 7);
+			$server_name = substr($server_name, 7);
 		}
-		elseif (mb_substr($server_name, 0, 8) == 'https://')
+		elseif (str_starts_with($server_name, 'https://'))
 		{
-			$server_name = mb_substr($server_name, 8);
+			$server_name = substr($server_name, 8);
 			$server_port = 443;
 		}
 
 		if (preg_match('/.+:([0-9]+)$/', $server_name, $matches))
 		{
 			$server_port = $matches[1];
-			$server_name = mb_substr($server_name, 0, 0 - mb_strlen($server_port) - 1);
+			$server_name = substr($server_name, 0, 0 - strlen($server_port) - 1);
 		}
 
 		$proxy_url = CPageOption::GetOptionString("main", "controller_proxy_url", "");
@@ -1186,7 +1186,7 @@ class __CControllerPacketRequest extends __CControllerPacket
 			$bUseProxy = ($proxy_url <> '' && $proxy_port <> '');
 		}
 
-		// соединяемся с удаленным сервером
+		// СЃРѕРµРґРёРЅСЏРµРјСЃСЏ СЃ СѓРґР°Р»РµРЅРЅС‹Рј СЃРµСЂРІРµСЂРѕРј
 		if ($bUseProxy)
 		{
 			$proxy_port = intval($proxy_port);
@@ -1304,15 +1304,15 @@ class __CControllerPacketRequest extends __CControllerPacket
 }
 
 /////////////////////////////////////////////////////////
-// Базовый класс для классов типа Response:
+// Р‘Р°Р·РѕРІС‹Р№ РєР»Р°СЃСЃ РґР»СЏ РєР»Р°СЃСЃРѕРІ С‚РёРїР° Response:
 //
-// Для использования на контроллере:
-// CControllerServerResponseFrom - Класс для получения ответа клиента на сервере
-// CControllerServerResponseTo - Класс для отправки результатов выполнения запроса назад на клиента
+// Р”Р»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РЅР° РєРѕРЅС‚СЂРѕР»Р»РµСЂРµ:
+// CControllerServerResponseFrom - РљР»Р°СЃСЃ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ РѕС‚РІРµС‚Р° РєР»РёРµРЅС‚Р° РЅР° СЃРµСЂРІРµСЂРµ
+// CControllerServerResponseTo - РљР»Р°СЃСЃ РґР»СЏ РѕС‚РїСЂР°РІРєРё СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ РІС‹РїРѕР»РЅРµРЅРёСЏ Р·Р°РїСЂРѕСЃР° РЅР°Р·Р°Рґ РЅР° РєР»РёРµРЅС‚Р°
 //
-// Для использования на клиенте:
-// CControllerClientResponseFrom - Класс для получения ответа контроллера на клиенте
-// CControllerClientResponseTo - Класс для отправки результатов выполнения запроса назад на контроллер
+// Р”Р»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РЅР° РєР»РёРµРЅС‚Рµ:
+// CControllerClientResponseFrom - РљР»Р°СЃСЃ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ РѕС‚РІРµС‚Р° РєРѕРЅС‚СЂРѕР»Р»РµСЂР° РЅР° РєР»РёРµРЅС‚Рµ
+// CControllerClientResponseTo - РљР»Р°СЃСЃ РґР»СЏ РѕС‚РїСЂР°РІРєРё СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ РІС‹РїРѕР»РЅРµРЅРёСЏ Р·Р°РїСЂРѕСЃР° РЅР°Р·Р°Рґ РЅР° РєРѕРЅС‚СЂРѕР»Р»РµСЂ
 //////////////////////////////////////////////////////////
 class __CControllerPacketResponse extends __CControllerPacket
 {
@@ -1336,7 +1336,7 @@ class __CControllerPacketResponse extends __CControllerPacket
 	}
 
 	//////////////////////////////////////////////
-	// Методы для работы в классах принимающих результат (CControllerServerResponseFrom, CControllerClientResponseFrom):
+	// РњРµС‚РѕРґС‹ РґР»СЏ СЂР°Р±РѕС‚С‹ РІ РєР»Р°СЃСЃР°С… РїСЂРёРЅРёРјР°СЋС‰РёС… СЂРµР·СѓР»СЊС‚Р°С‚ (CControllerServerResponseFrom, CControllerClientResponseFrom):
 	//////////////////////////////////////////////
 
 	/**
@@ -1360,13 +1360,13 @@ class __CControllerPacketResponse extends __CControllerPacket
 		parent::Sign($this->status, $this->text, serialize($this->arParameters), $this->secret_id);
 	}
 
-	// Возвращает успешно ли выполнился запрос по статус его ответа
+	// Р’РѕР·РІСЂР°С‰Р°РµС‚ СѓСЃРїРµС€РЅРѕ Р»Рё РІС‹РїРѕР»РЅРёР»СЃСЏ Р·Р°РїСЂРѕСЃ РїРѕ СЃС‚Р°С‚СѓСЃ РµРіРѕ РѕС‚РІРµС‚Р°
 	function OK()
 	{
-		return (mb_substr($this->status, 0, 1) == "2");
+		return (str_starts_with($this->status, "2"));
 	}
 
-	// Разбирает строку ответа по полям объекта
+	// Р Р°Р·Р±РёСЂР°РµС‚ СЃС‚СЂРѕРєСѓ РѕС‚РІРµС‚Р° РїРѕ РїРѕР»СЏРј РѕР±СЉРµРєС‚Р°
 	function ParseResult($result)
 	{
 		$ar_result = array();
@@ -1413,10 +1413,10 @@ class __CControllerPacketResponse extends __CControllerPacket
 
 
 	///////////////////////////////////////
-	// Базовые методы для использования в классах отправляющих результат (CControllerServerResponseTo, CControllerClientResponseTo):
+	// Р‘Р°Р·РѕРІС‹Рµ РјРµС‚РѕРґС‹ РґР»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РІ РєР»Р°СЃСЃР°С… РѕС‚РїСЂР°РІР»СЏСЋС‰РёС… СЂРµР·СѓР»СЊС‚Р°С‚ (CControllerServerResponseTo, CControllerClientResponseTo):
 	///////////////////////////////////////
 
-	// возвращает отформатированную строку ответа в формате понятном для приема на сервере, с подписью
+	// РІРѕР·РІСЂР°С‰Р°РµС‚ РѕС‚С„РѕСЂРјР°С‚РёСЂРѕРІР°РЅРЅСѓСЋ СЃС‚СЂРѕРєСѓ РѕС‚РІРµС‚Р° РІ С„РѕСЂРјР°С‚Рµ РїРѕРЅСЏС‚РЅРѕРј РґР»СЏ РїСЂРёРµРјР° РЅР° СЃРµСЂРІРµСЂРµ, СЃ РїРѕРґРїРёСЃСЊСЋ
 	function GetResponseBody($log = false)
 	{
 		$result = "status=".urlencode($this->status).
@@ -1444,7 +1444,7 @@ class __CControllerPacketResponse extends __CControllerPacket
 		return $result;
 	}
 
-	// отправляет ответ обратно
+	// РѕС‚РїСЂР°РІР»СЏРµС‚ РѕС‚РІРµС‚ РѕР±СЂР°С‚РЅРѕ
 	function Send()
 	{
 		if ($this->isDebugEnabled())
@@ -1461,7 +1461,7 @@ class __CControllerPacketResponse extends __CControllerPacket
 	}
 }
 
-// Класс для отправки запроса на сервер
+// РљР»Р°СЃСЃ РґР»СЏ РѕС‚РїСЂР°РІРєРё Р·Р°РїСЂРѕСЃР° РЅР° СЃРµСЂРІРµСЂ
 class CControllerClientRequestTo extends __CControllerPacketRequest
 {
 	var $debug_const = "CONTROLLER_CLIENT_DEBUG";
@@ -1508,7 +1508,7 @@ class CControllerClientRequestTo extends __CControllerPacketRequest
 }
 
 
-// Класс получения результата на клиенте (от контроллера)
+// РљР»Р°СЃСЃ РїРѕР»СѓС‡РµРЅРёСЏ СЂРµР·СѓР»СЊС‚Р°С‚Р° РЅР° РєР»РёРµРЅС‚Рµ (РѕС‚ РєРѕРЅС‚СЂРѕР»Р»РµСЂР°)
 class CControllerClientResponseFrom extends __CControllerPacketResponse
 {
 	var $debug_const = "CONTROLLER_CLIENT_DEBUG";
@@ -1554,7 +1554,7 @@ class CControllerClientRequestFrom extends __CControllerPacketRequest
 }
 
 
-// Класс для отсылки ответа на сервер
+// РљР»Р°СЃСЃ РґР»СЏ РѕС‚СЃС‹Р»РєРё РѕС‚РІРµС‚Р° РЅР° СЃРµСЂРІРµСЂ
 class CControllerClientResponseTo extends __CControllerPacketResponse
 {
 	var $debug_const = "CONTROLLER_CLIENT_DEBUG";

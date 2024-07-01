@@ -49,11 +49,6 @@ $requestParams = ($foundQMark !== false? mb_substr($_SERVER["REQUEST_URI"], $fou
 //decode only filename, not parameters
 $requestPage = urldecode($requestUriWithoutParams);
 
-if(!defined("BX_UTF") && CUtil::DetectUTF8($_SERVER["REQUEST_URI"]))
-{
-	$requestPage = \Bitrix\Main\Text\Encoding::convertEncoding($requestPage, "utf-8", (defined("BX_DEFAULT_CHARSET")? BX_DEFAULT_CHARSET : "windows-1251"));
-}
-
 $requestUri = $requestPage.$requestParams;
 
 $io = CBXVirtualIo::GetInstance();
@@ -128,7 +123,7 @@ if (!$uri->isPathTraversal())
 	{
 		if(preg_match($val["CONDITION"], $requestUri))
 		{
-			if ($val["RULE"] <> '')
+			if (!empty($val["RULE"]))
 				$url = preg_replace($val["CONDITION"], ($val["PATH"] <> '' ? $val["PATH"]."?" : "").$val["RULE"], $requestUri);
 			else
 				$url = $val["PATH"];
@@ -161,9 +156,8 @@ if (!$uri->isPathTraversal())
 
 			$urlTmp = mb_strtolower(ltrim($url, "/\\"));
 			$urlTmp = str_replace(".", "", $urlTmp);
-			$urlTmp7 = mb_substr($urlTmp, 0, 7);
 
-			if (($urlTmp7 == "upload/" || ($urlTmp7 == "bitrix/" && mb_substr($urlTmp, 0, 16) != "bitrix/services/" && mb_substr($urlTmp, 0, 18) != "bitrix/groupdavphp")))
+			if ((str_starts_with($urlTmp, "upload/") || (str_starts_with($urlTmp, "bitrix/") && !str_starts_with($urlTmp, "bitrix/services/") && !str_starts_with($urlTmp, "bitrix/groupdavphp"))))
 				continue;
 
 			$ext = strtolower(GetFileExtension($url));
@@ -188,7 +182,7 @@ if (!$uri->isPathTraversal())
 }
 
 //admin section 404
-if(mb_strpos($requestUri, "/bitrix/admin/") === 0)
+if(str_starts_with($requestUri, "/bitrix/admin/"))
 {
 	$_SERVER["REAL_FILE_PATH"] = "/bitrix/admin/404.php";
 	include($_SERVER["DOCUMENT_ROOT"]."/bitrix/admin/404.php");

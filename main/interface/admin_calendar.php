@@ -191,7 +191,7 @@ class CAdminCalendar
 			'<input type="text" class="adm-input adm-calendar-to" id="'.$sToName.'_calendar_to" name="'.$sToName.'" size="'.($size+5).'" value="'.htmlspecialcharsbx($sToVal).'">'.
 			'<span class="adm-calendar-icon" title="'.GetMessage("admin_lib_calend_title").'" onclick="BX.calendar({node:this, field:\''.$sToName.'\', form: \'\', bTime: '.($bTime ? 'true' : 'false').', bHideTime: false});"></span>'.
 		'</div>'.
-		'<script type="text/javascript">
+		'<script>
 			window["'.$sFromName.'_bTime"] = '.($bTime ? "true" : "false").';';
 
 		if($bSelectShow)

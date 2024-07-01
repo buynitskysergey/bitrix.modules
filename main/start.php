@@ -4,7 +4,7 @@
  * Bitrix Framework
  * @package bitrix
  * @subpackage main
- * @copyright 2001-2023 Bitrix
+ * @copyright 2001-2024 Bitrix
  */
 
 error_reporting(E_COMPILE_ERROR | E_ERROR | E_CORE_ERROR | E_PARSE);

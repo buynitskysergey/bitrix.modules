@@ -15,14 +15,10 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 	protected static array $locks = [];
 	protected static bool $isConnected = false;
 	protected static array $baseDirVersion = [];
-	protected static array $initDirVersion = [];
-
-	protected static array $listKeys = [];
-
 	protected string $sid = 'BX';
 	protected bool $useLock = false;
-	protected int $ttlMultiplier = 1;
-	protected int $ttlOld = 2;
+	protected int $ttlMultiplier = 2;
+	protected int $ttlOld = 60;
 	protected bool $old = false;
 	protected bool $fullClean = false;
 
@@ -46,16 +42,15 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 	 */
 	public function __construct(array $options = [])
 	{
+		$hash = sha1(serialize($options));
+
 		static $config = [];
-		if (self::$engine == null)
+		if (self::$engine == null || empty($config[$hash]))
 		{
-			if (empty($config))
-			{
-				$config = $this->configure($options);
-			}
+				$config[$hash] = $this->configure($options);
 		}
 
-		$this->connect($config);
+		$this->connect($config[$hash]);
 	}
 
 	protected function connect($config)
@@ -123,6 +118,11 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 			$config['servers'] = array_merge($config['servers'], $options['servers']);
 		}
 
+		if (isset($options['actual_data']))
+		{
+			$cacheConfig['actual_data'] = $options['actual_data'];
+		}
+
 		if (isset($cacheConfig['use_lock']))
 		{
 			$this->useLock = (bool) $cacheConfig['use_lock'];
@@ -137,6 +137,11 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 		if (isset($cacheConfig['serializer']))
 		{
 			$config['serializer'] = (int) $cacheConfig['serializer'];
+		}
+
+		if (isset($cacheConfig['connectionTimeout']))
+		{
+			$config['connectionTimeout'] = (int) $cacheConfig['connectionTimeout'];
 		}
 
 		$config['persistent'] = true;
@@ -168,6 +173,10 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 		{
 			$this->fullClean = (bool) $cacheConfig['full_clean'];
 		}
+
+		$this->sid .= '|v1|';
+
+		$this->sid .= '|v1|';
 
 		return $config;
 	}
@@ -270,45 +279,16 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 		return '|' . substr(sha1($key), 0, 2) . '|';
 	}
 
-	protected function getInitDirKey($baseDir, $initDir = false) : string
-	{
-		return $this->sid . '|' . $this->getBaseDirVersion($baseDir) . '|init_dir|' . sha1($initDir);
-	}
-
 	/**
 	 * Return InitDirVersion
 	 *
 	 * @param bool|string $baseDir Base cache directory (usually /bitrix/cache).
 	 * @param bool|string $initDir Directory within base.
-	 * @param bool $generateNew Create new value if cache empty.
 	 * @return string
 	 */
-	protected function getInitDirVersion($baseDir, $initDir = false, $generateNew = true) : string
+	protected function getInitDirVersion($baseDir, $initDir = false) : string
 	{
-		$key = $this->getInitDirKey($baseDir, $initDir);
-
-		if (!array_key_exists($key, static::$initDirVersion))
-		{
-			static::$initDirVersion[$key] = $this->get($key);
-		}
-
-		if (
-			static::$initDirVersion[$key] === false
-			|| (static::$initDirVersion[$key] == '' && $generateNew)
-		)
-		{
-			if ($generateNew)
-			{
-				static::$initDirVersion[$key] = sha1(mt_rand() . '|' . microtime());
-				$this->set($key, 0, static::$initDirVersion[$key]);
-			}
-			else
-			{
-				static::$initDirVersion[$key] = '';
-			}
-		}
-
-		return static::$initDirVersion[$key];
+		return sha1($initDir);
 	}
 
 	/**
@@ -327,7 +307,7 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 			static::$baseDirVersion[$key] = $this->get($key);
 		}
 
-		if (static::$baseDirVersion[$key] === false)
+		if (static::$baseDirVersion[$key] === false || (static::$baseDirVersion[$key] == ''))
 		{
 			static::$baseDirVersion[$key] = sha1($baseDirHash . '|' . mt_rand() . '|' . microtime());
 			$this->set($key, 0, static::$baseDirVersion[$key]);
@@ -349,7 +329,7 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 	 */
 	public function read(&$vars, $baseDir, $initDir, $filename, $ttl)
 	{
-		$initDirVersion = $this->getInitDirVersion($baseDir, $initDir, false);
+		$initDirVersion = $this->getInitDirVersion($baseDir, $initDir);
 
 		if ($initDirVersion == '')
 		{
@@ -365,6 +345,7 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 			if (!is_array($cachedData))
 			{
 				$cachedData = $this->get($key . '|old');
+
 				if (is_array($cachedData))
 				{
 					$this->old = true;
@@ -376,12 +357,9 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 				return false;
 			}
 
-			if ($this->lock($key, $ttl))
+			if (($cachedData['expire'] < time() || $this->old) && $this->lock($key, $ttl))
 			{
-				if ($this->old || $cachedData['datecreate'] < (time() - $ttl))
-				{
-					return false;
-				}
+				return false;
 			}
 
 			$vars = $cachedData['content'];
@@ -416,7 +394,7 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 
 		if ($this->useLock)
 		{
-			$this->set($key, $exp, ['datecreate' => time(), 'content' => $vars]);
+			$this->set($key, $exp, ['expire' => time() + $ttl, 'content' => $vars]);
 			$this->del($key . '|old');
 			$this->unlock($key, $ttl);
 		}
@@ -488,16 +466,21 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 		elseif ($initDir != '')
 		{
 			$keyPrefix = $this->sid . '|' .$dir . '|';
-			$initDirKey = $this->getInitDirKey($baseDir, $initDir);
-			$this->del($initDirKey);
-			unset(static::$initDirVersion[$initDirKey]);
-
 			$partitionKeys = $this->getSet($initListKey);
+			
+			// A temporary optimization solution
+			if ($this->getConnectionName() != 'cache.redis')
+			{
+				$this->delFromSet($initListKey, $partitionKeys);
+			}
+			$this->del($initListKey);
+
 			foreach ($partitionKeys as $partition)
 			{
 				$delKey = $initListKey . $partition;
 				$this->deleteBySet($delKey, $keyPrefix);
 				$this->del($delKey);
+
 				if ($this->fullClean)
 				{
 					$this->delFromSet($baseListKey . $this->getPartition($delKey), $delKey);
@@ -532,9 +515,7 @@ abstract class CacheEngine implements CacheEngineInterface, LocalStorage\Storage
 				}
 
 				$this->del($baseListKey);
-
 			}
 		}
-
 	}
 }

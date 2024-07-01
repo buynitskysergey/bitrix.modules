@@ -954,7 +954,7 @@ class CFileMan
 		if (isset($Params['public']) && $Params['public'] == 'Y')
 		{
 			?>
-			<script type="text/javascript">
+			<script>
 				window.location = '<?= CUtil::JSEscape(CHTTP::URN2URI(GetDirPath($Params['path'])))?>';
 			</script>
 		<?
@@ -1606,16 +1606,16 @@ class CFileMan
 					$arr[] = $arJS[$i];
 			}
 			?>
-			<script type="text/javascript" src="/bitrix/admin/fileman_js.php?lang=<?=LANGUAGE_ID?>&v=<?=@filemtime($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/fileman/lang/'.LANGUAGE_ID.'/admin/fileman_js.php')?>"></script>
-			<script type="text/javascript" src="/bitrix/admin/fileman_common_js.php?s=<?=$str_taskbars?>"></script>
+			<script src="/bitrix/admin/fileman_js.php?lang=<?=LANGUAGE_ID?>&v=<?=@filemtime($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/fileman/lang/'.LANGUAGE_ID.'/admin/fileman_js.php')?>"></script>
+			<script src="/bitrix/admin/fileman_common_js.php?s=<?=$str_taskbars?>"></script>
 			<?
 			for($i = 0, $l = count($arr); $i < $l; $i++)
 			{
 				$script_filename = $arr[$i];
-				?><script type="text/javascript" src="/bitrix/admin/htmleditor2/<?=$script_filename?>?v=<?=@filemtime($_SERVER['DOCUMENT_ROOT'].'/bitrix/admin/htmleditor2/'.$script_filename)?>"></script><?
+				?><script src="/bitrix/admin/htmleditor2/<?=$script_filename?>?v=<?=@filemtime($_SERVER['DOCUMENT_ROOT'].'/bitrix/admin/htmleditor2/'.$script_filename)?>"></script><?
 			}
 			?>
-			<script type="text/javascript" src="/bitrix/js/main/popup_menu.js?v=<?=@filemtime($_SERVER['DOCUMENT_ROOT'].'/bitrix/js/main/popup_menu.js')?>"></script>
+			<script src="/bitrix/js/main/popup_menu.js?v=<?=@filemtime($_SERVER['DOCUMENT_ROOT'].'/bitrix/js/main/popup_menu.js')?>"></script>
 			<?
 			for($i = 0, $l = count($arCSS); $i < $l; $i++) // Additional CSS files from event OnBeforeHtmlEditorScriptGet
 			{
@@ -2208,10 +2208,6 @@ class CFileMan
 
 	public static function decodePdfViewerLangFiles()
 	{
-		if(!\Bitrix\Main\Application::isUtfMode())
-		{
-			return;
-		}
 		$localePath = \Bitrix\Main\Application::getDocumentRoot().'/bitrix/components/bitrix/pdf.viewer/pdfjs/locale/';
 		if(!\Bitrix\Main\IO\Directory::isDirectoryExists($localePath))
 		{
@@ -2235,10 +2231,6 @@ class CFileMan
 	 */
 	protected static function decodeLangFile($path, $charsetFrom)
 	{
-		if(!\Bitrix\Main\Application::isUtfMode())
-		{
-			return;
-		}
 		$file = new \Bitrix\Main\IO\File($path);
 		if($file->isExists())
 		{

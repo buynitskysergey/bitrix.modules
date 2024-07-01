@@ -10,8 +10,8 @@ use Bitrix\Main\UserField\Types\DateTimeType;
 IncludeModuleLangFile(__FILE__);
 
 /**
- * Данный класс фактически является интерфейсной прослойкой между значениями
- * пользовательских свойств и сущностью к которой они привязаны.
+ * Р”Р°РЅРЅС‹Р№ РєР»Р°СЃСЃ С„Р°РєС‚РёС‡РµСЃРєРё СЏРІР»СЏРµС‚СЃСЏ РёРЅС‚РµСЂС„РµР№СЃРЅРѕР№ РїСЂРѕСЃР»РѕР№РєРѕР№ РјРµР¶РґСѓ Р·РЅР°С‡РµРЅРёСЏРјРё
+ * РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёС… СЃРІРѕР№СЃС‚РІ Рё СЃСѓС‰РЅРѕСЃС‚СЊСЋ Рє РєРѕС‚РѕСЂРѕР№ РѕРЅРё РїСЂРёРІСЏР·Р°РЅС‹.
  * @package usertype
  * @subpackage classes
  */
@@ -24,9 +24,9 @@ class CUserTypeManager
 	const BASE_TYPE_DATETIME = "datetime";
 	const BASE_TYPE_STRING = "string";
 	/**
-	 * Хранит все типы пользовательских свойств.
+	 * РҐСЂР°РЅРёС‚ РІСЃРµ С‚РёРїС‹ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёС… СЃРІРѕР№СЃС‚РІ.
 	 *
-	 * <p>Инициализируется при первом вызове метода GetUserType.</p>
+	 * <p>РРЅРёС†РёР°Р»РёР·РёСЂСѓРµС‚СЃСЏ РїСЂРё РїРµСЂРІРѕРј РІС‹Р·РѕРІРµ РјРµС‚РѕРґР° GetUserType.</p>
 	 * @var array
 	 */
 	public $arUserTypes = false;
@@ -45,14 +45,14 @@ class CUserTypeManager
 	}
 
 	/**
-	 * Функция возвращает метаданные типа.
+	 * Р¤СѓРЅРєС†РёСЏ РІРѕР·РІСЂР°С‰Р°РµС‚ РјРµС‚Р°РґР°РЅРЅС‹Рµ С‚РёРїР°.
 	 *
-	 * <p>Если это первый вызов функции, то выполняется системное событие OnUserTypeBuildList (main).
-	 * Зарегистрированные обработчики должны вернуть даные описания типа. В данном случае действует правило -
-	 * кто последний тот и папа. (на случай если один тип зарегились обрабатывать "несколько" классов)</p>
-	 * <p>Без параметров функция возвращает полный список типов.<p>
-	 * <p>При заданном user_type_id - возвращает массив если такой тип зарегистрирован и false если нет.<p>
-	 * @param string|bool $user_type_id необязательный. Идентификатор типа свойства.
+	 * <p>Р•СЃР»Рё СЌС‚Рѕ РїРµСЂРІС‹Р№ РІС‹Р·РѕРІ С„СѓРЅРєС†РёРё, С‚Рѕ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ СЃРёСЃС‚РµРјРЅРѕРµ СЃРѕР±С‹С‚РёРµ OnUserTypeBuildList (main).
+	 * Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅРЅС‹Рµ РѕР±СЂР°Р±РѕС‚С‡РёРєРё РґРѕР»Р¶РЅС‹ РІРµСЂРЅСѓС‚СЊ РґР°РЅС‹Рµ РѕРїРёСЃР°РЅРёСЏ С‚РёРїР°. Р’ РґР°РЅРЅРѕРј СЃР»СѓС‡Р°Рµ РґРµР№СЃС‚РІСѓРµС‚ РїСЂР°РІРёР»Рѕ -
+	 * РєС‚Рѕ РїРѕСЃР»РµРґРЅРёР№ С‚РѕС‚ Рё РїР°РїР°. (РЅР° СЃР»СѓС‡Р°Р№ РµСЃР»Рё РѕРґРёРЅ С‚РёРї Р·Р°СЂРµРіРёР»РёСЃСЊ РѕР±СЂР°Р±Р°С‚С‹РІР°С‚СЊ "РЅРµСЃРєРѕР»СЊРєРѕ" РєР»Р°СЃСЃРѕРІ)</p>
+	 * <p>Р‘РµР· РїР°СЂР°РјРµС‚СЂРѕРІ С„СѓРЅРєС†РёСЏ РІРѕР·РІСЂР°С‰Р°РµС‚ РїРѕР»РЅС‹Р№ СЃРїРёСЃРѕРє С‚РёРїРѕРІ.<p>
+	 * <p>РџСЂРё Р·Р°РґР°РЅРЅРѕРј user_type_id - РІРѕР·РІСЂР°С‰Р°РµС‚ РјР°СЃСЃРёРІ РµСЃР»Рё С‚Р°РєРѕР№ С‚РёРї Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ Рё false РµСЃР»Рё РЅРµС‚.<p>
+	 * @param string|bool $user_type_id РЅРµРѕР±СЏР·Р°С‚РµР»СЊРЅС‹Р№. РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ С‚РёРїР° СЃРІРѕР№СЃС‚РІР°.
 	 * @return array|boolean
 	 */
 	public function GetUserType($user_type_id = false)
@@ -115,7 +115,7 @@ class CUserTypeManager
 
 	public function PrepareSettings($ID, $arUserField, $bCheckUserType = true)
 	{
-		$user_type_id = $arUserField["USER_TYPE_ID"];
+		$user_type_id = $arUserField['USER_TYPE_ID'] ?? null;
 		if ($ID > 0)
 		{
 			$rsUserType = CUserTypeEntity::GetList([], ["ID" => $ID]);
@@ -145,17 +145,18 @@ class CUserTypeManager
 			}
 		}
 
-		if ($arType = $this->GetUserType($user_type_id))
+		$userType = $this->GetUserType($user_type_id);
+
+		if ($userType && is_callable([$userType['CLASS_NAME'], 'preparesettings']))
 		{
-			if (is_callable([$arType["CLASS_NAME"], "preparesettings"]))
-			{
-				return call_user_func_array([$arType["CLASS_NAME"], "preparesettings"], [$arUserField]);
-			}
+			return call_user_func_array([$userType['CLASS_NAME'], 'preparesettings'], [$arUserField]);
 		}
-		else
+
+		if (!$userType)
 		{
 			return [];
 		}
+
 		return null;
 	}
 
@@ -184,10 +185,10 @@ class CUserTypeManager
 	}
 
 	/**
-	 * Функция возвращает метаданные полей определеных для сущности.
+	 * Р¤СѓРЅРєС†РёСЏ РІРѕР·РІСЂР°С‰Р°РµС‚ РјРµС‚Р°РґР°РЅРЅС‹Рµ РїРѕР»РµР№ РѕРїСЂРµРґРµР»РµРЅС‹С… РґР»СЏ СЃСѓС‰РЅРѕСЃС‚Рё.
 	 *
-	 * <p>Важно! В $arUserField добалено поле ENTITY_VALUE_ID - это идентификатор экземпляра сущности
-	 * позволяющий отделить новые записи от старых и соответсвенно использовать значения по умолчанию.</p>
+	 * <p>Р’Р°Р¶РЅРѕ! Р’ $arUserField РґРѕР±Р°Р»РµРЅРѕ РїРѕР»Рµ ENTITY_VALUE_ID - СЌС‚Рѕ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СЌРєР·РµРјРїР»СЏСЂР° СЃСѓС‰РЅРѕСЃС‚Рё
+	 * РїРѕР·РІРѕР»СЏСЋС‰РёР№ РѕС‚РґРµР»РёС‚СЊ РЅРѕРІС‹Рµ Р·Р°РїРёСЃРё РѕС‚ СЃС‚Р°СЂС‹С… Рё СЃРѕРѕС‚РІРµС‚СЃРІРµРЅРЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ Р·РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ.</p>
 	 */
 	public function GetUserFields($entity_id, $value_id = 0, $LANG = false, $user_id = false, $selectFields = null)
 	{
@@ -283,7 +284,7 @@ class CUserTypeManager
 					{
 						if ($result[$key]["MULTIPLE"] == "Y")
 						{
-							if (mb_substr($value, 0, 1) !== 'a' && $value > 0)
+							if (!str_starts_with($value, 'a') && $value > 0)
 							{
 								$value = $this->LoadMultipleValues($result[$key], $value);
 							}
@@ -376,7 +377,7 @@ class CUserTypeManager
 				}
 
 				$result[$key]["VALUE"] = $this->OnAfterFetch($result[$key], $value);
-				$result[$key]["ENTITY_VALUE_ID"] = $readyData[$primaryIdName];
+				$result[$key]["ENTITY_VALUE_ID"] = $readyData[$primaryIdName] ?? null;
 			}
 		}
 
@@ -466,7 +467,7 @@ class CUserTypeManager
 					$result = $eventResult->getParameters(); // [ENTITY_ID => 'SomeTable']
 					foreach ($result as $entityId => $entityClass)
 					{
-						if (mb_substr($entityClass, 0, 1) !== '\\')
+						if (!str_starts_with($entityClass, '\\'))
 						{
 							$entityClass = '\\' . $entityClass;
 						}
@@ -803,8 +804,8 @@ class CUserTypeManager
 				$arUserField['USER_TYPE']['BASE_TYPE'] == 'datetime'
 			)
 			{
-				$value1 = $GLOBALS['find_' . $fieldName . '_from'];
-				$value2 = $GLOBALS['find_' . $fieldName . '_to'];
+				$value1 = $GLOBALS['find_' . $fieldName . '_from'] ?? null;
+				$value2 = $GLOBALS['find_' . $fieldName . '_to'] ?? null;
 				if ($this->IsNotEmpty($value1) && \Bitrix\Main\Type\Date::isCorrect($value1))
 				{
 					$date = new \Bitrix\Main\Type\Date($value1);
@@ -950,7 +951,7 @@ class CUserTypeManager
 		}
 	}
 
-	public function AddUserFields($entity_id, $arRes, &$row)
+	public function AddUserFields($entity_id, $arRes, $row)
 	{
 		$arUserFields = $this->GetUserFields($entity_id);
 		foreach ($arUserFields as $FIELD_NAME => $arUserField)
@@ -1150,7 +1151,7 @@ class CUserTypeManager
 					return '<tr' . ($rowClass != '' ? ' class="' . $rowClass . '"' : '') . '><td class="adm-detail-valign-top">' . $strLabelHTML . '</td><td>' .
 						'<table id="table_' . $arUserField["FIELD_NAME"] . '">' . $html . '<tr><td>' . $fieldHtml . '</td></tr>' .
 						'<tr><td style="padding-top: 6px;"><input type="button" value="' . GetMessage("USER_TYPE_PROP_ADD") . '" onClick="addNewRow(\'table_' . $arUserField["FIELD_NAME"] . '\', \'' . $FIELD_NAME_X . '|' . $arUserField["FIELD_NAME"] . '|' . $arUserField["FIELD_NAME"] . '_old_id\')"></td></tr>' .
-						"<script type=\"text/javascript\">BX.addCustomEvent('onAutoSaveRestore', function(ob, data) {for (var i in data){if (i.substring(0," . (mb_strlen($arUserField['FIELD_NAME']) + 1) . ")=='" . CUtil::JSEscape($arUserField['FIELD_NAME']) . "['){" .
+						"<script>BX.addCustomEvent('onAutoSaveRestore', function(ob, data) {for (var i in data){if (i.substring(0," . (mb_strlen($arUserField['FIELD_NAME']) + 1) . ")=='" . CUtil::JSEscape($arUserField['FIELD_NAME']) . "['){" .
 						'addNewRow(\'table_' . $arUserField["FIELD_NAME"] . '\', \'' . $FIELD_NAME_X . '|' . $arUserField["FIELD_NAME"] . '|' . $arUserField["FIELD_NAME"] . '_old_id\')' .
 						"}}})</script>" .
 						'</table>' .
@@ -1167,19 +1168,22 @@ class CUserTypeManager
 		{
 			if (is_callable([$arUserField["USER_TYPE"]["CLASS_NAME"], "getfilterhtml"]))
 			{
+				$useFieldComponent = ($arUserField['USER_TYPE']['USE_FIELD_COMPONENT'] ?? false) === true;
 				$html = call_user_func_array(
 						[$arUserField["USER_TYPE"]["CLASS_NAME"], "getfilterhtml"],
 						[
 							$arUserField,
 							[
-								"NAME" => $filter_name,
-								"VALUE" => htmlspecialcharsex($filter_value),
+								'NAME' => $filter_name,
+								'VALUE' => ($useFieldComponent ? $filter_value : htmlspecialcharsEx($filter_value)),
 							],
 						]
 					) . CAdminCalendar::ShowScript();
+
 				return '<tr><td>' . htmlspecialcharsbx($arUserField["LIST_FILTER_LABEL"] ?: $arUserField["FIELD_NAME"]) . ':</td><td>' . $html . '</td></tr>';
 			}
 		}
+
 		return '';
 	}
 

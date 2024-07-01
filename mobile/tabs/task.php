@@ -13,6 +13,7 @@ use Bitrix\Mobile\Tab\Tabable;
 use Bitrix\Mobile\Tab\Utils;
 use Bitrix\MobileApp\Janative\Manager;
 use Bitrix\Socialnetwork\Component\WorkgroupList;
+use Bitrix\TasksMobile\Settings;
 
 class Task implements Tabable
 {
@@ -137,6 +138,25 @@ class Task implements Tabable
 				],
 			],
 		];
+		$flowListTab = [
+			'id' => 'tasks.flow.list',
+			'testId' => 'tasks_flow',
+			'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_TAB_FLOW'),
+			'component' => [
+				'name' => 'JSStackComponent',
+				'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_HEADER'),
+				'componentCode' => 'tasks.flow.list',
+				'scriptPath' => Manager::getComponentPath('tasks:tasks.flow.list'),
+				'rootWidget' => $this->getTaskListRootWidget(),
+				'params' => [
+					'COMPONENT_CODE' => 'tasks.flow.list',
+					'USER_ID' => $this->context->userId,
+					'SITE_ID' => $this->context->siteId,
+					'SITE_DIR' => $this->context->siteDir,
+					'LANGUAGE_ID' => LANGUAGE_ID,
+				],
+			],
+		];
 		$projectListTab = [
 			'id' => 'tasks.project.list',
 			'testId' => 'tasks_project',
@@ -218,7 +238,7 @@ class Task implements Tabable
 			'selectable' => false,
 		];
 
-
+		$flowEnabled = Settings::getInstance()->isTaskFlowAvailable();
 		$projectsEnabled = $scrumEnabled = $effectiveEnabled = true;
 		if (Loader::includeModule('intranet'))
 		{
@@ -230,8 +250,9 @@ class Task implements Tabable
 		$tabsItems = array_values(array_filter([
 			$taskListTab,
 			$projectsEnabled ? $projectListTab : null,
+			$flowEnabled ? $flowListTab : null,
 			$scrumEnabled ? $scrumTab : null,
-			$effectiveEnabled ? $efficiencyTab: null,
+			$effectiveEnabled ? $efficiencyTab : null,
 		]));
 
 		return [
@@ -246,8 +267,9 @@ class Task implements Tabable
 					'grabTitle' => true,
 					'grabButtons' => true,
 					'grabSearch' => true,
+					'useLargeTitleMode' => true,
 					'tabs' => [
-						'items' => $tabsItems
+						'items' => $tabsItems,
 					],
 				],
 			],
@@ -258,6 +280,7 @@ class Task implements Tabable
 				'SHOW_SCRUM_LIST' => $showScrumList,
 				'TAB_CODES' => [
 					'TASKS' => $this->getTaskListComponentCode(),
+					'FLOW' => 'tasks.flow.list',
 					'PROJECTS' => 'tasks.project.list',
 					'SCRUM' => 'tasks.scrum.list',
 					'EFFICIENCY' => 'tasks.efficiency',

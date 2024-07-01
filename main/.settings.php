@@ -16,4 +16,12 @@ return [
 		],
 		'readonly' => true,
 	],
+	'console' => [
+		'value' => [
+			'commands' => [
+				\Bitrix\Main\Cli\OrmAnnotateCommand::class,
+			],
+		],
+		'readonly' => true,
+	],
 ];

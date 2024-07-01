@@ -1,4 +1,4 @@
-<script type="text/javascript">
+<script>
 	BX.addCustomEvent(BX.adminMenu, 'onMenuChange', BX.delegate(BX.adminFav.onMenuChange, this));
 </script>
 

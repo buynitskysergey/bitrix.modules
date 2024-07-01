@@ -2,7 +2,7 @@
 ##############################################
 # Bitrix: SiteManager                        #
 # Copyright (c) 2002-2004 Bitrix             #
-# http://www.bitrixsoft.com                  #
+# https://www.bitrixsoft.com                 #
 # mailto:admin@bitrixsoft.com                #
 ##############################################
 global $MESS;
@@ -235,7 +235,7 @@ setTimeout("Stats()", 0);
 
 <?require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/admin/group_rights.php");?>
 <?$tabControl->Buttons();?>
-<script type="text/javascript">
+<script>
 function RestoreDefaults()
 {
 	if(confirm('<?echo AddSlashes(GetMessage("MAIN_HINT_RESTORE_DEFAULTS_WARNING"))?>'))

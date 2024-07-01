@@ -74,7 +74,7 @@ class Calendar implements Tabable
 
 	public function shouldShowInMenu(): bool
 	{
-		return Loader::includeModule('intranet') && ToolsManager::getInstance()->checkAvailabilityByToolId('calendar');
+		return $this->isAvailable() && \Bitrix\MobileApp\Mobile::getInstance()::getApiVersion() < 54;
 	}
 
 	public function canBeRemoved(): bool
@@ -112,19 +112,22 @@ class Calendar implements Tabable
 		return 'calendar';
 	}
 
-	private function getComponentParams(): array
+	public function getComponentParams(): array
 	{
 		if (Mobile::getApiVersion() < self::MINIMAL_API_VERSION)
 		{
 			return [
+				'type' => 'component',
 				'name' => 'JSStackComponent',
-				'title' => $this->getTitle(),
 				'componentCode' => $this->getId(),
 				'scriptPath' => Manager::getComponentPath(self::OLD_COMPONENT),
 				'rootWidget' => [
 					'name' => 'list',
 					'settings' => [
-						'title' => $this->getTitle(),
+						'titleParams' => [
+							'text' => $this->getTitle(),
+							'type' => 'section',
+						],
 						'useLargeTitleMode' => true,
 						'objectName' => 'list',
 					],
@@ -134,13 +137,17 @@ class Calendar implements Tabable
 		}
 
 		return [
+			'type' => 'component',
 			'name' => 'JSStackComponent',
-			'title' => $this->getTitle(),
 			'componentCode' => self::INITIAL_COMPONENT,
 			'scriptPath' => Manager::getComponentPath(self::INITIAL_COMPONENT),
 			'rootWidget' => [
 				'name' => 'layout',
 				'settings' => [
+					'titleParams' => [
+						'text' => $this->getTitle(),
+						'type' => 'section',
+					],
 					'useLargeTitleMode' => true,
 					'objectName' => 'layout',
 				],

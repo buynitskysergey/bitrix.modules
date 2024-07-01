@@ -3,6 +3,7 @@
 use Bitrix\Crm\Integration\UI\EntitySelector\CopilotLanguageProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\CountryProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\DynamicMultipleProvider;
+use Bitrix\Crm\Integration\UI\EntitySelector\MessageTemplateProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\PlaceholderProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\TimelinePingProvider;
 
@@ -112,6 +113,9 @@ return array(
 			],
 			'crm.service.converter.category' => [
 				'className' => '\\Bitrix\\Crm\\Service\\Converter\\Category',
+			],
+			'crm.service.converter.automatedSolution' => [
+				'className' => '\\Bitrix\\Crm\\Service\\Converter\\AutomatedSolution',
 			],
 			'crm.service.converter.caseCache' => [
 				'className' => '\\Bitrix\\Crm\\Service\\Converter\\InMemoryCaseCache',
@@ -402,6 +406,9 @@ return array(
 			'crm.summary.summaryFactory' => [
 				'className' => \Bitrix\Crm\Summary\SummaryFactory::class,
 			],
+			'crm.binding.clientBinder' => [
+				'className' => \Bitrix\Crm\Binding\ClientBinder::class,
+			],
 		],
 		'readonly' => true,
 	],
@@ -465,6 +472,13 @@ return array(
 					],
 				],
 				[
+					'entityId' => 'dynamic_type',
+					'provider' => [
+						'moduleId' => 'crm',
+						'className' => '\\Bitrix\\Crm\\Integration\\UI\\EntitySelector\\DynamicTypeProvider',
+					],
+				],
+				[
 					'entityId' => 'smart_invoice',
 					'provider' => [
 						'moduleId' => 'crm',
@@ -506,6 +520,13 @@ return array(
 						'className' => PlaceholderProvider::class,
 					],
 				],
+				[
+					'entityId' => 'message_template',
+					'provider' => [
+						'moduleId' => 'crm',
+						'className' => MessageTemplateProvider::class,
+					],
+				]
 			],
 			'extensions' => ['crm.entity-selector'],
 		],

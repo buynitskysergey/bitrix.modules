@@ -429,6 +429,8 @@ if ($NS['step'] == 4)
 
 		foreach($NS['site_path_list'] as $SITE_ID => $DOCUMENT_ROOT_SITE)
 		{
+			$DOCUMENT_ROOT_SITE = rtrim($DOCUMENT_ROOT_SITE, '/');
+
 			$tar->path = $DOCUMENT_ROOT_SITE;
 
 			if (!$tar->openWrite($NS["arc_name"]))
@@ -440,10 +442,14 @@ if ($NS['step'] == 4)
 			if ($NS['multisite'])
 			{
 				$tar->prefix = 'bitrix/backup/sites/'.$SITE_ID.'/';
-				$DirScan->arSkip[rtrim($DOCUMENT_ROOT_SITE, '/').'/bitrix'] = true;
-				$DirScan->arSkip[rtrim($DOCUMENT_ROOT_SITE, '/').'/upload'] = true;
+				$DirScan->arSkip[$DOCUMENT_ROOT_SITE.'/bitrix'] = true;
+				$DirScan->arSkip[$DOCUMENT_ROOT_SITE.'/upload'] = true;
+				if (is_link($DOCUMENT_ROOT_SITE.'/local'))
+				{
+					// if it's a link, we need it only the first time
+					$DirScan->arSkip[$DOCUMENT_ROOT_SITE.'/local'] = true;
+				}
 			}
-
 
 			$Block = $tar->Block;
 

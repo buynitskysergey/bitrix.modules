@@ -22,7 +22,7 @@ class Chat implements Tabable
 			&& Loader::includeModule('mobileapp')
 		);
 	}
-	
+
 	public function getData()
 	{
 		if (!$this->isAvailable())
@@ -35,25 +35,25 @@ class Chat implements Tabable
 		{
 			return $messengerNavigationManager->getMessengerComponent();
 		}
-		
+
 		return $messengerNavigationManager->getOldChatComponent();
 	}
-	
+
 	public function getMenuData()
 	{
 		return null;
 	}
-	
+
 	public function shouldShowInMenu()
 	{
 		return false;
 	}
-	
+
 	public function canBeRemoved()
 	{
 		return false;
 	}
-	
+
 	/**
 	 * @return integer
 	 */
@@ -61,32 +61,42 @@ class Chat implements Tabable
 	{
 		return 100;
 	}
-	
+
 	public function canChangeSort()
 	{
 		return true;
 	}
-	
+
 	public function getTitle()
 	{
-		return Loc::getMessage("TAB_NAME_IM_RECENT");
+		if (!$this->isAvailable())
+		{
+			return Loc::getMessage("TAB_NAME_IM_RECENT");
+		}
+
+		return Manager::getShortTitle();
 	}
-	
+
 	public function setContext($context)
 	{
 		$this->context = $context;
 	}
-	
+
 	public function getShortTitle()
 	{
-		return Loc::getMessage("TAB_NAME_IM_RECENT_SHORT");
+		if (!$this->isAvailable())
+		{
+			return Loc::getMessage("TAB_NAME_IM_RECENT_SHORT");
+		}
+
+		return Manager::getShortTitle();
 	}
-	
+
 	public function getId()
 	{
 		return "chats";
 	}
-	
+
 	public function getIconId(): string
 	{
 		return 'chat';
