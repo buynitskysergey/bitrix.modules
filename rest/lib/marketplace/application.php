@@ -323,6 +323,7 @@ class Application
 								'installed' => AppTable::isInstalled($appId),
 								'redirect' => $redirect,
 								'openSlider' => $sliderUrl,
+								'canShowForm' => $appDetailInfo['OPEN_API'] === 'Y' && !empty($appFields['URL_SETTINGS'])
 							];
 
 							Analytic::logToFile(

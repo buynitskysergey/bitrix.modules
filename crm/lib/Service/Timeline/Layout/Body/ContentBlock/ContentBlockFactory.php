@@ -113,7 +113,7 @@ class ContentBlockFactory
 	{
 		$result = [];
 
-		$parts = preg_split('/(#\w+#)/' . BX_UTF_PCRE_MODIFIER, $template, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
+		$parts = preg_split('/(#\w+#)/u', $template, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
 
 		foreach ($parts as $singlePart)
 		{

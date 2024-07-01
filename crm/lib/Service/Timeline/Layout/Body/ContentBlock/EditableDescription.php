@@ -18,6 +18,7 @@ class EditableDescription extends ContentBlock
 	protected ?string $text = null;
 	protected ?string $backgroundColor = null;
 	protected ?bool $editable = true;
+	protected ?bool $copied = false;
 	protected string $height = self::HEIGHT_LONG;
 	protected array $copilotSettings = [];
 
@@ -46,6 +47,18 @@ class EditableDescription extends ContentBlock
 	public function setEditable(bool $editable): self
 	{
 		$this->editable = $editable;
+
+		return $this;
+	}
+
+	public function getCopied(): bool
+	{
+		return $this->copied;
+	}
+
+	public function setCopied(bool $copied): self
+	{
+		$this->copied = $copied;
 
 		return $this;
 	}
@@ -92,6 +105,7 @@ class EditableDescription extends ContentBlock
 			'text' => html_entity_decode($this->getText()),
 			'saveAction' => $this->getAction(),
 			'editable' => $this->getEditable(),
+			'copied' => $this->getCopied(),
 			'height' => $this->getHeight(),
 			'backgroundColor' => $this->getBackgroundColor(),
 			'copilotSettings' => $this->getCopilotSettings(),

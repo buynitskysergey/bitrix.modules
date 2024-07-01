@@ -281,7 +281,7 @@ class CCrmRole
 		return $result;
 	}
 
-	private static function ClearCache()
+	public static function ClearCache()
 	{
 		// Clean up cached permissions
 		Main\Application::getInstance()->getCache()->cleanDir(self::CACHE_PATH);
@@ -490,6 +490,11 @@ class CCrmRole
 			}
 		}
 		return $permissions;
+	}
+
+	public function GetLastError(): string
+	{
+		return $this->LAST_ERROR ?? '';
 	}
 
 	/**

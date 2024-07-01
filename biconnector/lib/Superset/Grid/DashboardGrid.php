@@ -15,6 +15,11 @@ use Bitrix\Main\Grid\Row\Rows;
  */
 final class DashboardGrid extends Grid
 {
+	public function __construct(\Bitrix\Main\Grid\Settings $settings)
+	{
+		parent::__construct($settings);
+		$this->getSettings()->setOrmFilter($this->getOrmFilter());
+	}
 
 	public function setSupersetAvailability(bool $isSupersetAvailable): void
 	{
@@ -35,6 +40,7 @@ final class DashboardGrid extends Grid
 				'TITLE',
 				'STATUS',
 				'CREATED_BY_ID',
+				'OWNER_ID',
 				'DATE_CREATE',
 				'DATE_MODIFY',
 				'SOURCE_ID',

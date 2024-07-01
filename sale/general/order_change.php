@@ -1682,7 +1682,7 @@ class CSaleOrderChangeFormat
 		$info = "";
 		if (!empty($data))
 		{
-			$info = GetMessage("SOC_".ToUpper($type)."_INFO");
+			$info = GetMessage("SOC_".mb_strtoupper($type)."_INFO");
 
 			if (is_array($data))
 			{
@@ -1720,10 +1720,10 @@ class CSaleOrderChangeFormat
 			}
 		}
 
-		$title = GetMessage("SOC_".ToUpper($type)."_TITLE");
+		$title = GetMessage("SOC_".mb_strtoupper($type)."_TITLE");
 
 		if (strval($title) == "")
-			$title = GetMessage("SOC_".ToUpper($entity)."_TITLE");
+			$title = GetMessage("SOC_".mb_strtoupper($entity)."_TITLE");
 
 		return array(
 			"NAME" => $title,
@@ -1742,7 +1742,7 @@ class CSaleOrderChangeFormat
 		$info = "";
 		if (!empty($data))
 		{
-			$info = GetMessage("SOC_".ToUpper($type)."_INFO");
+			$info = GetMessage("SOC_".mb_strtoupper($type)."_INFO");
 
 			if (is_array($data))
 			{
@@ -1784,10 +1784,10 @@ class CSaleOrderChangeFormat
 			}
 		}
 
-		$title = GetMessage("SOC_".ToUpper($type)."_TITLE");
+		$title = GetMessage("SOC_".mb_strtoupper($type)."_TITLE");
 
 		if (strval($title) == "")
-			$title = GetMessage("SOC_".ToUpper($entity)."_TITLE");
+			$title = GetMessage("SOC_".mb_strtoupper($entity)."_TITLE");
 
 		return array(
 			"NAME" => $title,
@@ -1807,7 +1807,7 @@ class CSaleOrderChangeFormat
 		$info = "";
 		if (!empty($data))
 		{
-			$info = GetMessage("SOC_".ToUpper($type)."_INFO");
+			$info = GetMessage("SOC_".mb_strtoupper($type)."_INFO");
 
 			if (is_array($data))
 			{
@@ -1833,10 +1833,10 @@ class CSaleOrderChangeFormat
 			}
 		}
 
-		$title = GetMessage("SOC_".ToUpper($type)."_TITLE");
+		$title = GetMessage("SOC_".mb_strtoupper($type)."_TITLE");
 
 		if (strval($title) == "")
-			$title = GetMessage("SOC_".ToUpper($entity)."_TITLE");
+			$title = GetMessage("SOC_".mb_strtoupper($entity)."_TITLE");
 
 		return array(
 			"NAME" => $title,

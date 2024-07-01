@@ -337,11 +337,11 @@ class Landing extends \Bitrix\Landing\Internals\BaseTable
 			{
 				Block::fillLanding(
 					$this,
-					isset($params['blocks_limit']) ? $params['blocks_limit'] : 0,
-					array(
-						'id' => isset($params['blocks_id']) ? $params['blocks_id'] : 0,
+					$params['blocks_limit'] ?? null,
+					[
+						'id' => $params['blocks_id'] ?? 0,
 						'deleted' => isset($params['deleted']) && $params['deleted'] === true
-					)
+					]
 				);
 			}
 			// fill meta data
@@ -1212,7 +1212,7 @@ class Landing extends \Bitrix\Landing\Internals\BaseTable
 			}
 			// output js
 			Asset::getInstance()->addString(
-				'<script type="text/javascript">' .
+				'<script>' .
 					'BX.ready(function(){'
 						. 'if (typeof BX.Landing.Main !== "undefined")'
 						. '{'

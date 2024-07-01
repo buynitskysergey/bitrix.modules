@@ -60,9 +60,9 @@ class TextHelper
 
 		return (string)preg_replace(
 			[
-				"#<br />[\\t\\s]*(<li[^>]*>)#is" . BX_UTF_PCRE_MODIFIER,
-				"#<br />[\\t\\s]*(</ol[^>]*>)#is" . BX_UTF_PCRE_MODIFIER,
-				"#<br />[\\t\\s]*(</ul[^>]*>)#is" . BX_UTF_PCRE_MODIFIER,
+				"#<br />[\\t\\s]*(<li[^>]*>)#isu",
+				"#<br />[\\t\\s]*(</ol[^>]*>)#isu",
+				"#<br />[\\t\\s]*(</ul[^>]*>)#isu",
 			],
 			"\\1",
 			$result
@@ -177,8 +177,7 @@ class TextHelper
 		$pattern =
 			'#\[(\/?)(?!\b'
 			. implode('\b|\b', array_diff($whitelist, $excludeFromWhitelist))
-			. '\b)\w+\b[^\]]*\]#i'
-			. BX_UTF_PCRE_MODIFIER
+			. '\b)\w+\b[^\]]*\]#iu'
 		;
 
 		return preg_replace($pattern, '', $bb);

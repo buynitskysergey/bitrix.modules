@@ -13,6 +13,7 @@ use Bitrix\Main\Type\DateTime;
 
 class Accessibility
 {
+	private array $canSeeNameCache = [];
 	private bool $checkPermissions = true;
 	private int $skipEventId = 0;
 
@@ -184,10 +185,19 @@ class Accessibility
 	private function canSeeName(array $event): bool
 	{
 		$currentUserId = \CCalendar::GetUserId();
-		$accessController = new EventAccessController($currentUserId);
-		$eventModel = EventModel::createFromArray($event);
+		$eventId = (int)$event['ID'];
+		$cachedValue = $this->canSeeNameCache[$eventId] ?? null;
 
-		return !$this->isPrivate($event) && $accessController->check(ActionDictionary::ACTION_EVENT_VIEW_TITLE, $eventModel);
+		if ($cachedValue === null)
+		{
+			$accessController = new EventAccessController($currentUserId);
+			$eventModel = EventModel::createFromArray($event);
+
+			$canViewTitle = $accessController->check(ActionDictionary::ACTION_EVENT_VIEW_TITLE, $eventModel);
+			$this->canSeeNameCache[$eventId] = !$this->isPrivate($event) && $canViewTitle;
+		}
+
+		return $this->canSeeNameCache[$eventId];
 	}
 
 	private function isPrivate(array $event): bool

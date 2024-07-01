@@ -1,5 +1,6 @@
 <?php
 
+use Bitrix\Main\Analytics\AnalyticsEvent;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Event;
 use Bitrix\Intranet\Internals\InvitationTable;
@@ -1002,7 +1003,7 @@ class CIntranetEventHandlers
 				'USER_ID' => $userId,
 				'INITIALIZED' => 'N'
 			],
-			'select' => [ 'ID' ],
+			'select' => ['ID', 'INVITATION_TYPE', 'IS_MASS', 'IS_DEPARTMENT', 'IS_INTEGRATOR', 'IS_REGISTER'],
 			'limit' => 1
 		]);
 		if ($invitationFields = $res->fetch())
@@ -1010,6 +1011,10 @@ class CIntranetEventHandlers
 			InvitationTable::update($invitationFields['ID'], [
 				'INITIALIZED' => 'Y'
 			]);
+
+			(new \Bitrix\Main\Event('intranet', 'onUserFirstInitialization', [
+				'invitationFields' => $invitationFields
+			]))->send();
 		}
 	}
 
@@ -1059,7 +1064,7 @@ class CIntranetEventHandlers
 
 				'PROPERTY_VALUES' => array(
 					'USER' => $arUser['ID'],
-					'DEPARTMENT' => $arUser['UF_DEPARTMENT'],
+					'DEPARTMENT' => $arUser['UF_DEPARTMENT'] ?? null,
 					'POST' => $arUser['WORK_POSITION'] ? $arUser['WORK_POSITION'] : $arUser['PERSONAL_PROFESSION'],
 					'STATE' => $ACCEPTED_ENUM_ID
 				),

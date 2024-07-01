@@ -506,6 +506,10 @@ final class Lead extends Service\Factory
 			)
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenAddingEntity(),
+			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\Compatible\SendEvent('OnAfterCrmLeadAdd'),
 			)
 			->addAction(
@@ -550,6 +554,10 @@ final class Lead extends Service\Factory
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\Compatible\SocialNetwork\ProcessUpdate(),
+			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenUpdatingEntity(),
 			)
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,

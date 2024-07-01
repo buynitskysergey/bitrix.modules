@@ -133,6 +133,7 @@ final class Dashboard
 			'APP_ID' => $this->ormObject->getAppId(),
 			'TYPE' => $this->getType(),
 			'CREATED_BY_ID' => $this->ormObject->get('CREATED_BY_ID'),
+			'OWNER_ID' => $this->ormObject->get('OWNER_ID'),
 			'DATE_CREATE' => $this->ormObject->get('DATE_CREATE'),
 			'DATE_MODIFY' => $this->ormObject->get('DATE_MODIFY'),
 			'FILTER_PERIOD' => $embeddedFilterFields['FILTER_PERIOD'],

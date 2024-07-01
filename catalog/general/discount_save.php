@@ -1,29 +1,28 @@
-<?
+<?php
+
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main;
 use Bitrix\Currency;
 use Bitrix\Catalog;
 
-Loc::loadMessages(__FILE__);
-
 class CAllCatalogDiscountSave
 {
-	const ENTITY_ID = 1;
+	public const ENTITY_ID = 1;
 
-	const TYPE_PERCENT = 'P';
-	const TYPE_FIX = 'F';
+	public const TYPE_PERCENT = 'P';
+	public const TYPE_FIX = 'F';
 
-	const COUNT_TIME_ALL = 'U';
-	const COUNT_TIME_INTERVAL = 'D';
-	const COUNT_TIME_PERIOD = 'P';
+	public const COUNT_TIME_ALL = 'U';
+	public const COUNT_TIME_INTERVAL = 'D';
+	public const COUNT_TIME_PERIOD = 'P';
 
-	const ACTION_TIME_ALL = 'U';
-	const ACTION_TIME_INTERVAL = 'D';
-	const ACTION_TIME_PERIOD = 'P';
+	public const ACTION_TIME_ALL = 'U';
+	public const ACTION_TIME_INTERVAL = 'D';
+	public const ACTION_TIME_PERIOD = 'P';
 
-	const APPLY_MODE_REPLACE = 'R';
-	const APPLY_MODE_ADD = 'A';
-	const APPLY_MODE_DISABLE = 'D';
+	public const APPLY_MODE_REPLACE = 'R';
+	public const APPLY_MODE_ADD = 'A';
+	public const APPLY_MODE_DISABLE = 'D';
 
 	static protected $intDisable = 0;
 	static protected $intDiscountUserID = 0;
@@ -523,7 +522,7 @@ class CAllCatalogDiscountSave
 			{
 				self::$discountResultCache[$cacheKey] = array();
 
-				$intCurrentTime = getmicrotime();
+				$intCurrentTime = microtime(true);
 				$strDate = date($DB->DateFormatToPHP(CSite::GetDateFormat("FULL")), $intCurrentTime);
 				$arFilter = array(
 					'ID' => $arCurrentDiscountID,

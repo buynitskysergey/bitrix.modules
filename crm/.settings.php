@@ -1,5 +1,6 @@
 <?php
 
+use Bitrix\Crm\Integration\UI\EntitySelector\CopilotLanguageProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\CountryProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\DynamicMultipleProvider;
 use Bitrix\Crm\Integration\UI\EntitySelector\PlaceholderProvider;
@@ -395,6 +396,9 @@ return array(
 			'crm.terminal.payment' => [
 				'className' => \Bitrix\Crm\Service\Sale\Terminal\PaymentService::class,
 			],
+			'crm.customSection.automatedSolutionManager' => [
+				'className' => \Bitrix\Crm\AutomatedSolution\AutomatedSolutionManager::class,
+			],
 			'crm.summary.summaryFactory' => [
 				'className' => \Bitrix\Crm\Summary\SummaryFactory::class,
 			],
@@ -472,6 +476,13 @@ return array(
 					'provider' => [
 						'moduleId' => 'crm',
 						'className' => '\\Bitrix\\Crm\\Integration\\UI\\EntitySelector\\SmartDocument'
+					],
+				],
+				[
+					'entityId' => 'copilot_language',
+					'provider' => [
+						'moduleId' => 'crm',
+						'className' => CopilotLanguageProvider::class,
 					],
 				],
 				[

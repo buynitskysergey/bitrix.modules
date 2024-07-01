@@ -15,6 +15,8 @@ class CIntranetRestService extends IRestService
 		"ID", "NAME", "SORT", "IBLOCK_SECTION_ID", "UF_HEAD"
 	);
 
+	private static bool $checkAccess = true;
+
 	public static function OnRestServiceBuildDescription()
 	{
 		$result = array(
@@ -351,8 +353,23 @@ class CIntranetRestService extends IRestService
 
 	protected static function canEdit()
 	{
+		if (!self::isCheckAccess())
+		{
+			return true;
+		}
+
 		CModule::IncludeModule('iblock');
 		$perm = CIBlock::GetPermission(self::getDeptIblock());
 		return $perm  >= 'U';
+	}
+
+	public static function isCheckAccess(): bool
+	{
+		return self::$checkAccess;
+	}
+
+	public static function setCheckAccess(bool $checkAccess): void
+	{
+		self::$checkAccess = $checkAccess;
 	}
 }

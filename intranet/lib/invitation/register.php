@@ -464,7 +464,7 @@ class Register
 		return $transferedUserIds;
 	}
 
-	public static function registerUsersByPhone($items, &$errors)
+	public static function registerUsersByPhone($items, &$errors, $type)
 	{
 		$invitedUserIdList = [];
 		foreach ($items as $userData)
@@ -499,15 +499,17 @@ class Register
 		if (!empty($invitedUserIdList))
 		{
 			Invitation::add([
-								'USER_ID' => $invitedUserIdList,
-								'TYPE' => Invitation::TYPE_PHONE
-							]);
+				'USER_ID' => $invitedUserIdList,
+				'TYPE' => Invitation::TYPE_PHONE,
+				'IS_MASS' => $type === 'mass' ? 'Y' : 'N',
+				'IS_DEPARTMENT' => $type === 'group' ? 'Y' : 'N'
+			]);
 		}
 
 		return $invitedUserIdList;
 	}
 
-	public static function registerUsersByEmail($items, &$errors)
+	public static function registerUsersByEmail($items, &$errors, $type = 'email')
 	{
 		$invitedUserIdList = [];
 		foreach ($items as $userData)
@@ -542,14 +544,16 @@ class Register
 		{
 			Invitation::add([
 				'USER_ID' => $invitedUserIdList,
-				'TYPE' => Invitation::TYPE_EMAIL
+				'TYPE' => Invitation::TYPE_EMAIL,
+				'IS_MASS' => $type === 'mass' ? 'Y' : 'N',
+				'IS_DEPARTMENT' => $type === 'group' ? 'Y' : 'N'
 			]);
 		}
 
 		return $invitedUserIdList;
 	}
 
-	public static function inviteNewUsers($SITE_ID, $fields, &$errors = [])
+	public static function inviteNewUsers($SITE_ID, $fields, $type, &$errors = [])
 	{
 		if (!is_array($fields) || empty($fields))
 		{
@@ -620,13 +624,13 @@ class Register
 		$phoneUserIds = [];
 		if (!empty($resPhone["PHONE_TO_REGISTER"]))
 		{
-			$phoneUserIds = self::registerUsersByPhone($resPhone["PHONE_TO_REGISTER"], $errors);
+			$phoneUserIds = self::registerUsersByPhone($resPhone["PHONE_TO_REGISTER"], $errors, $type);
 		}
 
 		$emailUserIds = [];
 		if (!empty($resEmail["EMAIL_TO_REGISTER"]))
 		{
-			$emailUserIds = self::registerUsersByEmail($resEmail["EMAIL_TO_REGISTER"], $errors);
+			$emailUserIds = self::registerUsersByEmail($resEmail["EMAIL_TO_REGISTER"], $errors, $type);
 		}
 
 		if (!empty($errors))

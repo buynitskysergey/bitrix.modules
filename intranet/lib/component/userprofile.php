@@ -625,6 +625,14 @@ class UserProfile extends \CBitrixComponent implements \Bitrix\Main\Engine\Contr
 			$user["STATUS"] = self::STATUS_INVITED;
 		}
 
+		if (
+			$user["ACTIVE"] === "N"
+			&& !empty($user["CONFIRM_CODE"])
+		)
+		{
+			$user["STATUS"] = 'waiting';
+		}
+
 		if (in_array($user["EXTERNAL_AUTH_ID"], [ 'email' ]))
 		{
 			$user["STATUS"] = $user["EXTERNAL_AUTH_ID"];

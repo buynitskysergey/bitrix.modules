@@ -112,7 +112,7 @@ class IcsManager
 
 	public function prepareEventDescription(Event $event, array $params): string
 	{
-		$languageId = \CCalendar::getUserLanguageId($event->getOwner()->getId());
+		$languageId = \CCalendar::getUserLanguageId($event->getOwner()?->getId());
 		$eventDescription = '';
 
 		if (

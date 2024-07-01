@@ -543,7 +543,7 @@ class CAllSaleTax
 			else
 				$bInvert = false;
 
-			switch (ToUpper($key))
+			switch (mb_strtoupper($key))
 			{
 				case "ID":
 					$arSqlSearch[] = "T.ID ".($bInvert?"<>":"=")." ".intval($val)." ";
@@ -574,8 +574,8 @@ class CAllSaleTax
 		$arSqlOrder = Array();
 		foreach ($arOrder as $by=>$order)
 		{
-			$by = ToUpper($by);
-			$order = ToUpper($order);
+			$by = mb_strtoupper($by);
+			$order = mb_strtoupper($order);
 			if ($order!="ASC")
 				$order = "DESC";
 
@@ -643,7 +643,7 @@ class CAllSaleTax
 			{
 				$val = $vals[$j];
 
-				switch (ToUpper($key))
+				switch (mb_strtoupper($key))
 				{
 					case "GROUP_ID":
 						$arSqlSearch_tmp[] = "TE2G.GROUP_ID ".($bInvert?"<>":"=")." ".intval($val)." ";

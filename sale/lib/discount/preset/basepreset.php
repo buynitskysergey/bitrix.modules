@@ -13,7 +13,6 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\SiteTable;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Web\Json;
-use Bitrix\Main\Web\PostDecodeFilter;
 use Bitrix\Sale\Helpers\Admin\Blocks\OrderBasket;
 use Bitrix\Sale\Internals\DiscountGroupTable;
 
@@ -144,9 +143,6 @@ abstract class BasePreset
 
 	public function executeAjaxAction($actionName)
 	{
-		\CUtil::jSPostUnescape();
-		$this->request->addFilter(new PostDecodeFilter);
-
 		$methodName = 'processAjaxAction' . $actionName;
 		if(!method_exists($this, $methodName))
 		{
@@ -832,7 +828,7 @@ abstract class BasePreset
 				</tr>
 				<tr>
 					<td class="adm-detail-content-cell-l" style="width:40%;">
-						<script type="text/javascript">BX.ready(function(){BX.hint_replace(BX("tr_HELP_notice"), \'<img style="padding-left: 16px;" width="545" height="353" src="/bitrix/images/sale/discount/' . $hintLastDiscountImageName . '" alt="">\');})</script>
+						<script>BX.ready(function(){BX.hint_replace(BX("tr_HELP_notice"), \'<img style="padding-left: 16px;" width="545" height="353" src="/bitrix/images/sale/discount/' . $hintLastDiscountImageName . '" alt="">\');})</script>
 						<span id="tr_HELP_notice"></span>
 						<strong>' . Loc::getMessage('SALE_BASE_PRESET_LAST_LEVEL_DISCOUNT_LABEL') . ':</strong>
 					</td>
@@ -842,7 +838,7 @@ abstract class BasePreset
 				</tr>
 				<tr>
 					<td class="adm-detail-content-cell-l" style="width:40%;">
-						<script type="text/javascript">BX.ready(function(){BX.hint_replace(BX("tr_HELP_notice2"), \'<img style="padding-left: 16px;" width="545" height="353" src="/bitrix/images/sale/discount/' . $hintLastDiscountImageName . '" alt="">\');})</script>
+						<script>BX.ready(function(){BX.hint_replace(BX("tr_HELP_notice2"), \'<img style="padding-left: 16px;" width="545" height="353" src="/bitrix/images/sale/discount/' . $hintLastDiscountImageName . '" alt="">\');})</script>
 						<span id="tr_HELP_notice2"></span>					
 						<strong>' . Loc::getMessage('SALE_BASE_PRESET_LAST_DISCOUNT_LABEL') . ':</strong>
 					</td>

@@ -88,6 +88,8 @@ class RestrictionManager
 	/** @var Bitrix24AccessRestriction|null  */
 	private static $inventoryControlIntegrationRestriction;
 	/** @var Bitrix24AccessRestriction|null  */
+	private static $inventoryControl1cRestriction;
+	/** @var Bitrix24AccessRestriction|null  */
 	private static $calendarSharingRestriction;
 
 	/**
@@ -745,12 +747,6 @@ class RestrictionManager
 		}
 	}
 
-	public static function onMigrateToBox()
-	{
-		Main\Config\Option::delete('crm', array('name' => 'crm_enable_permission_control'));
-		Main\Config\Option::delete('crm', array('name' => 'recurring_deal_enabled'));
-	}
-
 	public static function getDynamicTypesLimitRestriction(): DynamicTypesLimit
 	{
 		if (!static::$dynamicTypesLimit)
@@ -836,7 +832,28 @@ class RestrictionManager
 		}
 
 		return self::$inventoryControlIntegrationRestriction;
+	}
 
+	public static function getInventoryControl1cRestriction(): Bitrix24AccessRestriction
+	{
+		if (self::$inventoryControl1cRestriction === null)
+		{
+			self::$inventoryControl1cRestriction = new Bitrix24AccessRestriction(
+				'catalog_inventory_management_1c',
+				false,
+				null,
+				['ID' => 'limit_crm_1c_inventory_control']
+			);
+
+			if(!self::$inventoryControl1cRestriction->load())
+			{
+				self::$inventoryControl1cRestriction->permit(
+					Bitrix24Manager::isFeatureEnabled('catalog_inventory_management_1c')
+				);
+			}
+		}
+
+		return self::$inventoryControl1cRestriction;
 	}
 
 	public static function getDealClientFieldsRestriction(): ClientFieldsRestriction

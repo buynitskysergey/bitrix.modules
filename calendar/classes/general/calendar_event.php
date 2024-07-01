@@ -1088,7 +1088,7 @@ class CCalendarEvent
 							$value = array_map(static function($item) {
 								return (int)$item;
 							}, $value);
-							
+
 							if (empty($value))
 							{
 								$value = [''];
@@ -3941,8 +3941,8 @@ class CCalendarEvent
 						{
 							if (in_array($entry['MEETING_STATUS'] ?? null,
 								[
-									\Bitrix\Calendar\Core\Event\Tools\Dictionary::MEETING_STATUS['Yes'],
-									\Bitrix\Calendar\Core\Event\Tools\Dictionary::MEETING_STATUS['Question'],
+									Dictionary::MEETING_STATUS['Yes'],
+									Dictionary::MEETING_STATUS['Question'],
 								], true))
 							{
 								self::SetMeetingStatus([
@@ -5018,6 +5018,7 @@ class CCalendarEvent
 		$arFilter = [
 			'DELETED' => 'N',
 			'ACCESSIBILITY' => 'absent',
+			'CAL_TYPE' => Dictionary::CALENDAR_TYPE['user'],
 		];
 
 		if ($users)

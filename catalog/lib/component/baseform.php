@@ -29,7 +29,6 @@ use Bitrix\Main\ORM\Fields\BooleanField;
 use Bitrix\Main\ORM\Fields\DateField;
 use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\EnumField;
-use Bitrix\Main\ORM\Fields\Field;
 use Bitrix\Main\ORM\Fields\FloatField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\ScalarField;
@@ -192,6 +191,11 @@ abstract class BaseForm
 
 	public function isReadOnly(): bool
 	{
+		if (State::isExternalCatalog())
+		{
+			return true;
+		}
+
 		return
 			!$this->accessController->check(ActionDictionary::ACTION_PRODUCT_CARD_EDIT)
 			&& !$this->isAllowedEditFields()
@@ -608,7 +612,7 @@ abstract class BaseForm
 						$value = $this->getEntityViewPictureValues($this->entity);
 						$editValue = $this->getEntityEditPictureValues($this->entity);
 
-						if (!$description['multiple'])
+						if (!$description['multiple'] && isset($value[0]))
 						{
 							$value = $value[0];
 							$editValue = $editValue[0];
@@ -637,9 +641,7 @@ abstract class BaseForm
 					}
 					else
 					{
-						// generate new IDs for new elements to avoid duplicate IDs in HTML inputs
-						$entityId = $this->entity->getId() ?? uniqid();
-						$controlId = $description['name'] . '_uploader_' . $entityId;
+						$controlId = $description['name'] . '_uploader';
 
 						$additionalValues[$descriptionData['view']] = '';
 						$additionalValues[$descriptionData['viewList']]['SINGLE'] = '';
@@ -960,7 +962,7 @@ abstract class BaseForm
 	{
 		$isQuantityTraceExplicitlyDisabled = $this->entity->getField('QUANTITY_TRACE') === 'N';
 		$isWithOrdersMode = Loader::includeModule('crm') && \CCrmSaleHelper::isWithOrdersMode();
-		$isInventoryManagementUsed = UseStore::isUsed();
+		$isInventoryManagementUsed = State::isUsedInventoryManagement();
 
 		return (!$isWithOrdersMode && !$isInventoryManagementUsed)
 			|| ($isInventoryManagementUsed && !$isQuantityTraceExplicitlyDisabled);
@@ -2254,7 +2256,7 @@ abstract class BaseForm
 	{
 		$inputName = $this->getFilePropertyInputName($property);
 
-		if ($value && !is_array($value))
+		if ($value && (!is_array($value) || isset($value['ID'])))
 		{
 			$value = [$value];
 		}

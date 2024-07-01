@@ -773,7 +773,7 @@ class RestService extends \IRestService
 		$dbRes = Manager::getList(array('filter' => array('ACTION_FILE' => $data['CODE'])));
 		if ($dbRes->fetch())
 		{
-			throw new RestException('Pay system with handler '.ToUpper($data['CODE']).' exists!', self::ERROR_PAY_SYSTEM_DELETE);
+			throw new RestException('Pay system with handler '.mb_strtoupper($data['CODE']).' exists!', self::ERROR_PAY_SYSTEM_DELETE);
 		}
 	}
 
@@ -1544,7 +1544,7 @@ class RestService extends \IRestService
 		}
 
 		$handlerData = Internals\PaySystemRestHandlersTable::getList([
-			'filter' => ['CODE' => $code],
+			'filter' => ['=CODE' => $code],
 			'limit' => 1,
 		])->fetch();
 		if (is_array($handlerData))

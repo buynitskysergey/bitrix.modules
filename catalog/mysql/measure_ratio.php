@@ -1,4 +1,5 @@
-<?
+<?php
+
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/catalog/general/measure_ratio.php");
 
 class CCatalogMeasureRatio extends CCatalogMeasureRatioAll

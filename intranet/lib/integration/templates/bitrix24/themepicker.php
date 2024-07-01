@@ -107,15 +107,7 @@ class ThemePicker
 			$this->entityId = $this->userId;
 		}
 
-		if (Loader::includeModule('bitrix24'))
-		{
-			$this->zoneId = \CBitrix24::getPortalZone();
-		}
-		else
-		{
-			$context = Context::getCurrent();
-			$this->zoneId = $context !== null ? $context->getLanguage() : "en";
-		}
+		$this->zoneId = Application::getInstance()->getLicense()->getRegion() ?? 'en';
 
 		$res = ThemeTable::getList([
 			'filter' => [

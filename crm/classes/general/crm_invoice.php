@@ -4934,7 +4934,7 @@ class CAllCrmInvoice
 		{
 			$arMatch = array();
 
-			if (preg_match('/(.*)_from$/i'.BX_UTF_PCRE_MODIFIER, $k, $arMatch))
+			if (preg_match('/(.*)_from$/iu', $k, $arMatch))
 			{
 				if($v <> '')
 				{
@@ -4942,11 +4942,11 @@ class CAllCrmInvoice
 				}
 				unset($arFilter[$k]);
 			}
-			elseif (preg_match('/(.*)_to$/i'.BX_UTF_PCRE_MODIFIER, $k, $arMatch))
+			elseif (preg_match('/(.*)_to$/iu', $k, $arMatch))
 			{
 				if($v <> '')
 				{
-					if (($arMatch[1] == 'DATE_PAY_BEFORE' || $arMatch[1] == 'DATE_INSERT') && !preg_match('/\d{1,2}:\d{1,2}(:\d{1,2})?$/'.BX_UTF_PCRE_MODIFIER, $v))
+					if (($arMatch[1] == 'DATE_PAY_BEFORE' || $arMatch[1] == 'DATE_INSERT') && !preg_match('/\d{1,2}:\d{1,2}(:\d{1,2})?$/u', $v))
 					{
 						$v = CCrmDateTimeHelper::SetMaxDayTime($v);
 					}

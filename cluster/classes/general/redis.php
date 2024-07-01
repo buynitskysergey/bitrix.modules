@@ -86,8 +86,9 @@ class CClusterRedis
 
 		$content .= "];\n";
 
-		file_put_contents($_SERVER['DOCUMENT_ROOT'] . BX_ROOT . '/modules/cluster/redis.php', $content);
-		bx_accelerator_reset();
+		$filename = $_SERVER['DOCUMENT_ROOT'] . BX_ROOT . '/modules/cluster/redis.php';
+		file_put_contents($filename, $content);
+		\Bitrix\Main\Application::resetAccelerator($filename);
 
 		self::$systemConfigurationUpdate = null;
 		$cache = \Bitrix\Main\Config\Configuration::getValue('cache');

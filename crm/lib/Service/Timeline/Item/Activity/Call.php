@@ -28,7 +28,6 @@ use Bitrix\Crm\Service\Timeline\Layout\Footer\IconButton;
 use Bitrix\Crm\Service\Timeline\Layout\Header\Tag;
 use Bitrix\Crm\Service\Timeline\Layout\Menu;
 use Bitrix\Crm\Service\Timeline\Layout\Menu\MenuItemFactory;
-use Bitrix\Crm\Settings\WorkTime;
 use Bitrix\Crm\Tour\CopilotInCall;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\PhoneNumber;
@@ -284,20 +283,10 @@ class Call extends Activity
 
 	public function getButtons(): array
 	{
-		$communication = $this->getAssociatedEntityModel()?->get('COMMUNICATION') ?? [];
-
-		$nearestWorkday = (new WorkTime())->detectNearestWorkDateTime(3, 1);
-		$scheduleButton = (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_CALL_SCHEDULE'), Button::TYPE_SECONDARY))
-			->setAction((new JsEvent('Call:Schedule'))
-				->addActionParamInt('activityId', $this->getActivityId())
-				->addActionParamString('scheduleDate', $nearestWorkday->toString())
-				->addActionParamInt('scheduleTs', $nearestWorkday->getTimestamp())
-			)
-		;
-		$doneButton = (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_CALL_COMPLETE'), Button::TYPE_PRIMARY))
-			->setAction($this->getCompleteAction())
-		;
+		$doneButton = (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_CALL_COMPLETE'), Button::TYPE_PRIMARY))->setAction($this->getCompleteAction());
+		$scheduleButton = $this->getScheduleButton('Call:Schedule');
 		$aiButton = $this->getAIButton();
+		$communication = $this->getAssociatedEntityModel()?->get('COMMUNICATION') ?? [];
 
 		switch ($this->fetchDirection())
 		{
@@ -463,15 +452,15 @@ class Call extends Activity
 			return null;
 		}
 
-		$isCopilotTourCanShow = (CopilotInCall::getInstance())
+		$isWelcomeTourEnabled = (CopilotInCall::getInstance())
 			->setEntityTypeId($this->getContext()->getIdentifier()->getEntityTypeId())
-			->isCopilotTourCanShow()
+			->isWelcomeTourEnabled()
 		;
 
 		return (new Payload())
 			->addValueBoolean(
-				'isCopilotTourCanShow',
-				$isCopilotTourCanShow
+				'isWelcomeTourEnabled',
+				$isWelcomeTourEnabled
 			)
 		;
 	}
@@ -715,6 +704,9 @@ class Call extends Activity
 			return null;
 		}
 
+		$buttonProps = [
+			'data-activity-id' => $activityId,
+		];
 		$button = (new Button(Loc::getMessage('CRM_COMMON_COPILOT'), Button::TYPE_AI))
 			->setIcon(Button::TYPE_AI)
 			->setAction(
@@ -732,9 +724,14 @@ class Call extends Activity
 			!$this->getContext()->getUserPermissions()->isAdmin()
 		)
 		{
-			$button->setProps([
+			$buttonProps = [
 				'data-bitrix24-license-feature' => AIManager::AI_LICENCE_FEATURE_NAME,
-			]);
+			];
+		}
+
+		if (!empty($buttonProps))
+		{
+			$button->setProps($buttonProps);
 		}
 
 		if (AIManager::isLaunchOperationsPending($ownerTypeId, $ownerId, $activityId))

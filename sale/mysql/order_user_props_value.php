@@ -150,7 +150,7 @@ class CSaleOrderUserPropsValue extends CAllSaleOrderUserPropsValue
 			}
 			else
 			{
-				// ÒÎËÜÊÎ ÄËß MYSQL!!! ÄËß ORACLE ÄÐÓÃÎÉ ÊÎÄ
+				// Ð¢ÐžÐ›Ð¬ÐšÐž Ð”Ð›Ð¯ MYSQL!!! Ð”Ð›Ð¯ ORACLE Ð”Ð Ð£Ð“ÐžÐ™ ÐšÐžÐ”
 				$cnt = $dbRes->SelectedRowsCount();
 			}
 

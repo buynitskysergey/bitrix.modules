@@ -8,7 +8,7 @@ use CRestUtil;
 
 class Toolbar
 {
-	public static function getInfo($marketAction): array
+	public static function getInfo($marketAction, $searchAction): array
 	{
 		$result = [
 			'CATEGORIES' => Categories::forceGet(),
@@ -16,6 +16,7 @@ class Toolbar
 			'MENU_INFO' => Menu::getList(),
 			'MARKET_SLIDER' => Status::getSlider(),
 			'MARKET_ACTION' => $marketAction,
+			'SEARCH_ACTION' => $searchAction,
 		];
 
 		if (CRestUtil::isAdmin()) {

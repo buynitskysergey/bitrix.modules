@@ -70,8 +70,8 @@ class ClientResolver
 	{
 		$result = $value;
 
-		$result = preg_replace('/^[ \t\-]+/'.BX_UTF_PCRE_MODIFIER, '', $result);
-		$result = preg_replace('/ {2,}/'.BX_UTF_PCRE_MODIFIER, ' ', $result);
+		$result = preg_replace('/^[ \t\-]+/u', '', $result);
+		$result = preg_replace('/ {2,}/u', ' ', $result);
 		$result = trim($result);
 
 		return $result;
@@ -153,7 +153,7 @@ class ClientResolver
 
 		$dateFormat = Date::convertFormatToPhp(FORMAT_DATE);
 		$nameFormat = Crm\Format\PersonNameFormatter::LastFirstSecondFormat;
-		$alphaRegex = "/[[:alpha:]]/".BX_UTF_PCRE_MODIFIER;
+		$alphaRegex = "/[[:alpha:]]/u";
 		$results = array();
 
 		Loc::loadMessages(__FILE__);

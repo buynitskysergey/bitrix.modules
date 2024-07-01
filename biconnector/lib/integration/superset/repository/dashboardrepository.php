@@ -26,6 +26,7 @@ final class DashboardRepository
 		$ormParams['select'] = [
 			'*', 'SOURCE'
 		];
+		$ormParams['cache'] = ['ttl' => 3600];
 		$dashboardList = SupersetDashboardTable::getList($ormParams)->fetchCollection();
 		$dashboardExternalIds = $dashboardList->getExternalIdList();
 		Collection::normalizeArrayValuesByInt($dashboardExternalIds);

@@ -1,15 +1,15 @@
-<?
-use Bitrix\Main,
-	Bitrix\Main\Localization\Loc,
-	Bitrix\Catalog;
+<?php
 
-Loc::loadMessages(__FILE__);
+use Bitrix\Main;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Catalog;
+
 /**
  * Class CCatalogMeasureAll
  */
 class CCatalogMeasureAll
 {
-	const DEFAULT_MEASURE_CODE = 796;
+	public const DEFAULT_MEASURE_CODE = 796;
 
 	protected static $defaultMeasure = null;
 

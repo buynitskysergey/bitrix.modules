@@ -2,11 +2,11 @@
 
 namespace Bitrix\Crm\Controller;
 
+use Bitrix\Crm;
 use Bitrix\Crm\Order\Order;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\UI\EntitySelector;
 use Bitrix\Main;
-use Bitrix\Crm;
 use Bitrix\UI\EntitySelector\Dialog;
 
 class Entity extends Main\Engine\Controller
@@ -15,29 +15,35 @@ class Entity extends Main\Engine\Controller
 
 	public function configureActions()
 	{
-		return array(
-			'search' => array(
+		return [
+			'search' => [
 				'class' => Crm\Controller\Action\Entity\SearchAction::class,
 				'+prefilters' => [new Main\Engine\ActionFilter\CloseSession()]
-			),
-			'mergeBatch' => array('class' => Crm\Controller\Action\Entity\MergeBatchAction::class),
-			'prepareMerge' => array('class' => Crm\Controller\Action\Entity\PrepareMergeAction::class),
-			'processMerge' => array('class' => Crm\Controller\Action\Entity\ProcessMergeAction::class),
-			'processMergeByMap' => array('class' => Crm\Controller\Action\Entity\ProcessMergeByMapAction::class),
-			'prepareDeletion' => array('class' => Crm\Controller\Action\Entity\PrepareDeletionAction::class),
-			'cancelDeletion' => array('class' => Crm\Controller\Action\Entity\CancelDeletionAction::class),
-			'processDeletion' => array('class' => Crm\Controller\Action\Entity\ProcessDeletionAction::class),
-			'fetchPaymentDocuments' => array(
+			],
+			'mergeBatch' => ['class' => Crm\Controller\Action\Entity\MergeBatchAction::class],
+			'prepareMerge' => ['class' => Crm\Controller\Action\Entity\PrepareMergeAction::class],
+			'processMerge' => ['class' => Crm\Controller\Action\Entity\ProcessMergeAction::class],
+			'processMergeByMap' => ['class' => Crm\Controller\Action\Entity\ProcessMergeByMapAction::class],
+			'prepareDeletion' => [
+				'class' => Crm\Controller\Action\Entity\PrepareDeletionAction::class,
+			],
+			'cancelDeletion' => [
+				'class' => Crm\Controller\Action\Entity\CancelDeletionAction::class,
+			],
+			'processDeletion' => [
+				'class' => Crm\Controller\Action\Entity\ProcessDeletionAction::class,
+			],
+			'fetchPaymentDocuments' => [
 				'class' => Crm\Controller\Action\Entity\FetchPaymentDocumentsAction::class,
 				'+prefilters' => [new Main\Engine\ActionFilter\Authentication()]
-			),
+			],
 			'renderImageInput' => [
 				'class' =>  Crm\Controller\Action\Entity\RenderImageInputAction::class,
 			],
 			'canChangeCurrency' => [
 				'class' => Crm\Controller\Action\Entity\CanChangeCurrencyAction::class,
 			],
-		);
+		];
 	}
 
 	//region LRU

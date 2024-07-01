@@ -8,10 +8,21 @@
 
 namespace Bitrix\Intranet;
 
+use Bitrix\Intranet\HR\Employee;
+use Bitrix\Intranet\Counters\Counter;
+use Bitrix\Main\ArgumentException;
 use Bitrix\Main\ArgumentOutOfRangeException;
+use Bitrix\Main\DB\SqlExpression;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main\Entity\ExpressionField;
+use Bitrix\Main\ORM\Fields\DatetimeField;
+use Bitrix\Main\ORM\Fields\Relations\ManyToMany;
+use Bitrix\Main\UI\EntitySelector\EntityUsageTable;
+use Bitrix\Main\ObjectPropertyException;
+use Bitrix\Main\ORM\Query\Query;
+use Bitrix\Main\SystemException;
 use Bitrix\Main\UserAccessTable;
 
 /**
@@ -160,6 +171,41 @@ class UserTable extends \Bitrix\Main\UserTable
 			"CASE WHEN %s = 'employee' THEN 1 ELSE 0 END",
 			'USER_TYPE_INNER'
 		));
+
+		$entity->addField(
+			new \Bitrix\Main\ORM\Fields\Relations\Reference(
+				'INVITATION',
+				\Bitrix\Intranet\Internals\InvitationTable::class,
+				\Bitrix\Main\ORM\Query\Join::on('this.ID', 'ref.USER_ID')
+			)
+		);
+
+		$entity->addField(new DatetimeField('CHECKWORD_TIME'));
+
+		$entity->addField(new ExpressionField(
+			'INVITED_SORT',
+			"CASE WHEN %s = 'Y' AND %s <> '' THEN 0 ELSE 1 END",
+			['ACTIVE', 'CONFIRM_CODE']
+		));
+
+		$entity->addField(new ExpressionField(
+			'WAITING_CONFIRMATION_SORT',
+			"CASE WHEN %s = 'N' AND %s <> '' THEN 0 ELSE 1 END",
+			['ACTIVE', 'CONFIRM_CODE']
+		));
+
+		$entity->addField(
+			(new \Bitrix\Main\ORM\Fields\Relations\Reference(
+			'UG',
+			\Bitrix\Socialnetwork\UserToGroupTable::class,
+			\Bitrix\Main\ORM\Query\Join::on('this.ID', 'ref.USER_ID'))
+			)->configureJoinType(\Bitrix\Main\ORM\Query\Join::TYPE_INNER)
+		);
+	}
+
+	public static function createInvitedQuery(): Query
+	{
+		return static::query()->addFilter('!CONFIRM_CODE', false)->where('IS_REAL_USER', true);
 	}
 }
 
@@ -171,14 +217,19 @@ class User
 	/**
 	 * @throws ArgumentOutOfRangeException
 	 */
-	public function __construct(?int $userId)
+	public function __construct(?int $userId = null)
 	{
-		if ($userId <= 0)
+		if (!is_null($userId) && $userId <= 0)
 		{
 			throw new ArgumentOutOfRangeException('userId', 1);
 		}
 		$this->currentUser = CurrentUser::get();
-		$this->userId = $userId;
+		$this->userId = is_null($userId) ? $this->currentUser->getId() : $userId;
+	}
+
+	public function getId(): int
+	{
+		return $this->userId;
 	}
 
 	public function isIntranet(): bool
@@ -225,7 +276,10 @@ class User
 
 	public function isAdmin(): bool
 	{
-		if ($this->currentUser->getId() === $this->userId)
+		if (
+			isset($GLOBALS['USER'])
+			&& $GLOBALS['USER'] instanceof \CAllUser
+			&& $this->currentUser->getId() === $this->userId)
 		{
 			return (
 					Loader::includeModule('bitrix24')
@@ -245,5 +299,112 @@ class User
 	{
 		$result = \CUser::GetById($this->userId)->fetch();
 		return is_array($result) ? $result : [];
+	}
+
+	public function numberOfInvitationsSent(): int
+	{
+		$query = UserTable::createInvitedQuery()->where('ACTIVE', 'Y');
+
+		if (!$this->isAdmin())
+		{
+			$query->addFilter('INVITATION.ORIGINATOR_ID', $this->userId);
+		}
+
+		return $query->queryCountTotal();
+	}
+
+	public function fetchOriginatorUser(): ?self
+	{
+		$user = UserTable::query()
+			->where('ID', $this->userId)
+			->setSelect(['ID', 'OWN_USER_ID' => 'INVITATION.ORIGINATOR_ID'])
+			->setLimit(1)
+			->fetch();
+
+		if (isset($user['OWN_USER_ID']) && (int)$user['OWN_USER_ID'] > 0)
+		{
+			return new static((int)$user['OWN_USER_ID']);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Returns sorted array of user id.
+	 * Flags for correct complex sorting
+	 * @param bool $onlyActive
+	 * @param bool $withInvited
+	 * @return array
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
+	public function getStructureSort(bool $onlyActive = true, bool $withInvited = true): array
+	{
+		$userDepartment = \CIntranetUtils::GetUserDepartments($this->userId);
+		$departmentId = !empty($userDepartment) ? $userDepartment[0] : 0;
+		$list = [];
+
+		if ($departmentId)
+		{
+			if ($managerId = \CIntranetUtils::GetDepartmentManagerID($departmentId))
+			{
+				$list[] = $managerId;
+			}
+
+			$list = array_merge(
+				$list,
+				Employee::getInstance()->getListByDepartmentId($departmentId, $onlyActive, $withInvited),
+			);
+		}
+
+		$list = array_merge(
+			$list,
+			$this->getUserUsageList()
+		);
+
+		return array_reverse(array_unique($list));
+	}
+
+	private function getUserUsageList(): array
+	{
+		$query = EntityUsageTable::query()
+			->setSelect(['ENTITY_ID', 'ITEM_ID', 'MAX_LAST_USE_DATE'])
+			->setGroup(['ENTITY_ID', 'ITEM_ID'])
+			->where('USER_ID', $this->userId)
+			->where('ENTITY_ID', 'user')
+			->registerRuntimeField(new \Bitrix\Main\ORM\Fields\ExpressionField('MAX_LAST_USE_DATE', 'MAX(%s)', 'LAST_USE_DATE'))
+			->setOrder(['MAX_LAST_USE_DATE' => 'asc'])
+			->setLimit(20);
+
+		$userEntityList = $query->exec()->fetchAll();
+		$result = [];
+
+		foreach ($userEntityList as $userEntity)
+		{
+			$result[] = $userEntity['ITEM_ID'];
+		}
+
+		return $result;
+	}
+
+	public function isInitializedUser(): bool
+	{
+		return !UserTable::createInvitedQuery()->where('ID', $this->getId())->queryCountTotal();
+	}
+
+	public function getInvitationCounterValue(): int
+	{
+		return (new Counter(Invitation::getInvitedCounterId()))->getValue($this);
+	}
+
+	public function getTotalInvitationCounterValue(): int
+	{
+		return (new Counter(Invitation::getTotalInvitationCounterId()))->getValue($this);
+	}
+
+	public function getWaitConfirmationCounterValue(): int
+	{
+		return (new Counter(Invitation::getWaitConfirmationCounterId()))->getValue($this);
 	}
 }

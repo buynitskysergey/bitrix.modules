@@ -388,22 +388,22 @@ class Block extends \Bitrix\Landing\Internals\BaseTable
 			{
 				$filter['ID'] = $params['id'];
 			}
-			$res = parent::getList(array(
-				'select' => array(
+			$res = parent::getList([
+				'select' => [
 					'*',
 					'LANDING_ACTIVE' => 'LANDING.ACTIVE',
 					'LANDING_TPL_CODE' => 'LANDING.TPL_CODE',
 					'SITE_TPL_CODE' => 'LANDING.SITE.TPL_CODE',
 					'SITE_TYPE' => 'LANDING.SITE.TYPE',
 					'SITE_ID' => 'LANDING.SITE_ID'
-				),
+				],
 				'filter' => $filter,
-				'order' => array(
+				'order' => [
 					'SORT' => 'ASC',
 					'ID' => 'ASC'
-				),
-				'limit' => $limit
-			));
+				],
+				'limit' => $limit ?: null
+			]);
 			while ($row = $res->fetch())
 			{
 				$blockParams = [];
@@ -1460,7 +1460,7 @@ class Block extends \Bitrix\Landing\Internals\BaseTable
 			'order' => [
 				'DATE_CREATE' => 'DESC'
 			],
-			'limit' => $count
+			'limit' => $count ?: null
 		]);
 		while ($row = $res->fetch())
 		{
@@ -1621,7 +1621,7 @@ class Block extends \Bitrix\Landing\Internals\BaseTable
 		{
 			$extContent = \CUtil::initJSCore($ext, true);
 			$extContent = preg_replace(
-				'#<script type="text/javascript"(\sdata\-skip\-moving\="true")?>.*?</script>#is',
+				'#<script(\sdata\-skip\-moving\="true")?>.*?</script>#is',
 				'',
 				$extContent
 			);
@@ -2898,7 +2898,7 @@ class Block extends \Bitrix\Landing\Internals\BaseTable
 						: 'b' . $this->id;
 				}
 				$autoPublicationEnabled = Site\Type::isPublicScope() && \CUserOptions::getOption('landing', 'auto_publication', 'Y') === 'Y';
-				echo '<script type="text/javascript">'
+				echo '<script>'
 						. 'BX.ready(function(){'
 							. 'if (typeof BX.Landing.Block !== "undefined")'
 							. '{'

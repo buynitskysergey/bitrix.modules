@@ -403,6 +403,10 @@ final class Company extends Service\Factory
 				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\Compatible\SendEvent\ExternalAdd('OnAfterExternalCrmCompanyAdd'),
 			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenAddingEntity(),
+			)
 		;
 	}
 
@@ -433,6 +437,10 @@ final class Company extends Service\Factory
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\ResetEntityCommunicationSettingsInActivities(),
+			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenUpdatingEntity(),
 			)
 		;
 

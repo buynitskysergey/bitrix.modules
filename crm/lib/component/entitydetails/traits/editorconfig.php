@@ -8,6 +8,7 @@ use Bitrix\Crm\Service\Container;
 trait EditorConfig
 {
 	use EditorInitialMode;
+	use EditorRequisiteEditMode;
 
 	abstract protected function getEntityId();
 

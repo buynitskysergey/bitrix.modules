@@ -100,10 +100,10 @@ class CPullPush
 		/**
 		 * @var $DB CDatabase
 		 */
-		$killTime = ConvertTimeStamp(getmicrotime() - 24 * 3600 * 14, "FULL");
+		$killTime = ConvertTimeStamp(microtime(true) - 24 * 3600 * 14, "FULL");
 		$sqlString = "DELETE FROM b_pull_push WHERE DATE_AUTH < " . $DB->CharToDateFunction($killTime);
 
-		$DB->Query($sqlString, false, "FILE: " . __FILE__ . "<br> LINE: " . __LINE__);
+		$DB->Query($sqlString);
 
 		return "CPullPush::cleanTokens();";
 	}
@@ -141,7 +141,7 @@ class CPushManager
 		}
 
 		$strSql = "DELETE FROM b_pull_push_queue WHERE USER_ID = " . intval($userId) . " AND TAG = '" . $DB->ForSQL($tag) . "'";
-		$DB->Query($strSql, false, "File: " . __FILE__ . "<br>Line: " . __LINE__);
+		$DB->Query($strSql);
 
 		\Bitrix\Pull\Push::add($userId, [
 			'module_id' => 'pull',
@@ -928,7 +928,7 @@ class CPushManager
 		}
 
 		$strSql = "DELETE FROM b_pull_push_queue WHERE USER_ID = " . intval($userId) . " AND SUB_TAG = '" . $DB->ForSQL($tag) . "'";
-		$DB->Query($strSql, false, "File: " . __FILE__ . "<br>Line: " . __LINE__);
+		$DB->Query($strSql);
 
 		\Bitrix\Pull\Push::add($userId, [
 			'module_id' => 'pull',
@@ -974,7 +974,7 @@ class CPushManager
 		}
 
 		$strSql = $DB->TopSql("SELECT ID, USER_ID, MESSAGE, PARAMS, ADVANCED_PARAMS, BADGE, APP_ID FROM b_pull_push_queue" . $sqlDate, 280);
-		$dbRes = $DB->Query($strSql, false, "File: " . __FILE__ . "<br>Line: " . __LINE__);
+		$dbRes = $DB->Query($strSql);
 		while ($arRes = $dbRes->Fetch())
 		{
 			if ($arRes['BADGE'] == '')
@@ -1020,7 +1020,7 @@ class CPushManager
 		if ($maxId > 0)
 		{
 			$strSql = "DELETE FROM b_pull_push_queue WHERE ID <= " . $maxId;
-			$DB->Query($strSql, false, "File: " . __FILE__ . "<br>Line: " . __LINE__);
+			$DB->Query($strSql);
 		}
 
 		$CPushManager = new CPushManager();
@@ -1030,7 +1030,7 @@ class CPushManager
 		}
 
 		$strSql = "SELECT COUNT(ID) CNT FROM b_pull_push_queue";
-		$dbRes = $DB->Query($strSql, false, "File: " . __FILE__ . "<br>Line: " . __LINE__);
+		$dbRes = $DB->Query($strSql);
 		if ($arRes = $dbRes->Fetch())
 		{
 			global $pPERIOD;

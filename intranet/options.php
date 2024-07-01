@@ -253,7 +253,7 @@ $mail_check_period = COption::GetOptionInt('intranet', 'mail_check_period', 10);
 
 $tabControl->Begin();
 ?>
-<script type="text/javascript">
+<script>
 var arIB = <?echo CUtil::PhpToJsObject($arIB)?>;
 
 function change_iblock_list(value, index)
@@ -782,7 +782,7 @@ $arWeekDays = array(
 
 $arVariants = array_keys($arTZRules);
 ?>
-<script type="text/javascript">
+<script>
 function check_other(obSelect, type)
 {
 	if (obSelect.value && obSelect.value != 'other')

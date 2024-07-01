@@ -89,7 +89,7 @@ class CSaleDiscountConvert
 		$intStep = intval($intStep);
 		if (0 >= $intStep)
 			$intStep = 100;
-		$startConvertTime = getmicrotime();
+		$startConvertTime = microtime(true);
 
 		$obDiscount = new CSaleDiscount();
 
@@ -280,13 +280,13 @@ class CSaleDiscountConvert
 				self::$intConvertPerStep++;
 			}
 
-			if ($intMaxExecutionTime > 0 && (getmicrotime() - $startConvertTime > $intMaxExecutionTime))
+			if ($intMaxExecutionTime > 0 && (microtime(true) - $startConvertTime > $intMaxExecutionTime))
 				break;
 		}
 
 		CTimeZone::Enable();
 
-		if ($intMaxExecutionTime > (2*(getmicrotime() - $startConvertTime)))
+		if ($intMaxExecutionTime > (2*(microtime(true) - $startConvertTime)))
 			self::$intNextConvertPerStep = $intStep*2;
 		else
 			self::$intNextConvertPerStep = $intStep;

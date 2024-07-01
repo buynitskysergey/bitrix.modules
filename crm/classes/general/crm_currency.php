@@ -1,17 +1,18 @@
 <?php
-use Bitrix\Main\Loader,
-	Bitrix\Currency;
 
-IncludeModuleLangFile(__FILE__);
+use Bitrix\Main\Loader;
+use Bitrix\Main\Localization\LanguageTable;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Currency;
 
 class CCrmCurrency
 {
 	/** @var \CCurrencyRates */
 	private static $currencyRatesClassName = \CCurrencyRates::class;
-	private static $BASE_CURRENCY_ID = null;
+	private static ?string $BASE_CURRENCY_ID = null;
 	private static $ACCOUNT_CURRENCY_ID = null;
-	private static $CURRENCY_BY_LANG = array();
-	private static $CURRENCY_FORMAT_BY_LANG = array();
+	private static array $CURRENCY_BY_LANG = [];
+	private static array $CURRENCY_FORMAT_BY_LANG = [];
 	protected static $LAST_ERROR = '';
 	// Default currency is stub that used only when 'currency' module is not installed
 	protected static $DEFAULT_CURRENCY_ID = '';
@@ -78,7 +79,7 @@ class CCrmCurrency
 
 	public static function GetFieldCaption($fieldName)
 	{
-		$result = GetMessage("CRM_CURRENCY_FIELD_{$fieldName}");
+		$result = Loc::getMessage("CRM_CURRENCY_FIELD_{$fieldName}");
 		return is_string($result) ? $result : '';
 	}
 
@@ -101,22 +102,42 @@ class CCrmCurrency
 
 	public static function GetDefaultCurrencyID()
 	{
-		if(self::$DEFAULT_CURRENCY_ID !== '')
+		if (self::$DEFAULT_CURRENCY_ID !== '')
 		{
 			return self::$DEFAULT_CURRENCY_ID;
 		}
 
 		self::$DEFAULT_CURRENCY_ID = 'USD';
 
-		$rsLang = CLanguage::GetByID('ru');
-		if($arLang = $rsLang->Fetch())
+		$row = LanguageTable::getRow([
+			'select' => [
+				'ID',
+			],
+			'filter' => [
+				'=ID' => 'ru',
+			],
+			'cache' => [
+				'ttl' => 86400,
+			]
+		]);
+		if ($row !== null)
 		{
 			self::$DEFAULT_CURRENCY_ID = 'RUB';
 		}
 		else
 		{
-			$rsLang = CLanguage::GetByID('de');
-			if($arLang = $rsLang->Fetch())
+			$row = LanguageTable::getRow([
+				'select' => [
+					'ID',
+				],
+				'filter' => [
+					'=ID' => 'de',
+				],
+				'cache' => [
+					'ttl' => 86400,
+				]
+			]);
+			if ($row !== null)
 			{
 				self::$DEFAULT_CURRENCY_ID = 'EUR';
 			}
@@ -127,7 +148,7 @@ class CCrmCurrency
 
 	public static function NormalizeCurrencyID($currencyID)
 	{
-		return mb_strtoupper(trim(strval($currencyID)));
+		return mb_strtoupper(trim((string)$currencyID));
 	}
 
 	public static function GetBaseCurrencyID()
@@ -137,10 +158,11 @@ class CCrmCurrency
 			return self::GetDefaultCurrencyID();
 		}
 
-		if(!self::$BASE_CURRENCY_ID)
+		if (!self::$BASE_CURRENCY_ID)
 		{
 			self::$BASE_CURRENCY_ID = (string)Currency\CurrencyManager::getBaseCurrency();
 		}
+
 		return self::$BASE_CURRENCY_ID;
 	}
 	public static function SetBaseCurrencyID($currencyID)
@@ -206,7 +228,7 @@ class CCrmCurrency
 	{
 		if(!Loader::includeModule('currency'))
 		{
-			self::$LAST_ERROR = GetMessage('CRM_CURRERCY_MODULE_WARNING');
+			self::$LAST_ERROR = Loc::getMessage('CRM_CURRERCY_MODULE_WARNING');
 			return false;
 		}
 
@@ -220,26 +242,30 @@ class CCrmCurrency
 
 	public static function GetByID($currencyID, $langID = '')
 	{
-		$currencyID = self::NormalizeCurrencyID($currencyID);
+		$currencyID = (string)self::NormalizeCurrencyID($currencyID);
 
-		if(!isset($currencyID[0]))
+		if ($currencyID === '')
 		{
 			return false;
 		}
 
 		$currencies = self::GetAll($langID);
-		return isset($currencies[$currencyID]) ? $currencies[$currencyID] : false;
+
+		return $currencies[$currencyID] ?? false;
 	}
 
 	public static function GetByName($name, $langID = '')
 	{
-		$name = strval($name);
+		$name = (string)$name;
 		$currencies = self::GetAll($langID);
 		foreach($currencies as $currency)
 		{
-			if(isset($currency['FULL_NAME']) && $currency['FULL_NAME'] === $name)
+			if (isset($currency['FULL_NAME']) && $currency['FULL_NAME'] === $name)
+			{
 				return $currency;
+			}
 		}
+
 		return false;
 	}
 
@@ -250,16 +276,16 @@ class CCrmCurrency
 			return array();
 		}
 
-		$langID = strval($langID);
-		if(!isset($langID[0]))
+		$langID = (string)$langID;
+		if ($langID === '')
 		{
 			$langID = LANGUAGE_ID;
 		}
 
-		$currencies = isset(self::$CURRENCY_BY_LANG[$langID]) ? self::$CURRENCY_BY_LANG[$langID] : null;
-		if(!$currencies)
+		$currencies = self::$CURRENCY_BY_LANG[$langID] ?? null;
+		if (!$currencies)
 		{
-			$currencies = array();
+			$currencies = [];
 			$resCurrency = CCurrency::GetList('sort', 'asc', $langID);
 			while ($arCurrency = $resCurrency->Fetch())
 			{
@@ -298,8 +324,8 @@ class CCrmCurrency
 			$order = 'asc';
 		}
 
-		$langID = strval($langID);
-		if($langID === '')
+		$langID = (string)$langID;
+		if ($langID === '')
 		{
 			$langID = LANGUAGE_ID;
 		}
@@ -311,19 +337,19 @@ class CCrmCurrency
 	{
 		if (!Loader::includeModule('currency'))
 		{
-			return array();
+			return [];
 		}
 
-		$currencyID = strval($currencyID);
+		$currencyID = (string)$currencyID;
 		if($currencyID === '')
 		{
-			return array();
+			return [];
 		}
 
-		$result = array();
+		$result = [];
 
 		$dbResult = CCurrencyLang::GetList('', '', self::NormalizeCurrencyID($currencyID));
-		if($dbResult)
+		if ($dbResult)
 		{
 			while($item = $dbResult->Fetch())
 			{
@@ -467,51 +493,48 @@ class CCrmCurrency
 
 	public static function GetCurrencyName($currencyID, $langID = '')
 	{
-		$currencyID = strval($currencyID);
-		if($currencyID === '')
+		$currencyID = (string)$currencyID;
+		if ($currencyID === '')
 		{
 			return '';
 		}
 
 		$ID = self::NormalizeCurrencyID($currencyID);
 		$currencies = self::GetAll($langID);
-		return isset($currencies[$ID]) && isset($currencies[$ID]['FULL_NAME']) ? $currencies[$ID]['FULL_NAME'] : $currencyID;
+
+		return $currencies[$ID]['FULL_NAME'] ?? $currencyID;
 	}
 
 	public static function GetCurrencyFormatString($currencyID, $langID = '')
 	{
-		$currencyID = strval($currencyID);
-		$langID = strval($langID);
-		if($langID === '')
+		$currencyID = (string)$currencyID;
+		$langID = (string)$langID;
+		if ($langID === '')
 		{
 			$langID = LANGUAGE_ID;
 		}
 
 		$formatStr = '';
-		if(isset(self::$CURRENCY_FORMAT_BY_LANG[$langID]) && isset(self::$CURRENCY_FORMAT_BY_LANG[$langID][$currencyID]))
+		if (isset(self::$CURRENCY_FORMAT_BY_LANG[$langID][$currencyID]))
 		{
 			$formatStr = self::$CURRENCY_FORMAT_BY_LANG[$langID][$currencyID];
 		}
-		elseif(Loader::includeModule('currency'))
+		elseif (Loader::includeModule('currency'))
 		{
 			$formatInfo = CCurrencyLang::GetCurrencyFormat($currencyID, $langID);
-			$formatStr = isset($formatInfo['FORMAT_STRING'])
-				? $formatInfo['FORMAT_STRING'] : '#';
+			$formatStr = $formatInfo['FORMAT_STRING'] ?? '#';
 
-			if($formatStr !== '')
+			if ($formatStr !== '')
 			{
 				$formatStr = strip_tags($formatStr);
 			}
 
-			if($formatStr === '')
+			if ($formatStr === '')
 			{
 				$formatStr = '#';
 			}
 
-			if(!isset(self::$CURRENCY_FORMAT_BY_LANG[$langID]))
-			{
-				self::$CURRENCY_FORMAT_BY_LANG[$langID] = array();
-			}
+			self::$CURRENCY_FORMAT_BY_LANG[$langID] ??= [];
 			self::$CURRENCY_FORMAT_BY_LANG[$langID][$currencyID] = $formatStr;
 		}
 
@@ -520,42 +543,22 @@ class CCrmCurrency
 
 	public static function GetCurrencyFormatParams($currencyID)
 	{
-		if(!Loader::includeModule('currency'))
+		if (!Loader::includeModule('currency'))
 		{
-			return array();
+			return [];
 		}
 
-		$result = CCurrencyLang::GetFormatDescription($currencyID);
-		// TODO: remove after currency stable
-		if (!isset($result['TEMPLATE']))
-		{
-			$result['TEMPLATE'] = [
-				'SINGLE' => $result['FORMAT_STRING'],
-				'PARTS' => [
-					0 => '#'
-				],
-				'VALUE_INDEX' => 0
-			];
-			$parts = CCurrencyLang::getParsedCurrencyFormat($currencyID);
-			if (!empty($parts))
-			{
-				$result['TEMPLATE']['PARTS'] = $parts;
-				$result['TEMPLATE']['VALUE_INDEX'] = (int)array_search('#', $parts);
-			}
-			unset($parts);
-		}
-
-		return $result;
+		return CCurrencyLang::GetFormatDescription($currencyID);
 	}
 
 	public static function GetCurrencyText($currencyID)
 	{
 		$currencyText = '?';
 
-		if(Loader::includeModule('currency'))
+		if (Loader::includeModule('currency'))
 		{
-			$currencyFormat = self::GetCurrencyFormatString($currencyID);
-			if (is_string($currencyFormat) && $currencyFormat !== '')
+			$currencyFormat = (string)self::GetCurrencyFormatString($currencyID);
+			if ($currencyFormat !== '')
 			{
 				$str = CCurrencyLang::applyTemplate('', $currencyFormat);
 				if (is_string($str))
@@ -625,11 +628,11 @@ class CCrmCurrency
 		else
 		{
 			// Do not convert to float to avoid data lost caused by overflow (9 999 999 999 999 999.99 ->10 000 000 000 000 000.00)
-			$triadSep = strval($formatInfo['THOUSANDS_SEP']);
-			$decPoint = strval($formatInfo['DEC_POINT']);
-			$dec = intval($formatInfo['DECIMALS']);
+			$triadSep = (string)$formatInfo['THOUSANDS_SEP'];
+			$decPoint = (string)$formatInfo['DEC_POINT'];
+			$dec = $formatInfo['DECIMALS'];
 
-			$sum = str_replace(',', '.', strval($sum));
+			$sum = str_replace(',', '.', (string)$sum);
 			$sumArr = explode('.', $sum, 2);
 			$i = $sumArr[0] ?? null;
 			$d = $sumArr[1] ?? null;
@@ -657,7 +660,7 @@ class CCrmCurrency
 			}
 		}
 
-		$formatStr = strval($formatStr);
+		$formatStr = (string)$formatStr;
 		if($formatStr === '' && ($formatInfo['FORMAT_STRING'] ?? '') !== '')
 		{
 			$formatStr = $formatInfo['FORMAT_STRING'];
@@ -756,9 +759,9 @@ class CCrmCurrency
 		return ($cnt !== 1 ? ($exchRate / $cnt) : $exchRate);
 	}
 
-	private static function ClearCache()
+	private static function ClearCache(): void
 	{
-		self::$CURRENCY_BY_LANG = array();
+		self::$CURRENCY_BY_LANG = [];
 	}
 
 	public static function GetLastError()
@@ -791,13 +794,14 @@ class CCrmCurrency
 	{
 		if (!Loader::includeModule('currency'))
 		{
-			self::$LAST_ERROR = GetMessage('CRM_CURRERCY_MODULE_IS_NOT_INSTALLED');
+			self::$LAST_ERROR = Loc::getMessage('CRM_CURRERCY_MODULE_IS_NOT_INSTALLED');
+
 			return false;
 		}
 
 		global $APPLICATION;
 
-		$ID = isset($arFields['CURRENCY']) ? $arFields['CURRENCY'] : '';
+		$ID = $arFields['CURRENCY'] ?? '';
 		if(!self::CheckFields('ADD', $arFields, $ID))
 		{
 			return false;
@@ -816,6 +820,7 @@ class CCrmCurrency
 		}
 
 		self::ClearCache();
+
 		return $ID;
 	}
 
@@ -823,7 +828,8 @@ class CCrmCurrency
 	{
 		if (!Loader::includeModule('currency'))
 		{
-			self::$LAST_ERROR = GetMessage('CRM_CURRERCY_MODULE_IS_NOT_INSTALLED');
+			self::$LAST_ERROR = Loc::getMessage('CRM_CURRERCY_MODULE_IS_NOT_INSTALLED');
+
 			return false;
 		}
 
@@ -848,6 +854,7 @@ class CCrmCurrency
 		}
 
 		self::ClearCache();
+
 		return true;
 	}
 
@@ -855,31 +862,30 @@ class CCrmCurrency
 	{
 		if (!Loader::includeModule('currency'))
 		{
-			self::$LAST_ERROR = GetMessage('CRM_CURRERCY_MODULE_IS_NOT_INSTALLED');
+			self::$LAST_ERROR = Loc::getMessage('CRM_CURRERCY_MODULE_IS_NOT_INSTALLED');
+
 			return false;
 		}
 
-		IncludeModuleLangFile(__FILE__);
-
 		global $APPLICATION;
 
-		$ID = strval($ID);
-		if(mb_strlen($ID) !== 3)
+		$ID = (string)$ID;
+		if (mb_strlen($ID) !== 3)
 		{
-			//Invalid ID is supplied. Are you A.Krasichkov?
-			//self::$LAST_ERROR = GetMessage('CRM_CURRERCY_MODULE_INVALID_ID');
 			return false;
 		}
 
 		if($ID === self::GetBaseCurrencyID())
 		{
-			self::$LAST_ERROR = GetMessage('CRM_CURRERCY_ERR_DELETION_OF_BASE_CURRENCY');
+			self::$LAST_ERROR = Loc::getMessage('CRM_CURRERCY_ERR_DELETION_OF_BASE_CURRENCY');
+
 			return false;
 		}
 
 		if($ID === self::GetAccountCurrencyID())
 		{
-			self::$LAST_ERROR = GetMessage('CRM_CURRERCY_ERR_DELETION_OF_ACCOUNTING_CURRENCY');
+			self::$LAST_ERROR = Loc::getMessage('CRM_CURRERCY_ERR_DELETION_OF_ACCOUNTING_CURRENCY');
+
 			return false;
 		}
 
@@ -895,6 +901,7 @@ class CCrmCurrency
 		}
 
 		self::ClearCache();
+
 		return true;
 	}
 

@@ -179,7 +179,7 @@ abstract class EntityCompatibility
 		$aliasFields = static::getAliasFields();
 		foreach($filter as $fieldName => $fieldValue)
 		{
-			$fieldName = ToUpper($fieldName);
+			$fieldName = mb_strtoupper($fieldName);
 			$filterMatch = $this->query->explodeFilterKey($fieldName);
 			$fieldClearName = $filterMatch['alias'];
 
@@ -340,14 +340,14 @@ abstract class EntityCompatibility
 	 */
 	public function setCallback(array $callback)
 	{
-
 		if (($sql = call_user_func_array($callback, array())) && strval(trim($sql)) != '')
 		{
-			$this->query->registerRuntimeField('',
-										 new Entity\ExpressionField(
-											 '__CALLBACK',
-											 '(CASE WHEN ('.$sql.') THEN 1 ELSE 0 END)'
-										 )
+			$this->query->registerRuntimeField(
+				'',
+				new Entity\ExpressionField(
+					'__CALLBACK',
+					'(CASE WHEN ('.$sql.') THEN 1 ELSE 0 END)'
+				)
 			);
 			$this->query->addFilter('=__CALLBACK', 1);
 		}
@@ -605,16 +605,16 @@ abstract class EntityCompatibility
 
 			$setValue = null;
 
-			if (ToLower($value) != ToLower($nowDate))
+			if (mb_strtolower($value) != mb_strtolower($nowDate))
 			{
 				$setValue = $value;
 			}
 
-			if (ToUpper($dateFields[$key]) == "DATE")
+			if (mb_strtoupper($dateFields[$key]) == "DATE")
 			{
 				$value = new Date($setValue);
 			}
-			elseif (ToUpper($dateFields[$key]) == "DATETIME")
+			elseif (mb_strtoupper($dateFields[$key]) == "DATETIME")
 			{
 				$value = new DateTime($setValue);
 			}

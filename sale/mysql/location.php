@@ -180,7 +180,7 @@ class CSaleLocation extends CAllSaleLocation
 			else
 				$bInvert = false;
 
-			switch(ToUpper($key))
+			switch(mb_strtoupper($key))
 			{
 			case "ID":
 				$arSqlSearch[] = "C.ID ".($bInvert?"<>":"=")." ".intval($val)." ";
@@ -217,8 +217,8 @@ class CSaleLocation extends CAllSaleLocation
 		$arSqlOrder = Array();
 		foreach ($arOrder as $by=>$order)
 		{
-			$by = ToUpper($by);
-			$order = ToUpper($order);
+			$by = mb_strtoupper($by);
+			$order = mb_strtoupper($order);
 			if ($order!="ASC") $order = "DESC";
 
 			if ($by == "SORT") $arSqlOrder[] = " SL.SORT ".$order;
@@ -286,7 +286,7 @@ class CSaleLocation extends CAllSaleLocation
 			else
 				$bInvert = false;
 
-			switch(ToUpper($key))
+			switch(mb_strtoupper($key))
 			{
 				case "ID":
 					$arSqlSearch[] = "C.ID ".($bInvert?"<>":"=")." ".intval($val)." ";
@@ -320,8 +320,8 @@ class CSaleLocation extends CAllSaleLocation
 		$arSqlOrder = Array();
 		foreach ($arOrder as $by=>$order)
 		{
-			$by = ToUpper($by);
-			$order = ToUpper($order);
+			$by = mb_strtoupper($by);
+			$order = mb_strtoupper($order);
 			if ($order!="ASC") $order = "DESC";
 
 			if ($by == "SORT") $arSqlOrder[] = " SL.SORT ".$order;
@@ -390,7 +390,7 @@ class CSaleLocation extends CAllSaleLocation
 			else
 				$bInvert = false;
 
-			switch(ToUpper($key))
+			switch(mb_strtoupper($key))
 			{
 				case "ID":
 					$arSqlSearch[] = "C.ID ".($bInvert?"<>":"=")." ".intval($val)." ";
@@ -424,8 +424,8 @@ class CSaleLocation extends CAllSaleLocation
 		$arSqlOrder = Array();
 		foreach ($arOrder as $by=>$order)
 		{
-			$by = ToUpper($by);
-			$order = ToUpper($order);
+			$by = mb_strtoupper($by);
+			$order = mb_strtoupper($order);
 			if ($order!="ASC") $order = "DESC";
 
 			if ($by == "SORT") $arSqlOrder[] = " SL.SORT ".$order;

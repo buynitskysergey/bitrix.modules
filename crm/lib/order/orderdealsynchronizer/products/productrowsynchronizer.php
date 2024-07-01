@@ -269,7 +269,10 @@ class ProductRowSynchronizer implements LoggerAwareInterface
 		/** @var \Bitrix\Crm\Order\BasketItem $basketItem */
 		foreach ($this->order->getBasket() as $basketItem)
 		{
-			if ($basketItem->getId() === 0)
+			if (
+				$basketItem->getId() === 0
+				|| $basketItem->getFields()->isChanged('PRODUCT_ID')
+			)
 			{
 				$strategy = RefreshFactory::createSingle($basketItem->getBasketCode());
 				$this->order->getBasket()->refresh($strategy);

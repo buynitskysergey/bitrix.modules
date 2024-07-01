@@ -2,6 +2,8 @@
 
 namespace Bitrix\BIConnector\Integration\UI\EntitySelector;
 
+use Bitrix\BIConnector\Access\AccessController;
+use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable;
 use Bitrix\Main\Engine\CurrentUser;
@@ -45,6 +47,8 @@ class SupersetDashboardTagProvider extends BaseProvider
 			$elements = $this->getElements([], self::ELEMENTS_LIMIT);
 			$dialog->addRecentItems($elements);
 		}
+
+		$dialog->setFooter('BX.BIConnector.EntitySelector.TagFooter', $this->getFooterOptions());
 	}
 
 	public function doSearch(SearchQuery $searchQuery, Dialog $dialog): void
@@ -69,11 +73,6 @@ class SupersetDashboardTagProvider extends BaseProvider
 
 	public function getElements(array $filter = [], ?int $limit = null): array
 	{
-		if (CurrentUser::get()?->getId() > 0)
-		{
-			$filter['=USER_ID'] = CurrentUser::get()->getId();
-		}
-
 		$result = [];
 		$ormParams = [
 			'filter' => $filter,
@@ -113,5 +112,12 @@ class SupersetDashboardTagProvider extends BaseProvider
 		];
 
 		return new Item($itemParams);
+	}
+
+	private function getFooterOptions(): array
+	{
+		return [
+			'canCreateTag' => AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_TAG_MODIFY),
+		];
 	}
 }

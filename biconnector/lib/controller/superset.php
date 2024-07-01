@@ -4,6 +4,7 @@ namespace Bitrix\BIConnector\Controller;
 
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\Main\Engine\Controller;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 
@@ -25,11 +26,13 @@ class Superset extends Controller
 	/**
 	 * Clean action from user disabling superset due to tariff restrictions.
 	 *
+	 * @param CurrentUser $currentUser
+	 *
 	 * @return bool|null
 	 */
-	public function cleanAction(): ?bool
+	public function cleanAction(CurrentUser $currentUser): ?bool
 	{
-		if (!$this->getCurrentUser()?->isAdmin())
+		if (!$currentUser->isAdmin() && !\CBitrix24::isPortalAdmin($currentUser->getId()))
 		{
 			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_SUPERSET_DELETE_ERROR_RIGHTS')));
 

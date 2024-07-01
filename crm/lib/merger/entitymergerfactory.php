@@ -1,10 +1,23 @@
 <?php
 namespace Bitrix\Crm\Merger;
 use Bitrix\Main;
-use Bitrix\Crm;
 
 class EntityMergerFactory
 {
+	final public static function isEntityTypeSupported(int $entityTypeId): bool
+	{
+		try
+		{
+			self::create($entityTypeId, 0);
+
+			return true;
+		}
+		catch (Main\NotSupportedException)
+		{
+			return false;
+		}
+	}
+
 	/** Create new entity merger by specified entity type ID.
 	 * @static
 	 * @param int $entityTypeID Entity type ID.

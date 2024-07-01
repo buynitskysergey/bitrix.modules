@@ -3,6 +3,10 @@
 namespace Bitrix\Transformer\Entity;
 
 use Bitrix\Main;
+use Bitrix\Main\ORM\Fields\DatetimeField;
+use Bitrix\Main\ORM\Fields\IntegerField;
+use Bitrix\Main\ORM\Fields\StringField;
+use Bitrix\Main\ORM\Fields\TextField;
 use Bitrix\Main\Type\Date;
 
 /**
@@ -21,6 +25,7 @@ use Bitrix\Main\Type\Date;
  * <li> ERROR string(255)
  * <li> ERROR_CODE string(255)
  * <li> UPDATE_TIME datetime mandatory
+ * <li> CONTROLLER_URL string(255)
  * </ul>
  *
  * @package Bitrix\Transformer
@@ -58,28 +63,63 @@ class CommandTable extends Main\Entity\DataManager
 	 */
 	public static function getMap()
 	{
-		return array(
-			new Main\Entity\IntegerField('ID', array(
-				'primary' => true,
-				'autocomplete' => true,
-			)),
-			new Main\Entity\StringField('GUID', array('required' => true)),
-			new Main\Entity\IntegerField('STATUS', array('required' => true)),
-			new Main\Entity\StringField('COMMAND', array('required' => true)),
-			new Main\Entity\StringField('MODULE', array('required' => true)),
-			new Main\Entity\StringField('CALLBACK', array('required' => true)),
-			new Main\Entity\StringField('PARAMS', array('required' => true)),
-			new Main\Entity\StringField('FILE'),
-			new Main\Entity\StringField('ERROR'),
-			new Main\Entity\IntegerField('ERROR_CODE'),
-			new Main\Entity\DatetimeField('UPDATE_TIME', array('default_value' => function()
-			{
-				$date = new Main\Type\DateTime();
-				$date->setTime($date->format('H'), $date->format('i'), $date->format('s'));
-				return $date;
-			}
-			)),
-		);
+		return [
+			(new IntegerField('ID'))
+				->configurePrimary()
+				->configureAutocomplete()
+			,
+
+			(new StringField('GUID'))
+				->configureRequired()
+				->configureSize(32)
+			,
+
+			(new IntegerField('STATUS'))
+				->configureRequired()
+			,
+
+			(new StringField('COMMAND'))
+				->configureRequired()
+				->configureSize(255)
+			,
+
+			(new TextField('MODULE'))
+				->configureRequired()
+			,
+
+			(new TextField('CALLBACK'))
+				->configureRequired()
+			,
+
+			(new TextField('PARAMS'))
+				->configureRequired()
+			,
+
+			(new StringField('FILE'))
+				->configureSize(255)
+			,
+
+			(new TextField('ERROR')),
+
+			(new IntegerField('ERROR_CODE')),
+
+			(new DatetimeField('UPDATE_TIME'))
+				->configureDefaultValue(static function() {
+					$date = new Main\Type\DateTime();
+					$date->setTime($date->format('H'), $date->format('i'), $date->format('s'));
+					return $date;
+				})
+			,
+
+			(new DatetimeField('SEND_TIME'))
+				->configureNullable()
+			,
+
+			(new StringField('CONTROLLER_URL'))
+				->configureSize(255)
+				->configureNullable()
+			,
+		];
 	}
 
 	/**
@@ -128,5 +168,4 @@ class CommandTable extends Main\Entity\DataManager
 
 		return "\\Bitrix\\Transformer\\Entity\\CommandTable::deleteOldAgent({$days}, {$portion});";
 	}
-
 }

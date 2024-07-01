@@ -2,11 +2,12 @@
 
 namespace Bitrix\BIConnector\Integration\Superset\Model;
 
+use Bitrix\BIConnector\Access\Service\RolePermissionService;
 use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\ORM\Data\DataManager;
+use Bitrix\Main\ORM\Event;
 use Bitrix\Main\ORM\Fields;
 use Bitrix\Main\ORM\Query\Join;
-use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Rest\AppTable;
 
@@ -134,10 +135,81 @@ final class SupersetDashboardTable extends DataManager
 			(new Fields\IntegerField('CREATED_BY_ID'))
 				->configureNullable(),
 
+			(new Fields\IntegerField('OWNER_ID'))
+				->configureNullable(),
+
 			(new Fields\Relations\ManyToMany('TAGS', SupersetTagTable::class))
 				->configureMediatorTableName('b_biconnector_superset_dashboard_tag')
 				->configureLocalPrimary('ID', 'DASHBOARD_ID')
 				->configureRemotePrimary('ID', 'TAG_ID'),
 		];
+	}
+
+	public static function onAfterDelete(Event $event): void
+	{
+		$dashboardId = (int)$event->getParameters()['primary']['ID'];
+		$service = new RolePermissionService();
+		$service->deletePermissionsByDashboard($dashboardId);
+
+		$tagBindings = SupersetDashboardTagTable::getList([
+			'filter' => ['DASHBOARD_ID' => $dashboardId]
+		])
+			->fetchCollection()
+		;
+
+		foreach ($tagBindings as $tagBinding)
+		{
+			$tagBinding->delete();
+		}
+
+		$topMenuDashboardsOptions = \CUserOptions::getList(
+			['ID' => 'ASC'],
+			[
+				'CATEGORY' => 'biconnector',
+				'NAME' => 'top_menu_dashboards',
+			]
+		);
+		while ($row = $topMenuDashboardsOptions->fetch())
+		{
+			$topMenuDashboards = unserialize($row['VALUE'], ['allowed_classes' => false]);
+			if (
+				is_array($topMenuDashboards)
+				&& in_array($dashboardId, $topMenuDashboards, true)
+			)
+			{
+				$topMenuDashboards = array_filter($topMenuDashboards, static fn ($item) => $item !== $dashboardId);
+				\CUserOptions::setOption(
+					category: 'biconnector',
+					name: 'top_menu_dashboards',
+					value: $topMenuDashboards,
+					user_id: $row['USER_ID'],
+				);
+			}
+		}
+
+		$pinnedDashboardsOptions = \CUserOptions::getList(
+			['ID' => 'ASC'],
+			[
+				'CATEGORY' => 'biconnector',
+				'NAME' => 'grid_pinned_dashboards',
+			]
+		);
+		while ($row = $pinnedDashboardsOptions->fetch())
+		{
+			$pinnedDashboards = unserialize($row['VALUE'], ['allowed_classes' => false]);
+			if (
+				is_array($pinnedDashboards)
+				&& in_array($dashboardId, $pinnedDashboards, true)
+			)
+			{
+				$pinnedDashboards = array_filter($pinnedDashboards, static fn ($item) => $item !== $dashboardId);
+				\CUserOptions::setOption(
+					category: 'biconnector',
+					name: 'grid_pinned_dashboards',
+					value: $pinnedDashboards,
+					user_id: $row['USER_ID'],
+				);
+			}
+		}
 	}
 }

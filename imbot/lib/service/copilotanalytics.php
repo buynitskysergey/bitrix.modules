@@ -4,6 +4,7 @@ namespace Bitrix\ImBot\Service;
 
 use Bitrix\AI\Engine;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Integration\AI\RoleManager;
 use Bitrix\Imbot\Bot\CopilotChatBot;
 use Bitrix\Main\Analytics\AnalyticsEvent;
 use Bitrix\Main\Engine\Response\Converter;
@@ -19,6 +20,7 @@ class CopilotAnalytics
 		'ERROR_LIMIT_MONTHLY' => 'error_limit_monthly',
 		'ERROR_AGREEMENT' => 'error_agreement',
 		'ERROR_TURNEDOFF' => 'error_turnedoff',
+		'ERROR_LIMIT_BAAS' => 'error_limit_baas',
 	];
 	protected const ANALYTICS_EVENTS = [
 		'GENERATE' => 'generate',
@@ -33,7 +35,6 @@ class CopilotAnalytics
 		Chat $chat,
 		?Engine $engine = null,
 		?string $promptCode = null,
-		?string $role = null,
 		?string $status = null
 	): void
 	{
@@ -48,11 +49,16 @@ class CopilotAnalytics
 			return;
 		}
 
+		$role = (new RoleManager())->getMainRole($chat->getId());
+
 		$event
 			->setP1(self::convertUnderscoreForAnalytics('none'))
 			->setP2('provider_' . (isset($engine) ? $engine->getIEngine()->getName() : 'none'))
 			->setP3(self::ANALYTICS_TYPE)
-//			->setP4('role_' . (isset($role) ? self::convertUnderscoreForAnalytics($role) : 'copilotAssistant'))
+			->setP4(('role_' . isset($role)
+					? self::convertUnderscoreForAnalytics($role)
+					: self::convertUnderscoreForAnalytics(RoleManager::getDefaultRoleCode()))
+			)
 			->setP5('chatId_' . $chat->getChatId())
 			->setSection(self::ANALYTICS_ELEMENT)
 		;
@@ -96,13 +102,16 @@ class CopilotAnalytics
 
 			case (CopilotChatBot::ERROR_AGREEMENT):
 				return self::ANALYTICS_STATUS['ERROR_AGREEMENT'];
+
+			case (CopilotChatBot::LIMIT_IS_EXCEEDED_BAAS):
+				return self::ANALYTICS_STATUS['ERROR_LIMIT_BAAS'];
 		}
 
 		return self::ANALYTICS_STATUS['ERROR_B24'];
 	}
 
-	protected static function convertUnderscoreForAnalytics(string $test): string
+	protected static function convertUnderscoreForAnalytics(string $string): string
 	{
-		return (new Converter(Converter::TO_CAMEL | Converter::LC_FIRST))->process($test);
+		return (new Converter(Converter::TO_CAMEL | Converter::LC_FIRST))->process($string);
 	}
 }

@@ -1,4 +1,5 @@
-<?
+<?php
+
 use Bitrix\Main,
 	Bitrix\Catalog;
 

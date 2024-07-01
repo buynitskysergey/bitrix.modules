@@ -68,6 +68,8 @@ class CCrmOwnerType
 	//Special quasi-types
 	public const System = 1024;
 
+	public const UnlimitedTypeStart = 1030;
+
 	public const LeadName = 'LEAD';
 	public const DealName = 'DEAL';
 	public const ContactName = 'CONTACT';
@@ -210,11 +212,21 @@ class CCrmOwnerType
 
 	public static function isPossibleDynamicTypeId(int $typeId): bool
 	{
-		return ($typeId >= static::DynamicTypeStart && $typeId < static::DynamicTypeEnd);
+		if ($typeId >= self::UnlimitedTypeStart)
+		{
+			return $typeId % 2 === 0;
+		}
+
+		return ($typeId >= static::DynamicTypeStart && $typeId < static::DynamicTypeEnd);;
 	}
 
 	public static function isPossibleSuspendedDynamicTypeId(int $typeId): bool
 	{
+		if ($typeId >= self::UnlimitedTypeStart)
+		{
+			return $typeId % 2 !== 0;
+		}
+
 		return ($typeId >= static::SuspendedDynamicTypeStart && $typeId < static::SuspendedDynamicTypeEnd);
 	}
 
@@ -230,6 +242,11 @@ class CCrmOwnerType
 
 	public static function getSuspendedDynamicTypeId(int $typeId): int
 	{
+		if ($typeId >= self::UnlimitedTypeStart)
+		{
+			return ($typeId % 2 === 0) ? $typeId + 1 : $typeId;
+		}
+
 		if(static::isPossibleDynamicTypeId($typeId))
 		{
 			$typeId += (static::DynamicTypeEnd - static::DynamicTypeStart);
@@ -375,13 +392,22 @@ class CCrmOwnerType
 				return self::AgentContractDocument;
 
 			default:
-				if (CCrmOwnerTypeAbbr::isDynamicTypeAbbreviation($name) || CCrmOwnerTypeAbbr::isSuspendedDynamicTypeAbbreviation($name))
+
+				$isDynamicType = preg_match('/^'.static::DynamicTypePrefixName.'(\d+)$/', $name, $matches);
+
+				if (
+					$isDynamicType &&
+					(
+						CCrmOwnerTypeAbbr::isDynamicTypeAbbreviation($name)
+						|| CCrmOwnerTypeAbbr::isSuspendedDynamicTypeAbbreviation($name)
+					)
+				)
 				{
 					$name = CCrmOwnerTypeAbbr::ResolveName($name);
 				}
 
 				$isSuspendedDynamicType = false;
-				$isDynamicType = preg_match('/^'.static::DynamicTypePrefixName.'(\d+)$/', $name, $matches);
+
 				if(!$isDynamicType)
 				{
 					$isSuspendedDynamicType = preg_match('/^'.static::SuspendedDynamicTypePrefixName.'(\d+)$/', $name, $matches);
@@ -3563,6 +3589,11 @@ class CCrmOwnerType
 	{
 		return [self::SmartInvoice, self::SmartDocument, self::SmartB2eDocument];
 	}
+
+	public static function isUnlimitedDynamicTypeEnabled(): bool
+	{
+		return Bitrix\Main\Config\Option::get('crm', 'dynamic_type_unlimited', 'N') === 'Y';
+	}
 }
 
 class CCrmOwnerTypeAbbr
@@ -3858,7 +3889,17 @@ class CCrmOwnerTypeAbbr
 
 	private static function extractTypeIdFromDynamicTypeAbbreviation(string $abbr): ?int
 	{
+		if(!str_starts_with($abbr, self::DynamicTypeAbbreviationPrefix))
+		{
+			return null;
+		}
+
 		$typeId = mb_substr($abbr, mb_strlen(self::DynamicTypeAbbreviationPrefix));
+		if (!preg_match('/^[0-9a-fA-F]+$/', $typeId))
+		{
+			return null;
+		}
+
 		$typeIdNormalized = self::normalizeTypeIdFromAbbreviation($typeId);
 		if (CCrmOwnerType::isPossibleDynamicTypeId($typeIdNormalized))
 		{
@@ -3870,7 +3911,17 @@ class CCrmOwnerTypeAbbr
 
 	private static function extractTypeIdFromSuspendedDynamicTypeAbbreviation(string $abbr): ?int
 	{
+		if(!str_starts_with($abbr, self::SuspendedDynamicTypeAbbreviationPrefix))
+		{
+			return null;
+		}
+
 		$typeId = mb_substr($abbr, mb_strlen(self::SuspendedDynamicTypeAbbreviationPrefix));
+		if  (!preg_match('/^[0-9a-fA-F]+$/', $typeId))
+		{
+			return null;
+		}
+
 		$typeIdNormalized = self::normalizeTypeIdFromAbbreviation($typeId);
 		if (CCrmOwnerType::isPossibleSuspendedDynamicTypeId($typeIdNormalized))
 		{

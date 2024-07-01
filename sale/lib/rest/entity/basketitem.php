@@ -1,8 +1,6 @@
 <?php
 
-
 namespace Bitrix\Sale\Rest\Entity;
-
 
 use Bitrix\Main\Error;
 use Bitrix\Sale\Helpers\Order\Builder\BasketBuilderRest;
@@ -460,12 +458,20 @@ class BasketItem extends Base
 
 	public function externalizeFields($fields)
 	{
-		$basketProperties = new \Bitrix\Sale\Rest\Entity\BasketProperties();
+		$basketProperties = new BasketProperties();
+		$basketReservation = new BasketReservation();
 
 		$result = parent::externalizeFields($fields);
 
-		if(isset($fields['PROPERTIES']))
+		if (isset($fields['PROPERTIES']))
+		{
 			$result['PROPERTIES'] = $basketProperties->externalizeListFields($fields['PROPERTIES']);
+		}
+
+		if(isset($fields['RESERVATIONS']))
+		{
+			$result['RESERVATIONS'] = $basketReservation->externalizeListFields($fields['RESERVATIONS']);
+		}
 
 		return $result;
 	}

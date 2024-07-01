@@ -444,7 +444,7 @@ $arExcludeSites = CPullOptions::GetExcludeSites();
 	<?endif;?>
 
 	<?$tabControl->Buttons();?>
-<script language="JavaScript">
+<script>
 BX.bind(BX('push_enable'), 'change', function(){
 	BX('push_message_per_hit').disabled = !this.checked;
 });

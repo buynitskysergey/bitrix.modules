@@ -5839,7 +5839,7 @@ class EntityRequisite
 									'id' => "$fieldName|$countryId|$addressTypeId|$addrFieldKey",
 									'name' => GetMessage('CRM_REQUISITE_FILTER_PREFIX').
 										($hideCountry ? '' : ' ('.$countryList[$countryId].')').': '.
-										$addressTypeName.' - '.ToLower($addressLabels[$addrFieldKey]),
+										$addressTypeName.' - '.mb_strtolower($addressLabels[$addrFieldKey]),
 									'type' => 'text'
 								);
 							}
@@ -5894,7 +5894,7 @@ class EntityRequisite
 			$fieldParsed = false;
 
 			$matches = array();
-			if (preg_match('/^(RQ_\w+)\|(\d+)\|(\d+)\|(\w+)$/'.BX_UTF_PCRE_MODIFIER, $filterFieldId, $matches))
+			if (preg_match('/^(RQ_\w+)\|(\d+)\|(\d+)\|(\w+)$/u', $filterFieldId, $matches))
 			{
 				$fieldName = $matches[1];
 				$countryId = (int)$matches[2];
@@ -5910,7 +5910,7 @@ class EntityRequisite
 					&& in_array($addressFieldName, EntityRequisite::getAddressFiltrableFields(), true)
 				;
 			}
-			else if (preg_match('/^(RQ_\w+)\|(\d+)$/'.BX_UTF_PCRE_MODIFIER, $filterFieldId, $matches))
+			else if (preg_match('/^(RQ_\w+)\|(\d+)$/u', $filterFieldId, $matches))
 			{
 				$fieldName = $matches[1];
 				$countryId = (int)$matches[2];
@@ -6395,7 +6395,7 @@ class EntityRequisite
 				$fieldParsed = false;
 				if (
 					preg_match(
-						'/^((UF_|RQ_)\w+)\|(\d+)$/'.BX_UTF_PCRE_MODIFIER,
+						'/^((UF_|RQ_)\w+)\|(\d+)$/u',
 						mb_substr($fieldString, $prefixLength),
 						$matches
 					)

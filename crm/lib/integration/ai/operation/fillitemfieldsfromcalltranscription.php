@@ -7,6 +7,7 @@ use Bitrix\Crm\Comparer\ComparerBase;
 use Bitrix\Crm\Dto\Dto;
 use Bitrix\Crm\Entity\FieldDataProvider;
 use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\Config;
 use Bitrix\Crm\Integration\AI\Dto\FillItemFieldsFromCallTranscriptionPayload;
 use Bitrix\Crm\Integration\AI\Dto\MultipleFieldFillPayload;
 use Bitrix\Crm\Integration\AI\Dto\SingleFieldFillPayload;
@@ -166,6 +167,27 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 		}
 
 		return Json::encode($fields);
+	}
+
+	final protected function getContextLanguageId(): string
+	{
+		$item = Container::getInstance()
+			->getFactory($this->target->getEntityTypeId())
+			?->getItem($this->target->getEntityId())
+		;
+
+		if ($item)
+		{
+			$categoryId = $item->isCategoriesSupported() ? $item->getCategoryId() : null;
+
+			return Config::getLanguageId(
+				$this->userId,
+				$this->target->getEntityTypeId(),
+				$categoryId
+			);
+		}
+
+		return parent::getContextLanguageId();
 	}
 
 	protected static function extractPayloadFromAIResult(\Bitrix\AI\Result $result, EO_Queue $job): Dto

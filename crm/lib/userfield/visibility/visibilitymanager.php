@@ -243,7 +243,7 @@ class VisibilityManager
 	{
 		$userId = 0;
 
-		$codesWithUserId = preg_grep('#^U\d+$#' . BX_UTF_PCRE_MODIFIER, $userAccessCodes);
+		$codesWithUserId = preg_grep('#^U\d+$#u', $userAccessCodes);
 		if (!empty($codesWithUserId))
 		{
 			$userId = (int)str_replace('U', '', array_shift($codesWithUserId));

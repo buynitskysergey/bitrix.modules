@@ -246,6 +246,7 @@ class CCrmLiveFeedEvent
 	const Progress = 'progress';
 	const Denomination = 'denomination';
 	const Responsible = 'responsible';
+	const Observer = 'observer';
 	const Client = 'client';
 	const Owner = 'owner';
 	const Message = 'message';
@@ -863,7 +864,7 @@ class CCrmLiveFeed
 			}
 
 			$arResult["EVENT_FORMATTED"]["MESSAGE"] = htmlspecialcharsbx($parserLog->convert(htmlspecialcharsback($arResult["EVENT_FORMATTED"]["MESSAGE"]), $arAllow));
-			$arResult["EVENT_FORMATTED"]["MESSAGE"] = preg_replace("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/is".BX_UTF_PCRE_MODIFIER, "\\2", $arResult["EVENT_FORMATTED"]["MESSAGE"]);
+			$arResult["EVENT_FORMATTED"]["MESSAGE"] = preg_replace("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/isu", "\\2", $arResult["EVENT_FORMATTED"]["MESSAGE"]);
 		}
 		else
 		{
@@ -4883,26 +4884,13 @@ class CCrmLiveFeed
 			'PARENTS' => static::prepareParentRelations($item),
 		];
 
-		$logEventId = static::CreateLogEvent(
+		static::CreateLogEvent(
 			$liveFeedFields,
 			\CCrmLiveFeedEvent::Add,
 			[
 				'CURRENT_USER' => $context->getUserId(),
 			],
 		);
-
-		if ($logEventId === false)
-		{
-			return;
-		}
-
-		if (
-			static::isNotificationEnabled($item->getEntityTypeId())
-			&& $item->getCreatedBy() !== $item->getAssignedById()
-		)
-		{
-			static::sendNotificationAboutResponsibleAdd($item);
-		}
 	}
 
 	private static function isNotificationEnabled(int $entityTypeId): bool
@@ -4913,38 +4901,6 @@ class CCrmLiveFeed
 		}
 
 		return true;
-	}
-
-	private static function sendNotificationAboutResponsibleAdd(Item $item): void
-	{
-		if (!Loader::includeModule('im'))
-		{
-			return;
-		}
-
-		$entityTypeName = \CCrmOwnerType::ResolveName($item->getEntityTypeId());
-		$message = (new MessageBuilder\ProcessEntityResponsible($item->getEntityTypeId()))
-			->setType(MessageBuilder\ProcessEntityResponsible::BECOME_RESPONSIBLE)
-			->getMessage([
-				'#TITLE#' => htmlspecialcharsbx($item->getHeading()),
-				'#URL#' => '#URL#',
-			])
-		;
-
-		$url = Container::getInstance()->getRouter()->getItemDetailUrl($item->getEntityTypeId(), $item->getId());
-
-		\CIMNotify::Add([
-			'MESSAGE_TYPE' => IM_MESSAGE_SYSTEM,
-			'TO_USER_ID' => $item->getAssignedById(),
-			'FROM_USER_ID' => $item->getCreatedBy(),
-			'NOTIFY_TYPE' => IM_NOTIFY_FROM,
-			'NOTIFY_MODULE' => 'crm',
-			//'NOTIFY_EVENT' => mb_strtolower($entityTypeName) . '_add',
-			'NOTIFY_EVENT' => 'changeAssignedBy',
-			'NOTIFY_TAG' => "CRM|{$entityTypeName}_RESPONSIBLE|" . $item->getId(),
-			'NOTIFY_MESSAGE' => str_replace('#URL#', $url, $message),
-			'NOTIFY_MESSAGE_OUT' => str_replace('#URL#', static::transformRelativeUrlToAbsolute($url), $message),
-		]);
 	}
 
 	private static function transformRelativeUrlToAbsolute(Uri $url): Uri
@@ -4975,11 +4931,6 @@ class CCrmLiveFeed
 
 			if (static::isNotificationEnabled($item->getEntityTypeId()))
 			{
-				if ($singleEvent['TYPE'] === \CCrmLiveFeedEvent::Responsible)
-				{
-					static::sendNotificationAboutAssignedChange($itemBeforeSave, $item);
-				}
-
 				if ($singleEvent['TYPE'] === \CCrmLiveFeedEvent::Progress)
 				{
 					static::sendNotificationAboutStageChange($itemBeforeSave, $item);
@@ -5038,6 +4989,26 @@ class CCrmLiveFeed
 				],
 			];
 		}
+//
+//		if ($difference->isChanged(Item::FIELD_NAME_OBSERVERS))
+//		{
+//			$eventData[\CCrmLiveFeedEvent::Observer] = [
+//				'TYPE' => \CCrmLiveFeedEvent::Observer,
+//				'FIELDS' => [
+//					'ENTITY_TYPE_ID' => $item->getEntityTypeId(),
+//					'ENTITY_ID' => $item->getId(),
+//					'USER_ID' => $item->getUpdatedBy(),
+//					'TITLE' => Loc::getMessage(
+//						'CRM_LF_EVENT_FIELD_CHANGED',
+//						['#FIELD_CAPTION#' => htmlspecialcharsbx($factory->getFieldCaption(Item::FIELD_NAME_OBSERVERS))]
+//					),
+//					'PARAMS' => [
+//						'START_OBSERVER_IDS' => $difference->getPreviousValue(Item::FIELD_NAME_OBSERVERS),
+//						'FINAL_OBSERVER_IDS' => $difference->getCurrentValue(Item::FIELD_NAME_OBSERVERS),
+//					],
+//				],
+//			];
+//		}
 
 		if ($factory->isClientEnabled() && $item->hasField(Item::FIELD_NAME_CONTACT_IDS))
 		{
@@ -5158,6 +5129,14 @@ class CCrmLiveFeed
 		return $eventData;
 	}
 
+	public static function getTitleAboutChangingField(string $fieldCaption): ?string
+	{
+		return Loc::getMessage(
+			'CRM_LF_EVENT_FIELD_CHANGED',
+			['#FIELD_CAPTION#' => htmlspecialcharsbx($fieldCaption)],
+		);
+	}
+
 	private static function prepareParentRelations(Item $item): ?array
 	{
 		if (!static::isParentRelationsSupported($item->getEntityTypeId()))
@@ -5227,70 +5206,6 @@ class CCrmLiveFeed
 			$entityTypeId === \CCrmOwnerType::Deal
 			|| $entityTypeId === \CCrmOwnerType::Contact
 		);
-	}
-
-	private static function sendNotificationAboutAssignedChange(Item $itemBeforeSave, Item $item): void
-	{
-		if (!Loader::includeModule('im'))
-		{
-			return;
-		}
-
-		$entityTypeName = \CCrmOwnerType::ResolveName($item->getEntityTypeId());
-		$notificationFields = [
-			'MESSAGE_TYPE' => IM_MESSAGE_SYSTEM,
-			'FROM_USER_ID' => $item->getUpdatedBy(),
-			'NOTIFY_TYPE' => IM_NOTIFY_FROM,
-			'NOTIFY_MODULE' => 'crm',
-			//'NOTIFY_EVENT' => mb_strtolower($entityTypeName) . '_update',
-			'NOTIFY_EVENT' => 'changeAssignedBy',
-			'NOTIFY_TAG' => "CRM|{$entityTypeName}_RESPONSIBLE|" . $item->getId(),
-		];
-
-		$previousAssigned = $itemBeforeSave->remindActual(Item::FIELD_NAME_ASSIGNED);
-		$currentAssigned = $item->getAssignedById();
-
-		$url = Container::getInstance()->getRouter()->getItemDetailUrl($item->getEntityTypeId(), $item->getId());
-
-		if ($currentAssigned !== $item->getUpdatedBy())
-		{
-			$notificationToNewAssigned = $notificationFields;
-
-			$notificationToNewAssigned['TO_USER_ID'] = $currentAssigned;
-
-			$message = (new MessageBuilder\ProcessEntityResponsible($item->getEntityTypeId()))
-				->setType(MessageBuilder\ProcessEntityResponsible::BECOME_RESPONSIBLE)
-				->getMessage([
-					'#TITLE#' => htmlspecialcharsbx($item->getHeading()),
-					'#URL#' => '#URL#',
-				])
-			;
-
-			$notificationToNewAssigned['NOTIFY_MESSAGE'] = str_replace('#URL#', $url, $message);
-			$notificationToNewAssigned['NOTIFY_MESSAGE_OUT'] = str_replace('#URL#', static::transformRelativeUrlToAbsolute($url), $message);
-
-			\CIMNotify::Add($notificationToNewAssigned);
-		}
-
-		if ($previousAssigned !== $item->getUpdatedBy())
-		{
-			$notificationToPreviousAssigned = $notificationFields;
-
-			$notificationToPreviousAssigned['TO_USER_ID'] = $previousAssigned;
-
-			$message = (new MessageBuilder\ProcessEntityResponsible($item->getEntityTypeId()))
-				->setType(MessageBuilder\ProcessEntityResponsible::NO_LONGER_RESPONSIBLE)
-				->getMessage([
-					'#TITLE#' => htmlspecialcharsbx($item->getHeading()),
-					'#URL#' => '#URL#',
-				])
-			;
-
-			$notificationToPreviousAssigned['NOTIFY_MESSAGE'] = str_replace('#URL#', $url, $message);
-			$notificationToPreviousAssigned['NOTIFY_MESSAGE_OUT'] = str_replace('#URL#', static::transformRelativeUrlToAbsolute($url), $message);
-
-			\CIMNotify::Add($notificationToPreviousAssigned);
-		}
 	}
 
 	private static function sendNotificationAboutStageChange(Item $itemBeforeSave, Item $item): void
@@ -6488,7 +6403,7 @@ class CCrmLiveFeedComponent
 							{
 								ob_start();
 								?>
-								<script type="text/javascript">
+								<script>
 								if (typeof (window.bSipManagerUrlDefined_<?=$arCommunication["ENTITY_TYPE_ID"]?>) === 'undefined')
 								{
 									window.bSipManagerUrlDefined_<?=$arCommunication["ENTITY_TYPE_ID"]?> = true;
@@ -7384,7 +7299,7 @@ class CCrmLiveFeedComponent
 					}
 
 					//  send mention notifications
-					preg_match_all("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/is".BX_UTF_PCRE_MODIFIER, $message, $arMention);
+					preg_match_all("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/isu", $message, $arMention);
 					if (
 						!empty($arMention)
 						&& !empty($arMention[1])

@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Integration\AI\Operation;
 use Bitrix\Crm\Activity\Provider\Call;
 use Bitrix\Crm\Badge;
 use Bitrix\Crm\Dto\Dto;
+use Bitrix\Crm\Integration\AI\Config;
 use Bitrix\Crm\Integration\AI\Dto\TranscribeCallRecordingPayload;
 use Bitrix\Crm\Integration\AI\ErrorCode;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
@@ -164,6 +165,21 @@ final class TranscribeCallRecording extends AbstractOperation
 			['STORAGE_TYPE_ID' => $this->storageTypeId, 'STORAGE_ELEMENT_ID' => $this->storageElementId]
 			+ parent::getJobUpdateFields()
 		;
+	}
+
+	final protected function getContextLanguageId(): string
+	{
+		$itemIdentifier = (new Orchestrator())->findPossibleFillFieldsTarget($this->target->getEntityId());
+		if ($itemIdentifier)
+		{
+			return Config::getLanguageId(
+				$this->userId,
+				$itemIdentifier->getEntityTypeId(),
+				$itemIdentifier->getCategoryId()
+			);
+		}
+
+		return parent::getContextLanguageId();
 	}
 
 	protected static function notifyTimelineAfterSuccessfulLaunch(Result $result): void

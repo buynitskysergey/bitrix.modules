@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Component\EntityDetails\TimelineMenuBar;
 use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\Call;
 use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\Comment;
 use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\Delivery;
+use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\EInvoiceApp;
 use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\Email;
 use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\GoToChat;
 use Bitrix\Crm\Component\EntityDetails\TimelineMenuBar\Item\Market;
@@ -45,7 +46,7 @@ final class Repository
 	{
 		$context = $this->context;
 
-		$items = [
+		return [
 			new ToDo($context),
 			new Comment($context),
 			new Task($context),
@@ -59,13 +60,10 @@ final class Repository
 			new Meeting($context),
 			new Call($context),
 			new Visit($context),
+			...$this->getRestPlacementItems(),
+			new EInvoiceApp($context),
+			new Market($context),
 		];
-
-		return array_merge(
-			$items,
-			$this->getRestPlacementItems(),
-			[new Market($context)],
-		);
 	}
 
 	protected function getRestPlacementItems(): array

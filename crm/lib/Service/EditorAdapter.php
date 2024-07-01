@@ -2134,7 +2134,14 @@ class EditorAdapter
 
 		$resultData = [];
 		/** @var array $clientData */
-		$clientData = \CUtil::JsObjectToPhp($json);
+		try
+		{
+			$clientData = \Bitrix\Main\Web\Json::decode($json);
+		}
+		catch (\Bitrix\Main\ArgumentException $e)
+		{
+			$clientData = [];
+		}
 		if (!is_array($clientData))
 		{
 			$clientData = [];
@@ -2250,7 +2257,14 @@ class EditorAdapter
 	public function saveProductsData(Item $item, string $productsJson): Result
 	{
 		/** @var array[] $productRows */
-		$productRows = \CUtil::JsObjectToPhp($productsJson);
+		try
+		{
+			$productRows = \Bitrix\Main\Web\Json::decode($productsJson);
+		}
+		catch (\Bitrix\Main\ArgumentException $e)
+		{
+			$productRows = [];
+		}
 		if (!is_array($productRows))
 		{
 			$productRows = [];
@@ -2582,7 +2596,14 @@ class EditorAdapter
 	{
 		$result = new Result();
 
-		$data = \CUtil::JsObjectToPhp($json);
+		try
+		{
+			$data = \Bitrix\Main\Web\Json::decode($json);
+		}
+		catch (\Bitrix\Main\ArgumentException $e)
+		{
+			$data = [];
+		}
 		if (!is_array($data))
 		{
 			$data = [];

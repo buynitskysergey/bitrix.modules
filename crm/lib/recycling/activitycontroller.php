@@ -268,29 +268,29 @@ class ActivityController extends BaseController
 		return $result;
 	}
 
-	public function recover($entityID, array $params = array())
+	public function recover(int $entityID, array $params = []): ?int
 	{
 		if($entityID <= 0)
 		{
-			return false;
+			return null;
 		}
 
 		$recyclingEntityID = isset($params['ID']) ? (int)$params['ID'] : 0;
 		if($recyclingEntityID <= 0)
 		{
-			return false;
+			return null;
 		}
 
 		$slots = isset($params['SLOTS']) ? $params['SLOTS'] : null;
 		if(!is_array($slots))
 		{
-			return false;
+			return null;
 		}
 
 		$fields = isset($slots['FIELDS']) ? $slots['FIELDS'] : null;
 		if(!(is_array($fields) && !empty($fields)))
 		{
-			return false;
+			return null;
 		}
 
 		unset($fields['ID'], $fields['COMPANY_ID'], $fields['COMPANY_IDS'], $fields['LEAD_ID']);
@@ -439,7 +439,7 @@ class ActivityController extends BaseController
 
 		if($newEntityID <= 0)
 		{
-			return false;
+			return null;
 		}
 
 		$this->notifyTimelineMonitorAboutMoveFromBin($fields['BINDINGS'] ?? []);
@@ -468,7 +468,8 @@ class ActivityController extends BaseController
 		unset($this->entityIdToRecyclingEntityId[$entityID]);
 		$this->rebuildSearchIndex($newEntityID);
 		$this->fireAfterRecoverEvent($recyclingEntityID, $newEntityID);
-		return true;
+
+		return $newEntityID;
 	}
 
 	public function erase($entityID, array $params = [])

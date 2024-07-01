@@ -1,8 +1,7 @@
-<?
+<?php
+
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Catalog;
-
-Loc::loadMessages(__FILE__);
 
 class CAllExtra
 {

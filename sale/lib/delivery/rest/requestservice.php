@@ -471,10 +471,10 @@ class RequestService extends BaseService
 
 		if (isset($params[$key]['MONEY_VALUES']) && is_array($params[$key]['MONEY_VALUES']))
 		{
-			foreach ($params[$key]['MONEY_VALUES'] as $key => $moneyValue)
+			foreach ($params[$key]['MONEY_VALUES'] as $moneyKey => $moneyValue)
 			{
 				$message->addMoneyValue(
-					(string)$key,
+					(string)$moneyKey,
 					(float)$moneyValue
 				);
 			}
@@ -482,7 +482,7 @@ class RequestService extends BaseService
 
 		if (isset($params[$key]['DATE_VALUES']) && is_array($params[$key]['DATE_VALUES']))
 		{
-			foreach ($params[$key]['DATE_VALUES'] as $key => $dateValue)
+			foreach ($params[$key]['DATE_VALUES'] as $dateKey => $dateValue)
 			{
 				if (!isset($dateValue['VALUE']) || !isset($dateValue['FORMAT']))
 				{
@@ -493,7 +493,7 @@ class RequestService extends BaseService
 				}
 
 				$message->addDateValue(
-					(string)$key,
+					(string)$dateKey,
 					(int)$dateValue['VALUE'],
 					(string)$dateValue['FORMAT']
 				);

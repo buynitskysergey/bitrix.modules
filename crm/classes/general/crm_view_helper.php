@@ -586,7 +586,7 @@ class CCrmViewHelper
 			}
 
 			$timestamp = $time !== '' ? MakeTimeStamp($time) : 0;
-			$timeFormatted = $timestamp > 0 ? CCrmComponentHelper::TrimDateTimeString(FormatDate('FULL', $timestamp)) : GetMessage('CRM_ACTIVITY_TIME_NOT_SPECIFIED');
+			$timeFormatted = $timestamp > 0 ? CCrmComponentHelper::TrimDateTimeString(FormatDate('FULL', $timestamp)) : GetMessage('CRM_ACTIVITY_TIME_NOT_SPECIFIED_MSGVER_1');
 			$isExpired = $arParams['ACTIVITY_EXPIRED'] ?? ($timestamp <= (time() + CTimeZone::GetOffset()));
 			$isDetailExist = true;
 			if (isset($arParams['ACTIVITY_PROVIDER_ID']))
@@ -654,7 +654,7 @@ class CCrmViewHelper
 				else
 				{
 					$result .= '<div class="crm-nearest-activity-plus" onclick="BX.CrmInterfaceGridManager.showMenu(\''.htmlspecialcharsbx($menuID).'\', this);"></div>
-					<script type="text/javascript">BX.CrmInterfaceGridManager.createMenu("'.$menuID.'", '.CUtil::PhpToJSObject($menuItems).');</script>';
+					<script>BX.CrmInterfaceGridManager.createMenu("'.$menuID.'", '.CUtil::PhpToJSObject($menuItems).');</script>';
 				}
 			}
 
@@ -731,7 +731,7 @@ class CCrmViewHelper
 			{
 				return '<span class="crm-activity-add-hint">'.htmlspecialcharsbx($hintText).'</span>
 				<a class="crm-activity-add" onclick="BX.CrmInterfaceGridManager.showMenu(\''.htmlspecialcharsbx($menuID).'\', this); return false;">'.htmlspecialcharsbx(GetMessage('CRM_ENTITY_ADD_ACTIVITY')).'</a>
-				<script type="text/javascript">BX.CrmInterfaceGridManager.createMenu("'.$menuID.'", '.CUtil::PhpToJSObject($menuItems).');</script>';
+				<script>BX.CrmInterfaceGridManager.createMenu("'.$menuID.'", '.CUtil::PhpToJSObject($menuItems).');</script>';
 			}
 		}
 
@@ -1356,7 +1356,7 @@ class CCrmViewHelper
 		{
 			if(!self::$USER_INFO_PROVIDER_MESSAGES_REGISTRED)
 			{
-				echo '<script type="text/javascript">',
+				echo '<script>',
 				'BX.ready(function(){',
 				'BX.CrmUserInfoProvider.messages = ',
 				'{ "generalError":"', GetMessageJS('CRM_GET_USER_INFO_GENERAL_ERROR'), '" }',
@@ -1366,7 +1366,7 @@ class CCrmViewHelper
 				self::$USER_INFO_PROVIDER_MESSAGES_REGISTRED = true;
 			}
 
-			echo '<script type="text/javascript">',
+			echo '<script>',
 			'BX.ready(function(){',
 			'BX.CrmUserInfoProvider.createIfNotExists(',
 			'"', CUtil::JSEscape($userInfoProviderID), '",',
@@ -1381,7 +1381,7 @@ class CCrmViewHelper
 
 		if(!$editable)
 		{
-			echo '<script type="text/javascript">',
+			echo '<script>',
 			'BX.ready(function(){',
 			'BX.CrmUserLinkField.create(',
 			'{',
@@ -1424,7 +1424,7 @@ class CCrmViewHelper
 				);
 			}
 
-			echo '<script type="text/javascript">';
+			echo '<script>';
 			echo 'BX.ready(function(){';
 			echo 'BX.CrmSidebarUserSelector.create(',
 			'"', $userSelectorName, '", ',
@@ -1611,7 +1611,7 @@ class CCrmViewHelper
 				echo '<span id="', htmlspecialcharsbx($buttonID),'" class="', htmlspecialcharsbx($arrowClassName), '"></span>';
 			}
 
-			echo '<script type="text/javascript">';
+			echo '<script>';
 			echo 'BX.ready(function(){',
 			'BX.CmrSidebarFieldSelector.create(',
 			'"', CUtil::JSEscape($selectorName), '",',
@@ -1694,7 +1694,7 @@ class CCrmViewHelper
 		'<select id="', $controls['year'], '" class="bx-select"></select>',
 		'</span>';
 
-		echo '<script type="text/javascript">',
+		echo '<script>',
 		'BX.ready(function(){',
 		'BX.addCustomEvent(window, "CrmWidgetPanelCreated", ',
 		'function(){ BX.CrmWidgetConfigPeriodEditor.create("', $editorID, '", { isNested: false, config: ', CUtil::PhpToJSObject($config), ', controls: ', CUtil::PhpToJSObject($controls) ,' }); }',
@@ -1762,7 +1762,7 @@ class CCrmViewHelper
 
 		$delay = isset($arParams['DELAY']) ? intval($arParams['DELAY']) : 0;
 
-		echo '<script type="text/javascript">',
+		echo '<script>',
 		'BX.ready(function(){',
 		'BX.CrmUserSearchPopup.deletePopup("', $editorID, '");',
 		'BX.CrmUserSearchPopup.create("', $editorID, '", { searchInput: BX("', CUtil::JSEscape($searchInputID), '"), dataInput: BX("', CUtil::JSEscape($dataInputID),'"), componentName: "', CUtil::JSEscape($componentName),'", user: ', CUtil::PhpToJSObject(array_change_key_case($user, CASE_LOWER)) ,', zIndex: ', $zIndex,' }, ', $delay,');',
@@ -1826,7 +1826,7 @@ class CCrmViewHelper
 			echo '<input type="hidden" id="', htmlspecialcharsbx($dataInputID),'" name="', htmlspecialcharsbx($dataInputID),'">';
 		}
 
-		echo '<script type="text/javascript">',
+		echo '<script>',
 		'BX.ready(function(){',
 		'BX.CrmUserSearchPopup.deletePopup("', $ID, '");',
 		'BX.CrmUserSearchPopup.create("', $ID, '", { searchInput: BX("', CUtil::JSEscape($searchInputID), '"), dataInput: BX("', CUtil::JSEscape($dataInputID),'"), componentName: "', CUtil::JSEscape($componentName),'", user: {} }, ', $delay,');',
@@ -2028,7 +2028,7 @@ class CCrmViewHelper
 			'checkErrorHelpArticleCode' => '8233923'
 		);
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmDealStageManager) === "undefined") return; BX.CrmDealStageManager.infos = '.CUtil::PhpToJSObject($result).'; BX.CrmDealStageManager.messages = '.CUtil::PhpToJSObject($messages).'; });'
 			.'</script>';
 	}
@@ -2122,7 +2122,7 @@ class CCrmViewHelper
 			'conversionCancellationContent' => GetMessage('CRM_LEAD_STATUS_MANAGER_CONVERSION_CANCEL_CNT_MSGVER_1')
 		);
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmLeadStatusManager) === "undefined") return; BX.CrmLeadStatusManager.infos = '.CUtil::PhpToJSObject($result).'; BX.CrmLeadStatusManager.messages = '.CUtil::PhpToJSObject($messages).'; });'
 			.'</script>';
 	}
@@ -2193,7 +2193,7 @@ class CCrmViewHelper
 			'notSpecified' => GetMessage('CRM_INVOICE_STATUS_MANAGER_NOT_SPECIFIED')
 		);
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmInvoiceStatusManager) === "undefined") return;'
 			.'BX.CrmInvoiceStatusManager.infos = '.CUtil::PhpToJSObject($result).';'.PHP_EOL
 			.'BX.CrmInvoiceStatusManager.messages = '.CUtil::PhpToJSObject($messages).';'.PHP_EOL
@@ -2635,7 +2635,7 @@ class CCrmViewHelper
 		return $registrationScript.'<div class="crm-list-stage-bar'.$wrapperClass.'" '.$wrapperStyle.' id="'.htmlspecialcharsbx($controlID).'"><table class="crm-list-stage-bar-table"><tr>'
 			.$stepHtml
 			.'</tr></table>'
-			.'<script type="text/javascript">BX.ready(function(){ BX.CrmProgressControl.create("'
+			.'<script>BX.ready(function(){ BX.CrmProgressControl.create("'
 			.CUtil::JSEscape($controlID).'"'
 			.', BX.CrmParamBag.create({"containerId": "'.CUtil::JSEscape($controlID).'"'
 			.', "entityType":"'.CUtil::JSEscape($entityTypeName).'"'
@@ -2986,7 +2986,7 @@ class CCrmViewHelper
 		);
 
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmOrderShipmentStatusManager) === "undefined") return;'
 			.'BX.CrmOrderShipmentStatusManager.messages = '.CUtil::PhpToJSObject($messages).';'.PHP_EOL
 			.'BX.CrmOrderShipmentStatusManager.infos = '.CUtil::PhpToJSObject($result).';});'
@@ -3043,7 +3043,7 @@ class CCrmViewHelper
 			'notSpecified' => GetMessage('CRM_ORDER_STATUS_MANAGER_NOT_SPECIFIED')
 		);
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmOrderStatusManager) === "undefined") return;'
 			.'BX.CrmOrderStatusManager.infos = '.CUtil::PhpToJSObject($result).';'.PHP_EOL
 			.'BX.CrmOrderStatusManager.messages = '.CUtil::PhpToJSObject($messages).';'.PHP_EOL
@@ -3095,7 +3095,7 @@ class CCrmViewHelper
 			'checkErrorHelpArticleCode' => '8233923'
 		);
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmQuoteStatusManager) === "undefined") return;  BX.CrmQuoteStatusManager.infos = '.CUtil::PhpToJSObject($result).'; BX.CrmQuoteStatusManager.messages = '.CUtil::PhpToJSObject($messages).'; });'
 			.'</script>';
 	}
@@ -3161,7 +3161,7 @@ class CCrmViewHelper
 			'checkErrorHelpArticleCode' => '8233923',
 		];
 
-		return '<script type="text/javascript">'
+		return '<script>'
 			.'BX.ready(function(){ if(typeof(BX.CrmItemStatusManager) === "undefined") return;'
 			.'BX.CrmItemStatusManager.infos = '.CUtil::PhpToJSObject($result).';'.PHP_EOL
 			.'BX.CrmItemStatusManager.messages = '.CUtil::PhpToJSObject($messages).'; });'.PHP_EOL
@@ -3302,7 +3302,7 @@ class CCrmViewHelper
 
 	public static function RenderSipContext()
 	{
-		echo '<script type="text/javascript">',
+		echo '<script>',
 		'BX.ready(function(){', "\n",
 		'var mgr = BX.CrmSipManager.getCurrent();', "\n",
 		'mgr.setServiceUrl(',
@@ -3355,7 +3355,7 @@ class CCrmViewHelper
 		$viewUrl = CUtil::JSEscape($viewUrl);
 
 		return (
-			'<script type="text/javascript">' . PHP_EOL
+			'<script>' . PHP_EOL
 			. 'BX.ready(' . PHP_EOL
 			. '    function ()' . PHP_EOL
 			. '    {' . PHP_EOL
@@ -3431,5 +3431,145 @@ class CCrmViewHelper
 		}
 
 		return implode("\n", $result);
+	}
+
+	final public static function initGridSettings(
+		string $gridId,
+		\Bitrix\Main\Grid\Options $gridOptions,
+		array $headers,
+		bool $isInExportMode,
+		?int $categoryId = null,
+		?bool $isAllItemsCategory = null,
+		array $columnNameToEditableFieldNameMap = [],
+		?bool $isRecurring = null,
+		?bool $isMyCompany = null,
+	): \Bitrix\Crm\Component\EntityList\Grid\Settings\ItemSettings
+	{
+		$visibleColumns = $gridOptions->getUsedColumns(array_column($headers, 'id'));
+		$editableVisibleColumns = array_filter(
+			$headers,
+			fn(array $column) => isset($column['editable']) && in_array($column['id'], $visibleColumns, true)
+		);
+
+		$editableFieldsWhitelist = array_column($editableVisibleColumns, 'id');
+
+		return new \Bitrix\Crm\Component\EntityList\Grid\Settings\ItemSettings([
+			'ID' => $gridId,
+			/**
+			 * Could be rewritten in the future to
+			 * @see \Bitrix\Main\Grid\Export\ExcelExporter::isExportRequest()
+			 */
+			'MODE' => $isInExportMode ? \Bitrix\Crm\Component\EntityList\Grid\Settings\ItemSettings::MODE_EXCEL
+				: \Bitrix\Crm\Component\EntityList\Grid\Settings\ItemSettings::MODE_HTML,
+
+			'EDITABLE_FIELDS_WHITELIST' => array_map(
+				fn(string $columnName) => $columnNameToEditableFieldNameMap[$columnName] ?? $columnName,
+				$editableFieldsWhitelist,
+			),
+
+			'COLUMN_NAME_TO_EDITABLE_FIELD_NAME_MAP' => $columnNameToEditableFieldNameMap,
+
+			'CATEGORY_ID' => $categoryId,
+			'IS_ALL_ITEMS_CATEGORY' => $isAllItemsCategory,
+
+			'IS_RECURRING' => $isRecurring,
+
+			'IS_MY_COMPANY' => $isMyCompany,
+		]);
+	}
+
+	/**
+	 * @internal
+	 */
+	final public static function initGridPanel(
+		int $entityTypeId,
+		\Bitrix\Crm\Component\EntityList\Grid\Settings\ItemSettings $gridSettings,
+		?\Bitrix\Main\HttpRequest $request = null
+	): \Bitrix\Main\Grid\Panel\Panel
+	{
+		if (self::isCallListUpdateMode($entityTypeId, $request))
+		{
+			[$callListId, $callListContext] = self::getCallListIdAndContextFromRequest($request);
+
+			return new \Bitrix\Main\Grid\Panel\Panel(
+				new \Bitrix\Crm\Component\EntityList\Grid\Panel\Action\CallListUpdateModeItemDataProvider(
+					$entityTypeId,
+					$callListId,
+					$callListContext,
+					$gridSettings,
+				)
+			);
+		}
+
+		return new \Bitrix\Main\Grid\Panel\Panel(
+			new \Bitrix\Crm\Component\EntityList\Grid\Panel\Action\ItemDataProvider(
+				\Bitrix\Crm\Service\Container::getInstance()->getFactory($entityTypeId),
+				\Bitrix\Crm\Service\Container::getInstance()->getUserPermissions(),
+				\Bitrix\Crm\Service\Container::getInstance()->getContext(),
+				$gridSettings,
+			),
+		);
+	}
+
+	final public static function isCallListUpdateMode(int $entityTypeId, ?\Bitrix\Main\HttpRequest $request = null): bool
+	{
+		if (
+			!\Bitrix\Main\ModuleManager::isModuleInstalled('voximplant')
+			|| !\Bitrix\Crm\CallList\CallList::isEntityTypeSupported($entityTypeId)
+		)
+		{
+			return false;
+		}
+
+		[$callListId, $context] = self::getCallListIdAndContextFromRequest($request);
+
+		return $callListId > 0 && !empty($context);
+	}
+
+	final public static function getCallListIdAndContextFromRequest(?\Bitrix\Main\HttpRequest $request = null): array
+	{
+		$request ??= \Bitrix\Main\Application::getInstance()->getContext()->getRequest();
+
+		$id = $request->get('call_list_id');
+		if ($id !== null)
+		{
+			$id = (int)$id;
+		}
+
+		$context = $request->get('call_list_context');
+		if ($context !== null)
+		{
+			$context = (string)$context;
+		}
+
+		return [$id, $context];
+	}
+
+	final public static function processGridRequest(
+		int $entityTypeId,
+		string $gridId,
+		\Bitrix\Main\Grid\Panel\Panel $panel,
+		?\Bitrix\Main\HttpRequest $request = null
+	): void
+	{
+		if (!check_bitrix_sessid())
+		{
+			return;
+		}
+
+		$request ??= \Bitrix\Main\Application::getInstance()->getContext()->getRequest();
+
+		$request->addFilter(new \Bitrix\Main\Web\PostDecodeFilter());
+		$gridRequest = (new \Bitrix\Main\Grid\UI\Request\GridRequestFactory())->createFromRequest($request);
+
+		$filter = \Bitrix\Crm\Filter\Factory::createEntityFilter(
+			\Bitrix\Crm\Filter\Factory::getSettingsByGridId($entityTypeId, $gridId)
+		);
+
+		$gridResponse = $panel->processRequest($gridRequest, $filter);
+		if ($gridResponse?->isSendable())
+		{
+			$gridResponse?->send();
+		}
 	}
 }

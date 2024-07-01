@@ -198,7 +198,7 @@ class CAllSaleTaxRate
 				else
 					$bInvert = false;
 
-				switch (ToUpper($key))
+				switch (mb_strtoupper($key))
 				{
 					case "TAX_RATE_ID":
 						$arSqlSearch[] = "TR2L.TAX_RATE_ID ".($bInvert?"<>":"=")." ".intval($val)." ";

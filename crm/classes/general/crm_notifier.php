@@ -1,5 +1,6 @@
 <?php
 
+use Bitrix\Crm\Integration\Im\ProcessEntity\Notification;
 use Bitrix\Main\Localization\Loc;
 
 IncludeModuleLangFile(__FILE__);
@@ -7,7 +8,7 @@ IncludeModuleLangFile(__FILE__);
 class CCrmNotifier
 {
 	protected static array $ERRORS = [];
-	
+
 	public static function Notify($addresseeID, $internalMessage, $externalMessage, $schemeTypeID, $tag = ''): bool
 	{
 		self::ClearErrors();
@@ -57,7 +58,7 @@ class CCrmNotifier
 				: 'Unknown sending error. message not send.';
 
 			self::RegisterError($errorMessage);
-			
+
 			return false;
 		}
 
@@ -153,8 +154,12 @@ class CCrmNotifierSchemeType
 					'LIFETIME' => 86400 * 7,
 					'PUSH' => 'N',
 				],
-				'changeAssignedBy' => [
+				Notification\Responsible::NOTIFY_EVENT => [
 					'NAME' => GetMessage('CRM_NOTIFY_SCHEME_ENTITY_ASSIGNED_BY'),
+					'PUSH' => 'N',
+				],
+				Notification\Observer::NOTIFY_EVENT => [
+					'NAME' => GetMessage('CRM_NOTIFY_SCHEME_ENTITY_OBSERVER'),
 					'PUSH' => 'N',
 				],
 				'changeStage' => [

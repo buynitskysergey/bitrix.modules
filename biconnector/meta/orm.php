@@ -1,5 +1,431 @@
 <?php
 
+/* ORMENTITYANNOTATION:Bitrix\BIConnector\Access\Permission\PermissionTable:biconnector\lib\Access\Permission\PermissionTable.php */
+namespace Bitrix\BIConnector\Access\Permission {
+	/**
+	 * Permission
+	 * @see \Bitrix\BIConnector\Access\Permission\PermissionTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getRoleId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission setRoleId(\int|\Bitrix\Main\DB\SqlExpression $roleId)
+	 * @method bool hasRoleId()
+	 * @method bool isRoleIdFilled()
+	 * @method bool isRoleIdChanged()
+	 * @method \int remindActualRoleId()
+	 * @method \int requireRoleId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission resetRoleId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission unsetRoleId()
+	 * @method \int fillRoleId()
+	 * @method \string getPermissionId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission setPermissionId(\string|\Bitrix\Main\DB\SqlExpression $permissionId)
+	 * @method bool hasPermissionId()
+	 * @method bool isPermissionIdFilled()
+	 * @method bool isPermissionIdChanged()
+	 * @method \string remindActualPermissionId()
+	 * @method \string requirePermissionId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission resetPermissionId()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission unsetPermissionId()
+	 * @method \string fillPermissionId()
+	 * @method \int getValue()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission setValue(\int|\Bitrix\Main\DB\SqlExpression $value)
+	 * @method bool hasValue()
+	 * @method bool isValueFilled()
+	 * @method bool isValueChanged()
+	 * @method \int remindActualValue()
+	 * @method \int requireValue()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission resetValue()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission unsetValue()
+	 * @method \int fillValue()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission set($fieldName, $value)
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission reset($fieldName)
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\BIConnector\Access\Permission\Permission wakeUp($data)
+	 */
+	class EO_Permission {
+		/* @var \Bitrix\BIConnector\Access\Permission\PermissionTable */
+		static public $dataClass = '\Bitrix\BIConnector\Access\Permission\PermissionTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\BIConnector\Access\Permission {
+	/**
+	 * EO_Permission_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getRoleIdList()
+	 * @method \int[] fillRoleId()
+	 * @method \string[] getPermissionIdList()
+	 * @method \string[] fillPermissionId()
+	 * @method \int[] getValueList()
+	 * @method \int[] fillValue()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\BIConnector\Access\Permission\Permission $object)
+	 * @method bool has(\Bitrix\BIConnector\Access\Permission\Permission $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission getByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission[] getAll()
+	 * @method bool remove(\Bitrix\BIConnector\Access\Permission\Permission $object)
+	 * @method void removeByPrimary($primary)
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\BIConnector\Access\Permission\EO_Permission_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\BIConnector\Access\Permission\EO_Permission_Collection merge(?\Bitrix\BIConnector\Access\Permission\EO_Permission_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_Permission_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\BIConnector\Access\Permission\PermissionTable */
+		static public $dataClass = '\Bitrix\BIConnector\Access\Permission\PermissionTable';
+	}
+}
+namespace Bitrix\BIConnector\Access\Permission {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_Permission_Result exec()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission fetchObject()
+	 * @method \Bitrix\BIConnector\Access\Permission\EO_Permission_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_Permission_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission fetchObject()
+	 * @method \Bitrix\BIConnector\Access\Permission\EO_Permission_Collection fetchCollection()
+	 */
+	class EO_Permission_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission createObject($setDefaultValues = true)
+	 * @method \Bitrix\BIConnector\Access\Permission\EO_Permission_Collection createCollection()
+	 * @method \Bitrix\BIConnector\Access\Permission\Permission wakeUpObject($row)
+	 * @method \Bitrix\BIConnector\Access\Permission\EO_Permission_Collection wakeUpCollection($rows)
+	 */
+	class EO_Permission_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\BIConnector\Access\Role\RoleTable:biconnector\lib\Access\Role\RoleTable.php */
+namespace Bitrix\BIConnector\Access\Role {
+	/**
+	 * Role
+	 * @see \Bitrix\BIConnector\Access\Role\RoleTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\BIConnector\Access\Role\Role setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \string getName()
+	 * @method \Bitrix\BIConnector\Access\Role\Role setName(\string|\Bitrix\Main\DB\SqlExpression $name)
+	 * @method bool hasName()
+	 * @method bool isNameFilled()
+	 * @method bool isNameChanged()
+	 * @method \string remindActualName()
+	 * @method \string requireName()
+	 * @method \Bitrix\BIConnector\Access\Role\Role resetName()
+	 * @method \Bitrix\BIConnector\Access\Role\Role unsetName()
+	 * @method \string fillName()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\BIConnector\Access\Role\Role set($fieldName, $value)
+	 * @method \Bitrix\BIConnector\Access\Role\Role reset($fieldName)
+	 * @method \Bitrix\BIConnector\Access\Role\Role unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\BIConnector\Access\Role\Role wakeUp($data)
+	 */
+	class EO_Role {
+		/* @var \Bitrix\BIConnector\Access\Role\RoleTable */
+		static public $dataClass = '\Bitrix\BIConnector\Access\Role\RoleTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\BIConnector\Access\Role {
+	/**
+	 * EO_Role_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \string[] getNameList()
+	 * @method \string[] fillName()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\BIConnector\Access\Role\Role $object)
+	 * @method bool has(\Bitrix\BIConnector\Access\Role\Role $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Access\Role\Role getByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Access\Role\Role[] getAll()
+	 * @method bool remove(\Bitrix\BIConnector\Access\Role\Role $object)
+	 * @method void removeByPrimary($primary)
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\BIConnector\Access\Role\EO_Role_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\BIConnector\Access\Role\Role current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\BIConnector\Access\Role\EO_Role_Collection merge(?\Bitrix\BIConnector\Access\Role\EO_Role_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_Role_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\BIConnector\Access\Role\RoleTable */
+		static public $dataClass = '\Bitrix\BIConnector\Access\Role\RoleTable';
+	}
+}
+namespace Bitrix\BIConnector\Access\Role {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_Role_Result exec()
+	 * @method \Bitrix\BIConnector\Access\Role\Role fetchObject()
+	 * @method \Bitrix\BIConnector\Access\Role\EO_Role_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_Role_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\BIConnector\Access\Role\Role fetchObject()
+	 * @method \Bitrix\BIConnector\Access\Role\EO_Role_Collection fetchCollection()
+	 */
+	class EO_Role_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\BIConnector\Access\Role\Role createObject($setDefaultValues = true)
+	 * @method \Bitrix\BIConnector\Access\Role\EO_Role_Collection createCollection()
+	 * @method \Bitrix\BIConnector\Access\Role\Role wakeUpObject($row)
+	 * @method \Bitrix\BIConnector\Access\Role\EO_Role_Collection wakeUpCollection($rows)
+	 */
+	class EO_Role_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\BIConnector\Access\Role\RoleRelationTable:biconnector\lib\Access\Role\RoleRelationTable.php */
+namespace Bitrix\BIConnector\Access\Role {
+	/**
+	 * RoleRelation
+	 * @see \Bitrix\BIConnector\Access\Role\RoleRelationTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getRoleId()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation setRoleId(\int|\Bitrix\Main\DB\SqlExpression $roleId)
+	 * @method bool hasRoleId()
+	 * @method bool isRoleIdFilled()
+	 * @method bool isRoleIdChanged()
+	 * @method \int remindActualRoleId()
+	 * @method \int requireRoleId()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation resetRoleId()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation unsetRoleId()
+	 * @method \int fillRoleId()
+	 * @method \string getRelation()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation setRelation(\string|\Bitrix\Main\DB\SqlExpression $relation)
+	 * @method bool hasRelation()
+	 * @method bool isRelationFilled()
+	 * @method bool isRelationChanged()
+	 * @method \string remindActualRelation()
+	 * @method \string requireRelation()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation resetRelation()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation unsetRelation()
+	 * @method \string fillRelation()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation set($fieldName, $value)
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation reset($fieldName)
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\BIConnector\Access\Role\RoleRelation wakeUp($data)
+	 */
+	class EO_RoleRelation {
+		/* @var \Bitrix\BIConnector\Access\Role\RoleRelationTable */
+		static public $dataClass = '\Bitrix\BIConnector\Access\Role\RoleRelationTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\BIConnector\Access\Role {
+	/**
+	 * EO_RoleRelation_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getRoleIdList()
+	 * @method \int[] fillRoleId()
+	 * @method \string[] getRelationList()
+	 * @method \string[] fillRelation()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\BIConnector\Access\Role\RoleRelation $object)
+	 * @method bool has(\Bitrix\BIConnector\Access\Role\RoleRelation $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation getByPrimary($primary)
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation[] getAll()
+	 * @method bool remove(\Bitrix\BIConnector\Access\Role\RoleRelation $object)
+	 * @method void removeByPrimary($primary)
+	 * @method void fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection merge(?\Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_RoleRelation_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\BIConnector\Access\Role\RoleRelationTable */
+		static public $dataClass = '\Bitrix\BIConnector\Access\Role\RoleRelationTable';
+	}
+}
+namespace Bitrix\BIConnector\Access\Role {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_RoleRelation_Result exec()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation fetchObject()
+	 * @method \Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_RoleRelation_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation fetchObject()
+	 * @method \Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection fetchCollection()
+	 */
+	class EO_RoleRelation_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation createObject($setDefaultValues = true)
+	 * @method \Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection createCollection()
+	 * @method \Bitrix\BIConnector\Access\Role\RoleRelation wakeUpObject($row)
+	 * @method \Bitrix\BIConnector\Access\Role\EO_RoleRelation_Collection wakeUpCollection($rows)
+	 */
+	class EO_RoleRelation_Entity extends \Bitrix\Main\ORM\Entity {}
+}
 /* ORMENTITYANNOTATION:Bitrix\BIConnector\DashboardTable:biconnector\lib\dashboardtable.php */
 namespace Bitrix\BIConnector {
 	/**
@@ -852,6 +1278,16 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard resetCreatedById()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard unsetCreatedById()
 	 * @method null|\int fillCreatedById()
+	 * @method null|\int getOwnerId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard setOwnerId(null|\int|\Bitrix\Main\DB\SqlExpression $ownerId)
+	 * @method bool hasOwnerId()
+	 * @method bool isOwnerIdFilled()
+	 * @method bool isOwnerIdChanged()
+	 * @method null|\int remindActualOwnerId()
+	 * @method null|\int requireOwnerId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard resetOwnerId()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard unsetOwnerId()
+	 * @method null|\int fillOwnerId()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection getTags()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection requireTags()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fillTags()
@@ -937,6 +1373,8 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \Bitrix\Main\Type\DateTime[] fillDateModify()
 	 * @method null|\int[] getCreatedByIdList()
 	 * @method null|\int[] fillCreatedById()
+	 * @method null|\int[] getOwnerIdList()
+	 * @method null|\int[] fillOwnerId()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection[] getTagsList()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection getTagsCollection()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetTag_Collection fillTags()
@@ -1344,6 +1782,16 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser resetClientId()
 	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser unsetClientId()
 	 * @method \string fillClientId()
+	 * @method \string getPermissionHash()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser setPermissionHash(\string|\Bitrix\Main\DB\SqlExpression $permissionHash)
+	 * @method bool hasPermissionHash()
+	 * @method bool isPermissionHashFilled()
+	 * @method bool isPermissionHashChanged()
+	 * @method \string remindActualPermissionHash()
+	 * @method \string requirePermissionHash()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser resetPermissionHash()
+	 * @method \Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetUser unsetPermissionHash()
+	 * @method \string fillPermissionHash()
 	 *
 	 * Common methods:
 	 * ---------------
@@ -1392,6 +1840,8 @@ namespace Bitrix\BIConnector\Integration\Superset\Model {
 	 * @method \int[] fillUserId()
 	 * @method \string[] getClientIdList()
 	 * @method \string[] fillClientId()
+	 * @method \string[] getPermissionHashList()
+	 * @method \string[] fillPermissionHash()
 	 *
 	 * Common methods:
 	 * ---------------

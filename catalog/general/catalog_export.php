@@ -1,4 +1,5 @@
-<?
+<?php
+
 class CAllCatalogExport
 {
 	public static function CheckFields($ACTION, &$arFields)

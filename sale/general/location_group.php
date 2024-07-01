@@ -121,7 +121,7 @@ class CAllSaleLocationGroup
 				else
 					$bInvert = false;
 
-				switch(ToUpper($key))
+				switch(mb_strtoupper($key))
 				{
 				case "LOCATION_ID":
 					$arSqlSearch[] = "LOCATION_ID ".($bInvert?"<>":"=")." ".intval($val)." ";

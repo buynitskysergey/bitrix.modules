@@ -84,6 +84,11 @@ abstract class FileTransformer implements InterfaceCallback
 	 */
 	abstract protected function getCommandName();
 
+	final public static function getTransformerCommandName(): string
+	{
+		return (new static())->getCommandName();
+	}
+
 	/**
 	 * Get information of the last transformation command of the file.
 	 * array

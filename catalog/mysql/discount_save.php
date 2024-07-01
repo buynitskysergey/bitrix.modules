@@ -1,4 +1,5 @@
-<?
+<?php
+
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/catalog/general/discount_save.php");
 
 class CCatalogDiscountSave extends CAllCatalogDiscountSave

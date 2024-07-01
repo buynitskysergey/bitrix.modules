@@ -2,7 +2,7 @@
 ##############################################
 # Bitrix: SiteManager                        #
 # Copyright (c) 2002-2010 Bitrix             #
-# http://www.bitrixsoft.com                  #
+# https://www.bitrixsoft.com                  #
 # mailto:admin@bitrixsoft.com                #
 ##############################################
 
@@ -185,7 +185,7 @@ $tabControl = new CAdminTabControl('tabControl', $aTabs);
 <?//$tabControl->BeginNextTab();?>
 <?//require_once($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/main/admin/group_rights.php');?>
 <?$tabControl->Buttons();?>
-<script language="JavaScript">
+<script>
 function RestoreDefaults()
 {
 	if(confirm('<?echo AddSlashes(Loc::getMessage('MAIN_HINT_RESTORE_DEFAULTS_WARNING'))?>'))

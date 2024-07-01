@@ -31,7 +31,7 @@ final class CallList
 	protected $webformId;
 	protected $entityTypeId = \CCrmOwnerType::Undefined;
 	protected static $statusList = null;
-	
+
 	/** @var Item[] */
 	protected $items = array();
 	protected $itemsLoaded = false;
@@ -341,7 +341,7 @@ final class CallList
 	{
 		$this->entityTypeId = $entityTypeId;
 	}
-	
+
 	public function addItem(Item $item)
 	{
 		$this->items[$item->getElementId()] = $item;
@@ -436,7 +436,7 @@ final class CallList
 		$item = $this->getItem($elementId);
 		if($item === false)
 			return false;
-		
+
 		$item->setCallId($callId);
 		return true;
 	}
@@ -528,7 +528,7 @@ final class CallList
 			'COMPLETED' => true
 		));
 	}
-	
+
 	public static function getStatusList(): array
 	{
 		return array_values(\CCrmStatus::GetStatus('CALL_LIST'));
@@ -582,7 +582,7 @@ final class CallList
 	}
 
 	/**
-	 * Creates new Activity, associatied with the current call list. 
+	 * Creates new Activity, associatied with the current call list.
 	 * @param string $subject Subject of the activity.
 	 * @param string $description Description of the activity.
 	 * @return Result
@@ -649,7 +649,7 @@ final class CallList
 			));
 		}
 	}
-	
+
 	protected function setFromArray(array $fields)
 	{
 		$this->id = $fields['ID'];
@@ -947,13 +947,13 @@ final class CallList
 
 				unset($gridFilter[$k]);
 			}
-			elseif (preg_match('/(.*)_from$/i'.BX_UTF_PCRE_MODIFIER, $k, $arMatch))
+			elseif (preg_match('/(.*)_from$/iu', $k, $arMatch))
 			{
 				\Bitrix\Crm\UI\Filter\Range::prepareFrom($gridFilter, $arMatch[1], $v);
 			}
-			elseif (preg_match('/(.*)_to$/i'.BX_UTF_PCRE_MODIFIER, $k, $arMatch))
+			elseif (preg_match('/(.*)_to$/iu', $k, $arMatch))
 			{
-				if ($v != '' && ($arMatch[1] == 'DATE_CREATE' || $arMatch[1] == 'DATE_MODIFY') && !preg_match('/\d{1,2}:\d{1,2}(:\d{1,2})?$/'.BX_UTF_PCRE_MODIFIER, $v))
+				if ($v != '' && ($arMatch[1] == 'DATE_CREATE' || $arMatch[1] == 'DATE_MODIFY') && !preg_match('/\d{1,2}:\d{1,2}(:\d{1,2})?$/u', $v))
 				{
 					$v = \CCrmDateTimeHelper::SetMaxDayTime($v);
 				}
@@ -1279,5 +1279,19 @@ final class CallList
 			"DELETE FROM b_crm_call_list_item WHERE ENTITY_TYPE = '{$entityTypeName}' AND ELEMENT_ID = {$entityId}"
 		);
 		*/
+	}
+
+	final public static function isEntityTypeSupported(int $entityTypeId): bool
+	{
+		static $supportedEntityTypes = [
+			\CCrmOwnerType::Lead,
+			\CCrmOwnerType::Contact,
+			\CCrmOwnerType::Company,
+			\CCrmOwnerType::Deal,
+			\CCrmOwnerType::Quote,
+			\CCrmOwnerType::Invoice,
+		];
+
+		return in_array($entityTypeId, $supportedEntityTypes, true);
 	}
 }

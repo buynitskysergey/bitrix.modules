@@ -15,6 +15,7 @@ use Bitrix\Crm\Activity\Provider\StoreDocument;
 use Bitrix\Crm\Activity\Provider\Tasks;
 use Bitrix\Crm\Activity\Provider\ToDo;
 use Bitrix\Crm\Activity\Provider\Visit;
+use Bitrix\Crm\Activity\Provider\Zoom;
 use Bitrix\Crm\Activity\ProviderId;
 use Bitrix\Crm\Service\Timeline\Context;
 use Bitrix\Crm\Service\Timeline\Item;
@@ -147,6 +148,17 @@ class ConfigurableActivity
 			if ($providerId === Visit::getId())
 			{
 				return new Item\Activity\Visit($context, $model);
+			}
+
+			if ($providerId === Zoom::getId())
+			{
+				$providerData = $model->getHistoryItemModel()?->get('PROVIDER_DATA') ?? [];
+				if (($providerData['ZOOM_EVENT_TYPE'] ?? '') === Zoom::TYPE_ZOOM_CONF_JOINED)
+				{
+					return new Item\LogMessage\Zoom\ConferenceJoined($context, $model);
+				}
+
+				return new Item\Activity\Zoom($context, $model);
 			}
 		}
 

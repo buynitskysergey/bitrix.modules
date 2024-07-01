@@ -121,6 +121,34 @@ interface SupersetIntegrator
 	public function getLoginUrl(): IntegratorResponse;
 
 	/**
+	 * Updates supersetUser
+	 *
+	 * @return IntegratorResponse
+	 */
+	public function updateUser(Dto\User $user): IntegratorResponse;
+
+	/**
+	 * Activates superset user
+	 *
+	 * @return IntegratorResponse
+	 */
+	public function activateUser(Dto\User $user): IntegratorResponse;
+
+	/**
+	 * Deactivates superset user
+	 *
+	 * @return IntegratorResponse
+	 */
+	public function deactivateUser(Dto\User $user): IntegratorResponse;
+
+	/**
+	 * Sets empty role for superset user
+	 *
+	 * @return IntegratorResponse
+	 */
+	public function setEmptyRole(Dto\User $user): IntegratorResponse;
+
+	/**
 	 * Returns response with dashboard import result.
 	 * If response is OK - dashboard was imported successfully.
 	 *
@@ -151,11 +179,19 @@ interface SupersetIntegrator
 	/**
 	 * Sets owner for dashboard
 	 *
-	 * @param Dto\User $user
 	 * @param int $dashboardId
+	 * @param Dto\User $user
 	 * @return IntegratorResponse
 	 */
-	public function setOwnerDashboard(Dto\User $user, int $dashboardId): IntegratorResponse;
+	public function setDashboardOwner(int $dashboardId, Dto\User $user): IntegratorResponse;
+
+	/**
+	 * Sync roles, owners and so on
+	 *
+	 * @param array $data
+	 * @return IntegratorResponse
+	 */
+	public function syncProfile(Dto\User $user, array $data): IntegratorResponse;
 
 	/**
 	 * Set option that skip required fields in request and return instance
@@ -189,4 +225,14 @@ interface SupersetIntegrator
 	 * @return IntegratorResponse<Array<string|string>> return array of fields that changed
 	 */
 	public function updateDashboard(int $dashboardId, array $editedFields): IntegratorResponse;
+
+	/**
+	 * Changes dashboard owners
+	 *
+	 * @param int $dashboardId
+	 * @param Dto\User $userFrom
+	 * @param Dto\User $userTo
+	 * @return IntegratorResponse
+	 */
+	public function changeDashboardOwner(int $dashboardId, Dto\User $userFrom, Dto\User $userTo): IntegratorResponse;
 }

@@ -15,7 +15,7 @@ class Utils extends EdnaUtils
 {
 	public const CACHE_KEY_TEMPLATES = 'whatsapp_templates_cache';
 	public const CACHE_DIR_TEMPLATES = '/messageservice/templates/';
-	protected const CACHE_TIME_TEMPLATES = 86400;
+	protected const CACHE_TIME_TEMPLATES = 14400;
 
 	protected function initializeDefaultExternalSender(): Providers\ExternalSender
 	{

@@ -2993,8 +2993,7 @@ TRANSP:TRANSPARENT
 END:VEVENT'."\n";
 		}
 		$res .= 'END:VCALENDAR';
-		if (!defined('BX_UTF') || BX_UTF !== true)
-			$res = $GLOBALS["APPLICATION"]->ConvertCharset($res, LANG_CHARSET, 'UTF-8');
+
 		return $res;
 	}
 

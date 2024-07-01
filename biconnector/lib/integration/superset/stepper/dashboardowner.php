@@ -8,6 +8,7 @@ use Bitrix\BIConnector\Integration\Superset\SupersetController;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegratorResponse;
 
 class DashboardOwner extends Main\Update\Stepper
 {
@@ -69,7 +70,7 @@ class DashboardOwner extends Main\Update\Stepper
 			{
 				$dashboardId = (int)$dashboard['ID'];
 				$externalDashboardId = (int)$dashboard['EXTERNAL_ID'];
-				$createdById = (int)$dashboard['CREATED_BY_ID'];
+				$createdById = (int)$dashboard['OWNER_ID'];
 
 				$ownerId = $this->isUserAcceptable($createdById) ? $createdById : $adminUserId;
 
@@ -80,8 +81,11 @@ class DashboardOwner extends Main\Update\Stepper
 					return self::CONTINUE_EXECUTION;
 				}
 
-				$setOwnerDashboardResult = $integrator->setOwnerDashboard($user, $externalDashboardId);
-				if ($setOwnerDashboardResult->hasErrors())
+				$setOwnerDashboardResult = $integrator->setDashboardOwner($externalDashboardId, $user);
+				if (
+					$setOwnerDashboardResult->hasErrors()
+					&& $setOwnerDashboardResult->getStatus() !== ProxyIntegratorResponse::HTTP_STATUS_NOT_FOUND
+				)
 				{
 					return self::CONTINUE_EXECUTION;
 				}
@@ -103,8 +107,11 @@ class DashboardOwner extends Main\Update\Stepper
 				$user = (new SupersetUserRepository)->getById($adminUserId);
 				foreach ($supersetDashboardList as $supersetDashboardId)
 				{
-					$setOwnerDashboardResult = $integrator->setOwnerDashboard($user, $supersetDashboardId);
-					if ($setOwnerDashboardResult->hasErrors())
+					$setOwnerDashboardResult = $integrator->setDashboardOwner($supersetDashboardId, $user);
+					if (
+						$setOwnerDashboardResult->hasErrors()
+						&& $setOwnerDashboardResult->getStatus() !== ProxyIntegratorResponse::HTTP_STATUS_NOT_FOUND
+					)
 					{
 						return self::CONTINUE_EXECUTION;
 					}
@@ -170,15 +177,16 @@ class DashboardOwner extends Main\Update\Stepper
 	private function getDashboardList(array $filter = []): array
 	{
 		$parameters = [
-			'select' => ['ID', 'EXTERNAL_ID', 'CREATED_BY_ID'],
+			'select' => ['ID', 'EXTERNAL_ID', 'OWNER_ID'],
 			'order' => ['ID' => 'ASC'],
 			'cache' => ['ttl' => 3600],
 			'count_total' => true,
+			'filter' => ['=STATUS' => SupersetDashboardTable::DASHBOARD_STATUS_READY],
 		];
 
 		if ($filter)
 		{
-			$parameters['filter'] = $filter;
+			$parameters['filter'] += $filter;
 		}
 
 		return SupersetDashboardTable::getList($parameters)->fetchAll();

@@ -1,8 +1,8 @@
-<?
+<?php
+
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/catalog/general/store_docs_element.php");
 
-class CCatalogStoreDocsElement
-	extends CCatalogStoreDocsElementAll
+class CCatalogStoreDocsElement extends CCatalogStoreDocsElementAll
 {
 	public static function add($arFields)
 	{

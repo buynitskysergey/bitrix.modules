@@ -171,7 +171,7 @@ class Installed extends BaseTemplate
 			$appItem['BUTTONS'] = Action::getButtons($appItem);
 
 			if (isset($appItem['BUTTONS'][Action::UPDATE])) {
-				$appItem['INSTALL_INFO'] = Action::getJsAppData($appItem);
+				$appItem['INSTALL_INFO'] = Action::getInstallJsInfo($appItem);
 				$appItem['LICENSE'] = License::getInfo($appItem);
 			}
 
@@ -195,6 +195,8 @@ class Installed extends BaseTemplate
 		$this->result['SHOW_MARKET_ICON'] = $response['SHOW_MARKET_ICON'];
 		$this->result['ADDITIONAL_CONTENT'] = $response['ADDITIONAL_CONTENT'] ?? '';
 		$this->result['ADDITIONAL_MARKET_ACTION'] = $response['ADDITIONAL_MARKET_ACTION'] ?? '';
+		$this->result['ADDITIONAL_SEARCH_ACTION'] = $response['ADDITIONAL_SEARCH_ACTION'] ?? '';
+		$this->result['ADDITIONAL_HIT_ACTION'] = $response['ADDITIONAL_HIT_ACTION'] ?? '';
 	}
 
 	private function getFilterTags(): array

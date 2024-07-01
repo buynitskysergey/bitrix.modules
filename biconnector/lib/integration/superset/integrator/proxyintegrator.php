@@ -28,7 +28,7 @@ final class ProxyIntegrator implements SupersetIntegrator
 	private const PROXY_ACTION_DELETE_SUPERSET = '/instance/delete';
 	private const PROXY_ACTION_CHANGE_BI_TOKEN_SUPERSET = '/instance/changeToken';
 	private const PROXY_ACTION_REFRESH_DOMAIN_CONNECTION = '/instance/refreshDomain';
-	private const PROXY_ACTION_CLEAR_CACHE = '/instance/cache/delete';
+	private const PROXY_ACTION_CLEAR_CACHE = '/instance/clearCache';
 	private const PROXY_ACTION_LIST_DASHBOARD = '/dashboard/list';
 	private const PROXY_ACTION_DASHBOARD_DETAIL = '/dashboard/get';
 	private const PROXY_ACTION_GET_EMBEDDED_DASHBOARD_CREDENTIALS = '/dashboard/embedded/get';
@@ -38,10 +38,16 @@ final class ProxyIntegrator implements SupersetIntegrator
 	private const PROXY_ACTION_IMPORT_DASHBOARD = '/dashboard/import';
 	private const PROXY_ACTION_CREATE_USER = '/user/create';
 	private const PROXY_ACTION_GET_LOGIN_URL = '/user/getLoginUrl';
+	private const PROXY_ACTION_UPDATE_USER = '/user/update';
+	private const PROXY_ACTION_USER_ACTIVATE = '/user/activate';
+	private const PROXY_ACTION_USER_DEACTIVATE = '/user/deactivate';
+	private const PROXY_ACTION_USER_SET_EMPTY_ROLE = '/user/setEmptyRole';
+	private const PROXY_ACTION_USER_SYNC_PROFILE = '/user/syncProfile';
 	private const PROXY_ACTION_UPDATE_DASHBOARD = '/dashboard/update';
 	private const PROXY_ACTION_IMPORT_DATASET = '/dataset/import';
 	private const PROXY_ACTION_CREATE_EMPTY_DASHBOARD = '/dashboard/createEmpty';
-	private const PROXY_ACTION_SET_OWNER_DASHBOARD = '/dashboard/setOwner';
+	private const PROXY_ACTION_SET_DASHBOARD_OWNER = '/dashboard/setOwner';
+	private const PROXY_ACTION_CHANGE_DASHBOARD_OWNER = '/dashboard/changeOwner';
 
 	static private self $instance;
 
@@ -219,6 +225,87 @@ final class ProxyIntegrator implements SupersetIntegrator
 		);
 
 		return $response->setData($credentials);
+	}
+
+	public function updateUser(Dto\User $user): IntegratorResponse
+	{
+		$parameters = [
+			'email' => $user->email,
+			'username' => $user->userName,
+			'first_name' => $user->firstName,
+			'last_name' => $user->lastName,
+		];
+
+		$result = $this->performRequest(
+			action: self::PROXY_ACTION_UPDATE_USER,
+			requestParams: ['fields' => $parameters],
+			user: $user
+		);
+
+		$response = $result->response;
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$userCredentialsData = $result->requestResult->getData()['data'];
+
+		return $response->setData($userCredentialsData);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function activateUser(Dto\User $user): IntegratorResponse
+	{
+		$result = $this->performRequest(
+			action: self::PROXY_ACTION_USER_ACTIVATE,
+			user: $user
+		);
+
+		$response = $result->response;
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$userCredentialsData = $result->requestResult->getData()['data'];
+
+		return $response->setData($userCredentialsData);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function deactivateUser(Dto\User $user): IntegratorResponse
+	{
+		$result = $this->performRequest(
+			action: self::PROXY_ACTION_USER_DEACTIVATE,
+			user: $user
+		);
+
+		$response = $result->response;
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$userCredentialsData = $result->requestResult->getData()['data'];
+
+		return $response->setData($userCredentialsData);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function setEmptyRole(Dto\User $user): IntegratorResponse
+	{
+		$result = $this->performRequest(
+			action: self::PROXY_ACTION_USER_SET_EMPTY_ROLE,
+			user: $user
+		);
+
+		return $result->response;
 	}
 
 	/**
@@ -763,10 +850,10 @@ final class ProxyIntegrator implements SupersetIntegrator
 	/**
 	 * @inheritDoc
 	 */
-	public function setOwnerDashboard(Dto\User $user, int $dashboardId): IntegratorResponse
+	public function setDashboardOwner(int $dashboardId, Dto\User $user): IntegratorResponse
 	{
 		$result = $this->performRequest(
-			action: self::PROXY_ACTION_SET_OWNER_DASHBOARD,
+			action: self::PROXY_ACTION_SET_DASHBOARD_OWNER,
 			requestParams: ['id' => $dashboardId],
 			requiredFields: ['dashboard'],
 			user: $user
@@ -781,6 +868,35 @@ final class ProxyIntegrator implements SupersetIntegrator
 		$resultData = $result->requestResult->getData()['data'];
 
 		return $response->setData($resultData);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function syncProfile(Dto\User $user, array $data): IntegratorResponse
+	{
+		$dashboards = SupersetDashboardTable::getList([
+			'select' => ['EXTERNAL_ID'],
+			'filter' => [
+				'=STATUS' => SupersetDashboardTable::DASHBOARD_STATUS_READY,
+				'=TYPE' => SupersetDashboardTable::DASHBOARD_TYPE_CUSTOM,
+			],
+			'cache' => ['ttl' => 3600],
+		])->fetchAll();
+
+		$parameters = [
+			'role' => $data['role'],
+			'dashboardIdList' => $data['dashboardIdList'],
+			'dashboardAllIdList' => array_map('intval', array_column($dashboards, 'EXTERNAL_ID')),
+		];
+
+		$result = $this->performRequest(
+			action: self::PROXY_ACTION_USER_SYNC_PROFILE,
+			requestParams: ['fields' => $parameters],
+			user: $user
+		);
+
+		return $result->response;
 	}
 
 	private function decode(string $data)
@@ -877,6 +993,34 @@ final class ProxyIntegrator implements SupersetIntegrator
 	}
 
 	/**
+	 * @inheritDoc
+	 */
+	public function changeDashboardOwner(int $dashboardId, Dto\User $userFrom, Dto\User $userTo): IntegratorResponse
+	{
+		$parameters = [
+			'id' => $dashboardId,
+			'userFrom' => $userFrom->clientId,
+			'userTo' => $userTo->clientId,
+		];
+
+		$result = $this->performRequest(
+			action: self::PROXY_ACTION_CHANGE_DASHBOARD_OWNER,
+			requestParams: $parameters,
+			requiredFields: ['dashboard'],
+		);
+
+		$response = $result->response;
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $result->requestResult->getData()['data'];
+
+		return $response->setData($resultData);
+	}
+
+	/**
 	 * @param string $action
 	 * @return bool
 	 * @throws ArgumentException
@@ -904,7 +1048,8 @@ final class ProxyIntegrator implements SupersetIntegrator
 			self::PROXY_ACTION_UPDATE_DASHBOARD => false,
 			self::PROXY_ACTION_IMPORT_DATASET => false,
 			self::PROXY_ACTION_CREATE_EMPTY_DASHBOARD => true,
-			self::PROXY_ACTION_SET_OWNER_DASHBOARD => true,
+			self::PROXY_ACTION_SET_DASHBOARD_OWNER => true,
+			self::PROXY_ACTION_CHANGE_DASHBOARD_OWNER => false,
 		];
 
 		if (!array_key_exists($action, $actions))

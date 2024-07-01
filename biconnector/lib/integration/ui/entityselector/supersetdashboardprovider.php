@@ -2,6 +2,8 @@
 
 namespace Bitrix\BIConnector\Integration\UI\EntitySelector;
 
+use Bitrix\BIConnector\Access\AccessController;
+use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
 use Bitrix\BIConnector\Integration\Superset\Model\Dashboard;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
@@ -69,6 +71,15 @@ class SupersetDashboardProvider extends BaseProvider
 		];
 		$integrator = ProxyIntegrator::getInstance();
 		$superset = new SupersetController($integrator);
+
+		$accessFilter = AccessController::getCurrent()->getEntityFilter(
+			ActionDictionary::ACTION_BIC_DASHBOARD_VIEW,
+			SupersetDashboardTable::class
+		);
+		$ormParams['filter'] = [
+			$accessFilter,
+			$ormParams['filter'],
+		];
 
 		$elements = $superset->getDashboardRepository()->getList($ormParams);
 		foreach ($elements as $element)

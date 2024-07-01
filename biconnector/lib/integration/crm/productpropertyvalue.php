@@ -81,6 +81,10 @@ class ProductPropertyValue
 						'FIELD_NAME' => 'IEP.ID',
 						'FIELD_TYPE' => 'string',
 					],
+					'PRODUCT_ID' => [
+						'FIELD_NAME' => 'IEP.IBLOCK_ELEMENT_ID',
+						'FIELD_TYPE' => 'int',
+					],
 					'PROPERTY_ID' => [
 						'FIELD_NAME' => 'IEP.IBLOCK_PROPERTY_ID',
 						'FIELD_TYPE' => 'int',
@@ -115,6 +119,10 @@ class ProductPropertyValue
 					'ID' => [
 						'FIELD_NAME' => 'IEP.ID',
 						'FIELD_TYPE' => 'string',
+					],
+					'PRODUCT_ID' => [
+						'FIELD_NAME' => 'IEP.IBLOCK_ELEMENT_ID',
+						'FIELD_TYPE' => 'int',
 					],
 					'PROPERTY_ID' => [
 						'FIELD_NAME' => 'IEP.IBLOCK_PROPERTY_ID',
@@ -152,6 +160,10 @@ class ProductPropertyValue
 						'FIELD_NAME' => 'IEP.ID',
 						'FIELD_TYPE' => 'string',
 					],
+					'PRODUCT_ID' => [
+						'FIELD_NAME' => 'IEP.IBLOCK_ELEMENT_ID',
+						'FIELD_TYPE' => 'int',
+					],
 					'PROPERTY_ID' => [
 						'FIELD_NAME' => 'IEP.IBLOCK_PROPERTY_ID',
 						'FIELD_TYPE' => 'int',
@@ -175,6 +187,10 @@ class ProductPropertyValue
 						'IS_PRIMARY' => 'Y',
 						'FIELD_NAME' => 'IEP.ID',
 						'FIELD_TYPE' => 'string',
+					],
+					'PRODUCT_ID' => [
+						'FIELD_NAME' => 'IEP.IBLOCK_ELEMENT_ID',
+						'FIELD_TYPE' => 'int',
 					],
 					'PROPERTY_ID' => [
 						'IS_PRIMARY' => 'Y',
@@ -220,7 +236,7 @@ class ProductPropertyValue
 		$union = '';
 		foreach ($singlePropertyIds as $singlePropertyId)
 		{
-			$union .= 'UNION ALL SELECT ' . $helper->getConcatFunction('IBLOCK_ELEMENT_ID', '\':\'', $singlePropertyId) . ' AS ID, \'' . $singlePropertyId . '\' as PROPERTY_ID, PROPERTY_' . $singlePropertyId . ' as VALUE from b_iblock_element_prop_s' . $iblockId . '
+			$union .= 'UNION ALL SELECT ' . $helper->getConcatFunction('IBLOCK_ELEMENT_ID', '\':\'', $singlePropertyId) . ' AS ID, IBLOCK_ELEMENT_ID AS PRODUCT_ID, \'' . $singlePropertyId . '\' as PROPERTY_ID, PROPERTY_' . $singlePropertyId . ' as VALUE from b_iblock_element_prop_s' . $iblockId . '
 			';
 		}
 
@@ -229,6 +245,6 @@ class ProductPropertyValue
 
 	private static function getMultipleUnion($helper, int $iblockId): string
 	{
-		return 'UNION ALL SELECT ' . $helper->getConcatFunction('IEP.IBLOCK_ELEMENT_ID', '\':\'', 'IEP.IBLOCK_PROPERTY_ID', '\':\'', 'IEP.ID') . ' AS ID, IEP.IBLOCK_PROPERTY_ID AS PROPERTY_ID, IEP.VALUE FROM b_iblock_element_prop_m' . $iblockId . ' AS IEP';
+		return 'UNION ALL SELECT ' . $helper->getConcatFunction('IEP.IBLOCK_ELEMENT_ID', '\':\'', 'IEP.IBLOCK_PROPERTY_ID', '\':\'', 'IEP.ID') . ' AS ID, IEP.IBLOCK_ELEMENT_ID AS PRODUCT_ID, IEP.IBLOCK_PROPERTY_ID AS PROPERTY_ID, IEP.VALUE FROM b_iblock_element_prop_m' . $iblockId . ' AS IEP';
 	}
 }

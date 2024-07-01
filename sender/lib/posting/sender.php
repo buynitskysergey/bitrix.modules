@@ -198,6 +198,13 @@ class Sender
 		// lock posting for exclude double parallel sending
 		if (is_null($threadId))
 		{
+			if ($this->letter->get('WAITING_RECIPIENT') === 'Y')
+			{
+				$this->initRecipients();
+				$this->resultCode = static::RESULT_WAITING_RECIPIENT;
+				return;
+			}
+
 			if (!$this->threadStrategy->hasUnprocessedThreads())
 			{
 				// update status of posting
@@ -278,7 +285,6 @@ class Sender
 		}
 
 		$this->sendToRecipients($recipients);
-
 
 		$this->message->getTransport()->end();
 
@@ -372,7 +378,7 @@ class Sender
 			return;
 		}
 
-		$this->timeAtStart = getmicrotime();
+		$this->timeAtStart = microtime(true);
 		@set_time_limit(0);
 	}
 
@@ -810,7 +816,7 @@ class Sender
 			return false;
 		}
 
-		return (getmicrotime() - $this->timeAtStart >= $this->timeout);
+		return (microtime(true) - $this->timeAtStart >= $this->timeout);
 	}
 
 	/**

@@ -1,26 +1,45 @@
 <?php
 
+use Bitrix\Main;
+use Bitrix\Main\Loader;
+
 IncludeModuleLangFile(__FILE__);
 
-if(!CModule::IncludeModule('sale'))
+if (!Loader::includeModule('sale'))
 {
 	$arReturn['ERROR'] = GetMessage('SL_MODULE_SALE_NOT_INSTALLED');
+
 	return $arReturn;
 }
 
-function saleLocationLoadFile($arParams)
+function saleLocationLoadFile($arParams): array
 {
-	$arReturn = array(
+	$arReturn = [
 		'STEP' => false,
 		'ERROR' => '',
-		'MESSAGE' => ''
-	);
+		'MESSAGE' => '',
+	];
 
-	define('DLSERVER', $arParams['DLSERVER']);
-	define('DLPORT', $arParams['DLPORT']);
-	define('DLPATH', $arParams['DLPATH']);
-	define('DLMETHOD', $arParams['DLMETHOD']);
-	define('DLZIPFILE', $arParams['DLZIPFILE']);
+	if (!defined('DLSERVER'))
+	{
+		define('DLSERVER', $arParams['DLSERVER']);
+	}
+	if (!defined('DLPORT'))
+	{
+		define('DLPORT', $arParams['DLPORT']);
+	}
+	if (!defined('DLPATH'))
+	{
+		define('DLPATH', $arParams['DLPATH']);
+	}
+	if (!defined('DLMETHOD'))
+	{
+		define('DLMETHOD', $arParams['DLMETHOD']);
+	}
+	if (!defined('DLZIPFILE'))
+	{
+		define('DLZIPFILE', $arParams['DLZIPFILE']);
+	}
 
 	if(isset($arParams['TMP_PATH']))
 		$sTmpFilePath = $arParams['TMP_PATH'];
@@ -29,11 +48,11 @@ function saleLocationLoadFile($arParams)
 
 	set_time_limit(600);
 
-	$STEP = intval($arParams['STEP']);
-	$CSVFILE = $arParams["CSVFILE"];
+	$STEP = (int)($arParams['STEP'] ?? 0);
+	$CSVFILE = (string)($arParams['CSVFILE'] ?? '');
 	$LOADZIP = $arParams["LOADZIP"];
 
-	if ($CSVFILE <> '' && !in_array($CSVFILE, array(
+	if ($CSVFILE !== '' && !in_array($CSVFILE, array(
 													'loc_ussr.csv',
 													'loc_ua.csv',
 													'loc_kz.csv',
@@ -61,25 +80,25 @@ function saleLocationLoadFile($arParams)
 			break;
 
 			case 1:
-				$file_url = DLPATH.$CSVFILE;
+				$url = $arParams['DLSERVER']
+					. (isset($arParams['DLPORT']) ? ':' . $arParams['DLPORT'] : '')
+					. $arParams['DLPATH']
+					. $CSVFILE
+				;
+				$http = new Main\Web\HttpClient();
+				$http->setRedirect(true);
+				$data =
+					DLMETHOD === 'POST'
+						? $http->post($url)
+						: $http->get($url)
+				;
+				$data = (string)$data;
 
-				$error_number = 0;
-				$error_text = '';
-				$data = QueryGetData(
-					DLSERVER,
-					DLPORT,
-					$file_url,
-					'',
-					$error_number,
-					$error_text,
-					DLMETHOD
-				);
-
-				if ($data <> '')
+				if ($data !== '')
 				{
 					CheckDirPath($sTmpFilePath);
 					$fp = fopen($sTmpFilePath.$CSVFILE, 'w');
-					fwrite($fp, $GLOBALS['APPLICATION']->ConvertCharset($data, 'windows-1251', LANG_CHARSET));
+					fwrite($fp, Main\Text\Encoding::convertEncoding($data, 'windows-1251', LANG_CHARSET));
 					fclose($fp);
 
 					$arReturn['MESSAGE'] = GetMessage('SL_LOADER_FILE_LOADED').' '.$CSVFILE;
@@ -94,25 +113,25 @@ function saleLocationLoadFile($arParams)
 			break;
 
 			case 2:
-				$file_url = DLPATH.DLZIPFILE;
+				$url = $arParams['DLSERVER']
+					. (isset($arParams['DLPORT']) ? ':' . $arParams['DLPORT'] : '')
+					. $arParams['DLPATH']
+					. $CSVFILE
+				;
+				$http = new Main\Web\HttpClient();
+				$http->setRedirect(true);
+				$data =
+					DLMETHOD === 'POST'
+						? $http->post($url)
+						: $http->get($url)
+				;
+				$data = (string)$data;
 
-				$error_number = 0;
-				$error_text = '';
-				$data = QueryGetData(
-					DLSERVER,
-					DLPORT,
-					$file_url,
-					'',
-					$error_number,
-					$error_text,
-					DLMETHOD
-				);
-
-				if ($data <> '')
+				if ($data !== '')
 				{
 					CheckDirPath($sTmpFilePath);
 					$fp = fopen($sTmpFilePath.DLZIPFILE, 'w');
-					fwrite($fp, $GLOBALS['APPLICATION']->ConvertCharset($data, 'windows-1251', LANG_CHARSET));
+					fwrite($fp, Main\Text\Encoding::convertEncoding($data, 'windows-1251', LANG_CHARSET));
 					fclose($fp);
 
 					$arReturn['MESSAGE'] = GetMessage('SL_LOADER_FILE_LOADED').' '.DLZIPFILE;
@@ -135,19 +154,19 @@ function saleLocationLoadFile($arParams)
 	return $arReturn;
 }
 
-function saleLocationImport($arParams)
+function saleLocationImport($arParams): array
 {
 	global $DB;
 
-	$arReturn = array(
+	$arReturn = [
 		'STEP' => false,
 		'ERROR' => '',
 		'AMOUNT' => 0,
 		'POS' => 0,
-		'MESSAGE' => ''
-	);
+		'MESSAGE' => '',
+	];
 
-	$step_length = intval($arParams["STEP_LENGTH"]);
+	$step_length = (int)($arParams['STEP_LENGTH'] ?? 0);
 
 	if ($step_length <= 0)
 		$step_length = 10;
@@ -156,8 +175,8 @@ function saleLocationImport($arParams)
 	define('LOC_STEP_LENGTH', $step_length);
 	define('DLZIPFILE', $arParams["DLZIPFILE"]);
 
-	$STEP = intval($arParams['STEP']);
-	$CSVFILE = $arParams["CSVFILE"];
+	$STEP = (int)($arParams['STEP'] ?? 0);
+	$CSVFILE = (string)($arParams['CSVFILE'] ?? '');
 	$LOADZIP = $arParams["LOADZIP"];
 	$bSync = $arParams["SYNC"] == "Y";
 
@@ -167,7 +186,7 @@ function saleLocationImport($arParams)
 		$sTmpFilePath = CTempFile::GetDirectoryName(12, 'sale');
 
 
-	if ($CSVFILE <> '' && !in_array($CSVFILE, array(	'loc_ussr.csv',
+	if ($CSVFILE !== '' && !in_array($CSVFILE, array(	'loc_ussr.csv',
 															'loc_ua.csv',
 															'loc_kz.csv',
 															'loc_usa.csv',
@@ -304,7 +323,7 @@ function saleLocationImport($arParams)
 				$tt = 0;
 				while ($arRes = $csvFile->Fetch())
 				{
-					$type = ToUpper($arRes[0]);
+					$type = mb_strtoupper($arRes[0]);
 					$tt++;
 					$arArrayTmp = array();
 					foreach($arRes as $ind => $value)

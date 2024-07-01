@@ -1,8 +1,6 @@
 <?php
 
-
 namespace Bitrix\Sale\Rest;
-
 
 use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Engine\Controller;

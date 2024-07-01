@@ -2,6 +2,9 @@
 
 namespace Bitrix\BIConnector\Superset\Grid\Row\Action;
 
+use Bitrix\BIConnector\Access\AccessController;
+use Bitrix\BIConnector\Access\ActionDictionary;
+use Bitrix\BIConnector\Access\Model\DashboardAccessItem;
 use Bitrix\Main\Grid\Row\Action\BaseAction;
 use Bitrix\Main\HttpRequest;
 use Bitrix\Main\Localization\Loc;
@@ -27,6 +30,16 @@ final class CopyAction extends BaseAction
 
 	public function getControl(array $rawFields): ?array
 	{
+		$accessItem = DashboardAccessItem::createFromArray([
+			'ID' => (int)$rawFields['ID'],
+			'TYPE' => $rawFields['TYPE'],
+			'OWNER_ID' => (int)$rawFields['OWNER_ID'],
+		]);
+		if (!AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_COPY, $accessItem))
+		{
+			return null;
+		}
+
 		$dashboardId = (int)$rawFields['ID'];
 		$appId = \CUtil::JSEscape($rawFields['APP_ID']);
 		$type = \CUtil::JSEscape($rawFields['TYPE']);

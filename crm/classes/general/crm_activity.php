@@ -47,8 +47,8 @@ class CAllCrmActivity
 	private static $STORAGE_TYPE_ID = StorageType::Undefined;
 	protected static $errors = array();
 	private static $URN_REGEX = '/\[\s*(?:CRM\s*\:)\s*(?P<urn>[0-9]+\s*[-]\s*[0-9A-Z]+)\s*\]/i';
-	private static $URN_BODY_REGEX = '/\[\s*(?:msg\s*\:)\s*(?P<urn>[0-9]+\s*[-]\s*[0-9A-Z]+)\s*\]/i';
-	private static $URN_BODY_HTML_ENTITY_REGEX = '/\&\#91\;\s*(?:msg\s*\:)\s*(?P<urn>[0-9]+\s*[-]\s*[0-9A-Z]+)\s*\&\#93\;/i';
+	private static $URN_BODY_REGEX = '/\[\s*(?:msg\s*\:)\s*(?P<urn>[0-9]+\s*[-]\s*[0-9A-Z]+)\s*\]/iu';
+	private static $URN_BODY_HTML_ENTITY_REGEX = '/\&\#91\;\s*(?:msg\s*\:)\s*(?P<urn>[0-9]+\s*[-]\s*[0-9A-Z]+)\s*\&\#93\;/iu';
 	protected static $LAST_UPDATE_FIELDS = null;
 
 	private static $IGNORE_CALENDAR_EVENTS = false;
@@ -6467,7 +6467,7 @@ class CAllCrmActivity
 		if($type === 'html')
 		{
 			//URN already encoded
-			$str = rtrim(preg_replace(self::$URN_BODY_HTML_ENTITY_REGEX.BX_UTF_PCRE_MODIFIER, '', $str));
+			$str = rtrim(preg_replace(self::$URN_BODY_HTML_ENTITY_REGEX, '', $str));
 			if($str !== '')
 			{
 				$index = mb_stripos($str, '</body>');
@@ -6490,7 +6490,7 @@ class CAllCrmActivity
 		}
 		else
 		{
-			$str = rtrim(preg_replace(self::$URN_BODY_REGEX.BX_UTF_PCRE_MODIFIER, '', $str));
+			$str = rtrim(preg_replace(self::$URN_BODY_REGEX, '', $str));
 			if($str !== '')
 			{
 				$str .= CCrmEMail::GetEOL();
@@ -6561,7 +6561,7 @@ class CAllCrmActivity
 		}
 
 		$matches = array();
-		if(preg_match(self::$URN_BODY_REGEX.BX_UTF_PCRE_MODIFIER, $str, $matches) !== 1)
+		if(preg_match(self::$URN_BODY_REGEX, $str, $matches) !== 1)
 		{
 			return '';
 		}
@@ -7066,7 +7066,7 @@ class CAllCrmActivity
 		if ($isForced)
 		{
 			global $USER;
-			if ($responsibleID == $USER->getId())
+			if ($responsibleID == $USER?->getId())
 			{
 				return false;
 			};
@@ -7831,7 +7831,7 @@ class CAllCrmActivity
 			$description = preg_replace('/<script[^>]*>.*?<\/script>/is', '', $description);
 			$fields['DESCRIPTION_RAW'] = strip_tags(
 					preg_replace(
-						'/(<br[^>]*>)+/is'.BX_UTF_PCRE_MODIFIER,
+						'/(<br[^>]*>)+/isu',
 						"\n",
 						html_entity_decode($description, ENT_QUOTES)
 					)
@@ -7856,9 +7856,9 @@ class CAllCrmActivity
 			$fields['DESCRIPTION_RAW'] = strip_tags(
 				preg_replace(
 					array(
-						'/(<br[^>]*>)+/is'.BX_UTF_PCRE_MODIFIER,
-						'/(&nbsp;)+/is'.BX_UTF_PCRE_MODIFIER,
-						'/\[[0-9a-z\W\=]+\]/iUs'.BX_UTF_PCRE_MODIFIER
+						'/(<br[^>]*>)+/isu',
+						'/(&nbsp;)+/isu',
+						'/\[[0-9a-z\W\=]+\]/iUsu'
 					),
 					array(
 						"\n",
@@ -7878,7 +7878,7 @@ class CAllCrmActivity
 
 			if($enableHtml)
 			{
-				$fields['DESCRIPTION_HTML'] = preg_replace("/[\r\n]+/".BX_UTF_PCRE_MODIFIER, "<br/>", htmlspecialcharsbx($description));
+				$fields['DESCRIPTION_HTML'] = preg_replace("/[\r\n]+/u", "<br/>", htmlspecialcharsbx($description));
 			}
 
 			$fields['DESCRIPTION_RAW'] = $description;

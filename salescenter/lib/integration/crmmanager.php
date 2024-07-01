@@ -705,10 +705,17 @@ class CrmManager extends Base
 			return false;
 		}
 
-		$paymentLink = LandingManager::getInstance()->getUrlInfoByOrder(
+		$urlInfoByOrder = LandingManager::getInstance()->getUrlInfoByOrder(
 			$order,
 			['paymentId' => $payment->getId()]
-		)['shortUrl'];
+		);
+
+		if (!isset($urlInfoByOrder['shortUrl']))
+		{
+			return false;
+		}
+
+		$paymentLink = $urlInfoByOrder['shortUrl'];
 
 		$messageBody = str_replace(
 			'#LINK#',

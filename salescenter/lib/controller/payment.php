@@ -8,6 +8,7 @@ use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Sale\Registry;
+use Bitrix\SalesCenter\Integration\Bitrix24Manager;
 use Bitrix\SalesCenter\Integration\LandingManager;
 use Bitrix\Sale;
 
@@ -97,6 +98,18 @@ class Payment extends Base
 		else
 		{
 			$this->addError(new Error('Public url is not available'));
+
+			if (
+				LandingManager::getInstance()->getConnectedSiteId() > 0
+				&& !LandingManager::getInstance()->isPhoneConfirmed()
+			)
+			{
+				return [
+					'connectedSiteId' => LandingManager::getInstance()->getConnectedSiteId(),
+					'isPhoneConfirmed' => LandingManager::getInstance()->isPhoneConfirmed(),
+				];
+			}
+
 			return false;
 		}
 

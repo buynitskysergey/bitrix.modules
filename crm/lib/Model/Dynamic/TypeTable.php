@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Model\Dynamic;
 use Bitrix\Crm\Automation\Trigger\Entity\TriggerTable;
 use Bitrix\Crm\Binding\EntityContactTable;
 use Bitrix\Crm\Conversion\Entity\EntityConversionMapTable;
+use Bitrix\Crm\CustomSection\Entity\AutomatedSolutionTable;
 use Bitrix\Crm\EventRelationsTable;
 use Bitrix\Crm\Field;
 use Bitrix\Crm\Integration;
@@ -17,6 +18,7 @@ use Bitrix\Crm\Observer\Entity\ObserverTable;
 use Bitrix\Crm\ProductRowTable;
 use Bitrix\Crm\Recycling\DynamicController;
 use Bitrix\Crm\Relation\EntityRelationTable;
+use Bitrix\Crm\SequenceService;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Factory\Dynamic;
 use Bitrix\Crm\StatusTable;
@@ -26,6 +28,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\Entity\Validator\RegExp;
 use Bitrix\Main\Error;
 use Bitrix\Main\InvalidOperationException;
@@ -127,6 +130,14 @@ class TypeTable extends UserField\Internal\TypeDataManager
 
 				return $nextId;
 			});
+		$fieldsMap[] = (new ORM\Fields\IntegerField('CUSTOM_SECTION_ID'))
+			->configureNullable()
+			->configureTitle(Loc::getMessage('CRM_TYPE_CUSTOM_SECTION_ID_TITLE'));
+		$fieldsMap[] = new ReferenceField(
+			'CRM_TYPE_CUSTOM_SECTION',
+			AutomatedSolutionTable::class,
+			['=this.CUSTOM_SECTION_ID' => 'ref.ID']
+		);
 		$fieldsMap[] = (new ORM\Fields\BooleanField('IS_CATEGORIES_ENABLED'))
 			->configureStorageValues('N', 'Y')
 			->configureDefaultValue('N')
@@ -274,6 +285,20 @@ class TypeTable extends UserField\Internal\TypeDataManager
 	}
 
 	public static function getNextAvailableEntityTypeId(): ?int
+	{
+		return \CCrmOwnerType::isUnlimitedDynamicTypeEnabled()
+			? self::getNextAvailableEntityTypeIdUnlimitedWay()
+			: self::getNextAvailableEntityTypeId64LimitWay();
+	}
+
+	private static function getNextAvailableEntityTypeIdUnlimitedWay(): int
+	{
+		$seqService = SequenceService::getInstance();
+
+		return $seqService->nextDynamicTypeId();
+	}
+
+	private static function getNextAvailableEntityTypeId64LimitWay(): ?int
 	{
 		$entities = static::getList([
 			'select' => ['ENTITY_TYPE_ID'],
@@ -1001,6 +1026,11 @@ class TypeTable extends UserField\Internal\TypeDataManager
 				'TYPE' => Field::TYPE_INTEGER,
 				'ATTRIBUTES' => [\CCrmFieldInfoAttr::Required, \CCrmFieldInfoAttr::Unique, \CCrmFieldInfoAttr::Immutable],
 				'TITLE' => Loc::getMessage('CRM_TYPE_ENTITY_TYPE_ID_TITLE_MSGVER_1'),
+			],
+			'CUSTOM_SECTION_ID' => [
+				'TYPE' => Field::TYPE_INTEGER,
+				'ATTRIBUTES' => [\CCrmFieldInfoAttr::Immutable],
+				'TITLE' => Loc::getMessage('CRM_TYPE_CUSTOM_SECTION_ID_TITLE'),
 			],
 			'IS_CATEGORIES_ENABLED' => [
 				'TYPE' => Field::TYPE_BOOLEAN,

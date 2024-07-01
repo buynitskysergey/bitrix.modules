@@ -180,7 +180,7 @@ class Transport
 			$fields['license_key'] = ($LICENSE_KEY == 'DEMO') ? 'DEMO' : md5('BITRIX' . $LICENSE_KEY . 'LICENCE');
 		}
 
-		return Encoding::convertEncoding($fields, LANG_CHARSET, 'utf-8');
+		return $fields;
 	}
 
 	protected function prepareAnswer($response)

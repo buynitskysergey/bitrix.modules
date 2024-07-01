@@ -276,7 +276,7 @@ class CCrmDocument
 			{
 				$GLOBALS['CBPVirtualDocumentCloneRowPrinted_'.$documentType] = 1;
 				?>
-				<script language="JavaScript">
+				<script>
 				<!--
 				function CBPVirtualDocumentCloneRow(tableID)
 				{
@@ -694,7 +694,7 @@ class CCrmDocument
 			$result .= '<textarea id="WFSFormOptionsX" rows="5" cols="30">'.htmlspecialcharsbx($str).'</textarea><br />';
 			$result .= GetMessage("IBD_DOCUMENT_XFORMOPTIONS1").'<br />';
 			$result .= GetMessage("IBD_DOCUMENT_XFORMOPTIONS2").'<br />';
-			$result .= '<script type="text/javascript">
+			$result .= '<script>
 				function WFSFormOptionsXFunction()
 				{
 					var result = {};

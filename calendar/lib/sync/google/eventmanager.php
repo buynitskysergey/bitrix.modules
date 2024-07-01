@@ -46,9 +46,12 @@ class EventManager extends Manager implements EventManagerInterface
 		{
 			// TODO: Remake it: move this logic to parent::request().
 			// Or, better, in separate class.
+			$converter = new EventConverter(
+				event: $event,
+			);
 			$this->httpClient->post(
 				$this->prepareCreateUrl($context),
-				$this->encode((new EventConverter($event))->convertForCreate())
+				$this->encode($converter->convertForCreate())
 			);
 
 			if ($this->isRequestSuccess())
@@ -128,10 +131,14 @@ class EventManager extends Manager implements EventManagerInterface
 		{
 			// TODO: Remake it: move this logic to parent::request().
 			// Or, better, in separate class.
+			$converter = new EventConverter(
+				event: $event,
+				eventConnection: $context->getEventConnection(),
+			);
 			$this->httpClient->query(
 				HttpClient::HTTP_PUT,
 				$this->prepareUpdateUrl($context),
-				$this->encode((new EventConverter($event, $context->getEventConnection()))->convertForUpdate())
+				$this->encode($converter->convertForUpdate())
 			);
 
 			if ($this->isRequestSuccess())
@@ -215,10 +222,12 @@ class EventManager extends Manager implements EventManagerInterface
 		{
 			// TODO: Remake it: move this logic to parent::request().
 			// Or, better, in separate class.
+			$converter = new EventConverter($event);
+
 			$this->httpClient->query(
 				HttpClient::HTTP_DELETE,
 				$this->prepareUpdateUrl($context),
-				$this->encode((new EventConverter($event))->convertForDelete())
+				$this->encode($converter->convertForDelete())
 			);
 
 			if ($this->isRequestDeleteSuccess())
@@ -278,10 +287,15 @@ class EventManager extends Manager implements EventManagerInterface
 		{
 			// TODO: Remake it: move this logic to parent::request().
 			// Or, better, in separate class.
+
+			$converter = new EventConverter(
+				event: $event,
+				eventConnection: $instanceContext->getEventConnection()
+			);
 			$this->httpClient->query(
 				HttpClient::HTTP_PUT,
 				$this->prepareUpdateUrl($instanceContext),
-				$this->encode((new EventConverter($event, $instanceContext->getEventConnection()))->convertForUpdate())
+				$this->encode($converter->convertForUpdate())
 			);
 
 			if ($this->isRequestSuccess())
@@ -366,10 +380,14 @@ class EventManager extends Manager implements EventManagerInterface
 
 		try
 		{
+			$converter = new EventConverter(
+				event: $instance,
+				eventConnection: $instanceContext->getEventConnection()
+			);
 			$this->httpClient->query(
 				HttpClient::HTTP_PUT,
 				$this->prepareUpdateUrl($instanceContext),
-				$this->encode((new EventConverter($instance, $instanceContext->getEventConnection()))->convertForDeleteInstance())
+				$this->encode($converter->convertForDeleteInstance())
 			);
 
 			if ($this->isRequestSuccess())

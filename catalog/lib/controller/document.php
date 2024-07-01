@@ -5,6 +5,7 @@ namespace Bitrix\Catalog\Controller;
 use Bitrix\Catalog\Access\ActionDictionary;
 use Bitrix\Catalog\Access\Model\StoreDocument;
 use Bitrix\Catalog\Config\Feature;
+use Bitrix\Catalog\Config\State;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Catalog\StoreDocumentTable;
 use Bitrix\Main\Engine\Response\DataType\Page;
@@ -41,7 +42,7 @@ class Document extends Controller
 			return null;
 		}
 
-		if (!\Bitrix\Catalog\Component\UseStore::isUsed())
+		if (!State::isUsedInventoryManagement())
 		{
 			$this->addError(new Error(Loc::getMessage('DOCUMENT_CONTROLLER_MANAGEMENT_NOT_ENABLED')));
 
@@ -139,7 +140,7 @@ class Document extends Controller
 			return null;
 		}
 
-		if (!\Bitrix\Catalog\Component\UseStore::isUsed())
+		if (!State::isUsedInventoryManagement())
 		{
 			$this->addError(new Error(Loc::getMessage('DOCUMENT_CONTROLLER_MANAGEMENT_NOT_ENABLED')));
 

@@ -50,7 +50,7 @@ class CSaleBasket extends CAllSaleBasket
 				$arFilter = array();
 			$arGroupBy = false;
 
-			if (ToUpper($arFilter["ORDER_ID"]) == "NULL")
+			if (mb_strtoupper($arFilter["ORDER_ID"]) == "NULL")
 			{
 				$arFilter["ORDER_ID"] = 0;
 			}

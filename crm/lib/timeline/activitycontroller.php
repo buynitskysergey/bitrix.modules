@@ -651,6 +651,7 @@ class ActivityController extends EntityController
 			Activity\Provider\StoreDocument::getId(),
 			Activity\Provider\Document::getId(),
 			Activity\Provider\SignDocument::getId(),
+			Activity\Provider\SignB2eDocument::getId(),
 			Activity\Provider\ToDo::getId(),
 			Activity\Provider\Payment::getId(),
 			Activity\Provider\ConfigurableRestApp::getId(),
@@ -674,6 +675,7 @@ class ActivityController extends EntityController
 			|| $providerID === Activity\Provider\Zoom::getId()
 			|| $providerID === Activity\Provider\Document::getId()
 			|| $providerID === Activity\Provider\SignDocument::getId()
+			|| $providerID === Activity\Provider\SignB2eDocument::getId()
 			|| $providerID === Activity\Provider\ToDo::getId()
 			|| $providerID === Activity\Provider\ConfigurableRestApp::getId()
 			|| $providerID === Activity\Provider\CalendarSharing::getId()

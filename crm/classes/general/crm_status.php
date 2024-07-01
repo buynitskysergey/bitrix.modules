@@ -640,7 +640,7 @@ class CCrmStatus
 		if ($sOrder == '')
 			$sOrder = 'CS.ID DESC';
 
-		$strSqlOrder = ' ORDER BY '.TrimEx($sOrder,',');
+		$strSqlOrder = ' ORDER BY '.trim($sOrder, ', ');
 		$strSqlSearch = GetFilterSqlSearch($arSqlSearch);
 
 		$strSql = "SELECT CS.* FROM b_crm_status CS WHERE {$strSqlSearch} {$strSqlOrder}";

@@ -298,7 +298,7 @@ class SmartB2eDocument extends Dynamic
 							'COMPLETED' => 'N',
 							'RESPONSIBLE_ID' => $item->getAssignedById(),
 							'START_TIME' => (new DateTime())
-								->add('+30 DAYS'),
+								->add('+365 DAYS'),
 						]
 					);
 				}

@@ -761,7 +761,7 @@ class CCrmFieldMulti
 		if ($sOrder == '')
 			$sOrder = 'CFM.ID DESC';
 
-		$strSqlOrder = ' ORDER BY '.TrimEx($sOrder,",");
+		$strSqlOrder = ' ORDER BY '.trim($sOrder, ", ");
 
 		$strSqlSearch = GetFilterSqlSearch($arSqlSearch);
 		$strSql = "

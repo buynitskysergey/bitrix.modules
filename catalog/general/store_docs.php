@@ -1,7 +1,6 @@
 <?php
 
 use Bitrix\Catalog;
-use Bitrix\Catalog\Component\UseStore;
 use Bitrix\Catalog\Integration\PullManager;
 use Bitrix\Catalog\v2\Contractor;
 use Bitrix\Main\Application;
@@ -516,12 +515,20 @@ class CAllCatalogDocs
 	{
 		global $APPLICATION;
 
-		if (!UseStore::isUsed())
+		if (!Catalog\Config\State::isUsedInventoryManagement())
 		{
 			$APPLICATION->ThrowException(
 				Loc::getMessage('CAT_DOC_CONDUCT_UNCONDUCT_NOT_AVAILABLE'),
 				self::STORE_CONTROL_DISABLED_CONDUCT_ERROR,
 			);
+
+			return false;
+		}
+
+		if (Catalog\Store\EnableWizard\Manager::isOnecMode())
+		{
+			$APPLICATION->ThrowException(Loc::getMessage('CAT_DOC_CONDUCT_UNCONDUCT_NOT_AVAILABLE_EXTERNAL_CATALOG'));
+
 			return false;
 		}
 
@@ -605,12 +612,20 @@ class CAllCatalogDocs
 	{
 		global $APPLICATION;
 
-		if (!UseStore::isUsed())
+		if (!Catalog\Config\State::isUsedInventoryManagement())
 		{
 			$APPLICATION->ThrowException(
 				GetMessage('CAT_DOC_CONDUCT_UNCONDUCT_NOT_AVAILABLE'),
 				self::STORE_CONTROL_DISABLED_CONDUCT_ERROR
 			);
+
+			return false;
+		}
+
+		if (Catalog\Store\EnableWizard\Manager::isOnecMode())
+		{
+			$APPLICATION->ThrowException(Loc::getMessage('CAT_DOC_CONDUCT_UNCONDUCT_NOT_AVAILABLE_EXTERNAL_CATALOG'));
+
 			return false;
 		}
 

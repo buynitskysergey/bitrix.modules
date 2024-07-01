@@ -10,6 +10,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Sale;
 use Bitrix\Crm;
+use Bitrix\Sale\BasketItemBase;
 use Bitrix\SalesCenter\Component\ReceivePaymentModeDictionary;
 use Bitrix\SalesCenter\Integration\Bitrix24Manager;
 use Bitrix\SalesCenter\Integration\CrmManager;
@@ -127,7 +128,11 @@ class Order extends Base
 		$vatSum = 0;
 		foreach ($basketItems as $item)
 		{
-			$basketItem = $order->getBasket()->getItemByXmlId($item['innerId']);
+			$basketItem = $this->getBasketItemByProductId(
+				$order->getBasket(),
+				isset($item['skuId']) ? (int)$item['skuId'] : 0,
+				$item['module'] ?? ''
+			);
 			if ($basketItem === null)
 			{
 				continue;
@@ -176,6 +181,27 @@ class Order extends Base
 				'sum' => $baseSum,
 			]
 		];
+	}
+
+	private function getBasketItemByProductId(
+		Sale\BasketBase $basketItemCollection,
+		int $productId,
+		string $module
+	): ?BasketItemBase
+	{
+		/** @var BasketItemBase $basketItem */
+		foreach ($basketItemCollection as $basketItem)
+		{
+			if (
+				$basketItem->getProductId() === $productId
+				&& $basketItem->getField('MODULE') === $module
+			)
+			{
+				return $basketItem;
+			}
+		}
+
+		return null;
 	}
 
 	protected function prepareParamsForBuilder(array $params, $scenario = null) : array
@@ -616,9 +642,22 @@ class Order extends Base
 			$isSent = CrmManager::getInstance()->sendPaymentBySms($payment, $options['sendingMethodDesc'], $shipment);
 			if ($isSent === false)
 			{
-				$this->addError(
-					new Error(Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_SEND_SMS_ERROR'), 20)
-				);
+				if (!LandingManager::getInstance()->isPhoneConfirmed())
+				{
+					$this->addError(
+						new Error(
+							Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_SEND_SMS_NOTICE_PHONE_IS_NOT_CONFIRMED'),
+							9,
+							['connectedSiteId' => LandingManager::getInstance()->getConnectedSiteId()],
+						)
+					);
+				}
+				else
+				{
+					$this->addError(
+						new Error(Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_SEND_SMS_ERROR'), 20)
+					);
+				}
 			}
 			else
 			{
@@ -923,6 +962,7 @@ class Order extends Base
 
 		$shipment = $this->findNewShipment($order);
 		$payment = $this->findNewPayment($order);
+		$changedBasketItems = $this->getChangedBasketItems($order);
 
 		$result = $order->save();
 
@@ -943,14 +983,19 @@ class Order extends Base
 			$entityId = $binding ? $binding->getOwnerId() : 0;
 
 			$productManager = new Crm\Order\ProductManager($entityTypeId, $entityId);
-			$productManager->setOrder($order)->syncOrderProducts($basketItems);
+			$productManager->setOrder($order)->syncOrderProducts(
+				$this->prepareItemsBeforeSync(
+					$changedBasketItems,
+					$basketItems
+				)
+			);
 
 			$data = [
 				'order' => [
 					'number' => $order->getField('ACCOUNT_NUMBER'),
 					'id' => $order->getId(),
-					'paymentId' => $payment ? $payment->getId() : null,
-					'shipmentId' => $shipment ? $shipment->getId() : null,
+					'paymentId' => $payment?->getId(),
+					'shipmentId' => $shipment?->getId(),
 				],
 			];
 
@@ -1021,11 +1066,25 @@ class Order extends Base
 				if ($isPaymentSaved)
 				{
 					$isSent = CrmManager::getInstance()->sendPaymentBySms($payment, $options['sendingMethodDesc'], $shipment);
+
 					if (!$isSent)
 					{
-						$this->addError(
-							new Error(Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_SEND_SMS_ERROR'), 10)
-						);
+						if (!LandingManager::getInstance()->isPhoneConfirmed())
+						{
+							$this->addError(
+								new Error(
+									Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_SEND_SMS_NOTICE_PHONE_IS_NOT_CONFIRMED'),
+									9,
+									['connectedSiteId' => LandingManager::getInstance()->getConnectedSiteId()],
+								)
+							);
+						}
+						else
+						{
+							$this->addError(
+								new Error(Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_SEND_SMS_ERROR'), 10)
+							);
+						}
 					}
 				}
 				else
@@ -1281,6 +1340,77 @@ class Order extends Base
 		return null;
 	}
 
+	protected function getChangedBasketItems(Crm\Order\Order $order) : array
+	{
+		$result = [];
+
+		/** @var Crm\Order\BasketItem $item */
+		foreach ($order->getBasket() as $item)
+		{
+			if ($item->isChanged())
+			{
+				$result[] = $item;
+			}
+		}
+
+		return $result;
+	}
+
+	protected function prepareItemsBeforeSync(array $changedBasketItems, array $formItems) : array
+	{
+		$result = [];
+
+		$id2XmlIdMap = $this->getBasketId2XmlIdMap($changedBasketItems);
+
+		/** @var Crm\Order\BasketItem $basketItem */
+		foreach ($changedBasketItems as $basketItem)
+		{
+			foreach ($formItems as $formItem)
+			{
+				if ($basketItem->getProductId() !== (int)$formItem['skuId'])
+				{
+					continue;
+				}
+
+				$formItem['innerId'] = $id2XmlIdMap[$basketItem->getId()] ?? '';
+				$formItem['code'] = $basketItem->getBasketCode();
+
+				$result[] = $formItem;
+
+				break;
+			}
+		}
+
+		return $result;
+	}
+
+	protected function getBasketId2XmlIdMap(array $basketItems)
+	{
+		$ids = [];
+
+		/** @var Crm\Order\BasketItem $item */
+		foreach ($basketItems as $item)
+		{
+			$ids[] = $item->getId();
+		}
+
+		$dbRes = Crm\Order\Basket::getList([
+			'select' => ['ID', 'XML_ID'],
+			'filter' => [
+				'=ID' => $ids
+			]
+		]);
+
+		$result = [];
+
+		while ($item = $dbRes->fetch())
+		{
+			$result[$item['ID']] = $item['XML_ID'];
+		}
+
+		return $result;
+	}
+
 	/**
 	 * @param Crm\Order\Order $order
 	 * @return Crm\Order\Payment|null
@@ -1401,7 +1531,7 @@ class Order extends Base
 				$price = VatRate::getPriceWithTax($item);
 				$sum += Sale\PriceMaths::roundPrecision($item['QUANTITY'] * $price);
 
-				$result['PRODUCT'][] = [
+				$result['PRODUCT'][$index] = [
 					'BASKET_CODE' => $index,
 					'QUANTITY' => $item['QUANTITY']
 				];

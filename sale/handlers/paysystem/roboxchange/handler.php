@@ -216,7 +216,7 @@ class RoboxchangeHandler
 
 		$hash = md5(implode(':', $signaturePartList));
 
-		return ToUpper($hash) === ToUpper($request->get('SignatureValue'));
+		return mb_strtoupper($hash) === mb_strtoupper($request->get('SignatureValue'));
 	}
 
 	/**

@@ -16,7 +16,6 @@ use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\Mail\ContactList;
 use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\Text;
 use Bitrix\Crm\Service\Timeline\Layout\Body\Logo;
 use Bitrix\Crm\Service\Timeline\Layout\Footer\Button;
-use Bitrix\Crm\Settings\WorkTime;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Web\Uri;
 use CCrmActivityDirection;
@@ -272,17 +271,9 @@ class Email extends Activity
 			$type = Button::TYPE_SECONDARY;
 		}
 
-		$nearestWorkday = (new WorkTime())->detectNearestWorkDateTime(3, 1);
-		$scheduleButton = (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_EMAIL_SCHEDULE'), Button::TYPE_SECONDARY))
-			->setAction((new JsEvent('Email::Schedule'))
-				->addActionParamInt('activityId', $this->getActivityId())
-				->addActionParamString('scheduleDate', $nearestWorkday->toString())
-				->addActionParamInt('scheduleTs', $nearestWorkday->getTimestamp()));
-
 		return [
-			'openButton' => (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_EMAIL_OPEN'), $type))
-				->setAction(($this->getTitleAction())),
-			'scheduleButton' => $scheduleButton,
+			'openButton' => (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_EMAIL_OPEN'), $type))->setAction(($this->getTitleAction())),
+			'scheduleButton' => $this->getScheduleButton('Email::Schedule'),
 		];
 	}
 

@@ -339,7 +339,6 @@ class Manager
 							'CONDITION' => '#^' . $subDirSite. $basePathOriginal . '#'
 						)
 					);
-					self::getCacheManager()->clean('b_site_template');
 				}
 			}
 		}

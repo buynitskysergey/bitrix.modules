@@ -89,13 +89,11 @@ class Payment extends Activity
 				]
 			);
 
-			$result['paymentMethod'] = (new ContentBlockWithTitle())
-				->setInline()
-				->setTitle(Loc::getMessage('CRM_TIMELINE_ECOMMERCE_PAYMENT_METHOD'))
-				->setContentBlock(
+			$result['paymentMethod'] = (
 					(new ContentBlock\Text())
-						->setValue((string)$paymentMethodValue)
-						->setColor(ContentBlock\Text::COLOR_BASE_90)
+						->setValue(Loc::getMessage('CRM_TIMELINE_ECOMMERCE_PAYMENT_METHOD_MSGVER_1', ['#PAYMENT_METHOD#' => (string)$paymentMethodValue]))
+						->setFontSize(ContentBlock\Text::FONT_SIZE_SM)
+						->setColor(ContentBlock\Text::COLOR_BASE_70)
 				)
 			;
 		}

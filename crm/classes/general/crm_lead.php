@@ -12,6 +12,7 @@ use Bitrix\Crm\FieldContext\EntityFactory;
 use Bitrix\Crm\FieldContext\ValueFiller;
 use Bitrix\Crm\Format\TextHelper;
 use Bitrix\Crm\Integration\Channel\LeadChannelBinding;
+use Bitrix\Crm\Integration\Im\ProcessEntity\NotificationManager;
 use Bitrix\Crm\Integration\PullManager;
 use Bitrix\Crm\Integrity\DuplicateCommunicationCriterion;
 use Bitrix\Crm\Integrity\DuplicateIndexMismatch;
@@ -23,6 +24,7 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Tracking;
 use Bitrix\Crm\UserField\Visibility\VisibilityManager;
 use Bitrix\Crm\UtmTable;
+use Bitrix\Main\Localization\Loc;
 
 class CAllCrmLead
 {
@@ -1915,30 +1917,20 @@ class CAllCrmLead
 
 			$logEventID = CCrmLiveFeed::CreateLogEvent($liveFeedFields, CCrmLiveFeedEvent::Add, ['CURRENT_USER' => $userID]);
 
-			if (
-				$logEventID !== false
-				&& $assignedByID != $createdByID
-				&& CModule::IncludeModule("im")
-				&& \Bitrix\Crm\Settings\LeadSettings::isEnabled()
-			)
+			if ($logEventID !== false && !$isRestoration)
 			{
-				$url = CCrmOwnerType::GetEntityShowPath(CCrmOwnerType::Lead, $ID);
-				$serverName = (CMain::IsHTTPS() ? "https" : "http")."://".((defined("SITE_SERVER_NAME") && SITE_SERVER_NAME <> '') ? SITE_SERVER_NAME : COption::GetOptionString("main", "server_name", ""));
+				$difference = Crm\Comparer\ComparerBase::compareEntityFields([], [
+					Item::FIELD_NAME_ID => $ID,
+					Item::FIELD_NAME_TITLE => $arFields['TITLE'],
+					Item::FIELD_NAME_CREATED_BY => $createdByID,
+					Item::FIELD_NAME_ASSIGNED => $assignedByID,
+					Item::FIELD_NAME_OBSERVERS => $observerIDs,
+				]);
 
-				$arMessageFields = array(
-					"MESSAGE_TYPE" => IM_MESSAGE_SYSTEM,
-					"TO_USER_ID" => $assignedByID,
-					"FROM_USER_ID" => $createdByID,
-					"NOTIFY_TYPE" => IM_NOTIFY_FROM,
-					"NOTIFY_MODULE" => "crm",
-					"LOG_ID" => $logEventID,
-					//"NOTIFY_EVENT" => "lead_add",
-					"NOTIFY_EVENT" => "changeAssignedBy",
-					"NOTIFY_TAG" => "CRM|LEAD|".$ID,
-					"NOTIFY_MESSAGE" => GetMessage("CRM_LEAD_RESPONSIBLE_IM_NOTIFY", Array("#title#" => "<a href=\"".$url."\" class=\"bx-notifier-item-action\">".htmlspecialcharsbx($arFields['TITLE'])."</a>")),
-					"NOTIFY_MESSAGE_OUT" => GetMessage("CRM_LEAD_RESPONSIBLE_IM_NOTIFY", Array("#title#" => htmlspecialcharsbx($arFields['TITLE'])))." (".$serverName.$url.")"
+				NotificationManager::getInstance()->sendAllNotificationsAboutAdd(
+					CCrmOwnerType::Lead,
+					$difference,
 				);
-				CIMNotify::Add($arMessageFields);
 			}
 		}
 
@@ -2921,9 +2913,24 @@ class CAllCrmLead
 				);
 			}
 
+			$title = CCrmOwnerType::GetCaption(CCrmOwnerType::Lead, $ID, false);
+			$modifiedByID = (int)$arFields['MODIFY_BY_ID'];
+			$difference = Crm\Comparer\ComparerBase::compareEntityFields([], [
+				Item::FIELD_NAME_ID => $ID,
+				Item::FIELD_NAME_TITLE => $title,
+				Item::FIELD_NAME_UPDATED_BY => $modifiedByID,
+			]);
+
+			if (!empty($addedObserverIDs) || !empty($removedObserverIDs))
+			{
+				$difference
+					->setPreviousValue(Item::FIELD_NAME_OBSERVERS, $originalObserverIDs ?? [])
+					->setCurrentValue(Item::FIELD_NAME_OBSERVERS, $observerIDs ?? [])
+				;
+			}
+
 			if($bResult && $bCompare && $registerSonetEvent && !empty($sonetEventData))
 			{
-				$modifiedByID = intval($arFields['MODIFY_BY_ID']);
 				foreach($sonetEventData as &$sonetEvent)
 				{
 					$sonetEventFields = &$sonetEvent['FIELDS'];
@@ -2935,56 +2942,25 @@ class CAllCrmLead
 
 					if (
 						$logEventID !== false
-						&& CModule::IncludeModule("im")
+						&& CModule::IncludeModule('im')
 						&& \Bitrix\Crm\Settings\LeadSettings::isEnabled()
 					)
 					{
-						$title = CCrmOwnerType::GetCaption(CCrmOwnerType::Lead, $ID, false);
 						$url = CCrmOwnerType::GetEntityShowPath(CCrmOwnerType::Lead, $ID);
 						$serverName = (CMain::IsHTTPS() ? "https" : "http")."://".((defined("SITE_SERVER_NAME") && SITE_SERVER_NAME <> '') ? SITE_SERVER_NAME : COption::GetOptionString("main", "server_name", ""));
 
-						if (
-							$sonetEventFields['PARAMS']['FINAL_RESPONSIBLE_ID'] != $modifiedByID
-							&& $sonetEvent['TYPE'] == CCrmLiveFeedEvent::Responsible
-						)
+						if ($sonetEvent['TYPE'] === CCrmLiveFeedEvent::Responsible)
 						{
-							$arMessageFields = array(
-								"MESSAGE_TYPE" => IM_MESSAGE_SYSTEM,
-								"TO_USER_ID" => $sonetEventFields['PARAMS']['FINAL_RESPONSIBLE_ID'],
-								"FROM_USER_ID" => $modifiedByID,
-								"NOTIFY_TYPE" => IM_NOTIFY_FROM,
-								"NOTIFY_MODULE" => "crm",
-								"LOG_ID" => $logEventID,
-								//"NOTIFY_EVENT" => "lead_update",
-								"NOTIFY_EVENT" => "changeAssignedBy",
-								"NOTIFY_TAG" => "CRM|LEAD_RESPONSIBLE|".$ID,
-								"NOTIFY_MESSAGE" => GetMessage("CRM_LEAD_RESPONSIBLE_IM_NOTIFY", Array("#title#" => "<a href=\"".$url."\" class=\"bx-notifier-item-action\">".htmlspecialcharsbx($title)."</a>")),
-								"NOTIFY_MESSAGE_OUT" => GetMessage("CRM_LEAD_RESPONSIBLE_IM_NOTIFY", Array("#title#" => htmlspecialcharsbx($title)))." (".$serverName.$url.")"
-							);
-
-							CIMNotify::Add($arMessageFields);
-						}
-
-						if (
-							$sonetEvent['TYPE'] == CCrmLiveFeedEvent::Responsible
-							&& $sonetEventFields['PARAMS']['START_RESPONSIBLE_ID'] != $modifiedByID
-						)
-						{
-							$arMessageFields = array(
-								"MESSAGE_TYPE" => IM_MESSAGE_SYSTEM,
-								"TO_USER_ID" => $sonetEventFields['PARAMS']['START_RESPONSIBLE_ID'],
-								"FROM_USER_ID" => $modifiedByID,
-								"NOTIFY_TYPE" => IM_NOTIFY_FROM,
-								"NOTIFY_MODULE" => "crm",
-								"LOG_ID" => $logEventID,
-								//"NOTIFY_EVENT" => "lead_update",
-								"NOTIFY_EVENT" => "changeAssignedBy",
-								"NOTIFY_TAG" => "CRM|LEAD_RESPONSIBLE|".$ID,
-								"NOTIFY_MESSAGE" => GetMessage("CRM_LEAD_NOT_RESPONSIBLE_IM_NOTIFY", Array("#title#" => "<a href=\"".$url."\" class=\"bx-notifier-item-action\">".htmlspecialcharsbx($title)."</a>")),
-								"NOTIFY_MESSAGE_OUT" => GetMessage("CRM_LEAD_NOT_RESPONSIBLE_IM_NOTIFY", Array("#title#" => htmlspecialcharsbx($title)))." (".$serverName.$url.")"
-							);
-
-							CIMNotify::Add($arMessageFields);
+							$difference
+								->setPreviousValue(
+									Item::FIELD_NAME_ASSIGNED,
+									(int)$sonetEventFields['PARAMS']['START_RESPONSIBLE_ID'],
+								)
+								->setCurrentValue(
+									Item::FIELD_NAME_ASSIGNED,
+									(int)$sonetEventFields['PARAMS']['FINAL_RESPONSIBLE_ID'],
+								)
+							;
 						}
 
 						if (
@@ -3032,8 +3008,15 @@ class CAllCrmLead
 
 					unset($sonetEventFields);
 				}
+
 				unset($sonetEvent);
 			}
+
+			NotificationManager::getInstance()->sendAllNotificationsAboutUpdate(
+				CCrmOwnerType::Lead,
+				$difference,
+			);
+
 			//endregion
 			//region After update event
 			if($bResult && $enableSystemEvents)
@@ -3163,11 +3146,12 @@ class CAllCrmLead
 			->getUserPermissions($iUserId)
 			->checkDeletePermissions(CCrmOwnerType::Lead, $ID);
 
-		if (
-			$this->bCheckPermission
-			&& !$hasDeletePerm
-		)
+		if ($this->bCheckPermission && !$hasDeletePerm)
 		{
+			$this->LAST_ERROR = Loc::getMessage('CRM_LEAD_NO_PERMISSIONS_TO_DELETE', [
+				'#LEAD_NAME#' => htmlspecialcharsbx($arFields['TITLE'] ?? $arFields['ID']),
+			]);
+
 			return false;
 		}
 
@@ -4231,7 +4215,7 @@ class CAllCrmLead
 				$arFilter["=%{$k}"] = "{$v}%";
 				unset($arFilter[$k]);
 			}
-			elseif (preg_match('/(.*)_from$/i'.BX_UTF_PCRE_MODIFIER, $k, $arMatch))
+			elseif (preg_match('/(.*)_from$/iu', $k, $arMatch))
 			{
 				if($v <> '')
 				{
@@ -4239,12 +4223,12 @@ class CAllCrmLead
 				}
 				unset($arFilter[$k]);
 			}
-			elseif (preg_match('/(.*)_to$/i'.BX_UTF_PCRE_MODIFIER, $k, $arMatch))
+			elseif (preg_match('/(.*)_to$/iu', $k, $arMatch))
 			{
 				if($v <> '')
 				{
 					if (($arMatch[1] == 'DATE_CREATE' || $arMatch[1] == 'DATE_MODIFY' || $arMatch[1] == 'DATE_CLOSED')
-						&& !preg_match('/\d{1,2}:\d{1,2}(:\d{1,2})?$/'.BX_UTF_PCRE_MODIFIER, $v))
+						&& !preg_match('/\d{1,2}:\d{1,2}(:\d{1,2})?$/u', $v))
 					{
 						$v = CCrmDateTimeHelper::SetMaxDayTime($v);
 					}

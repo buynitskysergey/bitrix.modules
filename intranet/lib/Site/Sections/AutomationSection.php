@@ -3,14 +3,14 @@
 namespace Bitrix\Intranet\Site\Sections;
 
 use Bitrix\Crm;
-use Bitrix\Crm\Service\Router;
-use Bitrix\Sign;
-use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\Router;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Rpa\Driver;
+use Bitrix\Sign;
 
 class AutomationSection
 {
@@ -166,13 +166,46 @@ class AutomationSection
 			return [];
 		}
 
-		$menuDefaultItems = [];
-		$menuCustomSections = [];
-
 		$router = Container::getInstance()->getRouter();
 
 		$currentUser = CurrentUser::get();
 		$userPermissions = Container::getInstance()->getUserPermissions($currentUser->getId());
+
+		if (self::isAutomatedSolutionListEnabled())
+		{
+			$menuSubItems = self::getAutomatedSolutionsMenuSubItems($router, $userPermissions);
+		}
+		else
+		{
+			$menuSubItems = self::getSmartProcessesMenuSubItems($router, $userPermissions);
+		}
+
+		if (empty($menuSubItems))
+		{
+			return [];
+		}
+
+		return [
+			'id' => 'crm-dynamic',
+			'title' => Loc::getMessage('AUTOMATION_SECTION_CRM_DYNAMIC_SUBTITLE_1'),
+			'available' => true,
+			'iconClass' => 'ui-icon intranet-automation-bp-icon',
+			'menuData' => [
+				'menu_item_id' => self::MENU_ITEMS_ID['smart_process'],
+				'top_menu_id' => 'top_menu_id_crm_dynamic',
+				'sub_menu' => $menuSubItems,
+				'is_new' => self::isAutomatedSolutionListEnabled(),
+			],
+		];
+	}
+
+	private static function getSmartProcessesMenuSubItems(
+		Router $router,
+		Crm\Service\UserPermissions $userPermissions,
+	): array
+	{
+		$menuDefaultItems = [];
+		$menuCustomSections = [];
 
 		$customSections = Crm\Integration\IntranetManager::getCustomSections() ?? [];
 		foreach ($customSections as $customSection)
@@ -224,23 +257,84 @@ class AutomationSection
 			];
 		}
 
-		$menuSubItems = array_merge($menuCustomSections, $menuDefaultItems);
-		if (empty($menuSubItems))
+		return array_merge($menuCustomSections, $menuDefaultItems);
+	}
+
+	private static function getAutomatedSolutionsMenuSubItems(
+		Router $router,
+		Crm\Service\UserPermissions $userPermissions,
+	): array
+	{
+		$container = Container::getInstance();
+		$automatedSolutionManager = $container->getAutomatedSolutionManager();
+
+		$menuItems = [];
+
+		foreach ($automatedSolutionManager->getExistingAutomatedSolutions() as $automatedSolution)
 		{
-			return [];
+			$automatedSolutionSubItems = [];
+			foreach ($automatedSolution['TYPE_IDS'] as $typeId)
+			{
+				$type = $container->getType($typeId);
+				if ($userPermissions->canReadType($type->getEntityTypeId()))
+				{
+					$automatedSolutionSubItems[] = [
+						'TEXT' => $type->getTitle(),
+						'URL' => $router->getItemListUrlInCurrentView($type->getEntityTypeId()),
+					];
+				}
+			}
+
+			// user can read at least one type in the solution
+			if (!empty($automatedSolutionSubItems))
+			{
+				if ($userPermissions->canWriteConfig())
+				{
+					$automatedSolutionSubItems[] = [
+						'IS_DELIMITER' => true,
+					];
+
+					$automatedSolutionSubItems[] = [
+						'TEXT' => Loc::getMessage('AUTOMATION_SECTION_CRM_DYNAMIC_DEFAULT_SUBTITLE'),
+						'URL' => $router->getExternalTypeListUrl()->addParams([
+							'AUTOMATED_SOLUTION' => $automatedSolution['ID'],
+							'apply_filter' => 'Y',
+						]),
+					];
+				}
+
+				$menuItems[] = [
+					'TEXT' => $automatedSolution['TITLE'],
+					'ITEMS' => $automatedSolutionSubItems,
+				];
+			}
 		}
 
-		return [
-			'id' => 'crm-dynamic',
-			'title' => Loc::getMessage('AUTOMATION_SECTION_CRM_DYNAMIC_SUBTITLE_1'),
-			'available' => true,
-			'iconClass' => 'ui-icon intranet-automation-bp-icon',
-			'menuData' => [
-				'menu_item_id' => self::MENU_ITEMS_ID['smart_process'],
-				'top_menu_id' => 'top_menu_id_crm_dynamic',
-				'sub_menu' => $menuSubItems,
-			],
-		];
+		if ($userPermissions->canWriteConfig())
+		{
+			if (!empty($menuItems))
+			{
+				$menuItems[] = [
+					'IS_DELIMITER' => true,
+				];
+			}
+
+			$menuItems[] = [
+				'TEXT' => Loc::getMessage('AUTOMATION_SECTION_CRM_DYNAMIC_AUTOMATED_SOLUTION_LIST'),
+				'URL' => $router->getAutomatedSolutionListUrl(),
+				'IS_NEW' => true,
+			];
+		}
+
+		return $menuItems;
+	}
+
+	private static function isAutomatedSolutionListEnabled(): bool
+	{
+		return (
+			method_exists(Crm\Settings\Crm::class, 'isAutomatedSolutionListEnabled')
+			&& Crm\Settings\Crm::isAutomatedSolutionListEnabled()
+		);
 	}
 
 	public static function getRpa(): array
@@ -447,7 +541,7 @@ class AutomationSection
 
 		$items = [
 			[
-				'TEXT' => Loc::getMessage('AUTOMATION_SECTION_SIGN_SIGN_TITLE'),
+				'TEXT' => Loc::getMessage('AUTOMATION_SECTION_SIGN_SIGN_TITLE_MSGVER_1'),
 				'URL' => '/sign/#robots',
 			],
 		];
@@ -456,13 +550,13 @@ class AutomationSection
 		{
 			$router = Crm\Service\Container::getInstance()->getRouter();
 			$items[] = [
-				'TEXT' => Loc::getMessage('AUTOMATION_SECTION_SIGN_CRM_TITLE'),
+				'TEXT' => Loc::getMessage('AUTOMATION_SECTION_SIGN_CRM_TITLE_MSGVER_1'),
 				'URL' => $router->getItemListUrlInCurrentView(\CCrmOwnerType::Deal) . '#robots',
 			];
 		}
 
 		return [
-			'TEXT' => Loc::getMessage('AUTOMATION_SECTION_SIGN_ITEM_TITLE'),
+			'TEXT' => Loc::getMessage('AUTOMATION_SECTION_SIGN_ITEM_TITLE_MSGVER_1'),
 			'URL' => '/sign/',
 			'ITEMS' => $items,
 		];

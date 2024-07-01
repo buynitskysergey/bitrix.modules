@@ -1086,8 +1086,8 @@ class CAllSaleOrder
 			$arSelectFields = $arGroupBy;
 			foreach ($arGroupBy as $key => $val)
 			{
-				$val = ToUpper($val);
-				$key = ToUpper($key);
+				$val = mb_strtoupper($val);
+				$key = mb_strtoupper($key);
 				if (array_key_exists($val, $arFields) && !in_array($key, $arGroupByFunct))
 				{
 					if ($strSqlGroupBy != '')
@@ -1139,14 +1139,14 @@ class CAllSaleOrder
 
 					if ($arFields[$arFieldsKeys[$i]]["TYPE"] == "datetime")
 					{
-						if ((ToUpper($DB->type)=="ORACLE" || ToUpper($DB->type)=="MSSQL") && (array_key_exists($arFieldsKeys[$i], $arOrder)))
+						if ((mb_strtoupper($DB->type)=="ORACLE" || mb_strtoupper($DB->type)=="MSSQL") && (array_key_exists($arFieldsKeys[$i], $arOrder)))
 							$strSqlSelect .= $arFields[$arFieldsKeys[$i]]["FIELD"]." as ".$arFieldsKeys[$i]."_X1, ";
 
 						$strSqlSelect .= $DB->DateToCharFunction($arFields[$arFieldsKeys[$i]]["FIELD"], "FULL")." as ".$arFieldsKeys[$i];
 					}
 					elseif ($arFields[$arFieldsKeys[$i]]["TYPE"] == "date")
 					{
-						if ((ToUpper($DB->type)=="ORACLE" || ToUpper($DB->type)=="MSSQL") && (array_key_exists($arFieldsKeys[$i], $arOrder)))
+						if ((mb_strtoupper($DB->type)=="ORACLE" || mb_strtoupper($DB->type)=="MSSQL") && (array_key_exists($arFieldsKeys[$i], $arOrder)))
 							$strSqlSelect .= $arFields[$arFieldsKeys[$i]]["FIELD"]." as ".$arFieldsKeys[$i]."_X1, ";
 
 						$strSqlSelect .= $DB->DateToCharFunction($arFields[$arFieldsKeys[$i]]["FIELD"], "SHORT")." as ".$arFieldsKeys[$i];
@@ -1169,8 +1169,8 @@ class CAllSaleOrder
 			{
 				foreach ($arSelectFields as $key => $val)
 				{
-					$val = ToUpper($val);
-					$key = ToUpper($key);
+					$val = mb_strtoupper($val);
+					$key = mb_strtoupper($key);
 					if (array_key_exists($val, $arFields))
 					{
 						if ($strSqlSelect <> '')
@@ -1184,14 +1184,14 @@ class CAllSaleOrder
 						{
 							if ($arFields[$val]["TYPE"] == "datetime")
 							{
-								if ((ToUpper($DB->type)=="ORACLE" || ToUpper($DB->type)=="MSSQL") && (array_key_exists($val, $arOrder)))
+								if ((mb_strtoupper($DB->type)=="ORACLE" || mb_strtoupper($DB->type)=="MSSQL") && (array_key_exists($val, $arOrder)))
 									$strSqlSelect .= $arFields[$val]["FIELD"]." as ".$val."_X1, ";
 
 								$strSqlSelect .= $DB->DateToCharFunction($arFields[$val]["FIELD"], "FULL")." as ".$val;
 							}
 							elseif ($arFields[$val]["TYPE"] == "date")
 							{
-								if ((ToUpper($DB->type)=="ORACLE" || ToUpper($DB->type)=="MSSQL") && (array_key_exists($val, $arOrder)))
+								if ((mb_strtoupper($DB->type)=="ORACLE" || mb_strtoupper($DB->type)=="MSSQL") && (array_key_exists($val, $arOrder)))
 									$strSqlSelect .= $arFields[$val]["FIELD"]." as ".$val."_X1, ";
 
 								$strSqlSelect .= $DB->DateToCharFunction($arFields[$val]["FIELD"], "SHORT")." as ".$val;
@@ -1480,8 +1480,8 @@ class CAllSaleOrder
 			$arOrder = array();
 		foreach ($arOrder as $by => $order)
 		{
-			$by = ToUpper($by);
-			$order = ToUpper($order);
+			$by = mb_strtoupper($by);
+			$order = mb_strtoupper($order);
 
 			if ($order != "ASC")
 				$order = "DESC";
@@ -1524,7 +1524,7 @@ class CAllSaleOrder
 			$order = (mb_substr($arSqlOrder[$i], -3) == "ASC") ? "ASC" : "DESC";
 			if (!$nullsLast)
 			{
-				if(ToUpper($DB->type)=="ORACLE")
+				if(mb_strtoupper($DB->type)=="ORACLE")
 				{
 					if($order === "ASC")
 						$strSqlOrderBy .= $arSqlOrder[$i]." NULLS FIRST";
@@ -1537,14 +1537,14 @@ class CAllSaleOrder
 			else
 			{
 				$field = mb_substr($arSqlOrder[$i], 0, -mb_strlen($order) - 1);
-				if(ToUpper($DB->type) === "MYSQL")
+				if(mb_strtoupper($DB->type) === "MYSQL")
 				{
 					if($order === 'ASC')
 						$strSqlOrderBy .= '(CASE WHEN ISNULL('.$field.') THEN 1 ELSE 0 END) '.$order.', '.$field." ".$order;
 					else
 						$strSqlOrderBy .= $field." ".$order;
 				}
-				elseif(ToUpper($DB->type) === "MSSQL")
+				elseif(mb_strtoupper($DB->type) === "MSSQL")
 				{
 					if($order === 'ASC')
 						$strSqlOrderBy .= '(CASE WHEN '.$field.' IS NULL THEN 1 ELSE 0 END) '.$order.', '.$field." ".$order;
@@ -1552,7 +1552,7 @@ class CAllSaleOrder
 						$strSqlOrderBy .= $field." ".$order;
 
 				}
-				elseif(ToUpper($DB->type) === "ORACLE")
+				elseif(mb_strtoupper($DB->type) === "ORACLE")
 				{
 					if($order === 'DESC')
 						$strSqlOrderBy .= $field." ".$order." NULLS LAST";

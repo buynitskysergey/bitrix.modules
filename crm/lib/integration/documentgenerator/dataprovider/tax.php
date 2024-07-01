@@ -49,7 +49,7 @@ class Tax extends HashDataProvider
 					{
 						$name = $this->data['NAME'];
 					}
-					if(ToUpper(SITE_CHARSET) !== 'UTF-8')
+					if(mb_strtoupper(SITE_CHARSET) !== 'UTF-8')
 					{
 						$name = Encoding::convertEncoding($name, SITE_CHARSET, 'UTF-8');
 					}

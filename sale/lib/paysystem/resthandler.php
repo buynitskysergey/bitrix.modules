@@ -754,7 +754,7 @@ class RestHandler extends PaySystem\ServiceHandler
 		{
 			$handler = $this->service->getField('ACTION_FILE');
 			$dbRes = PaySystemRestHandlersTable::getList([
-				'filter' => ['CODE' => $handler]
+				'filter' => ['=CODE' => $handler]
 			]);
 			$data = $dbRes->fetch();
 

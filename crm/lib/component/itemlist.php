@@ -204,7 +204,7 @@ abstract class ItemList extends Base
 
 	protected function getCategoryId(): ?int
 	{
-		return ($this->category?->getId());
+		return $this->category?->getId();
 	}
 
 	protected function getToolbarParameters(): array
@@ -290,27 +290,40 @@ abstract class ItemList extends Base
 		// a bit of hardcode to avoid components copying
 		if (
 			$this->entityTypeId === \CCrmOwnerType::SmartInvoice
-			&& !InvoiceSettings::getCurrent()->isOldInvoicesEnabled()
 			&& Container::getInstance()->getUserPermissions()->canReadType(\CCrmOwnerType::Invoice)
 		)
 		{
-			$settingsItems[] = [
-				'text' => \CCrmOwnerType::GetCategoryCaption(\CCrmOwnerType::Invoice),
-				'href' => $this->router->getItemListUrlInCurrentView(\CCrmOwnerType::Invoice),
-				'onclick' => new Buttons\JsHandler('BX.Crm.Router.Instance.closeSettingsMenu'),
-			];
-
-			if (InvoiceSettings::getCurrent()->isShowInvoiceTransitionNotice())
+			if (!InvoiceSettings::getCurrent()->isOldInvoicesEnabled())
 			{
-				$spotlight = [
-					'ID' => 'crm-old-invoices-transition',
-					'JS_OPTIONS' => [
-						'targetElement' => static::TOOLBAR_SETTINGS_BUTTON_ID,
-						'content' => Loc::getMessage('CRM_COMPONENT_ITEM_LIST_OLD_INVOICES_TRANSITION_SPOTLIGHT'),
-						'targetVertex' => 'middle-center',
-						'autoSave' => true,
-					],
+				$settingsItems[] = [
+					'text' => \CCrmOwnerType::GetCategoryCaption(\CCrmOwnerType::Invoice),
+					'href' => $this->router->getItemListUrlInCurrentView(\CCrmOwnerType::Invoice),
+					'onclick' => new Buttons\JsHandler('BX.Crm.Router.Instance.closeSettingsMenu'),
 				];
+
+				if (InvoiceSettings::getCurrent()->isShowInvoiceTransitionNotice())
+				{
+					$spotlight = [
+						'ID' => 'crm-old-invoices-transition',
+						'JS_OPTIONS' => [
+							'targetElement' => static::TOOLBAR_SETTINGS_BUTTON_ID,
+							'content' => Loc::getMessage('CRM_COMPONENT_ITEM_LIST_OLD_INVOICES_TRANSITION_SPOTLIGHT'),
+							'targetVertex' => 'middle-center',
+							'autoSave' => true,
+						],
+					];
+				}
+			}
+
+			$currentListView = Container::getInstance()->getRouter()->getCurrentListView(\CCrmOwnerType::SmartInvoice);
+			$availableViews = [\Bitrix\Crm\Service\Router::LIST_VIEW_LIST, \Bitrix\Crm\Service\Router::LIST_VIEW_KANBAN];
+			if (in_array($currentListView, $availableViews, true))
+			{
+				$einvoiceToolbarSettings = new Integration\Rest\EInvoiceApp\ToolbarSettings();
+				$settingsItems = array_merge(
+					$settingsItems,
+					$einvoiceToolbarSettings->getItems(),
+				);
 			}
 		}
 

@@ -40,6 +40,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UI\Filter\FieldAdapter;
 use Bitrix\Main\UI\Filter\Options;
 use Bitrix\UI\Form\EntityEditorConfiguration;
+use CCrmPerms;
 
 abstract class Entity
 {
@@ -912,10 +913,10 @@ abstract class Entity
 	/**
 	 * Returns additional permission parameters for the crm.kanban component.
 	 *
-	 * @param \CCrmPerms $permissions
+	 * @param CCrmPerms $permissions
 	 * @return array
 	 */
-	public function getPermissionParameters(\CCrmPerms $permissions): array
+	public function getPermissionParameters(CCrmPerms $permissions): array
 	{
 		return [];
 	}
@@ -1029,7 +1030,7 @@ abstract class Entity
 		return $requiredFields;
 	}
 
-	protected function getAddItemToStagePermissionType(string $stageId, \CCrmPerms $userPermissions): ?string
+	protected function getAddItemToStagePermissionType(string $stageId, CCrmPerms $userPermissions): ?string
 	{
 		return null;
 	}
@@ -1037,7 +1038,7 @@ abstract class Entity
 	/**
 	 * Returns true if user with $userPermissions can add item to stage with identifier $stageId.
 	 */
-	public function canAddItemToStage(string $stageId, \CCrmPerms $userPermissions, string $semantics = PhaseSemantics::UNDEFINED): bool
+	public function canAddItemToStage(string $stageId, CCrmPerms $userPermissions, string $semantics = PhaseSemantics::UNDEFINED): bool
 	{
 		if (!$this->isInlineEditorSupported())
 		{
@@ -1290,6 +1291,11 @@ abstract class Entity
 		return $item;
 	}
 
+	public function getField(string $fieldName): ?\Bitrix\Crm\Field
+	{
+		return $this->factory?->getFieldsCollection()->getField($fieldName);
+	}
+
 	public function appendRelatedEntitiesValues(array $items, array $selectedFields): array
 	{
 		if (in_array('OBSERVER', $selectedFields))
@@ -1317,47 +1323,79 @@ abstract class Entity
 	}
 
 	/**
+	 * @deprecated since crm 24.0.0. Use deleteItemsV2
 	 * Delete items of this entity with $ids.
 	 *
 	 * @param array $ids
 	 * @param bool $isIgnore
-	 * @param \CCrmPerms|null $permissions
+	 * @param CCrmPerms|null $permissions
 	 * @param array $params
-	 * @throws Exception
 	 */
-	public function deleteItems(array $ids, bool $isIgnore = false, \CCrmPerms $permissions = null, array $params = []): void
+	public function deleteItems(array $ids, bool $isIgnore = false, CCrmPerms $permissions = null, array $params = []): void
 	{
+		$this->deleteItemsV2($ids, $isIgnore, $permissions, $params);
+	}
+
+	public function deleteItemsV2(array $ids, bool $isIgnore = false, CCrmPerms $permissions = null, array $params = []): Result
+	{
+		$result = new Result();
+
 		$provider = $this->getItemsProvider();
 		if (!method_exists($provider, 'delete'))
 		{
-			return;
+			return $result;
 		}
+
 		$entity = new $provider();
-		if (
-			$this->isExclusionSupported()
-			|| !Exclusion\Access::current()->canWrite()
-		)
+		if ($this->isExclusionSupported() || !Exclusion\Access::current()->canWrite())
 		{
 			$isIgnore = false;
 		}
+
+		$deletedIds = [];
+
 		foreach ($ids as $id)
 		{
+			$isDeleted = null;
+
 			if ($isIgnore)
 			{
-				Exclusion\Manager::excludeEntity(
-					$this->getTypeId(),
-					$id
-				);
+				Exclusion\Manager::excludeEntity($this->getTypeId(), $id);
 				if ($this->isDeleteAfterExclusion())
 				{
-					$entity->delete($id, $params);
+					$isDeleted = $entity->delete($id, $params);
 				}
 			}
 			else
 			{
-				$entity->delete($id, $params);
+				$isDeleted = $entity->delete($id, $params);
+			}
+
+			if ($isDeleted === null)
+			{
+				continue;
+			}
+
+			if ($isDeleted)
+			{
+				$deletedIds[] = (int)$id;
+			}
+			else
+			{
+				$errorText = (
+					empty($entity->LAST_ERROR)
+						? Loc::getMessage('CRM_KANBAN_ENTITY_COMMON_DELETION_ERROR')
+						: $entity->LAST_ERROR
+				);
+				$result->addError(new Error($errorText, 0, ['id' => $id]));
 			}
 		}
+
+		$result->setData([
+			'deletedIds' => $deletedIds,
+		]);
+
+		return $result;
 	}
 
 	/**
@@ -1380,10 +1418,10 @@ abstract class Entity
 	 * Returns true if user with $permissions can update item with $id.
 	 *
 	 * @param int $id
-	 * @param \CCrmPerms $permissions
+	 * @param CCrmPerms $permissions
 	 * @return bool
 	 */
-	public function checkUpdatePermissions(int $id, ?\CCrmPerms $permissions = null): bool
+	public function checkUpdatePermissions(int $id, ?CCrmPerms $permissions = null): bool
 	{
 		return EntityAuthorization::checkUpdatePermission($this->getTypeId(), $id, $permissions);
 	}
@@ -1392,10 +1430,10 @@ abstract class Entity
 	 * Returns true if user with $permissions can read item with $id.
 	 *
 	 * @param int $id
-	 * @param \CCrmPerms $permissions
+	 * @param CCrmPerms $permissions
 	 * @return bool
 	 */
-	public function checkReadPermissions(int $id = 0, ?\CCrmPerms $permissions = null): bool
+	public function checkReadPermissions(int $id = 0, ?CCrmPerms $permissions = null): bool
 	{
 		return EntityAuthorization::checkReadPermission($this->getTypeId(), $id, $permissions);
 	}
@@ -1405,10 +1443,10 @@ abstract class Entity
 	 *
 	 * @param array $ids
 	 * @param int $assignedId
-	 * @param \CCrmPerms $permissions
+	 * @param CCrmPerms $permissions
 	 * @return Result
 	 */
-	public function setItemsAssigned(array $ids, int $assignedId, \CCrmPerms $permissions): Result
+	public function setItemsAssigned(array $ids, int $assignedId, CCrmPerms $permissions): Result
 	{
 		$result = new Result();
 
@@ -1542,10 +1580,10 @@ abstract class Entity
 	 *
 	 * @param array $ids
 	 * @param int $categoryId
-	 * @param \CCrmPerms $permissions
+	 * @param CCrmPerms $permissions
 	 * @return Result
 	 */
-	public function updateItemsCategory(array $ids, int $categoryId, \CCrmPerms $permissions): Result
+	public function updateItemsCategory(array $ids, int $categoryId, CCrmPerms $permissions): Result
 	{
 		return new Result();
 	}
@@ -1553,10 +1591,10 @@ abstract class Entity
 	/**
 	 * Returns categories to which user with $permissions has access.
 	 *
-	 * @param \CCrmPerms $permissions
+	 * @param CCrmPerms $permissions
 	 * @return array
 	 */
-	public function getCategories(\CCrmPerms $permissions): array
+	public function getCategories(CCrmPerms $permissions): array
 	{
 		return [];
 	}
@@ -2823,7 +2861,7 @@ abstract class Entity
 			return [];
 		}
 
-		$categories = $this->getCategories(\CCrmPerms::getCurrentUserPermissions());
+		$categories = $this->getCategories(CCrmPerms::getCurrentUserPermissions());
 		if (empty($categories))
 		{
 			return [];

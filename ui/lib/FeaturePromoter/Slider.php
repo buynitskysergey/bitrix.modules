@@ -24,7 +24,6 @@ class Slider implements FeaturePromoterProvider
 		return [
 			'frameUrlTemplate' => $requestHelpdesk->getPreparedUrl(),
 			'trialableFeatureList' => $this->getTrialableFeatureList(),
-			'demoStatus' => $this->getDemoStatus(),
 			'availableDomainList' => $requestHelpdesk->getUrl()->getDomain()->getList(),
 		];
 	}
@@ -37,25 +36,5 @@ class Slider implements FeaturePromoterProvider
 		}
 
 		return [];
-	}
-
-	private function getDemoStatus(): string
-	{
-		if (Loader::includeModule('bitrix24'))
-		{
-			if (\CBitrix24::IsDemoLicense())
-			{
-				return 'ACTIVE';
-			}
-
-			if (Bitrix24\Feature::isEditionTrialable('demo'))
-			{
-				return 'AVAILABLE';
-			}
-
-			return 'EXPIRED';
-		}
-
-		return 'UNKNOWN';
 	}
 }

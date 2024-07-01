@@ -155,7 +155,9 @@ class OrderShipment
 			$extraServiceHTML = self::getExtraServiceEditControl($extraService, $index, false, self::$shipment);
 
 		if ($data['DELIVERY_ID'] > 0)
-			$map = self::getMap($data['DELIVERY_ID'], $index, $data['DELIVERY_STORE_ID']);
+		{
+			$map = self::getMap($data['DELIVERY_ID'], $index, $data['DELIVERY_STORE_ID'] ?? 0);
+		}
 
 		$dataId = (int)($data['ID'] ?? 0);
 		if ($dataId > 0)

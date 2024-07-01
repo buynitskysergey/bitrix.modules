@@ -6,6 +6,7 @@ use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\ActivityTable;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Mail\Internals\UserSignatureTable;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main;
@@ -222,10 +223,15 @@ class Message
 
 	public static function getSignature($email, $name)
 	{
+		$userId = CurrentUser::get()->getId();
+
 		$signatureList = UserSignatureTable::getList([
 			'select' => ["SIGNATURE"],
 			'order' => ['ID' => 'desc'],
-			'filter' => ['=SENDER' => (trim($name).' <'.trim($email).'>')],
+			'filter' => [
+				'=SENDER' => (trim($name).' <'.trim($email).'>'),
+				'=USER_ID' => $userId,
+			],
 			'limit' => 1,
 		])->fetchAll();
 
@@ -239,7 +245,10 @@ class Message
 			$signatureList = UserSignatureTable::getList([
 				'select' => ["SIGNATURE"],
 				'order' => ['ID' => 'desc'],
-				'filter' => ['=SENDER' => trim($email)],
+				'filter' => [
+					'=SENDER' => trim($email),
+					'=USER_ID' => $userId,
+				],
 				'limit' => 1,
 			])->fetchAll();
 		}

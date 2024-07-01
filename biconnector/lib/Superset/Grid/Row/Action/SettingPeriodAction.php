@@ -28,7 +28,7 @@ final class SettingPeriodAction extends BaseAction
 	public function getControl(array $rawFields): ?array
 	{
 		$dashboardId = (int)$rawFields['ID'];
-		$this->onclick = "BX.BIConnector.DashboardManager.openSettingPeriodSlider({$dashboardId})";
+		$this->onclick = "BX.BIConnector.DashboardManager.openSettingsSlider({$dashboardId})";
 
 		return parent::getControl($rawFields);
 	}

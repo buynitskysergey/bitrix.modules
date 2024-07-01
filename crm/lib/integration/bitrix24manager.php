@@ -324,7 +324,7 @@ class Bitrix24Manager
 			$serviceUrl = \CUtil::JSEscape(\CBitrix24::PATH_COUNTER);
 			$hostName = \CUtil::JSEscape(BX24_HOST_NAME);
 			return "{$content}
-				<script type='text/javascript'>
+				<script>
 					BX.ready(
 						function()
 						{

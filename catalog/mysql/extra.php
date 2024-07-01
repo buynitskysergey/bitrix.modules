@@ -1,4 +1,5 @@
-<?
+<?php
+
 use Bitrix\Catalog;
 
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/catalog/general/extra.php");

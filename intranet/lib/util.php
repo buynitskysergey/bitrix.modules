@@ -10,6 +10,7 @@ namespace Bitrix\Intranet;
 
 use Bitrix\Bitrix24\Integrator;
 use Bitrix\Bitrix24\Feature;
+use Bitrix\Intranet\Internals\InvitationTable;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\Event;
@@ -17,6 +18,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Security\Random;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Intranet;
@@ -30,6 +32,8 @@ Loc::loadMessages(__FILE__);
 class Util
 {
 	const CP_BITRIX_PATH = 'https://bitrix24.team';
+
+	private static $USER_STATUS = null;
 
 	public static function getDepartmentEmployees($params)
 	{
@@ -205,7 +209,7 @@ class Util
 			}
 			if (isset($b24Languages) && is_array($b24Languages))
 			{
-				$langFromTemplate = \Bitrix\Main\Text\Encoding::convertEncoding($b24Languages, 'UTF-8', SITE_CHARSET);
+				$langFromTemplate = $b24Languages;
 			}
 		}
 
@@ -625,7 +629,7 @@ class Util
 		}
 
 		$user = new \CUser;
-		$res = $user->Update($userId, array("ACTIVE" => "N"));
+		$res = $user->Update($userId, ['ACTIVE' => 'N', 'CONFIRM_CODE' => '']);
 
 		if (!$res)
 		{
@@ -651,8 +655,22 @@ class Util
 			return false;
 		}
 
+		$updateFields = ['ACTIVE' => 'Y'];
+
+		$res = InvitationTable::getList([
+			'select' => ['INITIALIZED'],
+			'filter' => [
+				'USER_ID' => $userId
+			]
+		])->fetch();
+
+		if ($res && isset($res['INITIALIZED']) && $res['INITIALIZED'] === 'N')
+		{
+			$updateFields['CONFIRM_CODE'] = Random::getString(8, true);
+		}
+
 		$user = new \CUser;
-		$res = $user->Update($userId, array("ACTIVE" => "Y"));
+		$res = $user->Update($userId, $updateFields);
 
 		if (!$res)
 		{
@@ -694,75 +712,81 @@ class Util
 	public static function getUserStatus($id)
 	{
 		global $USER;
-		$status = "";
 
-		$result = \Bitrix\Main\UserTable::getList([
-			'select' => ['ID', 'ACTIVE', 'CONFIRM_CODE', 'EXTERNAL_AUTH_ID', 'UF_DEPARTMENT'],
-			'filter' => ['=ID' => $id],
-		]);
-
-		if ($user = $result->fetch())
+		if (empty(self::$USER_STATUS))
 		{
-			$groups = $USER->getUserGroup($id);
+			$status = "";
 
-			$extranetGroupId = (
-			Loader::includeModule('extranet')
-				? intval(\CExtranet::getExtranetUserGroupId())
-				: 0
-			);
+			$result = \Bitrix\Main\UserTable::getList([
+				'select' => ['ID', 'ACTIVE', 'CONFIRM_CODE', 'EXTERNAL_AUTH_ID', 'UF_DEPARTMENT'],
+				'filter' => ['=ID' => $id],
+			]);
 
-			if(in_array(1, $groups))
+			if ($user = $result->fetch())
 			{
-				$status = "admin";
-			}
-			else
-			{
-				$status = "employee";
+				$groups = $USER->getUserGroup($id);
 
-				if(
-					!is_array($user['UF_DEPARTMENT'])
-					|| empty($user['UF_DEPARTMENT'][0])
-				)
+				$extranetGroupId = (
+				Loader::includeModule('extranet')
+					? intval(\CExtranet::getExtranetUserGroupId())
+					: 0
+				);
+
+				if(in_array(1, $groups))
 				{
-					if (
-						$extranetGroupId
-						&& in_array($extranetGroupId, $groups)
+					$status = "admin";
+				}
+				else
+				{
+					$status = "employee";
+
+					if(
+						!is_array($user['UF_DEPARTMENT'])
+						|| empty($user['UF_DEPARTMENT'][0])
 					)
 					{
-						$status = "extranet";
+						if (
+							$extranetGroupId
+							&& in_array($extranetGroupId, $groups)
+						)
+						{
+							$status = "extranet";
+						}
 					}
+				}
+
+				if (Loader::includeModule("bitrix24") && \Bitrix\Bitrix24\Integrator::isIntegrator($user["ID"]))
+				{
+					$status = "integrator";
+				}
+
+				if($user["ACTIVE"] == "N")
+				{
+					$status = "fired";
+				}
+
+				if (
+					$user["ACTIVE"] == "Y"
+					&& !empty($user["CONFIRM_CODE"])
+				)
+				{
+					$status = "invited";
+				}
+
+				if (in_array($user["EXTERNAL_AUTH_ID"], [ 'email' ]))
+				{
+					$status = $user["EXTERNAL_AUTH_ID"];
+				}
+				elseif (in_array($user["EXTERNAL_AUTH_ID"], [ 'shop', 'sale', 'saleanonymous' ]))
+				{
+					$status = 'shop';
 				}
 			}
 
-			if (Loader::includeModule("bitrix24") && \Bitrix\Bitrix24\Integrator::isIntegrator($user["ID"]))
-			{
-				$status = "integrator";
-			}
-
-			if($user["ACTIVE"] == "N")
-			{
-				$status = "fired";
-			}
-
-			if (
-				$user["ACTIVE"] == "Y"
-				&& !empty($user["CONFIRM_CODE"])
-			)
-			{
-				$status = "invited";
-			}
-
-			if (in_array($user["EXTERNAL_AUTH_ID"], [ 'email' ]))
-			{
-				$status = $user["EXTERNAL_AUTH_ID"];
-			}
-			elseif (in_array($user["EXTERNAL_AUTH_ID"], [ 'shop', 'sale', 'saleanonymous' ]))
-			{
-				$status = 'shop';
-			}
+			self::$USER_STATUS = $status;
 		}
 
-		return $status;
+		return self::$USER_STATUS;
 	}
 
 	public static function getAppsInstallationConfig(int $userId): array

@@ -68,7 +68,7 @@ class Calendar
 			$message = \CUtil::JSEscape(Loc::getMessage('CRM_CALENDAR_VIEW_SPOTLIGHT'));
 			$message .= ' <a href="javascript:void(0);" onclick="BX.Helper.show(\\\'redirect=detail&code=7481073\\\')">'.Loc::getMessage('CRM_CALENDAR_HELP_LINK').'</a>';
 			?>
-			<script type="text/javascript">
+			<script>
 				BX.ready(function()
 				{
 					var i, viewSwitcherListItems = document.querySelectorAll(".crm-view-switcher-list-item");
@@ -122,7 +122,7 @@ class Calendar
 
 			$message .= ' <a href="javascript:void(0);" onclick="BX.Helper.show(\\\'redirect=detail&code=18797220\\\')">'.Loc::getMessage('CRM_CALENDAR_HELP_LINK').'</a>';
 			?>
-			<script type="text/javascript">
+			<script>
 				BX.ready(function()
 				{
 					var viewMode = document.querySelector(".calendar-view-switcher-text-mode-inner");

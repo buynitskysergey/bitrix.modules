@@ -842,11 +842,11 @@ class CIntranetUtils
 	 * @param $bFlat
 	 * @return array
 	 */
-	public static function GetDeparmentsTree($section_id = 0, $bFlat = false): array
+	public static function GetDeparmentsTree($section_id = 0, $bFlat = false, $supportNew = true): array
 	{
 		if (null == self::$SECTIONS_SETTINGS_WITHOUT_EMPLOYEE_CACHE)
 		{
-			self::_GetDeparmentsTreeWithoutEmployee();
+			self::_GetDeparmentsTreeWithoutEmployee($supportNew);
 		}
 
 		if (!$section_id)
@@ -994,10 +994,10 @@ class CIntranetUtils
 		return $structures[intval($sectionId)][intval($depth)];
 	}
 
-	public static function GetStructure()
+	public static function GetStructure(bool $supportNew = true)
 	{
 		if (null == self::$SECTIONS_SETTINGS_CACHE)
-			self::_GetDeparmentsTree();
+			self::_GetDeparmentsTree($supportNew);
 
 		return self::$SECTIONS_SETTINGS_CACHE;
 	}
@@ -1005,11 +1005,11 @@ class CIntranetUtils
 	/**
 	 * @return array|null
 	 */
-	public static function GetStructureWithoutEmployees(): array|null
+	public static function GetStructureWithoutEmployees(bool $supportNew = true): array|null
 	{
 		if (null == self::$SECTIONS_SETTINGS_WITHOUT_EMPLOYEE_CACHE)
 		{
-			self::_GetDeparmentsTreeWithoutEmployee();
+			self::_GetDeparmentsTreeWithoutEmployee($supportNew);
 		}
 
 		return self::$SECTIONS_SETTINGS_WITHOUT_EMPLOYEE_CACHE;
@@ -1220,9 +1220,21 @@ class CIntranetUtils
 	/**
 	 * @deprecated Use Department to get the departmental structure and Employee to get the employees of the department.
 	 */
-	private static function _GetDeparmentsTree()
+	private static function _GetDeparmentsTree(bool $supportNew = true)
 	{
 		global $CACHE_MANAGER, $DB;
+
+		if ($supportNew && \Bitrix\Main\Loader::includeModule('humanresources'))
+		{
+			$structure = \Bitrix\HumanResources\Compatibility\Adapter\StructureBackwardAdapter::getStructure();
+
+			if (!empty($structure) && !empty($structure['DATA']))
+			{
+				self::$SECTIONS_SETTINGS_CACHE = $structure;
+
+				return;
+			}
+		}
 
 		self::$SECTIONS_SETTINGS_CACHE = array(
 			'TREE' => array(),
@@ -1303,8 +1315,20 @@ class CIntranetUtils
 	/**
 	 * @return void
 	 */
-	private static function _GetDeparmentsTreeWithoutEmployee(): void
+	private static function _GetDeparmentsTreeWithoutEmployee(bool $supportNew = true): void
 	{
+		if ($supportNew && \Bitrix\Main\Loader::includeModule('humanresources'))
+		{
+			$structure = \Bitrix\HumanResources\Compatibility\Adapter\StructureBackwardAdapter::getStructureWithoutEmployee();
+
+			if (!empty($structure) && !empty($structure['DATA']))
+			{
+				self::$SECTIONS_SETTINGS_WITHOUT_EMPLOYEE_CACHE = $structure;
+
+				return;
+			}
+		}
+
 		self::$SECTIONS_SETTINGS_WITHOUT_EMPLOYEE_CACHE = array(
 			'TREE' => array(),
 			'DATA' => array(),

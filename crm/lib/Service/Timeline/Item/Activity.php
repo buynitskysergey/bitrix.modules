@@ -5,7 +5,10 @@ namespace Bitrix\Crm\Service\Timeline\Item;
 use Bitrix\Crm\Integration\StorageManager;
 use Bitrix\Crm\Service\Timeline\Config;
 use Bitrix\Crm\Service\Timeline\Layout;
+use Bitrix\Crm\Service\Timeline\Layout\Action\JsEvent;
+use Bitrix\Crm\Service\Timeline\Layout\Footer\Button;
 use Bitrix\Crm\Service\Timeline\Layout\Menu\MenuItemFactory;
+use Bitrix\Crm\Settings\WorkTime;
 use Bitrix\Crm\Timeline\Entity\NoteTable;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Type\DateTime;
@@ -15,6 +18,9 @@ use CCrmOwnerType;
 
 abstract class Activity extends Configurable
 {
+	protected const NEAREST_WORK_DATE_DAYS = 3;
+	protected const NEAREST_WORK_DATE_HOURS = 1;
+
 	/**
 	 * Should return unique identifier of an activity template
 	 *
@@ -158,6 +164,23 @@ abstract class Activity extends Configurable
 	protected function isPlanned(): bool
 	{
 		return is_null($this->getAssociatedEntityModel()?->get('ORIGIN_ID'));
+	}
+
+	final protected function getScheduleButton(string $jsEventName, string $buttonType = Button::TYPE_SECONDARY): Button
+	{
+		$nearestWorkday = (new WorkTime())
+			->detectNearestWorkDateTime(self::NEAREST_WORK_DATE_DAYS, self::NEAREST_WORK_DATE_HOURS)
+		;
+
+		return (new Button(Loc::getMessage('CRM_COMMON_ACTION_SCHEDULE'), $buttonType))
+			->setAction(
+				(new JsEvent($jsEventName))
+					->addActionParamInt('activityId', $this->getActivityId())
+					->addActionParamString('scheduleDate', $nearestWorkday->toString())
+					->addActionParamInt('scheduleTs', $nearestWorkday->getTimestamp()
+				)
+			)
+		;
 	}
 
 	protected function getCompleteButton(): ?Layout\Header\ChangeStreamButton

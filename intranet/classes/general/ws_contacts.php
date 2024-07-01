@@ -111,7 +111,7 @@ class CIntranetContactsWS extends IWebService
 			);
 		}
 
-		$listName = ToUpper(CIntranetUtils::makeGUID($listName_original));
+		$listName = mb_strtoupper(CIntranetUtils::makeGUID($listName_original));
 
 		/*
 		$obRes = CIBlockSection::GetList(array('SORT' => 'ASC'), array('XML_ID' => $listName_original));
@@ -296,7 +296,7 @@ class CIntranetContactsWS extends IWebService
 			}
 		}
 
-		$listName = ToUpper(CIntranetUtils::makeGUID($listName_original));
+		$listName = mb_strtoupper(CIntranetUtils::makeGUID($listName_original));
 
 		$arFilter = array('ACTIVE' => 'Y');
 
@@ -501,7 +501,7 @@ class CIntranetContactsWS extends IWebService
 			return new CSoapFault('Data error', 'Wrong GUID - '.$listName);
 		}
 
-		$listName = ToUpper(CIntranetUtils::makeGUID($listName_original));
+		$listName = mb_strtoupper(CIntranetUtils::makeGUID($listName_original));
 		$listItemID = intval($listItemID);
 
 		$dbRes = CUser::GetByID($listItemID);

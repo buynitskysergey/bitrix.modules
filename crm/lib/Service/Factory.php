@@ -16,6 +16,7 @@ use Bitrix\Crm\Item;
 use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\RelationIdentifier;
 use Bitrix\Crm\Service\EventHistory\TrackedObject;
+use Bitrix\Crm\Service\Operation\Action\Compatible\SocialNetwork\ProcessSendNotification;
 use Bitrix\Crm\Settings\Crm;
 use Bitrix\Crm\Settings\HistorySettings;
 use Bitrix\Crm\Statistics;
@@ -787,14 +788,12 @@ abstract class Factory
 	{
 		if ($this->isReference($key))
 		{
-			$regex = '|^[!=%@><]*#COMMON_FIELD_NAME#\.|';
+			$regex = '|^[!=%@><]*#COMMON_FIELD_NAME#\.|u';
 		}
 		else
 		{
-			$regex = '|^[!=%@><]*#COMMON_FIELD_NAME#$|';
+			$regex = '|^[!=%@><]*#COMMON_FIELD_NAME#$|u';
 		}
-
-		$regex .= BX_UTF_PCRE_MODIFIER;
 
 		foreach ($this->getFieldsMap() as $commonFieldName => $entityFieldName)
 		{
@@ -1384,6 +1383,10 @@ abstract class Factory
 		$restore = new Operation\Restore($item, $this->getOperationSettings($context), $this->getFieldsCollection());
 
 		$this->configureAddOperation($restore);
+		$restore->removeAction(
+			Operation::ACTION_AFTER_SAVE,
+			ProcessSendNotification\WhenAddingEntity::class,
+		);
 
 		return $restore;
 	}

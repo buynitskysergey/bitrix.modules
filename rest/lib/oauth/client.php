@@ -75,10 +75,6 @@ class Client
 		{
 			$additionalParams = array();
 		}
-		else
-		{
-			$additionalParams = Encoding::convertEncoding($additionalParams, LANG_CHARSET, "utf-8");
-		}
 
 		return $additionalParams;
 	}

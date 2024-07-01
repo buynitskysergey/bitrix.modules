@@ -119,6 +119,17 @@ final class TerminalPaysystemManager
 				'MATCH' => \Bitrix\Sale\BusinessValue::MATCH_EXACT
 			]
 		);
+		if (empty($shopId))
+		{
+			$shopId = \Bitrix\Sale\BusinessValue::getMapping(
+				'YANDEX_CHECKOUT_SHOP_ID',
+				"PAYSYSTEM_".$id,
+				null,
+				[
+					'MATCH' => \Bitrix\Sale\BusinessValue::MATCH_COMMON
+				]
+			);
+		}
 
 		return !(isset($shopId['PROVIDER_VALUE']) && $shopId['PROVIDER_VALUE']);
 	}

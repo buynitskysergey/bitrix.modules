@@ -2,6 +2,9 @@
 
 namespace Bitrix\BIConnector\Superset\Grid\Row\Assembler\Field;
 
+use Bitrix\BIConnector\Access\AccessController;
+use Bitrix\BIConnector\Access\ActionDictionary;
+use Bitrix\BIConnector\Access\Model\DashboardAccessItem;
 use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetController;
@@ -14,21 +17,24 @@ class NameFieldAssembler extends FieldAssembler
 	{
 		$id = (int)$value['ID'];
 		$title = htmlspecialcharsbx($value['TITLE']);
+		$isPinned = (bool)$value['IS_PINNED'];
 
+		$editButton = '';
 		if ($this->canEditTitle($value) && !empty($value['EDIT_URL']))
 		{
 			$editButton = $this->getEditButton($id);
 		}
-		else
-		{
-			$editButton = '';
-		}
+
+		$pinButton = $this->getPinButton($id, $isPinned);
 
 		return <<<HTML
 			<div class="dashboard-title-wrapper">
 				<div class="dashboard-title-wrapper__item dashboard-title-preview">
 					<a href='/bi/dashboard/detail/{$id}/'>{$title}</a>
-					{$editButton}
+					<div class="dashboard-title-buttons">
+						{$editButton}
+						{$pinButton}
+					</div>
 				</div>
 			</div>
 		HTML;
@@ -37,13 +43,32 @@ class NameFieldAssembler extends FieldAssembler
 	protected function getEditButton(int $dashboardId): string
 	{
 		Extension::load('ui.design-tokens');
+
 		return <<<HTML
 			<a
 				onclick="event.stopPropagation(); BX.BIConnector.SupersetDashboardGridManager.Instance.renameDashboard({$dashboardId})"
 			>
 				<i
-					class="ui-icon-set --pencil-60"
-					style="--ui-icon-set__icon-size: 21px; --ui-icon-set__icon-color: none"
+					class="ui-icon-set --pencil-60 dashboard-edit-icon"
+				></i>
+			</a>
+		HTML;
+	}
+
+	protected function getPinButton(int $dashboardId, bool $isPinned): string
+	{
+		$iconClass = $isPinned ? '--pin-2 dashboard-unpin-icon' : '--pin-1 dashboard-pin-icon';
+		$method =
+			$isPinned
+				? 'BX.BIConnector.SupersetDashboardGridManager.Instance.unpin'
+				: 'BX.BIConnector.SupersetDashboardGridManager.Instance.pin';
+
+		return <<<HTML
+			<a
+				onclick="event.stopPropagation(); {$method}({$dashboardId})"
+			>
+				<i
+					class="ui-icon-set {$iconClass}"
 				></i>
 			</a>
 		HTML;
@@ -62,13 +87,7 @@ class NameFieldAssembler extends FieldAssembler
 		{
 			if ($row['data'][$columnId])
 			{
-				$value = [
-					'TITLE' => $row['data']['TITLE'],
-					'ID' => $row['data']['ID'],
-					'EDIT_URL' => $row['data']['EDIT_URL'],
-					'TYPE' => $row['data']['TYPE'],
-					'STATUS' => $row['data']['STATUS'],
-				];
+				$value = $row['data'];
 			}
 			else
 			{
@@ -93,9 +112,17 @@ class NameFieldAssembler extends FieldAssembler
 			return false;
 		}
 
-		return (
-			$dashboardData['TYPE'] === SupersetDashboardTable::DASHBOARD_TYPE_CUSTOM
-			&& $dashboardData['STATUS'] === SupersetDashboardTable::DASHBOARD_STATUS_READY
-		);
+		if ($dashboardData['STATUS'] === SupersetDashboardTable::DASHBOARD_STATUS_READY)
+		{
+			$accessItem = DashboardAccessItem::createFromArray([
+				'ID' => (int)$dashboardData['ID'],
+				'TYPE' => $dashboardData['TYPE'],
+				'OWNER_ID' => $dashboardData['OWNER_ID'],
+			]);
+
+			return AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $accessItem);
+		}
+
+		return false;
 	}
 }

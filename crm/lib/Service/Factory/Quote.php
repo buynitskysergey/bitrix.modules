@@ -452,6 +452,10 @@ class Quote extends Factory
 				Operation::ACTION_AFTER_SAVE,
 				$this->getProductRowsSaveEventAction()
 			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenAddingEntity(),
+			)
 		;
 	}
 
@@ -486,6 +490,10 @@ class Quote extends Factory
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,
 				$this->getProductRowsSaveEventAction()
+			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenUpdatingEntity(),
 			)
 		;
 	}

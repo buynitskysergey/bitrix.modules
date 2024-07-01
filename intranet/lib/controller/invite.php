@@ -303,5 +303,17 @@ class Invite extends Main\Engine\Controller
 		];
 	}
 
+	public function confirmUserRequestAction(int $userId, string $isAccept): bool
+	{
+		if (!Intranet\CurrentUser::get()->isAdmin())
+		{
+			return false;
+		}
+
+		$result = Invitation::confirmUserRequest($userId, $isAccept === 'Y');
+		$this->addErrors($result->getErrors());
+
+		return $result->isSuccess();
+	}
 }
 

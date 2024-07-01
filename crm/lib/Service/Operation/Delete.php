@@ -5,9 +5,7 @@ namespace Bitrix\Crm\Service\Operation;
 use Bitrix\Crm\Cleaning;
 use Bitrix\Crm\Integration\PullManager;
 use Bitrix\Crm\Integrity;
-use Bitrix\Crm\Item;
 use Bitrix\Crm\Service\Container;
-use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Service\Operation;
 use Bitrix\Crm\Statistics;
 use Bitrix\Crm\Timeline\TimelineManager;
@@ -31,15 +29,23 @@ class Delete extends Operation
 	{
 		$result = new Result();
 
-		if (!Container::getInstance()->getUserPermissions(
-				$this->getContext()->getUserId()
-			)->canDeleteItem($this->item)
-		)
+		$userId = $this->getContext()->getUserId();
+		if (!Container::getInstance()->getUserPermissions($userId)->canDeleteItem($this->item))
 		{
+			$title =  $this->item->getHeading() ?? '';
+			$message = Loc::getMessage(
+				'CRM_TYPE_ITEM_PERMISSIONS_DELETE_DENIED_MSGVER_1',
+				[
+					'#ITEM_TITLE#' => TruncateText($title, 80),
+				]
+			);
 			$result->addError(
 				new Error(
-					Loc::getMessage('CRM_TYPE_ITEM_PERMISSIONS_DELETE_DENIED'),
-					static::ERROR_CODE_ITEM_DELETE_ACCESS_DENIED
+					$message,
+					static::ERROR_CODE_ITEM_DELETE_ACCESS_DENIED,
+					[
+						'id' => $this->item->getId(),
+					]
 				)
 			);
 		}

@@ -21,8 +21,8 @@ class DashboardDataProvider extends EntityDataProvider
 	public function prepareFields(): array
 	{
 		return [
-			'CREATED_BY_ID' => $this->createField('CREATED_BY_ID', [
-				'name' => Loc::getMessage('BICONNECTOR_SUPERSET_DASHBOARD_GRID_FILTER_TITLE_CREATED_BY'),
+			'OWNER_ID' => $this->createField('OWNER_ID', [
+				'name' => Loc::getMessage('BICONNECTOR_SUPERSET_DASHBOARD_GRID_FILTER_TITLE_OWNER'),
 				'default' => true,
 				'type' => 'entity_selector',
 				'partial' => true,
@@ -79,6 +79,12 @@ class DashboardDataProvider extends EntityDataProvider
 				'partial' => true,
 				'type' => 'entity_selector',
 			]),
+			'CREATED_BY_ID' => $this->createField('CREATED_BY_ID', [
+				'name' => Loc::getMessage('BICONNECTOR_SUPERSET_DASHBOARD_GRID_FILTER_TITLE_CREATED_BY'),
+				'default' => false,
+				'type' => 'entity_selector',
+				'partial' => true,
+			]),
 		];
 	}
 
@@ -99,6 +105,14 @@ class DashboardDataProvider extends EntityDataProvider
 		}
 
 		if ($fieldID === 'CREATED_BY_ID')
+		{
+			return $this->getUserEntitySelectorParams(
+				$fieldID . '_filter',
+				['fieldName' => $fieldID]
+			);
+		}
+
+		if ($fieldID === 'OWNER_ID')
 		{
 			return $this->getUserEntitySelectorParams(
 				$fieldID . '_filter',

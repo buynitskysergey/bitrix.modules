@@ -16,6 +16,7 @@ use Bitrix\Main\Entity\ExpressionField;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Main\UI\Filter\Options;
+use CCrmPerms;
 
 class Dynamic extends Kanban\Entity
 {
@@ -273,7 +274,7 @@ class Dynamic extends Kanban\Entity
 		return parent::prepareItemCommonFields($item);
 	}
 
-	public function getCategories(\CCrmPerms $permissions): array
+	public function getCategories(CCrmPerms $permissions): array
 	{
 		$result = [];
 		if(!$this->factory->isCategoriesSupported())
@@ -355,20 +356,60 @@ class Dynamic extends Kanban\Entity
 		return false;
 	}
 
-	public function deleteItems(array $ids, bool $isIgnore = false, \CCrmPerms $permissions = null, array $params = []): void
+	public function deleteItems(array $ids, bool $isIgnore = false, CCrmPerms $permissions = null, array $params = []): void
+	{
+		$this->deleteItemsV2($ids, $isIgnore, $permissions, $params);
+	}
+
+	public function deleteItemsV2(array $ids, bool $isIgnore = false, CCrmPerms $permissions = null, array $params = []): Result
 	{
 		$items = $this->factory->getItemsFilteredByPermissions([
 			'filter' => [
 				'@ID' => $ids,
 			],
 		]);
+
+		$hasEventId = !empty($params['eventId']) && is_string($params['eventId']);
+
+		if ($hasEventId)
+		{
+			$context = clone Container::getInstance()->getContext();
+			$context->setEventId($params['eventId']);
+		}
+
+		$result = new Result();
+		$deletedIds = [];
 		foreach($items as $item)
 		{
-			$this->factory->getDeleteOperation($item)->launch();
+			$itemId = $item->getId();
+			if (!in_array($itemId, $ids))
+			{
+				continue;
+			}
+
+			$operation = $this->factory->getDeleteOperation($item);
+			if ($hasEventId)
+			{
+				$operation->setContext($context);
+			}
+
+			$operationResult = $operation->launch();
+			if ($operationResult->isSuccess())
+			{
+				$deletedIds[] = (int)$itemId;
+			}
+			else
+			{
+				$result->addErrors($operationResult->getErrors());
+			}
 		}
+
+		return $result->setData([
+			'deletedIds' => $deletedIds,
+		]);
 	}
 
-	public function setItemsAssigned(array $ids, int $assignedId, \CCrmPerms $permissions): Result
+	public function setItemsAssigned(array $ids, int $assignedId, CCrmPerms $permissions): Result
 	{
 		$result = new Result();
 
@@ -470,7 +511,7 @@ class Dynamic extends Kanban\Entity
 		return $fields;
 	}
 
-	public function updateItemsCategory(array $ids, int $categoryId, \CCrmPerms $permissions): Result
+	public function updateItemsCategory(array $ids, int $categoryId, CCrmPerms $permissions): Result
 	{
 		$result = new Result();
 
@@ -525,11 +566,12 @@ class Dynamic extends Kanban\Entity
 				'hasPlusButtonTitle' => true,
 				'showPersonalSetStatusNotCompletedText' => true,
 				'useFactoryBasedApproach' => true,
+				'isRecyclebinEnabled' => $this->factory->isRecyclebinEnabled(),
 			]
 		);
 	}
 
-	public function canAddItemToStage(string $stageId, \CCrmPerms $userPermissions, string $semantics = PhaseSemantics::UNDEFINED): bool
+	public function canAddItemToStage(string $stageId, CCrmPerms $userPermissions, string $semantics = PhaseSemantics::UNDEFINED): bool
 	{
 		return Container::getInstance()->getUserPermissions()->checkAddPermissions(
 			$this->getTypeId(),

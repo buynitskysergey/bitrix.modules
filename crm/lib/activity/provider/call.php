@@ -519,7 +519,12 @@ class Call extends Base
 			],
 			false,
 			false,
-			['ID', 'SETTINGS']
+			['ID', 'SETTINGS'],
+			[
+				'QUERY_OPTIONS' => [
+					'LIMIT' => 100,
+				],
+			],
 		);
 
 		$missedOnly = $options & self::UNCOMPLETED_ACTIVITY_MISSED;
@@ -530,30 +535,25 @@ class Call extends Base
 		{
 			if ($missedOnly)
 			{
-				$isMissedCall = isset($arResult['SETTINGS']['MISSED_CALL'])
-					&& $arResult['SETTINGS']['MISSED_CALL'];
-
+				$isMissedCall = isset($arResult['SETTINGS']['MISSED_CALL']) && $arResult['SETTINGS']['MISSED_CALL'];
 				if ($isMissedCall)
 				{
-					$result[] = (int)$arResult["ID"];
+					$result[] = (int)$arResult['ID'];
 				}
 			}
 			else
 			{
 				// all call activities excluding last created call activity
-				if ($activityId !== (int)$arResult["ID"])
+				if ($activityId !== (int)$arResult['ID'])
 				{
-					$result[] = (int)$arResult["ID"];
+					$result[] = (int)$arResult['ID'];
 				}
 			}
+		}
 
-			if ($incomingOnly)
-			{
-				$result = array_filter(
-					$result,
-					fn($activityId): bool => IncomingChannel::getInstance()->isIncomingChannel($activityId)
-				);
-			}
+		if ($incomingOnly)
+		{
+			$result = IncomingChannel::getInstance()->getIncomingChannelActivityIds($result);
 		}
 
 		return array_values(array_unique($result));

@@ -22,6 +22,7 @@ final class SupersetUserRepository
 				'NAME',
 				'LAST_NAME',
 				'SUPERSET_CLIENT_ID' => 'SUPERSET_USER.CLIENT_ID',
+				'SUPERSET_PERMISSION_HASH' => 'SUPERSET_USER.PERMISSION_HASH',
 			])
 			->setFilter([
 				'=ID' => $id,
@@ -52,6 +53,7 @@ final class SupersetUserRepository
 				firstName: $user['NAME'] ?: $user['LOGIN'],
 				lastName: $user['LAST_NAME'] ?: $user['LOGIN'],
 				clientId: $user['SUPERSET_CLIENT_ID'] ?: null,
+				permissionHash: $user['SUPERSET_PERMISSION_HASH'] ?: null,
 			);
 		}
 

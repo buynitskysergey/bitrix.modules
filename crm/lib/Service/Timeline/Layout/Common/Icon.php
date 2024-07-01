@@ -53,6 +53,7 @@ class Icon
 	public const ARROW_UP = 'arrow-up';
 	public const ARROW_DOWN = 'arrow-down';
 	public const VISIT = 'visit';
+	public const CAMERA = 'camera';
 	//endregion
 
 	public static function getSystemIcons(): array

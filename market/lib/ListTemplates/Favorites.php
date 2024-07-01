@@ -72,6 +72,8 @@ class Favorites extends BaseTemplate
 		$this->result['SHOW_MARKET_ICON'] = $response[Transport::METHOD_TOTAL_APPS]['SHOW_MARKET_ICON'];
 		$this->result['ADDITIONAL_CONTENT'] = $response[Transport::METHOD_TOTAL_APPS]['ADDITIONAL_CONTENT'] ?? '';
 		$this->result['ADDITIONAL_MARKET_ACTION'] = $response[Transport::METHOD_TOTAL_APPS]['ADDITIONAL_MARKET_ACTION'] ?? '';
+		$this->result['ADDITIONAL_SEARCH_ACTION'] = $response[Transport::METHOD_TOTAL_APPS]['ADDITIONAL_SEARCH_ACTION'] ?? '';
+		$this->result['ADDITIONAL_HIT_ACTION'] = $response[Transport::METHOD_TOTAL_APPS]['ADDITIONAL_HIT_ACTION'] ?? '';
 	}
 
 	private function prepareApps($apps)

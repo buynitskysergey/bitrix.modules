@@ -5,10 +5,12 @@ namespace Bitrix\Transformer;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\ArgumentTypeException;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Error;
 use Bitrix\Main\InvalidOperationException;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\ORM\Data\UpdateResult;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Transformer\Entity\CommandTable;
@@ -25,6 +27,7 @@ class Command
 	public const STATUS_SUCCESS = 400;
 	public const STATUS_ERROR = 1000;
 
+	public const ERROR_EMPTY_CONTROLLER_URL = 40;
 	public const ERROR_CONNECTION = 50;
 	public const ERROR_CONNECTION_COUNT = 51;
 	public const ERROR_CONNECTION_RESPONSE = 60;
@@ -62,6 +65,9 @@ class Command
 	protected $time;
 	protected $error;
 	protected $errorCode;
+
+	private ?DateTime $sendTime = null;
+	private ?string $controllerUrl = null;
 
 	/**
 	 * Command constructor.
@@ -131,17 +137,28 @@ class Command
 		{
 			throw new InvalidOperationException('command should be saved before send');
 		}
+
+		$updateData = ['SEND_TIME' => new DateTime()];
+
 		$result = new Result();
-		$response = $http->query($this->command, $this->guid, $this->params);
-		if($response && $response['success'] !== false)
+		$queryResult = $http->query($this->command, $this->guid, $this->params);
+		if (!empty($queryResult['controllerUrl']))
 		{
-			$this->updateStatus(self::STATUS_SEND);
+			$updateData['CONTROLLER_URL'] = $queryResult['controllerUrl'];
+		}
+
+		if ($queryResult['success'] !== false)
+		{
+			$this->updateStatusInner(self::STATUS_SEND, '', 0, $updateData);
 			$result->setData(['commandId' => $this->id]);
 		}
 		else
 		{
-			$result = $this->processError($response['result']['code'], $response['result']['msg']);
+			$result = $this->processError($queryResult['result']['code'], $queryResult['result']['msg'], $updateData);
 		}
+
+		ServiceLocator::getInstance()->get('transformer.integration.analytics.registrar')->registerCommandSend($this);
+
 		return $result;
 	}
 
@@ -236,7 +253,18 @@ class Command
 	 */
 	public function updateStatus($status, $error = '', $errorCode = 0)
 	{
-		$status = intval($status);
+		// don't allow passing additionalUpdateData from the outside
+
+		return $this->updateStatusInner((int)$status, (string)$error, (int)$errorCode);
+	}
+
+	private function updateStatusInner(
+		int $status,
+		string $error = '',
+		int $errorCode = 0,
+		array $additionalUpdateData = []
+	): UpdateResult
+	{
 		if(!self::getStatusText($status))
 		{
 			throw new ArgumentOutOfRangeException('status');
@@ -253,20 +281,26 @@ class Command
 			'updateStatus in {guid} from {status} to {newStatus}',
 			['guid' => $this->guid, 'status' => $this->status, 'newStatus' => $status]
 		);
-		$this->status = $status;
-		$data = array('STATUS' => $status, 'UPDATE_TIME' => new DateTime());
+
+		$time = new DateTime();
+		$data = ['STATUS' => $status, 'UPDATE_TIME' => $time] + $additionalUpdateData;
 		if(!empty($error))
 		{
 			$data['ERROR'] = $error;
-			$this->error = $error;
 		}
 		if(!empty($errorCode))
 		{
-			$errorCode = intval($errorCode);
 			$data['ERROR_CODE'] = $errorCode;
-			$this->errorCode = $errorCode;
 		}
-		return CommandTable::update($this->id, $data);
+
+		$result = CommandTable::update($this->id, $data);
+
+		if ($result->isSuccess())
+		{
+			$this->setStateFromArray($data);
+		}
+
+		return $result;
 	}
 
 	/**
@@ -287,7 +321,7 @@ class Command
 	 * @return Result
 	 * @throws \Bitrix\Main\ObjectException
 	 */
-	protected function processError($errorCode = 0, $message = '')
+	protected function processError($errorCode = 0, $message = '', array $additionalUpdateData = [])
 	{
 		$error = $this->constructError($errorCode, $message);
 
@@ -297,7 +331,7 @@ class Command
 
 		if($this->id > 0)
 		{
-			$this->updateStatus(self::STATUS_ERROR, $newMessage, $error->getCode());
+			$this->updateStatusInner(self::STATUS_ERROR, $newMessage, $error->getCode(), $additionalUpdateData);
 		}
 		if(!empty($this->callback))
 		{
@@ -320,7 +354,7 @@ class Command
 			self::STATUS_SEND => 'send',
 			self::STATUS_UPLOAD => 'upload',
 			self::STATUS_SUCCESS => 'success',
-			self::STATUS_ERROR => 'error'
+			self::STATUS_ERROR => 'error',
 		);
 		if(isset($statusList[$status]))
 		{
@@ -414,26 +448,66 @@ class Command
 	 */
 	protected static function initFromArray($commandItem)
 	{
-		$commandItem['CALLBACK'] = unserialize(
-			base64_decode($commandItem['CALLBACK']),
-			[
-				'allowed_classes' => false,
-			]
+		foreach (['PARAMS', 'MODULE', 'CALLBACK'] as $keyToUnserialize)
+		{
+			$decoded = base64_decode($commandItem[$keyToUnserialize]);
+
+			$commandItem[$keyToUnserialize] = unserialize($decoded, ['allowed_classes' => false]);
+		}
+
+		$self = new self(
+			$commandItem['COMMAND'],
+			$commandItem['PARAMS'],
+			$commandItem['MODULE'],
+			$commandItem['CALLBACK'],
 		);
-		$commandItem['MODULE'] = unserialize(
-			base64_decode($commandItem['MODULE']),
-			[
-				'allowed_classes' => false,
-			]
-		);
-		$commandItem['PARAMS'] = unserialize(
-			base64_decode($commandItem['PARAMS']),
-			[
-				'allowed_classes' => false,
-			]
-		);
-		$commandItem['ID'] = intval($commandItem['ID']);
-		return new self($commandItem['COMMAND'], $commandItem['PARAMS'], $commandItem['MODULE'], $commandItem['CALLBACK'], $commandItem['STATUS'], $commandItem['ID'], $commandItem['GUID'], $commandItem['UPDATE_TIME'], $commandItem['ERROR'], $commandItem['ERROR_CODE']);
+
+		$self->setStateFromArray($commandItem);
+
+		return $self;
+	}
+
+	private function setStateFromArray(array $commandItem): void
+	{
+		if (isset($commandItem['STATUS']))
+		{
+			$this->status = (int)$commandItem['STATUS'];
+		}
+
+		if (isset($commandItem['ID']))
+		{
+			$this->id = (int)$commandItem['ID'];
+		}
+
+		if (isset($commandItem['GUID']))
+		{
+			$this->guid = (string)$commandItem['GUID'];
+		}
+
+		if (isset($commandItem['UPDATE_TIME']) && $commandItem['UPDATE_TIME'] instanceof DateTime)
+		{
+			$this->time = $commandItem['UPDATE_TIME'];
+		}
+
+		if (isset($commandItem['SEND_TIME']) && $commandItem['SEND_TIME'] instanceof DateTime)
+		{
+			$this->sendTime = $commandItem['SEND_TIME'];
+		}
+
+		if (isset($commandItem['CONTROLLER_URL']))
+		{
+			$this->controllerUrl = (string)$commandItem['CONTROLLER_URL'];
+		}
+
+		if (isset($commandItem['ERROR']))
+		{
+			$this->error = (string)$commandItem['ERROR'];
+		}
+
+		if (isset($commandItem['ERROR_CODE']))
+		{
+			$this->errorCode = (int)$commandItem['ERROR_CODE'];
+		}
 	}
 
 	/**
@@ -444,6 +518,46 @@ class Command
 	public function getTime()
 	{
 		return $this->time;
+	}
+
+	final public function getSendTime(): ?DateTime
+	{
+		return $this->sendTime;
+	}
+
+	final public function getControllerUrl(): ?string
+	{
+		return $this->controllerUrl;
+	}
+
+	final public function getQueue(): ?string
+	{
+		if (isset($this->params['queue']))
+		{
+			return (string)$this->params['queue'];
+		}
+
+		return null;
+	}
+
+	final public function getFileSize(): ?int
+	{
+		if (isset($this->params['fileSize']))
+		{
+			return (int)$this->params['fileSize'];
+		}
+
+		return null;
+	}
+
+	final public function getCommandName(): string
+	{
+		return $this->command;
+	}
+
+	final public function getGuid(): ?string
+	{
+		return $this->guid;
 	}
 
 	/**
@@ -545,7 +659,7 @@ class Command
 			{
 				self::$errorMessagesCache[static::ERROR_CONTROLLER_RIGHT_CHECK_FAILED] = $tryLater;
 			}
-			elseif (Http::isDefaultCloudControllerUsed())
+			elseif (ServiceLocator::getInstance()->get('transformer.http.controllerResolver')->isDefaultCloudControllerUsed())
 			{
 				self::$errorMessagesCache[static::ERROR_CONTROLLER_RIGHT_CHECK_FAILED] = Loc::getMessage('TRANSFORMER_COMMAND_CHECK_LICENSE');
 			}

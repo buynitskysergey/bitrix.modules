@@ -61,7 +61,9 @@ class CopilotChatBot extends Base
 		ERROR_NETWORK = 'NETWORK',
 		AI_ENGINE_ERROR_PROVIDER = 'AI_ENGINE_ERROR_PROVIDER',
 		LIMIT_IS_EXCEEDED_DAILY = 'LIMIT_IS_EXCEEDED_DAILY',
-		LIMIT_IS_EXCEEDED_MONTHLY = 'LIMIT_IS_EXCEEDED_MONTHLY'
+		LIMIT_IS_EXCEEDED_MONTHLY = 'LIMIT_IS_EXCEEDED_MONTHLY',
+		/** @see \Bitrix\AI\Limiter\Enums\ErrorLimit::BAAS_LIMIT */
+		LIMIT_IS_EXCEEDED_BAAS = 'LIMIT_IS_EXCEEDED_BAAS'
 	;
 
 	protected const BOT_PROPERTIES = [
@@ -335,7 +337,6 @@ class CopilotChatBot extends Base
 				$chat,
 				$engine,
 				$messageFields['PARAMS']['COPILOT_PROMPT_CODE'] ?? null,
-				null,
 				CopilotAnalytics::getCopilotStatusByResult($serviceRestriction)
 			);
 
@@ -581,7 +582,7 @@ class CopilotChatBot extends Base
 		}
 
 		$copilotStatus = CopilotAnalytics::getCopilotStatusByResult($result);
-		CopilotAnalytics::sendAnalyticsEvent($params['CHAT'], $engine, $params['PROMPT_CODE'], null, $copilotStatus);
+		CopilotAnalytics::sendAnalyticsEvent($params['CHAT'], $engine, $params['PROMPT_CODE'], $copilotStatus);
 
 		return $result;
 	}
@@ -937,6 +938,13 @@ class CopilotChatBot extends Base
 			{
 				case is_numeric($error->getCode()):
 				case $error->getCode() == 'HASH_EXPIRED':
+					break;
+
+				case $error->getCode() === self::LIMIT_IS_EXCEEDED_BAAS;
+					$errorMessage = Loc::getMessage(
+						'IMBOT_COPILOT_ERROR_LIMIT_BAAS',
+						['#LINK#' => '/online/?FEATURE_PROMOTER=limit_boost_copilot',]
+					);
 					break;
 
 				case ($errorDesc = Loc::getMessage('IMBOT_COPILOT_ERROR_' . $error->getCode() . '_MSGVER_1')):

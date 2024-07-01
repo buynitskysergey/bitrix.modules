@@ -1,4 +1,5 @@
-<?
+<?php
+
 class CAllCatalogLoad
 {
 	function GetList($arOrder=Array("LAST_USED"=>"DESC"), $arFilter=Array())
@@ -6,7 +7,7 @@ class CAllCatalogLoad
 		global $DB;
 		$arSqlSearch = Array();
 
-		if(!is_array($arFilter)) 
+		if(!is_array($arFilter))
 			$filter_keys = Array();
 		else
 			$filter_keys = array_keys($arFilter);
@@ -43,7 +44,7 @@ class CAllCatalogLoad
 			$strSqlSearch .= " (".$arSqlSearch[$i].") ";
 		}
 
-		$strSql = 
+		$strSql =
 			"SELECT CL.NAME, CL.VALUE, CL.TYPE, CL.LAST_USED ".
 			"FROM b_catalog_load CL ".
 			"WHERE 1 = 1 ".
@@ -122,4 +123,3 @@ class CAllCatalogLoad
 		return true;
 	}
 }
-?>

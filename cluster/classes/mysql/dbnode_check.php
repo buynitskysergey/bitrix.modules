@@ -140,28 +140,40 @@ class CClusterDBNodeCheck extends CAllClusterDBNodeCheck
 			'WIZ_REC' => '',
 		];
 
-		$hasSuperPrivilege = false;
-		$hasReplicationSlavePrivilege = false;
+		$master_version = $this->GetServerVariable($DB, 'version');
+		$isSuperRequred = version_compare($master_version, '8.0') < 0;
+
+		$privileges = [];
 		$rs = $DB->Query('SHOW GRANTS FOR CURRENT_USER');
 		while ($ar = $rs->Fetch())
 		{
 			$privilege = array_pop($ar);
-			if (strpos($privilege, ' SUPER '))
+			if (preg_match('/^GRANT (.+?) ON/', $privilege, $match))
 			{
-				$hasSuperPrivilege = true;
-			}
-			elseif (strpos($privilege, 'REPLICATION SLAVE'))
-			{
-				$hasReplicationSlavePrivilege = true;
+				$privileges = array_merge($privileges, array_map('trim', explode(',', $match[1])));
 			}
 		}
-		$is_ok = $hasSuperPrivilege || $hasReplicationSlavePrivilege;
+
+		$grantList = [];
+		if ($isSuperRequred && !in_array('SUPER', $privileges, true))
+		{
+			$grantList[] = 'SUPER';
+		}
+		if (!in_array('REPLICATION CLIENT', $privileges, true))
+		{
+			$grantList[] = 'REPLICATION CLIENT';
+		}
+		if (!$isSuperRequred && !in_array('REPLICATION_SLAVE_ADMIN', $privileges, true))
+		{
+			$grantList[] = 'REPLICATION_SLAVE_ADMIN';
+		}
+
 		$result['privilege'] = [
-			'IS_OK' => $is_ok ? CClusterDBNodeCheck::OK : CClusterDBNodeCheck::ERROR,
+			'IS_OK' => $grantList ? CClusterDBNodeCheck::ERROR : CClusterDBNodeCheck::OK,
 			'MESSAGE' => GetMessage('CLU_SLAVE_PRIVILEGE_MSG'),
-			'WIZ_REC' => ($is_ok ? '' : GetMessage('CLU_MASTER_STATUS_WIZREC', [
-				'#sql#' => "GRANT REPLICATION SLAVE on *.* to '" . $DB->DBLogin . "'@'%';",
-			])),
+			'WIZ_REC' => ($grantList ? GetMessage('CLU_MASTER_STATUS_WIZREC', [
+				'#sql#' => 'GRANT ' . implode(', ', $grantList) . " on *.* to '" . $DB->DBLogin . "'@'%';",
+			]) : ''),
 		];
 
 		$DatabaseName = $DB->DBName;
@@ -401,10 +413,18 @@ class CClusterDBNodeCheck extends CAllClusterDBNodeCheck
 			'DB_PASSWORD' => $db_password,
 		]);
 
-		ob_start();
-		$nodeDB = CDatabase::GetDBNodeConnection($node_id, true);
-		$error = ob_get_contents();
-		ob_end_clean();
+		try
+		{
+			ob_start();
+			$nodeDB = CDatabase::GetDBNodeConnection($node_id, true);
+			$error = ob_get_contents();
+			ob_end_clean();
+		}
+		catch (\Bitrix\Main\DB\ConnectionException $e)
+		{
+			$nodeDB = false;
+			$error = $e->getMessage();
+		}
 
 		if (is_object($nodeDB))
 		{
@@ -694,41 +714,31 @@ class CClusterDBNodeCheck extends CAllClusterDBNodeCheck
 
 		$isSuperRequred = version_compare($slave_version, '8.0') < 0;
 
-		$hasSuperPrivilege = false;
-		$hasReplicationClientPrivilege = false;
-		$hasReplicationSlaveAdminPrivilege = false;
+		$privileges = [];
 		$rs = $nodeDB->Query('SHOW GRANTS FOR CURRENT_USER');
 		while ($ar = $rs->Fetch())
 		{
 			$privilege = array_pop($ar);
 			if (preg_match('/^GRANT (.+?) ON/', $privilege, $match))
 			{
-				$privileges = explode(', ', $match[1]);
-				if (in_array('SUPER', $privileges))
-				{
-					$hasSuperPrivilege = true;
-				}
-				if (in_array('REPLICATION CLIENT', $privileges))
-				{
-					$hasReplicationClientPrivilege = true;
-				}
-				if (in_array('REPLICATION_SLAVE_ADMIN', $privileges))
-				{
-					$hasReplicationSlaveAdminPrivilege = true;
-				}
+				$privileges = array_merge($privileges, array_map('trim', explode(',', $match[1])));
 			}
 		}
 
 		$grantList = [];
-		if ($isSuperRequred && !$hasSuperPrivilege)
+		if ($isSuperRequred && !in_array('SUPER', $privileges, true))
 		{
 			$grantList[] = 'SUPER';
 		}
-		if (!$hasReplicationClientPrivilege)
+		if (!in_array('REPLICATION CLIENT', $privileges, true))
 		{
 			$grantList[] = 'REPLICATION CLIENT';
 		}
-		if (!$isSuperRequred && !$hasReplicationSlaveAdminPrivilege)
+		if (!in_array('REPLICATION SLAVE', $privileges, true))
+		{
+			$grantList[] = 'REPLICATION SLAVE';
+		}
+		if (!$isSuperRequred && !in_array('REPLICATION_SLAVE_ADMIN', $privileges, true))
 		{
 			$grantList[] = 'REPLICATION_SLAVE_ADMIN';
 		}
@@ -737,7 +747,7 @@ class CClusterDBNodeCheck extends CAllClusterDBNodeCheck
 			'IS_OK' => $grantList ? CClusterDBNodeCheck::ERROR : CClusterDBNodeCheck::OK,
 			'MESSAGE' => GetMessage('CLU_SLAVE_PRIVILEGE_MSG'),
 			'WIZ_REC' => ($grantList ? GetMessage('CLU_MASTER_STATUS_WIZREC', [
-				'#sql#' => "GRANT " . implode(", ", $grantList) . " on *.* to '" . $nodeDB->DBLogin . "'@'%';",
+				'#sql#' => 'GRANT ' . implode(', ', $grantList) . " on *.* to '" . $nodeDB->DBLogin . "'@'%';",
 			]) : ''),
 		];
 

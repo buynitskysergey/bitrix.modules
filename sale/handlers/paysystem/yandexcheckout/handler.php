@@ -27,7 +27,6 @@ class YandexCheckoutHandler
 	implements
 	PaySystem\IRefund,
 	PaySystem\IPartialHold,
-	PaySystem\Domain\Verification\IVerificationable,
 	PaySystem\IRecurring,
 	PaySystem\Cashbox\ISupportPrintCheck,
 	PaySystem\Cashbox\IFiscalizationAware
@@ -1446,16 +1445,6 @@ class YandexCheckoutHandler
 	{
 		$fields = $this->getPaymentMethodFields();
 		return (bool)$fields;
-	}
-
-	/**
-	 * @inheritDoc
-	 */
-	public static function getModeList(): array
-	{
-		return [
-			self::MODE_EMBEDDED,
-		];
 	}
 
 	/**

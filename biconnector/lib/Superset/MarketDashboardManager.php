@@ -13,6 +13,7 @@ use Bitrix\Main\Event;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Rest;
 use Bitrix\Rest\AppTable;
 use Bitrix\Bitrix24\Feature;
@@ -24,6 +25,7 @@ final class MarketDashboardManager
 	public const MARKET_COLLECTION_ID = 'bi_constructor_dashboards';
 	private const DASHBOARD_EXPORT_ENABLED_OPTION_NAME = 'bi_constructor_dashboard_export_enabled';
 	private const DASHBOARD_EXPORT_FEATURE_NAME = 'bi_constructor_export';
+	private const EVENT_ON_AFTER_DASHBOARD_INSTALL = 'onAfterDashboardInstall';
 
 	private static ?MarketDashboardManager $instance = null;
 	private ProxyIntegrator $integrator;
@@ -128,8 +130,17 @@ final class MarketDashboardManager
 			->setType($type)
 			->setAppId($appCode)
 			->setStatus(SupersetDashboardTable::DASHBOARD_STATUS_READY)
+			->setDateModify(new DateTime())
 			->save()
 		;
+
+		$dashboardId = $dashboard->getId();
+		$eventData = [
+			'dashboardId' => $dashboardId,
+			'type' => $type,
+		];
+		$onInstallEvent = new Event('biconnector', self::EVENT_ON_AFTER_DASHBOARD_INSTALL, $eventData);
+		$onInstallEvent->send();
 
 		DashboardManager::notifyDashboardStatus($dashboard->getId(), SupersetDashboardTable::DASHBOARD_STATUS_READY);
 

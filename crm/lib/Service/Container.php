@@ -15,18 +15,19 @@ use Bitrix\Crm\Relation\RelationManager;
 use Bitrix\Crm\Service\Factory\Dynamic;
 use Bitrix\Crm\Service\Sale\Shipment\ProductService;
 use Bitrix\Crm\Service\Sale\Terminal\PaymentService;
+use Bitrix\Crm\Service\Sign\B2e\TypeService;
 use Bitrix\Crm\Summary\SummaryFactory;
 use Bitrix\Crm\Service\Sign\B2e\ItemService;
 use Bitrix\Crm\Service\Sign\B2e\LanguageService;
 use Bitrix\Crm\Service\Sign\B2e\StageService;
 use Bitrix\Crm\Service\Sign\B2e\StatusService;
 use Bitrix\Crm\Service\Sign\B2e\TriggerService;
-use Bitrix\Crm\Service\Sign\B2e\TypeService;
 use Bitrix\Crm\Timeline;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\InvalidOperationException;
 use Bitrix\Main\Loader;
+use Bitrix\Crm\AutomatedSolution\AutomatedSolutionManager;
 
 class Container
 {
@@ -579,6 +580,11 @@ class Container
 	public function getSummaryFactory(): SummaryFactory
 	{
 		return ServiceLocator::getInstance()->get('crm.summary.summaryFactory');
+	}
+
+	public function getAutomatedSolutionManager(): AutomatedSolutionManager
+	{
+		return ServiceLocator::getInstance()->get('crm.customSection.automatedSolutionManager');
 	}
 
 	public function getSignB2eTypeService(): TypeService

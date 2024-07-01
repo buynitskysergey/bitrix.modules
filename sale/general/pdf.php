@@ -324,7 +324,6 @@ class CSalePdf
 	public static function prepareToPdf($string)
 	{
 		$string = htmlspecialcharsback($string);
-		$string = CharsetConverter::ConvertCharset($string, SITE_CHARSET, 'UTF-8');
 		$string = html_entity_decode($string, ENT_QUOTES, 'UTF-8');
 
 		return $string;

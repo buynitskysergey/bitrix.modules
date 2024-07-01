@@ -157,6 +157,7 @@ class Crm
 		}
 
 		$connection->unlock('crm_set_document_singing_enabled');
+		\Bitrix\Crm\Conversion\Entity\EntityConversionMapTable::cleanCache();
 	}
 
 	public static function isLiveFeedRecordsGenerationEnabled(): bool

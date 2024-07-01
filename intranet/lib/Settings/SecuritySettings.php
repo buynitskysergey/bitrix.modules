@@ -3,7 +3,7 @@
 namespace Bitrix\Intranet\Settings;
 
 use Bitrix\Bitrix24\Feature;
-use Bitrix\Bitrix24\OptionTable;
+use Bitrix\Bitrix24\IpAccess\Rights;
 use Bitrix\Intranet\Settings\Controls\Section;
 use Bitrix\Intranet\Settings\Controls\Selector;
 use Bitrix\Intranet\Settings\Controls\Switcher;
@@ -373,13 +373,10 @@ class SecuritySettings extends AbstractSettings
 	{
 		$result = [];
 
-		$dbIpRights = OptionTable::getList([
-			'filter' => ['=NAME' => 'ip_access_rights'],
-		]);
+		$ipRights = Rights::getInstance()->getIpAccessRights();
 
-		if ($ipRights = $dbIpRights->Fetch())
+		if (!empty($ipRights))
 		{
-			$ipRights = unserialize($ipRights['VALUE'], ['allowed_classes' => false]);
 			$ipUsersList = [];
 
 			foreach ($ipRights as $userId => $ipList)
@@ -451,30 +448,7 @@ class SecuritySettings extends AbstractSettings
 				}
 			}
 
-			if (empty($ipSettings))
-			{
-				OptionTable::delete('ip_access_rights');
-			}
-			else
-			{
-				$ipSettingsSerialize = serialize($ipSettings);
-
-				$dbIpRights = OptionTable::getList([
-					'filter' => ['=NAME' => 'ip_access_rights'],
-				]);
-
-				if ($dbIpRights->Fetch())
-				{
-					OptionTable::update('ip_access_rights', ['VALUE' => $ipSettingsSerialize]);
-				}
-				else
-				{
-					OptionTable::add([
-						'NAME' => 'ip_access_rights',
-						'VALUE' => $ipSettingsSerialize,
-					]);
-				}
-			}
+			Rights::getInstance()->saveIpAccessRights($ipSettings);
 		}
 	}
 

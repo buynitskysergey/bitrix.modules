@@ -144,7 +144,11 @@ class Manager
 		{
 			if ($this->isCustomSectionAvailable($customSection))
 			{
-				$superLeftMenuSections[] = $this->compileLeftMenuSectionDescription($customSection);
+				$customSectionDescription = $this->compileLeftMenuSectionDescription($customSection);
+				$customSectionPages = $this->compileLeftMenuSectionPages($customSection);
+
+				$superLeftMenuSections[] = $customSectionDescription;
+				array_push($superLeftMenuSections, ...$customSectionPages);
 			}
 		}
 	}
@@ -243,6 +247,22 @@ class Manager
 		return $availablePages;
 	}
 
+	/**
+	 * @param CustomSection $customSection
+	 * @return CustomSectionPage[]
+	 */
+	protected function getAvailableNotSystemPages(CustomSection $customSection): array
+	{
+		$pages = $this->getAvailablePages($customSection);
+		$systemPageCodes = $this->getSystemPagesCodes($customSection->getCode());
+
+		return array_filter($pages, static fn($page) => !in_array(
+			$page->getCode(),
+			$systemPageCodes,
+			true,
+		));
+	}
+
 	protected function isPageAvailable(CustomSectionPage $page): bool
 	{
 		$provider = $this->getProvider($page->getModuleId());
@@ -308,31 +328,56 @@ class Manager
 
 	protected function compileLeftMenuSectionDescription(CustomSection $customSection): array
 	{
-		$availablePages = $this->getAvailablePages($customSection);
+		$availablePages = $this->getAvailableNotSystemPages($customSection);
 
-		$page = $this->getUserSelectedFirstPage($customSection->getCode(), $availablePages);
-		if (is_null($page))
-		{
-			$page = $this->getLastOpenedPage($customSection->getCode(), $availablePages);
-		}
-		if (is_null($page))
-		{
-			$page = $this->getPageWithMinSort($availablePages);
-		}
+		$page =
+			$this->getUserSelectedFirstPage($customSection->getCode(), $availablePages)
+			?? $this->getLastOpenedPage($customSection->getCode(), $availablePages)
+			?? $this->getPageWithMinSort($availablePages)
+		;
 
 		return [
 			htmlspecialcharsbx($customSection->getTitle()),
 			$this->getUrlForPage($customSection->getCode(), $page->getCode()),
-			[
-				$this->getSectionRootUrl($customSection),
-			],
+			[ $this->getSectionRootUrl($customSection) ],
 			[
 				'menu_item_id' => $this->getCustomSectionMenuId($customSection->getCode()),
 				'is_custom_section' => true,
-				'counter_id' => self::buildCustomSectionCounterId($customSection->getModuleId(), $customSection->getId())
+				'counter_id' => self::buildCustomSectionCounterId(
+					$customSection->getModuleId(),
+					$customSection->getId(),
+				),
+				'FROM_IBLOCK' => true,
+				'IS_PARENT' => true,
+				'DEPTH_LEVEL' => 1,
 			],
-			''
+			'',
 		];
+	}
+
+	protected function compileLeftMenuSectionPages(CustomSection $customSection): array
+	{
+		$compiledLeftMenuPages = [];
+
+		$params = [
+			'FROM_IBLOCK' => true,
+			'DEPTH_LEVEL' => 2,
+			'IS_PARENT' => false,
+		];
+
+		foreach ($this->getAvailableNotSystemPages($customSection) as $page)
+		{
+			$pageUrl = $this->getUrlForPage($customSection->getCode(), $page->getCode());
+			$compiledLeftMenuPages[] = [
+				htmlspecialcharsbx($page->getTitle()),
+				$pageUrl,
+				[],
+				$params,
+				'',
+			];
+		}
+
+		return $compiledLeftMenuPages;
 	}
 
 	/**

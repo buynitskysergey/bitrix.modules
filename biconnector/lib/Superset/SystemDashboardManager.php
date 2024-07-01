@@ -3,6 +3,7 @@
 namespace Bitrix\BIConnector\Superset;
 
 use Bitrix\BIConnector\Integration\Superset\Model\EO_SupersetDashboard;
+use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
@@ -133,6 +134,42 @@ final class SystemDashboardManager
 				];
 
 				\CIMNotify::Add($notificationFields);
+			}
+		}
+	}
+
+	/**
+	 * Adds agent to set admin as dashboard's owner if the previous owner was fired.
+	 * @param $fields array User fields ACTIVE (Y/N) and ID.
+	 *
+	 * @return void
+	 */
+	public static function onAfterUserUpdateHandler(array $fields): void
+	{
+		if (!SupersetInitializer::isSupersetActive())
+		{
+			return;
+		}
+
+		if (!isset($fields['ACTIVE']))
+		{
+			return;
+		}
+
+		if ($fields['ACTIVE'] === 'N')
+		{
+			$userId = (int)($fields['ID'] ?? 0);
+			if ($userId)
+			{
+				\CAgent::addAgent(
+					"\\Bitrix\\BIConnector\\Integration\\Superset\\Agent::setDefaultOwnerForDashboards({$userId});",
+					'biconnector',
+					'N',
+					300,
+					'',
+					'Y',
+					convertTimeStamp(time() + \CTimeZone::getOffset() + 300, 'FULL')
+				);
 			}
 		}
 	}

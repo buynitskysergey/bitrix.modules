@@ -550,7 +550,7 @@ class CUserCMLImport
 			);
 			while($property_state_enum = $property_state->GetNext())
 			{
-				$property_state_final[ToLower($property_state_enum["VALUE"])] = $property_state_enum["ID"];
+				$property_state_final[mb_strtolower($property_state_enum["VALUE"])] = $property_state_enum["ID"];
 			}
 		}
 
@@ -926,7 +926,7 @@ class CUserCMLImport
 						'POST' => $arState['POST'],
 						'USER' => $CURRENT_USER,
 						'DEPARTMENT' => $arState['DEPARTMENT'],
-						'STATE' => array("VALUE" => $property_state_final[ToLower($arState['STATE'])])
+						'STATE' => array("VALUE" => $property_state_final[mb_strtolower($arState['STATE'])])
 					),
 				);
 
@@ -1042,7 +1042,7 @@ class CUserCMLImport
 			}
 		}
 
-		$TYPE = ToUpper($TYPE);
+		$TYPE = mb_strtoupper($TYPE);
 
 		if (false !== mb_strpos($TYPE, GetMessage('INTR_IAC_VACATION')))
 			return $this->arAbsenceTypes['VACATION'];

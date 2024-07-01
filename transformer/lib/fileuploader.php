@@ -5,7 +5,6 @@ namespace Bitrix\Transformer;
 use Bitrix\Main\Error;
 use Bitrix\Main\IO\Path;
 use Bitrix\Main\Result;
-use Bitrix\Main\Text\BinaryString;
 
 class FileUploader
 {
@@ -219,9 +218,9 @@ class FileUploader
 	 */
 	private static function parseSize($str)
 	{
-		$str = BinaryString::changeCaseToLower($str);
+		$str = strtolower($str);
 		$res = doubleval($str);
-		$suffix = BinaryString::changeCaseToLower(BinaryString::getSubstring($str, -1));
+		$suffix = strtolower(substr($str, -1));
 		if($suffix === "k")
 		{
 			$res *= 1024;

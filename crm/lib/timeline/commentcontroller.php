@@ -294,7 +294,7 @@ class CommentController extends EntityController
 
 	public static function getMentionIds($text)
 	{
-		preg_match_all("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/is" . BX_UTF_PCRE_MODIFIER, $text, $mentionList);
+		preg_match_all("/\[user\s*=\s*([^\]]*)\](.+?)\[\/user\]/isu", $text, $mentionList);
 		$mentionList = $mentionList[1];
 		if (empty($mentionList) || !is_array($mentionList))
 			return array();
@@ -451,7 +451,7 @@ class CommentController extends EntityController
 		$data['HAS_FILES'] = $data['SETTINGS']['HAS_FILES'] ?? 'N';
 		if (
 			$data['HAS_FILES'] === 'Y'
-			&& preg_match("/\\[(\\/?)(file|document id|disk file id)(.*?)\\]/is".BX_UTF_PCRE_MODIFIER, $data['COMMENT'])
+			&& preg_match("/\\[(\\/?)(file|document id|disk file id)(.*?)\\]/isu", $data['COMMENT'])
 		)
 		{
 			$data['HAS_INLINE_ATTACHMENT'] = 'Y';

@@ -2,6 +2,8 @@
 
 namespace Bitrix\BIConnector\Superset\Grid\Row\Assembler\Field;
 
+use Bitrix\BIConnector\Access\AccessController;
+use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetController;
@@ -15,7 +17,11 @@ class TagTitleFieldAssembler extends FieldAssembler
 		$id = (int)$value['ID'];
 		$title = htmlspecialcharsbx($value['TITLE']);
 
-		$editButton = $this->getEditButton($id);
+		$editButton = '';
+		if (AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_TAG_MODIFY))
+		{
+			$editButton = $this->getEditButton($id);
+		}
 
 		return <<<HTML
 			<div class="tag-title-wrapper">

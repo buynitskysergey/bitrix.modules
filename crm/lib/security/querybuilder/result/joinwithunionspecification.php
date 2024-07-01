@@ -21,8 +21,8 @@ class JoinWithUnionSpecification
 			return true;
 		}
 
-		$allowedFields = array_intersect(array_keys($filter), ['CATEGORY_ID', '=IS_RECURRING']);
+		$diff = array_diff(array_keys($filter), ['CATEGORY_ID', '=IS_RECURRING']);
 
-		return count($allowedFields) === count($filter);
+		return empty($diff);
 	}
 }

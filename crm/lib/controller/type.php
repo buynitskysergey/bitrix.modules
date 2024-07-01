@@ -4,14 +4,13 @@ namespace Bitrix\Crm\Controller;
 
 use Bitrix\Crm\Integration;
 use Bitrix\Crm\Integration\Intranet\CustomSection;
+use Bitrix\Crm\Model\Dynamic;
 use Bitrix\Crm\Model\Dynamic\TypeTable;
 use Bitrix\Crm\Relation;
 use Bitrix\Crm\RelationIdentifier;
 use Bitrix\Crm\Restriction\RestrictionManager;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\UserField\UserFieldManager;
-use Bitrix\Intranet\CustomSection\Entity\CustomSectionPageTable;
-use Bitrix\Intranet\CustomSection\Entity\CustomSectionTable;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Response\DataType\Page;
@@ -21,10 +20,12 @@ use Bitrix\Main\EventResult;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
 use Bitrix\Main\UI\PageNavigation;
-use \Bitrix\Crm\Model\Dynamic;
 
 class Type extends Base
 {
+	/** @var CustomSection[] | null $customSections */
+	protected ?array $customSections = null;
+
 	public function getDefaultPreFilters(): array
 	{
 		$preFilters = parent::getDefaultPreFilters();
@@ -143,7 +144,7 @@ class Type extends Base
 		return $this->updateAction($type, $fields);
 	}
 
-	public function updateAction(?Dynamic\Type $type = null, array $fields): ?array
+	public function updateAction(?Dynamic\Type $type = null, array $fields = []): ?array
 	{
 		if($type === null)
 		{
@@ -187,7 +188,7 @@ class Type extends Base
 			$customSections[$customSectionsArray['ID']] = CustomSection\Assembler::constructCustomSection($customSectionsArray);
 		}
 
-		$existingCustomSections = $this->moveIdToKey(Integration\IntranetManager::getCustomSections() ?? []);
+		$existingCustomSections = $this->getExistingCustomSections();
 
 		// disable deletion of smart processes if saving occurs not due to crm.type.detail
 		$isSaveFromTypeDetail = isset($fields['IS_SAVE_FROM_TYPE_DETAIL']) && $fields['IS_SAVE_FROM_TYPE_DETAIL'] === 'true';
@@ -535,181 +536,17 @@ class Type extends Base
 	 * - if page exists and section is another - update record
 	 * - if page exists and there is not sectionId - delete record
 	 * - if page does not exist - add record.
-	 *
-	 * @param Dynamic\Type $type
-	 * @param array $fields
-	 * @return Result
-	 * @todo refactor it!
 	 */
 	protected function saveCustomSections(Dynamic\Type $type, array $fields): Result
 	{
-		$result = new Result();
-		$result->setData(['isCustomSectionChanged' => false]);
-
-		if (!Integration\IntranetManager::isCustomSectionsAvailable())
-		{
-			return $result;
-		}
-		$customSectionsArrays = $fields['CUSTOM_SECTIONS'] ?? null;
-		$settings = Integration\IntranetManager::preparePageSettingsForItemsList($type->getEntityTypeId());
-		if ($customSectionsArrays === null)
-		{
-			if (array_key_exists('CUSTOM_SECTION_ID', $fields) && (int)$fields['CUSTOM_SECTION_ID'] === 0)
-			{
-				$pagesList = CustomSectionPageTable::getList([
-					'select' => ['ID'],
-					'filter' => [
-						'=MODULE_ID' => 'crm',
-						'=SETTINGS' => $settings,
-					],
-				]);
-				/** @var array $pageRow */
-				while ($pageRow = $pagesList->fetch())
-				{
-					CustomSectionPageTable::delete($pageRow['ID']);
-					$result->setData(['isCustomSectionChanged' => true]);
-				}
-			}
-			return $result;
-		}
-		if (!is_array($customSectionsArrays))
-		{
-			$customSectionsArrays = [];
-		}
-		$customSectionId = $fields['CUSTOM_SECTION_ID'] ?? 0;
-		$realCustomSectionId = null;
-		if (!empty($customSectionId) && mb_strpos($customSectionId, 'new') !== 0)
-		{
-			$customSectionId = (int)$customSectionId;
-			$realCustomSectionId = $customSectionId;
-		}
-		$existingPageId = null;
-
-		$customSections = [];
-		foreach ($customSectionsArrays as $customSectionsArray)
-		{
-			$customSections[$customSectionsArray['ID']] = CustomSection\Assembler::constructCustomSection($customSectionsArray);
-		}
-
-		$existingCustomSections = $this->moveIdToKey(Integration\IntranetManager::getCustomSections() ?? []);
-
-		foreach ($existingCustomSections as $id => $section)
-		{
-			if (!isset($customSections[$id]))
-			{
-				$deleteResult = CustomSectionTable::delete($id);
-				if (!$deleteResult->isSuccess())
-				{
-					$result->addErrors($deleteResult->getErrors());
-				}
-			}
-		}
-
-		foreach ($customSections as $id => $section)
-		{
-			if (isset($existingCustomSections[$id]))
-			{
-				if (!empty($section->getTitle()) && ($section->getTitle() !== $existingCustomSections[$id]->getTitle()))
-				{
-					$updateResult = CustomSectionTable::update($id, [
-						'TITLE' => $section->getTitle(),
-					]);
-					if (!$updateResult->isSuccess())
-					{
-						$result->addErrors($updateResult->getErrors());
-					}
-				}
-				foreach ($existingCustomSections[$id]->getPages() as $page)
-				{
-					if ($page->getSettings() === $settings)
-					{
-						$existingPageId = $page->getId();
-						break;
-					}
-				}
-			}
-			elseif (!empty($section->getTitle()))
-			{
-				$addResult = CustomSectionTable::add([
-					'TITLE' => $section->getTitle(),
-					'MODULE_ID' => 'crm',
-				]);
-				if (!$addResult->isSuccess())
-				{
-					$result->addErrors($addResult->getErrors());
-				}
-				elseif ($id === $customSectionId)
-				{
-					$realCustomSectionId = $addResult->getId();
-				}
-			}
-		}
-
-		$isCustomSectionChanged = false;
-		if ($customSectionId !== null && $realCustomSectionId > 0)
-		{
-			$isCustomSectionChanged = true;
-			if ($existingPageId > 0)
-			{
-				$updatePageResult = CustomSectionPageTable::update($existingPageId, [
-					'CUSTOM_SECTION_ID' => $realCustomSectionId,
-					'TITLE' => $type->getTitle(),
-					// empty string to provoke CODE regeneration
-					'CODE' => '',
-				]);
-				if (!$updatePageResult->isSuccess())
-				{
-					$result->addErrors($updatePageResult->getErrors());
-				}
-			}
-			else
-			{
-				$addPageResult = CustomSectionPageTable::add([
-					'TITLE' => $type->getTitle(),
-					'MODULE_ID' => 'crm',
-					'CUSTOM_SECTION_ID' => $realCustomSectionId,
-					'SETTINGS' => $settings,
-					'SORT' => 100,
-				]);
-				if (!$addPageResult->isSuccess())
-				{
-					$result->addErrors($addPageResult->getErrors());
-				}
-			}
-		}
-		elseif ($existingPageId > 0)
-		{
-			$isCustomSectionChanged = true;
-			$deletePageResult = CustomSectionPageTable::delete($existingPageId);
-			if (!$deletePageResult->isSuccess())
-			{
-				$result->addErrors($deletePageResult->getErrors());
-			}
-		}
-
-		if ($result->isSuccess())
-		{
-			Container::getInstance()->getRouter()->reInit();
-		}
-
-		$result->setData(['isCustomSectionChanged' => $isCustomSectionChanged]);
-
-		return $result;
+		return Container::getInstance()->getAutomatedSolutionManager()->updateAutomatedSolutions($type, $fields);
 	}
 
 	/**
-	 * @param CustomSection[] $array
-	 *
 	 * @return CustomSection[]
 	 */
-	protected function moveIdToKey(array $array): array
+	protected function getExistingCustomSections(): array
 	{
-		$result = [];
-		foreach ($array as $customSection)
-		{
-			$result[$customSection->getId()] = $customSection;
-		}
-
-		return $result;
+		return Container::getInstance()->getAutomatedSolutionManager()->getExistingIntranetCustomSections();
 	}
 }

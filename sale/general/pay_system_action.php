@@ -175,7 +175,7 @@ class CAllSalePaySystemAction
 	public static function OnEventLogGetAuditTypes()
 	{
 		return array(
-			"PAY_SYSTEM_ACTION_ALARM" => "[PAY_SYSTEM_ACTION_ALARM] ".GetMessage("SKGPSA_ALARM_EVENT_LOG")
+			"PAY_SYSTEM_ACTION_ALARM" => "[PAY_SYSTEM_ACTION_ALARM] ".GetMessage("SKGPSA_ALARM_EVENT_LOG_MSGVER_1")
 		);
 	}
 
@@ -1739,7 +1739,6 @@ class CAllSalePaySystemAction
 				'PAYMENT_YMPayment' => 'ASSIST_PAYMENT_YMPayment',
 				'PAYMENT_WebMoneyPayment' => 'ASSIST_PAYMENT_WebMoneyPayment',
 				'PAYMENT_QIWIPayment' => 'ASSIST_PAYMENT_QIWIPayment',
-				'PAYMENT_AssistIDCCPayment' => 'ASSIST_PAYMENT_AssistIDCCPayment',
 				'DELAY' => 'ASSIST_DELAY',
 				'DEMO' => 'PS_IS_TEST',
 				'AUTOPAY' => 'PS_CHANGE_STATUS_PAY',
@@ -1936,7 +1935,7 @@ class CAllSalePaySystemAction
 			)
 		);
 
-		$handlerAliases = $psAliases[ToLower($handler)];
+		$handlerAliases = $psAliases[mb_strtolower($handler)];
 		if (is_array($handlerAliases))
 			return array_merge($psAliases['general'], $handlerAliases);
 

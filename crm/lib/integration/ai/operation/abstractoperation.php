@@ -8,6 +8,7 @@ use Bitrix\AI\Quality;
 use Bitrix\Crm\Badge;
 use Bitrix\Crm\Dto\Dto;
 use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\Config;
 use Bitrix\Crm\Integration\AI\ErrorCode;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
@@ -16,6 +17,7 @@ use Bitrix\Crm\Integration\Analytics\Builder\AI\AIBaseEvent;
 use Bitrix\Crm\Integration\Analytics\Builder\AI\CallParsingEvent;
 use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Crm\ItemIdentifier;
+use Bitrix\Crm\Requisite\EntityLink;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Timeline\Monitor;
 use Bitrix\Crm\Timeline\ActivityController;
@@ -44,6 +46,7 @@ abstract class AbstractOperation
 	protected const ENGINE_CATEGORY = 'text';
 
 	private bool $isManualLaunch = true;
+	private ?string $contextLanguageId = null;
 
 	public function __construct(
 		protected ItemIdentifier $target,
@@ -52,6 +55,7 @@ abstract class AbstractOperation
 	)
 	{
 		$this->userId ??= Container::getInstance()->getContext()->getUserId();
+		$this->contextLanguageId = $this->getContextLanguageId();
 	}
 
 	public static function isSuitableTarget(ItemIdentifier $target): bool
@@ -441,6 +445,7 @@ abstract class AbstractOperation
 			'ERROR_MESSAGE' => null,
 			'RETRY_COUNT' => new SqlExpression('?# + 1', 'RETRY_COUNT'),
 			'IS_MANUAL_LAUNCH' => $this->isManualLaunch,
+			'LANGUAGE_ID' => $this->contextLanguageId,
 		];
 	}
 
@@ -453,7 +458,20 @@ abstract class AbstractOperation
 			'USER_ID' => $this->userId,
 			'PARENT_ID' => (int)$this->parentJobId,
 			'IS_MANUAL_LAUNCH' => $this->isManualLaunch,
+			'LANGUAGE_ID' => $this->contextLanguageId,
 		];
+	}
+
+	protected function getContextAdditionalInfo(): array
+	{
+		return [
+			'myCompanyName' => Container::getInstance()->getCompanyBroker()->getTitle(EntityLink::getDefaultMyCompanyId()),
+		];
+	}
+
+	protected function getContextLanguageId(): string
+	{
+		return Config::getDefaultLanguageId();
 	}
 
 	private function getAIEngineContext(): Context
@@ -463,7 +481,9 @@ abstract class AbstractOperation
 			'target' => $this->target->toArray(),
 			'userId' => $this->userId,
 			'parentJobId' => $this->parentJobId,
+			'additionalInfo' => $this->getContextAdditionalInfo(),
 		]);
+		$context->setLanguage($this->contextLanguageId);
 
 		return $context;
 	}
@@ -798,6 +818,7 @@ abstract class AbstractOperation
 			$job->requireParentId(),
 			$job->requireRetryCount(),
 			$job->requireIsManualLaunch(),
+			$job->requireLanguageId()
 		);
 
 		if ($job->requireExecutionStatus() === QueueTable::EXECUTION_STATUS_ERROR)

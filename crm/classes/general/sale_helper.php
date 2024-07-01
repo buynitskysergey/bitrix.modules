@@ -14,6 +14,7 @@ use Bitrix\Catalog\Access\AccessController;
 use Bitrix\Catalog\Access\ActionDictionary;
 use Bitrix\Catalog\Config\State;
 use Bitrix\Catalog\StoreDocumentTable;
+use Bitrix\Catalog\Store\EnableWizard;
 use Bitrix\Crm;
 use Bitrix\Crm\Discount;
 use Bitrix\Crm\Invoice;
@@ -319,7 +320,7 @@ class CCrmSaleHelper
 
 			if (isset($v['NAME']))
 			{
-				$item['NAME'] = (string)$item['NAME'];
+				$item['NAME'] = (string)$v['NAME'];
 			}
 			else
 			{
@@ -1405,9 +1406,15 @@ class CCrmSaleHelper
 	 */
 	public static function isProcessInventoryManagement(): bool
 	{
+		$isFeatureEnabled =
+			EnableWizard\Manager::isOnecMode()
+				? !EnableWizard\TariffChecker::isOnecInventoryManagementRestricted()
+				: RestrictionManager::getInventoryControlIntegrationRestriction()->hasPermission()
+		;
+
 		return
 			!static::isWithOrdersMode()
-			&& RestrictionManager::getInventoryControlIntegrationRestriction()->hasPermission()
+			&& $isFeatureEnabled
 			&& Loader::includeModule('catalog')
 			&& State::isUsedInventoryManagement()
 		;

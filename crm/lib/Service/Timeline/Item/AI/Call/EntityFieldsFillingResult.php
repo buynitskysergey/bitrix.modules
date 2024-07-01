@@ -59,6 +59,7 @@ final class EntityFieldsFillingResult extends Base
 				->addActionParamInt('activityId', $this->getActivityId())
 				->addActionParamInt('ownerTypeId', $this->getContext()->getEntityTypeId())
 				->addActionParamInt('ownerId', $this->getContext()->getEntityId())
+				->addActionParamString('languageTitle', $this->getJobResultLanguageTitle())
 			;
 		}
 
@@ -107,7 +108,7 @@ final class EntityFieldsFillingResult extends Base
 		return $result->getOperationStatus() === Result::OPERATION_STATUS_CONFLICT;
 	}
 
-	private function getJobResult(): ?Result
+	protected function getJobResult(): ?Result
 	{
 		$activityId = $this->getAssociatedEntityModel()?->get('ID');
 		if (!isset($activityId))

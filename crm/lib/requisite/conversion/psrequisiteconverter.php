@@ -806,7 +806,7 @@ class PSRequisiteConverter
 					$matches = array();
 					$curPsLocalization = '';
 					$psType = '';
-					if (preg_match('/(bill|quote)(_\w+)*$/i'.BX_UTF_PCRE_MODIFIER, $arPaySys['PSA_ACTION_FILE'], $matches))
+					if (preg_match('/(bill|quote)(_\w+)*$/iu', $arPaySys['PSA_ACTION_FILE'], $matches))
 					{
 						$psType = $matches[1];
 						if (count($matches) === 2 && $psType === 'bill')

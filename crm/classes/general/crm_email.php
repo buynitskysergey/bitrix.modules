@@ -1950,7 +1950,7 @@ class CCrmEMail
 					continue;
 				}
 
-				$regexp = '/'.${$regexVar}.'/i'.BX_UTF_PCRE_MODIFIER;
+				$regexp = '/'.${$regexVar}.'/iu';
 				$match = array();
 				if (preg_match($regexp, $subject, $match) === 1)
 				{
@@ -2204,13 +2204,13 @@ class CCrmEMail
 				{
 					$email = $arCommEmails[$i];
 					$match = array();
-					if(preg_match('/"([^"]+)"\s*<'.$email.'>/i'.BX_UTF_PCRE_MODIFIER, $body, $match) === 1 && count($match) > 1)
+					if(preg_match('/"([^"]+)"\s*<'.$email.'>/iu', $body, $match) === 1 && count($match) > 1)
 					{
 						$name = $match[1];
 						break;
 					}
 
-					if(preg_match('/"([^"]+)"\s*[\s*mailto\:\s*'.$email.']/i'.BX_UTF_PCRE_MODIFIER, $body, $match) === 1 && count($match) > 1)
+					if(preg_match('/"([^"]+)"\s*[\s*mailto\:\s*'.$email.']/iu', $body, $match) === 1 && count($match) > 1)
 					{
 						$name = $match[1];
 						break;

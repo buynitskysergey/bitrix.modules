@@ -287,7 +287,7 @@ class OrderAdditional
 	public static function getScripts()
 	{
 		\Bitrix\Main\Page\Asset::getInstance()->addJs("/bitrix/js/sale/admin/order_additional_info.js");
-		return '<script type="text/javascript">'.
+		return '<script>'.
 			'BX.message({
 				SALE_ORDER_ADDITIONAL_INFO_COMMENT_EDIT: "'.\CUtil::jsEscape(Loc::getMessage("SALE_ORDER_ADDITIONAL_INFO_COMMENT_EDIT")).'",
 				SALE_ORDER_ADDITIONAL_INFO_COMMENT_SAVE: "'.\CUtil::jsEscape(Loc::getMessage("SALE_ORDER_ADDITIONAL_INFO_COMMENT_SAVE")).'",

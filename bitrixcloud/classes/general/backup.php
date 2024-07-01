@@ -55,7 +55,7 @@ class CBitrixCloudBackup
 		$node = $this->infoXML->SelectNodes('/control/quota/allow');
 		if (is_object($node))
 		{
-			$this->quota =  \Bitrix\Main\Config\Ini::unformatInt($node->textContent());
+			$this->quota = \Bitrix\Main\Config\Ini::unformatInt($node->textContent());
 		}
 
 		$node = $this->infoXML->SelectNodes('/control/files');
@@ -68,7 +68,7 @@ class CBitrixCloudBackup
 			foreach ($nodeFiles as $nodeFile)
 			{
 				/* @var CDataXMLNode $nodeFile */
-				$size =  \Bitrix\Main\Config\Ini::unformatInt($nodeFile->getAttribute('size'));
+				$size = \Bitrix\Main\Config\Ini::unformatInt($nodeFile->getAttribute('size'));
 				$name = $nodeFile->getAttribute('name');
 				$this->total_size += $size;
 				$this->files[] = [

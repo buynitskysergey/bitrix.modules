@@ -431,7 +431,7 @@ class Email extends Activity\Provider\Base
 		{
 			\CCrmContentType::BBCode => (new \CTextParser())->convertText($description),
 			\CCrmContentType::Html => ($needSanitize) ? static::sanitizeBody($description) : $description,
-			default => preg_replace('/[\r\n]+/' . BX_UTF_PCRE_MODIFIER,
+			default => preg_replace('/[\r\n]+/u',
 				'<br>',
 				htmlspecialcharsbx($description)
 			),

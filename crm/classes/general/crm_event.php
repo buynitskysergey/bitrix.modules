@@ -507,7 +507,7 @@ class CCrmEvent
 		if ($sOrder == '')
 			$sOrder = 'CER.ID DESC';
 
-		$strSqlOrder = ' ORDER BY '.TrimEx($sOrder,',');
+		$strSqlOrder = ' ORDER BY '.trim($sOrder, ', ');
 
 		// where
 		$arWhereFields = array(

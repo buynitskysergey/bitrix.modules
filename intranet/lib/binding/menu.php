@@ -792,7 +792,7 @@ class Menu
 				foreach ($sections as $globalSectionCode)
 				{
 					if (
-						($globalSectionCode === 'knowledge' || $globalSectionCode === 'other')
+						$globalSectionCode === 'knowledge'
 						&& !ToolsManager::getInstance()->checkAvailabilityByToolId('knowledge_base')
 					)
 					{

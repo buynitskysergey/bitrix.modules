@@ -68,8 +68,11 @@ final class AutostartSettings implements \JsonSerializable
 	public static function getDefault(): self
 	{
 		return new self(
-			AIManager::getAllOperationTypes(),
-			true,
+			[
+				SummarizeCallTranscription::TYPE_ID,
+				FillItemFieldsFromCallTranscription::TYPE_ID,
+			],
+			false,
 		);
 	}
 
@@ -116,5 +119,15 @@ final class AutostartSettings implements \JsonSerializable
 		}
 
 		return "ai_autostart_settings_{$typeKey}";
+	}
+
+	public static function checkSavePermissions(int $entityTypeId, ?int $categoryId = null, ?int $userId = null): bool
+	{
+		return self::checkReadPermissions($entityTypeId, $categoryId, $userId);
+	}
+
+	public static function checkReadPermissions(int $entityTypeId, ?int $categoryId = null, ?int $userId = null): bool
+	{
+		return Container::getInstance()->getUserPermissions($userId)->checkUpdatePermissions($entityTypeId, 0, $categoryId);
 	}
 }

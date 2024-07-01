@@ -2,34 +2,26 @@
 
 namespace Bitrix\BIConnector\Controller;
 
-use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorResponse;
-use Bitrix\BIConnector\Integration\Superset\Integrator\ProxyIntegrator;
-use Bitrix\BIConnector\Integration\Superset\Model;
-use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
+use Bitrix\BIConnector\Access\AccessController;
+use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable;
-use Bitrix\BIConnector\Integration\Superset\SupersetController;
-use Bitrix\BIConnector\Superset\Dashboard\EmbeddedFilter;
-use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
-use Bitrix\BIConnector\Superset\Grid\DashboardGrid;
-use Bitrix\BIConnector\Superset\Grid\Settings\DashboardSettings;
-use Bitrix\BIConnector\Superset\Logger\Logger;
-use Bitrix\BIConnector\Superset\MarketDashboardManager;
+use Bitrix\Bitrix24\Feature;
 use Bitrix\Intranet\ActionFilter\IntranetUser;
-use Bitrix\Main\Application;
+use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Engine\ActionFilter\Scope;
-use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Controller;
-use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\Result;
-use Bitrix\Main\Type\Date;
-use Bitrix\Main\Web\Uri;
 
 class DashboardTag extends Controller
 {
+	protected function processBeforeAction(Action $action)
+	{
+		return $this->checkPermission();
+	}
+
 	/**
 	 * @return array
 	 */
@@ -61,7 +53,6 @@ class DashboardTag extends Controller
 
 		$userTag = SupersetTagTable::getRow([
 			'filter' => [
-				'=USER_ID' => $userId,
 				'=TITLE' => $title,
 			],
 		]);
@@ -100,11 +91,8 @@ class DashboardTag extends Controller
 	 */
 	public function renameAction(int $id, string $title): ?bool
 	{
-		$userId = $this->getCurrentUser()->getId();
-
 		$tag = SupersetTagTable::getList([
 				'filter' => [
-					'=USER_ID' => $userId,
 					'=ID' => $id,
 				],
 			])
@@ -120,7 +108,6 @@ class DashboardTag extends Controller
 
 		$existedTitle = SupersetTagTable::getRow([
 			'filter' => [
-				'=USER_ID' => $userId,
 				'=TITLE' => $title,
 			],
 			'select' => ['ID'],
@@ -153,11 +140,8 @@ class DashboardTag extends Controller
 	 */
 	public function deleteAction(int $id): ?bool
 	{
-		$userId = $this->getCurrentUser()->getId();
-
 		$tag = SupersetTagTable::getList([
 				'filter' => [
-					'=USER_ID' => $userId,
 					'=ID' => $id,
 				],
 			])
@@ -185,6 +169,21 @@ class DashboardTag extends Controller
 		}
 
 		$tag->delete();
+
+		return true;
+	}
+
+	private function checkPermission(): bool
+	{
+		if (
+			(Loader::includeModule('bitrix24') && !Feature::isFeatureEnabled('bi_constructor'))
+			|| !AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_TAG_MODIFY)
+		)
+		{
+			$this->addError(new Error('Access denied.'));
+
+			return false;
+		}
 
 		return true;
 	}

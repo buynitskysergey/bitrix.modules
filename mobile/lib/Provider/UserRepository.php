@@ -8,7 +8,7 @@ final class UserRepository
 {
 	/**
 	 * @param int[] $userIds
-	 * @return UserDTO[]
+	 * @return CommonUserDto[]
 	 */
 	public static function getByIds(array $userIds): array
 	{
@@ -28,7 +28,7 @@ final class UserRepository
 		{
 			$userId = (int)$user['ID'];
 
-			$userDTO = new UserDTO();
+			$userDTO = new CommonUserDto();
 			$userDTO->id = $userId;
 			$userDTO->login = $user['LOGIN'];
 			$userDTO->name = $user['NAME'];

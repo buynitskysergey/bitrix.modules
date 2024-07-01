@@ -587,6 +587,10 @@ final class Deal extends Factory
 			)
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenAddingEntity(),
+			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\Compatible\SendEvent('OnAfterCrmDealAdd'),
 			)
 			->addAction(
@@ -649,7 +653,12 @@ final class Deal extends Factory
 			->addAction(
 				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\Compatible\SocialNetwork\ProcessUpdate(),
-			)->addAction(
+			)
+			->addAction(
+				Operation::ACTION_AFTER_SAVE,
+				new Operation\Action\Compatible\SocialNetwork\ProcessSendNotification\WhenUpdatingEntity(),
+			)
+			->addAction(
 				Operation::ACTION_AFTER_SAVE,
 				new Operation\Action\UpdateMlScoring(),
 			)

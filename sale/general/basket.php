@@ -3847,7 +3847,7 @@ class CAllSaleUser
 			if (strval($val) == "")
 				$val = 0;
 
-			switch(ToUpper($key))
+			switch(mb_strtoupper($key))
 			{
 				case "ID":
 					$arSqlSearch[] = "ID ".($bInvert?"<>":"=")." ".intval($val)." ";

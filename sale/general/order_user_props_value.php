@@ -123,8 +123,9 @@ class CAllSaleOrderUserPropsValue
 		return $id;
 	}
 
-	protected static function addPropertyValueField($tableAlias = 'V', &$arFields, &$arSelectFields)
+	protected static function addPropertyValueField($tableAlias, &$arFields, &$arSelectFields)
 	{
+		$tableAlias ??= 'V';
 		$tableAlias = \Bitrix\Main\HttpApplication::getConnection()->getSqlHelper()->forSql($tableAlias);
 
 		// locations kept in CODEs, but must be shown as IDs

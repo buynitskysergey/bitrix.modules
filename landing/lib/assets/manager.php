@@ -306,7 +306,7 @@ class Manager
 
 			case Types::TYPE_JS:
 			{
-				$externalLink = "<script type=\"text/javascript\" src=\"$path\"></script>";
+				$externalLink = "<script src=\"$path\"></script>";
 				break;
 			}
 

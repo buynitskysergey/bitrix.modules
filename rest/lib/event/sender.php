@@ -10,6 +10,8 @@ use Bitrix\Rest\AppTable;
 use Bitrix\Rest\OAuth\Auth;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\Sqs;
+use Bitrix\Rest\Tools\Diagnostics\Event\Logger;
+use Bitrix\Rest\Tools\Diagnostics\Event\LogType;
 use Bitrix\Rest\UsageStatTable;
 use Bitrix\Rest\Tools\Diagnostics\LoggerManager;
 
@@ -52,7 +54,7 @@ class Sender
 	public static function parseEventName($name)
 	{
 		$res = array();
-		list($res['MODULE_ID'], $res['EVENT']) = explode('__', $name);
+		[$res['MODULE_ID'], $res['EVENT']] = explode('__', $name);
 
 		$res['EVENT'] = str_replace('_0_', '\\', $res['EVENT']);
 		$res['EVENT'] = str_replace('_1_', '::', $res['EVENT']);
@@ -155,19 +157,14 @@ class Sender
 		global $USER;
 
 		$offlineEvents = array();
-		$logger = LoggerManager::getInstance()->getLogger();
-		if ($logger)
-		{
-			$logger->debug(
-				"\n{delimiter}\n"
-				. "{date} - {host}\n{delimiter}\n"
-				. " Sender::call() starts.\n"
-				. "{handlersList}\n{delimiter} ",
-				[
-					'handlersList' => $handlersList,
-				]
-			);
-		}
+		LoggerManager::getInstance()->getLogger()?->debug(
+			"\n{delimiter}\n"
+			. "{date} - {host}\n{delimiter}\n"
+			. " Sender::call() starts.\n"
+			. "{handlersList}\n{delimiter} ", [
+			'handlersList' => $handlersList,
+			'MESSAGE' => LogType::SENDER_CALL_START->value,
+		]);
 
 		foreach($handlersList as $handlerInfo)
 		{
@@ -186,17 +183,13 @@ class Sender
 			$session = Session::get();
 			if(!$session)
 			{
-				if ($logger)
-				{
-					$logger->debug(
-						"\n{delimiter}\n"
-						. "{date} - {host}\n{delimiter}\n"
-						. "Session ttl exceeded {session}.\n",
-						[
-							'session' => $session,
-						]
-					);
-				}
+				LoggerManager::getInstance()->getLogger()?->info(
+					"\n{delimiter}\n"
+					. "{date} - {host}\n{delimiter}\n"
+					. "Session ttl exceeded {session}.\n", [
+					'session' => $session,
+					'MESSAGE' => LogType::CYCLIC_CALL_LIMIT->value,
+				]);
 
 				// ttl exceeded, kill session
 				return;
@@ -252,6 +245,7 @@ class Sender
 						$handler['EVENT_HANDLER'],
 						array(
 							'event' => $handler['EVENT_NAME'],
+							'event_id' => $handler['ID'],
 							'data' => $data,
 							'ts' => time(),
 						),
@@ -273,37 +267,29 @@ class Sender
 
 		if (count($offlineEvents) > 0)
 		{
-			if ($logger)
-			{
-				$logger->debug(
-					"\n{delimiter}\n"
-					. "{date} - {host}\n{delimiter}\n"
-					. "Event count: {eventCount}\n{delimiter}"
-					. "Offline event list:\n"
-					. "{offlineEvents}",
-					[
-						'eventCount' => count($offlineEvents),
-						'offlineEvents' => $offlineEvents,
-					]
-				);
-			}
+			LoggerManager::getInstance()->getLogger()?->debug(
+				"\n{delimiter}\n"
+				. "{date} - {host}\n{delimiter}\n"
+				. "Event count: {eventCount}\n{delimiter}"
+				. "Offline event list:\n"
+				. "{offlineEvents}", [
+				'eventCount' => count($offlineEvents),
+				'offlineEvents' => $offlineEvents,
+				'MESSAGE' => LogType::READY_OFFLINE_EVENT_LIST->value,
+			]);
 			static::getProviderOffline()->send($offlineEvents);
 		}
 
-		if (count(static::$queryData) > 0 && !static::$forkSet)
+		if (!static::$forkSet && count(static::$queryData) > 0)
 		{
-			if ($logger)
-			{
-				$logger->debug(
-					"\n{delimiter}\n"
-					. "{date} - {host}\n{delimiter}\n"
-					. "Registers send event background job.\n"
-					. "count: {eventCount}",
-					[
-						'eventCount' => count(static::$queryData),
-					]
-				);
-			}
+			LoggerManager::getInstance()->getLogger()?->debug(
+				"\n{delimiter}\n"
+				. "{date} - {host}\n{delimiter}\n"
+				. "Registers send event background job.\n"
+				. "count: {eventCount}", [
+				'eventCount' => count(static::$queryData),
+				'MESSAGE' => LogType::READY_ONLINE_EVENT_LIST->value,
+			]);
 			\Bitrix\Main\Application::getInstance()->addBackgroundJob(array(__CLASS__, "send"));
 			static::$forkSet = true;
 		}
@@ -314,22 +300,17 @@ class Sender
 	 */
 	public static function send()
 	{
-		$logger = LoggerManager::getInstance()->getLogger();
-		if ($logger)
-		{
-			$logger->debug(
-				"\n{delimiter}\n"
-				. "{date} - {host}\n{delimiter}\n"
-				. "Starts method Sender::send()\n"
-				. "count: {eventCount}"
-				. "Event list:\n"
-				. "{eventList}",
-				[
-					'eventCount' => count(static::$queryData),
-					'eventList' => static::$queryData,
-				]
-			);
-		}
+		LoggerManager::getInstance()->getLogger()?->debug(
+			"\n{delimiter}\n"
+			. "{date} - {host}\n{delimiter}\n"
+			. "Starts method Sender::send()\n"
+			. "count: {eventCount}"
+			. "Event list:\n"
+			. "{eventList}", [
+			'eventCount' => count(static::$queryData),
+			'eventList' => static::$queryData,
+			'MESSAGE' => LogType::SENDER_SEND_START->value,
+		]);
 		if (count(self::$queryData) > 0)
 		{
 			UsageStatTable::finalize();

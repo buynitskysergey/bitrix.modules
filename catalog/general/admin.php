@@ -1,15 +1,13 @@
 <?php
 /** @global CAdminMenu $adminMenu */
 
-use Bitrix\Main\Loader,
-	Bitrix\Catalog\Access\ActionDictionary,
-	Bitrix\Catalog\Access\AccessController,
-	Bitrix\Main\Localization\Loc,
-	Bitrix\Main\Config\Option,
-	Bitrix\Iblock,
-	Bitrix\Catalog;
-
-Loc::loadMessages(__FILE__);
+use Bitrix\Main\Loader;
+use Bitrix\Catalog\Access\ActionDictionary;
+use Bitrix\Catalog\Access\AccessController;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Config\Option;
+use Bitrix\Iblock;
+use Bitrix\Catalog;
 
 class CCatalogAdmin
 {

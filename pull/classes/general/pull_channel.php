@@ -350,7 +350,7 @@ class CPullChannel
 		if ($arRes = $res->Fetch())
 		{
 			$strSql = "DELETE FROM b_pull_channel WHERE USER_ID = ".$arRes['USER_ID']." AND CHANNEL_TYPE = '".$DB->ForSql($arRes['CHANNEL_TYPE'])."'";
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 
 			$CACHE_MANAGER->Clean("b_pchc_".$arRes['USER_ID']."_".$arRes['CHANNEL_TYPE'], self::CACHE_TABLE);
 
@@ -415,7 +415,7 @@ class CPullChannel
 			$channelTypeSql = "CHANNEL_TYPE = '".$DB->ForSQL($channelType)."'";
 
 		$strSql = "DELETE FROM b_pull_channel WHERE USER_ID = ".$userId." AND ".$channelTypeSql;
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		$CACHE_MANAGER->Clean("b_pchc_".$userId."_".$channelType, self::CACHE_TABLE);
 
@@ -619,7 +619,7 @@ class CPullChannel
 		global $DB;
 
 		$strSql = "UPDATE b_pull_channel SET LAST_ID = ".intval($lastId)." WHERE CHANNEL_ID = '".$DB->ForSQL($channelId)."'";
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		return true;
 	}
@@ -651,7 +651,7 @@ class CPullChannel
 				FROM b_pull_channel
 				WHERE DATE_CREATE < {$sqlDateFunction}
 			";
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			while ($arRes = $dbRes->Fetch())
 			{
 				self::DeleteByUser($arRes['USER_ID'], $arRes['CHANNEL_ID'], $arRes['CHANNEL_TYPE']);

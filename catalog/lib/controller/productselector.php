@@ -1178,7 +1178,7 @@ class ProductSelector extends JsonController
 		}
 
 		$item = $selectedItems[0];
-		if ($item['hidden'] === true)
+		if (($item['hidden'] ?? null) === true)
 		{
 			return null;
 		}

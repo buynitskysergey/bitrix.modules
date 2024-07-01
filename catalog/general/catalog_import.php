@@ -1,4 +1,5 @@
-<?
+<?php
+
 class CAllCatalogImport
 {
 	public static function CheckFields($ACTION, &$arFields)

@@ -420,7 +420,7 @@ class CCrmUrlTemplate
 		$this->nodes = array();
 
 		$this->template = preg_replace('/[\r\n]/', '', $this->template);
-		$result = preg_match_all('/\[\s*\/?\s*[a-z0-9_]+\s*\/?\s*\]/i'.BX_UTF_PCRE_MODIFIER,
+		$result = preg_match_all('/\[\s*\/?\s*[a-z0-9_]+\s*\/?\s*\]/iu',
 			$this->template,
 			$matches,
 			PREG_SET_ORDER|PREG_OFFSET_CAPTURE

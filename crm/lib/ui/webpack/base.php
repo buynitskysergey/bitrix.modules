@@ -33,14 +33,14 @@ abstract class Base
 	/** @var int $id ID. */
 	private $id;
 
-	/** @var int $fileId ID. */
-	private $fileId;
+	/** @var int|null $fileId ID. */
+	private ?int $fileId;
 
-	/** @var int $fileName Filename. */
-	protected $fileName;
+	/** @var string $fileName Filename. */
+	protected string $fileName;
 
-	/** @var int $file dir. */
-	protected $fileDir = 'tag';
+	/** @var string $file dir. */
+	protected string $fileDir = 'tag';
 
 	/** @var int $cacheTtl Cache ttl. */
 	protected $cacheTtl = 60;

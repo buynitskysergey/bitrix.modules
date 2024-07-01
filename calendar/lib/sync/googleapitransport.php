@@ -68,12 +68,12 @@ final class GoogleApiTransport
 			$oAuth = new CSocServGoogleOAuth($userId);
 		}
 
-		$oAuth->getEntityOAuth()->addScope(
-			[
-				'https://www.googleapis.com/auth/calendar',
-				'https://www.googleapis.com/auth/calendar.readonly',
-			]
-		);
+		$oAuth->getEntityOAuth()->addScope([
+			'https://www.googleapis.com/auth/calendar',
+			'https://www.googleapis.com/auth/calendar.readonly',
+		]);
+		$oAuth->getEntityOAuth()->removeScope('https://www.googleapis.com/auth/drive');
+
 		$oAuth->getEntityOAuth()->setUser($userId);
 		if ($oAuth->getEntityOAuth()->GetAccessToken())
 		{

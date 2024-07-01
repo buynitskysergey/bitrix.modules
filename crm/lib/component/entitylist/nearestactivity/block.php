@@ -54,7 +54,7 @@ class Block
 
 			$timeFormatted = $deadline
 				? \CCrmComponentHelper::TrimDateTimeString(FormatDate('FULL', $deadline))
-				: Loc::getMessage('CRM_ACTIVITY_TIME_NOT_SPECIFIED')
+				: Loc::getMessage('CRM_ACTIVITY_TIME_NOT_SPECIFIED_MSGVER_1')
 			;
 
 			$isDetailExist = true;

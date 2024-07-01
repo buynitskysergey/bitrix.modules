@@ -138,6 +138,10 @@ final class QueueTable extends DataManager
 			(new DatetimeField('FINISHED_TIME'))
 				->configureNullable()
 			,
+			(new StringField('LANGUAGE_ID'))
+				->configureSize(2)
+				->configureNullable()
+			,
 		];
 	}
 

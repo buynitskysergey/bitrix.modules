@@ -1,8 +1,8 @@
 <?php
+
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/catalog/general/store_docs_barcode.php");
 
-class CCatalogStoreDocsBarcode
-	extends CCatalogStoreDocsBarcodeAll
+class CCatalogStoreDocsBarcode extends CCatalogStoreDocsBarcodeAll
 {
 	public static function add($arFields)
 	{

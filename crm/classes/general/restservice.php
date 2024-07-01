@@ -14609,8 +14609,8 @@ class CCrmPaySystemRestProxy extends CCrmRestProxyBase
 			{
 				$actionFile = $row['ACTION_FILE'] ?? '';
 				/*// only quote or invoice handlers
-				if (preg_match('/quote(_\w+)*$/i'.BX_UTF_PCRE_MODIFIER, $actionFile)
-					|| preg_match('/bill(\w+)*$/i'.BX_UTF_PCRE_MODIFIER, $actionFile))
+				if (preg_match('/quote(_\w+)*$/iu', $actionFile)
+					|| preg_match('/bill(\w+)*$/iu', $actionFile))
 				{*/
 				$paySystemPersonTypes = array();
 				if (isset($row['ID']) && $row['ID'] > 0)

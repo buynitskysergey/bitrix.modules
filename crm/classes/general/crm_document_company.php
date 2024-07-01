@@ -348,7 +348,7 @@ class CCrmDocumentCompany extends CCrmDocument implements IBPWorkflowDocument
 				unset($value);
 			}
 
-			if (!$arDocumentFields[$key]["Multiple"] && is_array($arFields[$key]))
+			if (!($arDocumentFields[$key]["Multiple"] ?? false) && is_array($arFields[$key]))
 			{
 				if (count($arFields[$key]) > 0)
 				{

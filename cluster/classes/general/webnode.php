@@ -247,7 +247,7 @@ class CClusterWebNode
 			$strRequest = 'GET ' . $url . " HTTP/1.0\r\n";
 			$strRequest .= "User-Agent: BitrixSMCluster\r\n";
 			$strRequest .= "Accept: */*\r\n";
-			$strRequest .= "Host: ${host}\r\n";
+			$strRequest .= 'Host: ' . $host . "\r\n";
 			$strRequest .= "Accept-Language: en\r\n";
 			$strRequest .= "\r\n";
 			fputs($FP, $strRequest);

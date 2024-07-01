@@ -396,7 +396,7 @@ class CCrmComponentHelper
 		return true;
 	}
 
-	public static function getFieldInfoData($entityTypeId, $fieldType)
+	public static function getFieldInfoData($entityTypeId, $fieldType, array $options = [])
 	{
 		$result = [];
 		switch ($fieldType)
@@ -406,7 +406,8 @@ class CCrmComponentHelper
 					'presets'=> \CCrmInstantEditorHelper::prepareRequisitesPresetList(
 						EntityRequisite::getDefaultPresetId($entityTypeId)
 					),
-					'feedback_form' => EntityRequisite::getRequisiteFeedbackFormParams()
+					'feedback_form' => EntityRequisite::getRequisiteFeedbackFormParams(),
+					'isEditMode' => $options['IS_EDIT_MODE'] ?? false,
 				];
 				break;
 			case "requisite_address":
@@ -419,7 +420,7 @@ class CCrmComponentHelper
 					'autocompleteEnabled' => $featureRestriction->hasPermission(),
 					'featureRestrictionCallback' => (
 						$featureRestriction ? $featureRestriction->prepareInfoHelperScript() : ''
-					)
+					),
 				];
 				break;
 		}
@@ -451,7 +452,7 @@ class CCrmComponentHelper
 			'autocompleteEnabled' => $featureRestriction->hasPermission(),
 			'featureRestrictionCallback' => $featureRestriction->prepareInfoHelperScript(),
 			'addressZoneConfig' => [
-				'defaultAddressType' => EntityAddressType::getDefaultIdByZone($addressZoneId),
+				'defaultAddressType' => EntityAddressType::getDefaultIdByEditorConfigOrByZone($entityTypeId),
 				'currentZoneAddressTypes' => EntityAddressType::getIdsByZonesOrValues([$addressZoneId]),
 				'countryAddressTypeMap' => $countryAddressTypeMap,
 			],
@@ -963,7 +964,7 @@ class CCrmComponentHelper
 		$receiversJson = Main\Web\Json::encode($receivers);
 
 		return <<<JS
-<script type="text/javascript">
+<script>
 	BX.ready(() => {
 		BX.Crm.MessageSender.ReceiverRepository.onDetailsLoad({$entityTypeId}, {$entityId}, '{$receiversJson}');
 	});

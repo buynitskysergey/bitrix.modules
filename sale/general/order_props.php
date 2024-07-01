@@ -883,7 +883,7 @@ class CSaleOrderProps
 		{
 			$val = $DB->ForSql($val);
 
-			switch(ToUpper($key))
+			switch(mb_strtoupper($key))
 			{
 				case "PROPERTY_ID":
 					$strSqlSearch .= " AND PROPERTY_ID = '".trim($val)."' ";
@@ -1259,11 +1259,11 @@ final class CSaleOrderPropsAdapter implements FetchAdapter
 			{
 				if (mb_strpos($key, 'IS_') === 0)
 				{
-					$newProperty[$key] = ToUpper($value);
+					$newProperty[$key] = mb_strtoupper($value);
 				}
 				elseif(in_array($key, $correctFields))
 				{
-					$newProperty[$key] = ToUpper($value);
+					$newProperty[$key] = mb_strtoupper($value);
 				}
 			}
 

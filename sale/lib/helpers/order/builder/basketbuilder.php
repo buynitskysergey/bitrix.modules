@@ -816,8 +816,13 @@ abstract class BasketBuilder
 			$setBasketCode
 		);
 
-		if ($basketCode != $productData["BASKET_CODE"])
+		if (
+			!isset($productData['BASKET_CODE'])
+			|| $basketCode != $productData['BASKET_CODE']
+		)
+		{
 			$productData["BASKET_CODE"] = $item->getBasketCode();
+		}
 
 		if($basketCode == self::BASKET_CODE_NEW)
 		{

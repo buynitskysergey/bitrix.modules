@@ -83,7 +83,7 @@ class DuplicateOrganizationCriterion extends DuplicateCriterion
 
 			if($pattern !== '')
 			{
-				self::$typeRx[] = "/{$pattern}/i".BX_UTF_PCRE_MODIFIER;
+				self::$typeRx[] = "/{$pattern}/iu";
 			}
 		}
 
@@ -111,7 +111,7 @@ class DuplicateOrganizationCriterion extends DuplicateCriterion
 			self::$typeRx[] = '/[\xAB\xBB\x84\x91\x92\x93\x94]/';
 		}
 
-		self::$typeRx[] = '/[\"\'\-\,\.\;\:\s]/i'.BX_UTF_PCRE_MODIFIER;
+		self::$typeRx[] = '/[\"\'\-\,\.\;\:\s]/iu';
 		return self::$typeRx;
 	}
 	public function getTitle()

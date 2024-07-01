@@ -13,6 +13,7 @@ use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Event;
 use Bitrix\Main\Loader;
 use Bitrix\Intranet;
+use Bitrix\Bitrix24;
 
 class RequestParametersBuilder
 {
@@ -120,6 +121,7 @@ class RequestParametersBuilder
 			'is_cloud' => $this->isCloud ? '1' : '0',
 			'host' => $this->getHostName(),
 			'languageId' => LANGUAGE_ID,
+			'demoStatus' => $this->getDemoStatus(),
 		];
 
 		if ($this->isCloud)
@@ -178,5 +180,25 @@ class RequestParametersBuilder
 		}
 
 		return Context::getCurrent()?->getRequest()->getHttpHost();
+	}
+
+	private function getDemoStatus(): string
+	{
+		if (Loader::includeModule('bitrix24'))
+		{
+			if (\CBitrix24::IsDemoLicense())
+			{
+				return 'ACTIVE';
+			}
+
+			if (Bitrix24\Feature::isEditionTrialable('demo'))
+			{
+				return 'AVAILABLE';
+			}
+
+			return 'EXPIRED';
+		}
+
+		return 'UNKNOWN';
 	}
 }

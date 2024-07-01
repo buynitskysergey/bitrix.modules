@@ -3,8 +3,10 @@
 namespace Bitrix\Crm\Integration\AI;
 
 use Bitrix\AI\Context;
+use Bitrix\AI\Context\Language;
 use Bitrix\AI\Engine;
 use Bitrix\AI\Limiter\Usage;
+use Bitrix\Crm\Integration\AI\Model\QueueTable;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\Orchestrator;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
@@ -36,8 +38,8 @@ final class AIManager
 	public const AI_PROVIDER_PARTNER_CRM = 'ai_provider_partner_crm';
 	public const AI_DISABLED_SLIDER_CODE = 'limit_copilot_off';
 
-	private const AI_CALL_PROCESSING_OPTION_NAME = 'AI_CALL_PROCESSING_ENABLED';
-	private const AI_CALL_PROCESSING_AUTOMATICALLY_OPTION_NAME = 'AI_CALL_PROCESSING_ALLOWED_AUTO';
+	private const AI_COPILOT_FEATURE_NAME = 'crm_copilot';
+	private const AI_CALL_PROCESSING_AUTOMATICALLY_OPTION_NAME = 'AI_CALL_PROCESSING_ALLOWED_AUTO_V2';
 	private const AI_LIMIT_SLIDERS_MAP = [
 		'Daily' => 'limit_copilot_max_number_daily_requests',
 		'Monthly' => 'limit_copilot_requests',
@@ -122,18 +124,15 @@ final class AIManager
 	{
 		return
 			self::isAvailable()
-			&& Option::get('crm', self::AI_CALL_PROCESSING_OPTION_NAME, false)
+			&& Bitrix24Manager::isFeatureEnabled(self::AI_COPILOT_FEATURE_NAME)
 		;
 	}
 
 	public static function isAiCallAutomaticProcessingAllowed(): bool
 	{
-		$region = Application::getInstance()->getLicense()->getRegion();
-		$defaultValue = !in_array($region, ['ru', 'by', 'kz']);
-
 		return
 			self::isAiCallProcessingEnabled()
-			&& Option::get('crm', self::AI_CALL_PROCESSING_AUTOMATICALLY_OPTION_NAME, $defaultValue)
+			&& Option::get('crm', self::AI_CALL_PROCESSING_AUTOMATICALLY_OPTION_NAME, true)
 		;
 	}
 
@@ -143,16 +142,6 @@ final class AIManager
 			self::isAvailable()
 			&& Bitrix24Manager::isFeatureEnabled(self::AI_LICENCE_FEATURE_NAME)
 		;
-	}
-
-	public static function setAiCallProcessingEnabled(bool $isEnabled): void
-	{
-		Option::set('crm', self::AI_CALL_PROCESSING_OPTION_NAME, $isEnabled);
-		if ($isEnabled)
-		{
-			\Bitrix\Main\Config\Option::set('bitrix24', 'eula_231115_is_ready', 'Y');
-			\Bitrix\Main\Config\Option::set('ai', '~enable_settings', 'Y');
-		}
 	}
 
 	public static function setAiCallAutomaticProcessingAllowed(?bool $isAllowed): void
@@ -636,5 +625,27 @@ final class AIManager
 		}
 
 		return $result;
+	}
+
+	public static function isUserHasJobs(int $userId): bool
+	{
+		$useJob = QueueTable::query()
+			->setSelect(['ID'])
+			->where('USER_ID', $userId)
+			->setLimit(1)
+			->fetchObject()
+		;
+
+		return (bool)$useJob;
+	}
+
+	public static function getAvailableLanguageList(): array
+	{
+		if (self::isAvailable())
+		{
+			return Language::getAvailable();
+		}
+
+		return [];
 	}
 }

@@ -3,8 +3,6 @@
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Catalog\v2\Contractor;
 
-Loc::loadMessages(__FILE__);
-
 class CAllCatalogContractor
 {
 	protected static function checkFields($action, &$arFields)

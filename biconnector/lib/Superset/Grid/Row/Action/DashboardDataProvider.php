@@ -24,8 +24,10 @@ class DashboardDataProvider extends DataProvider
 			new EditAction(),
 			new CopyAction(),
 			new DeleteAction(),
-			new SettingPeriodAction(),
+			new OpenSettingsAction(),
 			new ExportAction(),
+			new AddToTopMenuAction(),
+			new DeleteFromTopMenuAction(),
 		];
 	}
 

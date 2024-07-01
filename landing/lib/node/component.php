@@ -2,6 +2,7 @@
 namespace Bitrix\Landing\Node;
 
 use \Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Web\Json;
 
 Loc::loadMessages(__FILE__);
 
@@ -291,24 +292,18 @@ class Component extends \Bitrix\Landing\Node
 					{
 						// change node manifest
 						$newExtra[$field] = $props[$field];
-						$newExtra[$field]['VALUE'] = isset($component['DATA']['PARAMS'][$field])
-													? $component['DATA']['PARAMS'][$field]
-													: '';
+						$newExtra[$field]['VALUE'] = $component['DATA']['PARAMS'][$field] ?? '';
 						// add attr
 						if (!isset($manifestFull['attrs'][$componentName]))
 						{
 							$manifestFull['attrs'][$componentName] = array();
 						}
 						$propType = self::transformPropType(array(
-							'name' => isset($fieldItem['name'])
-										? $fieldItem['name']
-										: $newExtra[$field]['NAME'],
+							'name' => $fieldItem['name'] ?? $newExtra[$field]['NAME'],
 							'style' => isset($fieldItem['style'])
 										&& $fieldItem['style'],
 							'original_type' => 'component',
-							'component_type' => isset($newExtra[$field]['TYPE'])
-										? $newExtra[$field]['TYPE']
-										: '',
+							'component_type' => $newExtra[$field]['TYPE'] ?? '',
 							'attribute' => $field,
 							'value' => self::preparePropValue(
 								$newExtra[$field]['VALUE'],
@@ -470,7 +465,7 @@ class Component extends \Bitrix\Landing\Node
 					{
 						$item['value'] = explode(',', $item['value']);
 					}
-					$items = \Cutil::jsObjectToPhp($prop['JS_DATA']);
+					$items = Json::decode($prop['JS_DATA']);
 					if (is_array($items))
 					{
 						foreach ($items as $code => $val)
@@ -581,7 +576,7 @@ class Component extends \Bitrix\Landing\Node
 	{
 		if (!is_array($value))
 		{
-			$value = \CUtil::jsObjectToPhp($value);
+			$value = \CUtil::jsObjectToPhp($value, true);
 		}
 
 		if (isset($prop['TYPE']))

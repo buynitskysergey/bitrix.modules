@@ -145,7 +145,7 @@ class AddressField extends BaseField
 			$regExps[] = '/[\\xAB\\xBB\\x84\\x91\\x92\\x93\\x94]/';
 		}
 
-		$regExps[] = '/["`\'\\-,.;:\\s]/i' . BX_UTF_PCRE_MODIFIER;
+		$regExps[] = '/["`\'\\-,.;:\\s]/iu';
 
 		return mb_strtolower(trim(preg_replace($regExps, '', $value)));
 	}

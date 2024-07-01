@@ -514,7 +514,7 @@ class ImportHelper
 										'id' => $rqPrefix."{$fieldName}_{$addrFieldName}|$countryId",
 										'name' => GetMessage('CRM_REQUISITE_FILTER_PREFIX').
 											' ('.$countryList[$countryId].')'.': '.$fieldTitle.' - '.
-											ToLower($addressLabels[$addrFieldName]),
+											mb_strtolower($addressLabels[$addrFieldName]),
 										'group' => 'address',
 										'field' => $addrFieldName,
 										'fieldType' => isset($addrFieldTypeMap[$addrFieldName]) ?
@@ -2390,8 +2390,8 @@ class ImportHelper
 				}
 				else if ($fieldType === 'boolean')
 				{
-					$value = ToUpper($value);
-					$yesStr = ToUpper(Loc::getMessage('MAIN_YES'));
+					$value = mb_strtoupper($value);
+					$yesStr = mb_strtoupper(Loc::getMessage('MAIN_YES'));
 					$value = ($value === 'Y' || $value === $yesStr || $value == 1) ? 'Y' : 'N';
 					if ($isUF)
 						$value = $value === 'Y' ? 1 : 0;
@@ -2568,8 +2568,8 @@ class ImportHelper
 				}
 				else if ($fieldType === 'boolean')
 				{
-					$value = ToUpper($value);
-					$yesStr = ToUpper(Loc::getMessage('MAIN_YES'));
+					$value = mb_strtoupper($value);
+					$yesStr = mb_strtoupper(Loc::getMessage('MAIN_YES'));
 					$value = ($value === 'Y' || $value === $yesStr || $value == 1) ? 'Y' : 'N';
 				}
 

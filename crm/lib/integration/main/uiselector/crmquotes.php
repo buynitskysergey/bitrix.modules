@@ -250,7 +250,7 @@ class CrmQuotes extends CrmBase
 			$filter['%TITLE'] = $search;
 			$filter['LOGIC'] = 'OR';
 		}
-		else if (preg_match('/( . *)\[(\d+?)\]/i'.BX_UTF_PCRE_MODIFIER, $search, $matches))
+		else if (preg_match('/( . *)\[(\d+?)\]/iu', $search, $matches))
 		{
 			$filter['ID'] = (int) $matches[2];
 			$searchString = trim($matches[1]);

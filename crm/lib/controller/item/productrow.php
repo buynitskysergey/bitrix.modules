@@ -385,7 +385,7 @@ class ProductRow extends Base
 	{
 		$isErrorProneOperation = static function(string $key): bool {
 			return (
-				preg_match('/([<>])/' . BX_UTF_PCRE_MODIFIER, $key)
+				preg_match('/([<>])/u', $key)
 				&& mb_strpos($key, '><') === false
 			);
 		};

@@ -81,9 +81,6 @@ class CUserHRXMLImport
 		}
 
 		$this->PersonIDSchemeName = COption::GetOptionString("intranet", "import_PersonIDSchemeName", "");
-		global $APPLICATION;
-		if (toUpper(LANG_CHARSET) != "UTF-8")
-			$this->PersonIDSchemeName = $APPLICATION->ConvertCharset($this->PersonIDSchemeName, LANG_CHARSET, 'utf-8');
 
 		if (empty($this->PersonIDSchemeName))
 		{
@@ -178,13 +175,13 @@ class CUserHRXMLImport
 		);
 
 		if (isset($applicationArea->Sender->LogicalID))
-			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['LogicalID'] = $this->ConvertCharset($applicationArea->Sender->LogicalID);
+			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['LogicalID'] = $applicationArea->Sender->LogicalID;
 		if (isset($applicationArea->Sender->ComponentID))
-			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['ComponentID'] = $this->ConvertCharset($applicationArea->Sender->ComponentID);
+			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['ComponentID'] = $applicationArea->Sender->ComponentID;
 		if (isset($applicationArea->Sender->TaskID))
-			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['TaskID'] = $this->ConvertCharset($applicationArea->Sender->TaskID);
+			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['TaskID'] = $applicationArea->Sender->TaskID;
 		if (isset($applicationArea->Sender->ConfirmationCode))
-			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['ConfirmationCode'] = $this->ConvertCharset($applicationArea->Sender->ConfirmationCode);
+			$answer['DataArea']['Confirm']['OriginalApplicationArea']['Sender']['ConfirmationCode'] = $applicationArea->Sender->ConfirmationCode;
 		if (!empty($this->errors))
 		{
 			$answer['DataArea']['BOD']['BODFailureMessage'] = array(
@@ -289,7 +286,6 @@ class CUserHRXMLImport
 			else
 				$tempUserData['WORK_POSITION'] = '';
 
-			$tempUserData = $this->ConvertCharset($tempUserData);
 			$last = $this->STRUCTURE_ROOT;
 			$lastXML_ID = '';
 
@@ -306,7 +302,6 @@ class CUserHRXMLImport
 							'IBLOCK_ID' => $this->DEPARTMENTS_IBLOCK_ID,
 							'IBLOCK_SECTION_ID' => $last,
 						);
-						$arItem = $this->ConvertCharset($arItem);
 						if (!array_key_exists($arItem['XML_ID'], $arSections))
 						{
 							$res = CIBlockSection::GetList(
@@ -479,7 +474,6 @@ class CUserHRXMLImport
 					$arFields['DETAIL_TEXT'] .= '<pre>' . ((string) $description->Content) . '</pre><br>';
 				}
 			}
-			$arFields = $this->ConvertCharset($arFields);
 			if ($arVacancy = $rsVacancy->GetNext())
 			{
 				$el->Update($arVacancy['ID'], $arFields);
@@ -538,7 +532,6 @@ class CUserHRXMLImport
 						$sec = new CIBlockSection;
 						$arFields['NAME'] = (string) $value->OrganizationUnit->ParentOrganizationUnit->OrganizationName;
 						$arFields['IBLOCK_SECTION_ID'] = $this->STRUCTURE_ROOT;
-						$arFields = $this->ConvertCharset($arFields);
 						$id = $sec->Add($arFields);
 						if ($id)
 							$arSections[$arFields['XML_ID']] = $id;
@@ -551,7 +544,6 @@ class CUserHRXMLImport
 				$arUnitFields['IBLOCK_SECTION_ID'] = $this->STRUCTURE_ROOT;
 			}
 
-			$arUnitFields = $this->ConvertCharset($arUnitFields);
 			$sec = new CIBlockSection;
 			if (array_key_exists($arUnitFields['XML_ID'], $arSections))
 			{
@@ -653,7 +645,6 @@ class CUserHRXMLImport
 				$arHistoryRecord['PROPERTY_VALUES'] = $arHistoryPROP;
 				$arHistoryRecord['NAME'] = ' - '.(string) $assignment->ResourcePerson->PersonName->FormattedName;
 				$arHistoryRecord['ACTIVE_FROM'] = explode('-', (string) $assignment->AssignmentAvailability->StartDate->FormattedDateTime);
-				$arHistoryRecord = $this->ConvertCharset($arHistoryRecord);
 				$arHistoryRecord['ACTIVE_FROM'] = $arHistoryRecord['ACTIVE_FROM'][2].'.'
 					.$arHistoryRecord['ACTIVE_FROM'][1].'.'.$arHistoryRecord['ACTIVE_FROM'][0];
 				$arHistoryRecord['NAME'] = $arStates[(string) $assignment->StaffingAssignmentStatusCode]['NAME']
@@ -743,7 +734,6 @@ class CUserHRXMLImport
 								'VALUE' => $attr['name'],
 								'XML_ID' => $timeIntervalTypeCode,
 							);
-							$arFields = $this->ConvertCharset($arFields);
 							if ($PropID = $ibpenum->Add($arFields))
 							{
 								$arTimePROP['ABSENCE_TYPE'] = $PropID;
@@ -767,7 +757,6 @@ class CUserHRXMLImport
 					$arTimeRecord['ACTIVE_TO'] = $arTimeRecord['ACTIVE_TO'][2].'.'
 						.$arTimeRecord['ACTIVE_TO'][1].'.'
 						.$arTimeRecord['ACTIVE_TO'][0];
-					$arTimeRecord = $this->ConvertCharset($arTimeRecord);
 					$arTimeRecord['NAME'] = $arStates[$timeIntervalTypeCode]['NAME'];
 					$result = $obElement->Add($arTimeRecord);
 				}
@@ -892,16 +881,6 @@ class CUserHRXMLImport
 
 		return $CURRENT_USER;
 	}
-
-	private function ConvertCharset($data)
-	{
-		global $APPLICATION;
-		if (toUpper(LANG_CHARSET) != "UTF-8")
-			return $APPLICATION->ConvertCharsetArray($data, 'utf-8', LANG_CHARSET);
-		else
-			return $data;
-	}
-
 
 	private function GetPersonGUID($codes)
 	{

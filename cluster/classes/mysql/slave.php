@@ -263,17 +263,24 @@ class CClusterSlave
 			{
 				//TODO check if started just make active
 				$rs = $nodeDB->Query('STOP SLAVE', false, '', ['fixed_connection' => true]);
+
 				if ($rs)
 				{
-					$rs = $nodeDB->Query('SET GLOBAL SQL_SLAVE_SKIP_COUNTER = 1', false, '',
-						['fixed_connection' => true]);
+					$rs = $nodeDB->Query('SET GLOBAL SQL_SLAVE_SKIP_COUNTER = 1', true, '', ['fixed_connection' => true]);
+					if (!$rs)
+					{
+						return $nodeDB->GetErrorMessage();
+					}
 				}
+
 				if ($rs)
 				{
 					$nodeDB->Query('START SLAVE', false, '', ['fixed_connection' => true]);
 				}
 			}
 		}
+
+		return true;
 	}
 
 	public static function GetStatus($node_id, $bSlaveStatus = true, $bGlobalStatus = true, $bVariables = true)
@@ -326,7 +333,7 @@ class CClusterSlave
 
 		if (
 			CACHED_b_cluster_dbnode !== false
-			&& $managedCache->Read(CACHED_b_cluster_dbnode, $cacheID, 'b_cluster_dbnode')
+			&& $managedCache->read(CACHED_b_cluster_dbnode, $cacheID, 'b_cluster_dbnode')
 		)
 		{
 			$existSlave = $managedCache->get($cacheID);

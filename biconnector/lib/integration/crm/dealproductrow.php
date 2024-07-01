@@ -206,8 +206,8 @@ class DealProductRow
 					],
 				],
 				'PARENT' => self::getParentDescription($helper),
-				'SUPERPARENT' => self::getSuperParentDescription(),
-				'SUPERSUPERPARENT' => self::getSuperSuperParentDescription(),
+				'SUPERPARENT' => self::getSuperParentDescription($helper),
+				'SUPERSUPERPARENT' => self::getSuperSuperParentDescription($helper),
 			],
 		];
 
@@ -236,12 +236,10 @@ class DealProductRow
 				'FIELD_NAME' => 'IS1.NAME',
 				'FIELD_TYPE' => 'string',
 				'TABLE_ALIAS' => 'IS1',
-				'LEFT_JOIN' => '
-					LEFT JOIN b_iblock_section_element ISE ON ISE.IBLOCK_ELEMENT_ID = ' . ($parentProductQuery ? $helper->getIsNullFunction($parentProductQuery, 'PR.PRODUCT_ID') : 'PR.PRODUCT_ID') . '
-					LEFT JOIN b_iblock_section IS1 ON IS1.ID = ISE.IBLOCK_SECTION_ID
-					LEFT JOIN b_iblock_section IS2 ON IS2.ID = IS1.IBLOCK_SECTION_ID
-					LEFT JOIN b_iblock_section IS3 ON IS3.ID = IS2.IBLOCK_SECTION_ID
-				',
+				'LEFT_JOIN' => [
+					'LEFT JOIN b_iblock_element IE ON IE.ID = ' . ($parentProductQuery ? $helper->getIsNullFunction($parentProductQuery, 'PR.PRODUCT_ID') : 'PR.PRODUCT_ID'),
+					'LEFT JOIN b_iblock_section IS1 ON IS1.ID = IE.IBLOCK_SECTION_ID',
+				],
 			];
 		}
 
@@ -251,14 +249,21 @@ class DealProductRow
 		];
 	}
 
-	private static function getSuperParentDescription(): array
+	private static function getSuperParentDescription(\Bitrix\Main\DB\SqlHelper $helper): array
 	{
 		if (Loader::includeModule('iblock'))
 		{
+			$parentProductQuery = self::getParentProductIdQuery();
+
 			return [
 				'FIELD_NAME' => 'IS2.NAME',
 				'FIELD_TYPE' => 'string',
 				'TABLE_ALIAS' => 'IS2',
+				'LEFT_JOIN' => [
+					'LEFT JOIN b_iblock_element IE ON IE.ID = ' . ($parentProductQuery ? $helper->getIsNullFunction($parentProductQuery, 'PR.PRODUCT_ID') : 'PR.PRODUCT_ID'),
+					'LEFT JOIN b_iblock_section IS1 ON IS1.ID = IE.IBLOCK_SECTION_ID',
+					'LEFT JOIN b_iblock_section IS2 ON IS2.ID = IS1.IBLOCK_SECTION_ID',
+				],
 			];
 		}
 
@@ -268,14 +273,22 @@ class DealProductRow
 		];
 	}
 
-	private static function getSuperSuperParentDescription(): array
+	private static function getSuperSuperParentDescription(\Bitrix\Main\DB\SqlHelper $helper): array
 	{
 		if (Loader::includeModule('iblock'))
 		{
+			$parentProductQuery = self::getParentProductIdQuery();
+
 			return [
 				'FIELD_NAME' => 'IS3.NAME',
 				'FIELD_TYPE' => 'string',
 				'TABLE_ALIAS' => 'IS3',
+				'LEFT_JOIN' => [
+					'LEFT JOIN b_iblock_element IE ON IE.ID = ' . ($parentProductQuery ? $helper->getIsNullFunction($parentProductQuery, 'PR.PRODUCT_ID') : 'PR.PRODUCT_ID'),
+					'LEFT JOIN b_iblock_section IS1 ON IS1.ID = IE.IBLOCK_SECTION_ID',
+					'LEFT JOIN b_iblock_section IS2 ON IS2.ID = IS1.IBLOCK_SECTION_ID',
+					'LEFT JOIN b_iblock_section IS3 ON IS3.ID = IS2.IBLOCK_SECTION_ID',
+				],
 			];
 		}
 
@@ -287,6 +300,12 @@ class DealProductRow
 
 	private static function getParentProductIdQuery(): ?string
 	{
+		static $query = null;
+		if ($query)
+		{
+			return $query;
+		}
+
 		$crmCatalogIblockOfferId = \Bitrix\Crm\Product\Catalog::getDefaultOfferId();
 		if  (!$crmCatalogIblockOfferId)
 		{
@@ -324,9 +343,13 @@ class DealProductRow
 		$crmCatalogIblockOfferVersion = (int)$crmCatalogIblockOffer['VERSION'];
 		if ($crmCatalogIblockOfferVersion === 1)
 		{
-			return "(SELECT VALUE FROM b_iblock_element_property where IBLOCK_ELEMENT_ID = PR.PRODUCT_ID and IBLOCK_PROPERTY_ID = {$skuPropertyId})";
+			$query = "(SELECT VALUE FROM b_iblock_element_property where IBLOCK_ELEMENT_ID = PR.PRODUCT_ID and IBLOCK_PROPERTY_ID = {$skuPropertyId})";
+		}
+		else
+		{
+			$query = "(SELECT PROPERTY_{$skuPropertyId} FROM b_iblock_element_prop_s{$crmCatalogIblockOfferId} where IBLOCK_ELEMENT_ID = PR.PRODUCT_ID)";
 		}
 
-		return "(SELECT PROPERTY_{$skuPropertyId} FROM b_iblock_element_prop_s{$crmCatalogIblockOfferId} where IBLOCK_ELEMENT_ID = PR.PRODUCT_ID)";
+		return $query;
 	}
 }

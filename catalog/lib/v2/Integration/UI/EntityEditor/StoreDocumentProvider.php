@@ -929,15 +929,21 @@ class StoreDocumentProvider extends BaseProvider
 				'CURRENCY',
 				'FULL_NAME' => 'CURRENT_LANG_FORMAT.FULL_NAME',
 				'SORT',
+				'BASE',
 			],
 			'order' => [
 				'BASE' => 'DESC',
 				'SORT' => 'ASC',
 				'CURRENCY' => 'ASC',
 			],
+			'cache' => [
+				'ttl' => 86400,
+				'cache_joins' => true,
+			]
 		])->fetchAll();
 		foreach ($existingCurrencies as $currency)
 		{
+			$currency['FULL_NAME'] ??= $currency['CURRENCY'];
 			$result[] = $this->prepareCurrencyListItem($currency);
 		}
 

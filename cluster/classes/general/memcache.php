@@ -55,7 +55,7 @@ class CClusterMemcache
 				$GROUP_ID = $defGroup;
 			}
 
-			$content .= "\t" . intval($i) . " => array(\n";
+			$content .= "\t" . intval($i) . " => [\n";
 			$content .= "\t\t'ID' => \"" . EscapePHPString($arServer['ID']) . "\",\n";
 			$content .= "\t\t'GROUP_ID' => " . $GROUP_ID . ",\n";
 			$content .= "\t\t'HOST' => \"" . EscapePHPString($arServer['HOST']) . "\",\n";
@@ -73,17 +73,15 @@ class CClusterMemcache
 			{
 				$content .= "\t\t'STATUS' => \"READY\",\n";
 			}
-			$content .= "\t),\n";
+			$content .= "\t],\n";
 		}
 
 		$content .= '];';
 		$content .= "\n";
 
-		file_put_contents(
-			$_SERVER['DOCUMENT_ROOT'] . BX_ROOT . '/modules/cluster/memcache.php'
-			,$content
-		);
-		bx_accelerator_reset();
+		$filename = $_SERVER['DOCUMENT_ROOT'] . BX_ROOT . '/modules/cluster/memcache.php';
+		file_put_contents($filename, $content);
+		\Bitrix\Main\Application::resetAccelerator($filename);
 
 		self::$systemConfigurationUpdate = null;
 		$cache = \Bitrix\Main\Config\Configuration::getValue('cache');

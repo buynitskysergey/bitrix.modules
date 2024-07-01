@@ -1,14 +1,13 @@
-<?
-use Bitrix\Main,
-	Bitrix\Main\Localization\Loc,
-	Bitrix\Catalog;
+<?php
 
-Loc::loadMessages(__FILE__);
+use Bitrix\Main;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Catalog;
 
 abstract class CCatalogProductSetAll
 {
-	const TYPE_SET = 1;
-	const TYPE_GROUP = 2;
+	public const TYPE_SET = 1;
+	public const TYPE_GROUP = 2;
 
 	protected static $arErrors = array();
 	protected static $disableShowErrors = 0;
