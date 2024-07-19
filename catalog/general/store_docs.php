@@ -85,7 +85,7 @@ class CAllCatalogDocs
 		if(!empty($strUpdate))
 		{
 			$strSql = "update b_catalog_store_docs set ".$strUpdate." where ID = ".$id;
-			if(!$DB->Query($strSql, true, "File: ".__FILE__."<br>Line: ".__LINE__))
+			if(!$DB->Query($strSql, true))
 				return false;
 
 			if(isset($arFields["ELEMENT"]))

@@ -12,7 +12,7 @@ class CAllCatalogLoad
 		else
 			$filter_keys = array_keys($arFilter);
 
-		for($i=0; $i<count($filter_keys); $i++)
+		for ($i = 0, $max = count($filter_keys); $i < $max; $i++)
 		{
 			$val = $DB->ForSql($arFilter[$filter_keys[$i]]);
 			if ($val == '') continue;
@@ -38,7 +38,7 @@ class CAllCatalogLoad
 		}
 
 		$strSqlSearch = "";
-		for($i=0; $i<count($arSqlSearch); $i++)
+		for ($i = 0, $max = count($arSqlSearch); $i < $max; $i++)
 		{
 			$strSqlSearch .= " AND ";
 			$strSqlSearch .= " (".$arSqlSearch[$i].") ";
@@ -67,7 +67,8 @@ class CAllCatalogLoad
 		}
 
 		$strSqlOrder = "";
-		DelDuplicateSort($arSqlOrder); for ($i=0; $i<count($arSqlOrder); $i++)
+		DelDuplicateSort($arSqlOrder);
+		for ($i = 0, $max = count($arSqlOrder); $i < $max; $i++)
 		{
 			if ($i==0)
 				$strSqlOrder = " ORDER BY ";
@@ -79,8 +80,7 @@ class CAllCatalogLoad
 
 		$strSql .= $strSqlOrder;
 
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
-		return $db_res;
+		return $DB->Query($strSql);
 	}
 
 	function Add($arFields)
@@ -94,7 +94,7 @@ class CAllCatalogLoad
 		$strSql =
 			"INSERT INTO b_catalog_load(".$arInsert[0].") ".
 			"VALUES(".$arInsert[1].")";
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		return true;
 	}

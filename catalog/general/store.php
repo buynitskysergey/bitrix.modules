@@ -247,7 +247,7 @@ class CAllCatalogStore
 			}
 
 			$strSql = "update b_catalog_store set ".$strUpdate." where ID = ".$id;
-			if(!$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__))
+			if(!$DB->Query($strSql))
 				return false;
 			CCatalogStoreControlUtil::clearStoreName($id);
 

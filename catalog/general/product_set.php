@@ -184,7 +184,7 @@ abstract class CCatalogProductSetAll
 		}
 
 		$strSql = 'delete from b_catalog_product_sets where OWNER_ID='.$intProductID.' and TYPE='.$intSetType;
-		$DB->Query($strSql, false, 'File: '.__FILE__.'<br>Line: '.__LINE__);
+		$DB->Query($strSql);
 		switch ($intSetType)
 		{
 			case self::TYPE_SET:

@@ -268,7 +268,7 @@ class CCatalogProductSetAvailable extends CCatalogStepOperations
 			if (!empty($strUpdate))
 			{
 				$strQuery = "update ".$tableName." set ".$strUpdate." where ID = ".$productSet['ID'];
-				$DB->Query($strQuery, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strQuery);
 			}
 			$this->setLastId($productSet['ID']);
 			if ($this->isStopOperation())
@@ -1613,7 +1613,7 @@ class CCatalogProductSettings extends CCatalogProductAvailable
 			if (!empty($strUpdate))
 			{
 				$strQuery = "update ".$tableName." set ".$strUpdate." where ID = ".$productSet['ID'];
-				$DB->Query($strQuery, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strQuery);
 			}
 			$this->setLastId($productSet['ID']);
 			if ($this->isStopOperation())

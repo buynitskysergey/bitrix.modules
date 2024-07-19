@@ -56,7 +56,7 @@ class CCatalogDocs extends CAllCatalogDocs
 
 		$strSql = "INSERT INTO b_catalog_store_docs (".$arInsert[0].") VALUES(".$arInsert[1].")";
 
-		$res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$res = $DB->Query($strSql);
 		if (!$res)
 		{
 			return false;
@@ -174,7 +174,7 @@ class CCatalogDocs extends CAllCatalogDocs
 			if (!empty($arSqls["GROUPBY"]))
 				$strSql .= " GROUP BY ".$arSqls["GROUPBY"];
 
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			if ($arRes = $dbRes->Fetch())
 				return $arRes["CNT"];
 			else
@@ -203,7 +203,7 @@ class CCatalogDocs extends CAllCatalogDocs
 			if (!empty($arSqls["GROUPBY"]))
 				$strSql_tmp .= " GROUP BY ".$arSqls["GROUPBY"];
 
-			$dbRes = $DB->Query($strSql_tmp, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql_tmp);
 			$cnt = 0;
 			if (empty($arSqls["GROUPBY"]))
 			{
@@ -225,7 +225,7 @@ class CCatalogDocs extends CAllCatalogDocs
 			{
 				$strSql .= " LIMIT ".$intTopCount;
 			}
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 		}
 
 		return $dbRes;

@@ -649,7 +649,7 @@ class CAllSaleLocation
 
 		$strSql .= $strSqlOrder;
 
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 		return $db_res;
 	}
 
@@ -1044,7 +1044,7 @@ class CAllSaleLocation
 		{
 			$strUpdate = $DB->PrepareUpdate("b_sale_location_country", $arFields);
 			$strSql = "UPDATE b_sale_location_country SET ".$strUpdate." WHERE ID = ".$ID."";
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 
 			$db_lang = CLangAdmin::GetList("sort", "asc", array("ACTIVE" => "Y"));
 			while ($arLang = $db_lang->Fetch())
@@ -1061,7 +1061,7 @@ class CAllSaleLocation
 						"INSERT INTO b_sale_location_country_lang(COUNTRY_ID, ".$arInsert[0].") ".
 						"VALUES(".$ID.", ".$arInsert[1].")";
 				}
-				$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strSql);
 			}
 		}
 
@@ -1158,7 +1158,7 @@ class CAllSaleLocation
 				"SELECT * ".
 				"FROM b_sale_location_country ".
 				"WHERE ID = ".$ID." ";
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 
 			if ($res = $db_res->Fetch())
 			{
@@ -1223,7 +1223,7 @@ class CAllSaleLocation
 				"FROM b_sale_location_country_lang ".
 				"WHERE COUNTRY_ID = ".$ID." ".
 				"	AND LID = '".$DB->ForSql($strLang, 2)."' ";
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 
 			if ($res = $db_res->Fetch())
 			{
@@ -1285,7 +1285,7 @@ class CAllSaleLocation
 		{
 			$strUpdate = $DB->PrepareUpdate("b_sale_location_region", $arFields);
 			$strSql = "UPDATE b_sale_location_region SET ".$strUpdate." WHERE ID = ".$ID."";
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 
 			$db_lang = CLangAdmin::GetList("sort", "asc", array("ACTIVE" => "Y"));
 			while ($arLang = $db_lang->Fetch())
@@ -1303,7 +1303,7 @@ class CAllSaleLocation
 						"INSERT INTO b_sale_location_region_lang(REGION_ID, ".$arInsert[0].") ".
 						"VALUES(".$ID.", ".$arInsert[1].")";
 				}
-				$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strSql);
 			}
 		}
 
@@ -1400,7 +1400,7 @@ class CAllSaleLocation
 				"SELECT * ".
 				"FROM b_sale_location_region ".
 				"WHERE ID = ".$ID." ";
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 
 			if ($res = $db_res->Fetch())
 			{
@@ -1464,7 +1464,7 @@ class CAllSaleLocation
 				"FROM b_sale_location_region_lang ".
 				"WHERE REGION_ID = ".$ID." ".
 				" AND LID = '".$DB->ForSql($strLang, 2)."' ";
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 
 			if ($res = $db_res->Fetch())
 			{
@@ -1535,7 +1535,7 @@ class CAllSaleLocation
 		{
 			$strUpdate = $DB->PrepareUpdate("b_sale_location_city", $arFields);
 			$strSql = "UPDATE b_sale_location_city SET ".$strUpdate." WHERE ID = ".$ID."";
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 
 			$db_lang = CLangAdmin::GetList("sort", "asc", array("ACTIVE" => "Y"));
 			while ($arLang = $db_lang->Fetch())
@@ -1552,7 +1552,7 @@ class CAllSaleLocation
 						"INSERT INTO b_sale_location_city_lang(CITY_ID, ".$arInsert[0].") ".
 						"VALUES(".$ID.", ".$arInsert[1].")";
 				}
-				$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strSql);
 			}
 		}
 
@@ -1683,7 +1683,7 @@ class CAllSaleLocation
 				"SELECT * ".
 				"FROM b_sale_location_city ".
 				"WHERE ID = ".$ID." ";
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 
 			if ($res = $db_res->Fetch())
 			{
@@ -1747,7 +1747,7 @@ class CAllSaleLocation
 				"FROM b_sale_location_city_lang ".
 				"WHERE CITY_ID = ".$ID." ".
 				"	AND LID = '".$DB->ForSql($strLang, 2)."' ";
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 
 			if ($res = $db_res->Fetch())
 			{
@@ -2298,7 +2298,7 @@ class CAllSaleLocation
 
 		$strUpdate = $DB->PrepareUpdate("b_sale_location", $arFields);
 		$strSql = "UPDATE b_sale_location SET ".$strUpdate." WHERE ID = ".$ID."";
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		foreach (GetModuleEvents("sale", "OnLocationUpdate", true) as $arEvent)
 			ExecuteModuleEventEx($arEvent, array($ID, $arFields));

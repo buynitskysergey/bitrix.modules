@@ -38,7 +38,7 @@ class CAllSaleOrderChange
 			"	".$DB->DateToCharFunction("O.DATE_CREATE", "FULL")." as DATE_CREATE, ".
 			"FROM b_sale_order_change SOC ".
 			"WHERE O.ID = ".$ID."";
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 
 		if ($res = $db_res->Fetch())
 		{
@@ -1360,21 +1360,23 @@ class CSaleOrderChangeFormat
 	{
 		if (is_array($data))
 		{
-			$info = GetMessage("SOC_ORDER_PRICE_CHANGED_INFO",
-						   array(
-							   "#AMOUNT#" => CCurrencyLang::CurrencyFormat($data["PRICE"], $data["CURRENCY"], true),
-							   "#OLD_AMOUNT#" => CCurrencyLang::CurrencyFormat($data["OLD_PRICE"], $data["CURRENCY"], true),
-						   ));
+			$info = GetMessage(
+				'SOC_ORDER_PRICE_CHANGED_INFO',
+				[
+					'#AMOUNT#' => CCurrencyLang::CurrencyFormat($data['PRICE'], $data['CURRENCY'], true),
+					'#OLD_AMOUNT#' => CCurrencyLang::CurrencyFormat($data['OLD_PRICE'], $data['CURRENCY'], true),
+				]
+			);
 		}
 		else
 		{
 			$info = GetMessage("SOC_ORDER_PRICE_CHANGED_INFO");
 		}
 
-		return array(
-			"NAME" => GetMessage("SOC_ORDER_PRICE_CHANGED"),
-			"INFO" => $info
-		);
+		return [
+			'NAME' => GetMessage('SOC_ORDER_PRICE_CHANGED'),
+			'INFO' => $info,
+		];
 	}
 
 	public static function FormatBasketQuantityChanged($data)
@@ -1855,7 +1857,7 @@ class CSaleOrderChangeFormat
 	{
 		if (intval($id) < 0)
 			return false;
-		
+
 		static $orderResponsibleList = array();
 
 		if (isset($orderResponsibleList[$id]))

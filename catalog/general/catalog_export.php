@@ -177,7 +177,7 @@ class CAllCatalogExport
 				$strSqlFrom.
 				"WHERE CE.IS_EXPORT = 'Y' ".
 				$strSqlSearch;
-			$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$db_res = $DB->Query($strSql);
 			$iCnt = 0;
 			if ($ar_res = $db_res->Fetch())
 			{
@@ -228,7 +228,7 @@ class CAllCatalogExport
 
 		$strSql .= $strSqlOrder;
 
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 		return $db_res;
 	}
 
@@ -244,7 +244,7 @@ class CAllCatalogExport
 			"FROM b_catalog_export CE ".
 			"WHERE CE.ID = ".intval($ID)." ".
 			"	AND CE.IS_EXPORT = 'Y' ";
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 
 		if ($res = $db_res->Fetch())
 		{

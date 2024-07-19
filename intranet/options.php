@@ -71,7 +71,7 @@ $childTabControl = new CAdminViewTabControl("childTabControl", $aSubTabs);
 $childTabControl_1 = new \CAdminViewTabControl('childTabControl_1', $aSubTabs_1);
 $childTabControl_2 = new \CAdminViewTabControl('childTabControl_2', $aSubTabs_2);
 
-if($REQUEST_METHOD=="POST" && $Update.$Apply.$RestoreDefaults <> '' && check_bitrix_sessid())
+if($_SERVER['REQUEST_METHOD']=="POST" && $Update.$Apply.$RestoreDefaults <> '' && check_bitrix_sessid())
 {
 	if($RestoreDefaults <> '')
 	{

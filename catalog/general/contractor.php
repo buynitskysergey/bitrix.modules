@@ -53,7 +53,7 @@ class CAllCatalogContractor
 		if(!empty($strUpdate))
 		{
 			$strSql = "UPDATE b_catalog_contractor SET ".$strUpdate." WHERE ID = ".$id." ";
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 		}
 		return $id;
 	}

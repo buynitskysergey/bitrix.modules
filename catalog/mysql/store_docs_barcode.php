@@ -18,7 +18,7 @@ class CCatalogStoreDocsBarcode extends CCatalogStoreDocsBarcodeAll
 		$arInsert = $DB->PrepareInsert("b_catalog_docs_barcode", $arFields);
 		$strSql = "INSERT INTO b_catalog_docs_barcode (".$arInsert[0].") VALUES(".$arInsert[1].")";
 
-		$res=$DB->Query($strSql, true, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$res=$DB->Query($strSql, true);
 		if(!$res)
 			return false;
 		$lastId = intval($DB->LastID());
@@ -52,7 +52,7 @@ class CCatalogStoreDocsBarcode extends CCatalogStoreDocsBarcodeAll
 			if (!empty($arSqls["GROUPBY"]))
 				$strSql .= " GROUP BY ".$arSqls["GROUPBY"];
 
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			if ($arRes = $dbRes->Fetch())
 				return $arRes["CNT"];
 			else
@@ -80,7 +80,7 @@ class CCatalogStoreDocsBarcode extends CCatalogStoreDocsBarcodeAll
 			if (!empty($arSqls["GROUPBY"]))
 				$strSql_tmp .= " GROUP BY ".$arSqls["GROUPBY"];
 
-			$dbRes = $DB->Query($strSql_tmp, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql_tmp);
 			$cnt = 0;
 			if (empty($arSqls["GROUPBY"]))
 			{
@@ -102,7 +102,7 @@ class CCatalogStoreDocsBarcode extends CCatalogStoreDocsBarcodeAll
 			{
 				$strSql .= " LIMIT ".$intTopCount;
 			}
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 		}
 		return $dbRes;
 	}

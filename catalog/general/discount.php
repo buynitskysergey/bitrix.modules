@@ -3805,14 +3805,14 @@ class CAllCatalogDiscount
 				{
 					if ($boolUpdate)
 					{
-						$DB->Query("DELETE FROM ".$arParams['TABLE_ID']." WHERE DISCOUNT_ID = ".$intID, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+						$DB->Query("DELETE FROM ".$arParams['TABLE_ID']." WHERE DISCOUNT_ID = ".$intID);
 					}
 					if (!empty($arFields[$arParams['ENTITY_ID']]))
 					{
 						foreach ($arFields[$arParams['ENTITY_ID']] as &$intValue)
 						{
 							$strSql = "INSERT INTO ".$arParams['TABLE_ID']."(DISCOUNT_ID, ".$arParams['FIELD_ID'].") VALUES(".$intID.", ".$intValue.")";
-							$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+							$DB->Query($strSql);
 						}
 						if (isset($intValue))
 							unset($intValue);

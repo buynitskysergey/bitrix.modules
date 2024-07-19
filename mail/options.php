@@ -63,6 +63,8 @@ $tabControl->BeginNextTab();
 		$Option = $arAllOptions[$i];
 		$val = COption::GetOptionString("mail", $Option[0], $Option[2]);
 		$type = $Option[3];
+		$isDisabled = $Option[0] === 'sync_old_limit2' && \Bitrix\Main\Application::getConnection()->getType() === 'pgsql';
+		$hint = $isDisabled ? GetMessage('MAIL_SYNC_OLD_LIMIT_POSTGRESQL') : '';
 	?>
 		<tr>
 			<td valign="top" width="50%"><?if($type[0]=="checkbox")
@@ -73,7 +75,7 @@ $tabControl->BeginNextTab();
 					<?if($type[0]=="checkbox"):?>
 						<input type="checkbox" name="<?echo htmlspecialcharsbx($Option[0])?>" id="<?echo htmlspecialcharsbx($Option[0])?>" value="Y"<?if($val=="Y")echo" checked";?>>
 					<?elseif($type[0]=="text"):?>
-						<input type="text" size="<?echo $type[1]?>" maxlength="255" value="<?echo htmlspecialcharsbx($val)?>" name="<?echo htmlspecialcharsbx($Option[0])?>">
+						<input type="text" size="<?echo $type[1]?>" maxlength="255" value="<?echo htmlspecialcharsbx($val)?>" name="<?echo htmlspecialcharsbx($Option[0])?>"<?php if($isDisabled): ?> disabled="disabled"<?php endif; ?> title="<?= htmlspecialcharsbx($hint) ?>">
 					<?elseif($type[0]=="textarea"):?>
 						<textarea rows="<?echo $type[1]?>" cols="<?echo $type[2]?>" name="<?echo htmlspecialcharsbx($Option[0])?>"><?echo htmlspecialcharsbx($val)?></textarea>
 					<?endif?>

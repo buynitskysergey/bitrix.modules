@@ -57,7 +57,7 @@ class CSaleDiscountConvert
 
 		$strSql = "SELECT COUNT(*) CNT FROM b_sale_discount WHERE VERSION=".CSaleDiscount::VERSION_OLD;
 
-		$res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$res = $DB->Query($strSql);
 		if (!$res)
 			return 0;
 
@@ -71,7 +71,7 @@ class CSaleDiscountConvert
 
 		$strSql = "SELECT COUNT(*) CNT FROM b_sale_discount WHERE 1=1";
 
-		$res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$res = $DB->Query($strSql);
 		if (!$res)
 			return 0;
 
@@ -273,7 +273,7 @@ class CSaleDiscountConvert
 				if (!empty($strUpdate))
 				{
 					$strQuery = "UPDATE ".$strTableName." SET ".$strUpdate." WHERE ID = ".$arDiscount['ID'];
-					$DB->Query($strQuery, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+					$DB->Query($strQuery);
 				}
 
 				self::$intConverted++;

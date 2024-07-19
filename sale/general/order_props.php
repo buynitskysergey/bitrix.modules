@@ -905,7 +905,7 @@ class CSaleOrderProps
 		if ($strSqlSearch <> '')
 			$strSql .= " ".$strSqlSearch;
 
-		$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$dbRes = $DB->Query($strSql);
 
 		return $dbRes;
 	}
@@ -957,7 +957,7 @@ class CSaleOrderProps
 					"INSERT INTO b_sale_order_props_relation (PROPERTY_ID, ".$arInsert[0].") ".
 					"VALUES('".$ID."', ".$arInsert[1].")";
 
-				$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strSql);
 			}
 		}
 

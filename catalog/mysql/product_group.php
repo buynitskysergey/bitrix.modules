@@ -14,7 +14,7 @@ class CCatalogProductGroups extends CAllCatalogProductGroups
 		$arInsert = $DB->PrepareInsert("b_catalog_product2group", $arFields);
 
 		$strSql = "INSERT INTO b_catalog_product2group(".$arInsert[0].") VALUES(".$arInsert[1].")";
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		return (int)$DB->LastID();
 	}
@@ -53,7 +53,7 @@ class CCatalogProductGroups extends CAllCatalogProductGroups
 			if (!empty($arSqls["GROUPBY"]))
 				$strSql .= " GROUP BY ".$arSqls["GROUPBY"];
 
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			if ($arRes = $dbRes->Fetch())
 				return $arRes["CNT"];
 			else
@@ -82,7 +82,7 @@ class CCatalogProductGroups extends CAllCatalogProductGroups
 			if (!empty($arSqls["GROUPBY"]))
 				$strSql_tmp .= " GROUP BY ".$arSqls["GROUPBY"];
 
-			$dbRes = $DB->Query($strSql_tmp, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql_tmp);
 			$cnt = 0;
 			if (empty($arSqls["GROUPBY"]))
 			{
@@ -104,7 +104,7 @@ class CCatalogProductGroups extends CAllCatalogProductGroups
 			{
 				$strSql .= " LIMIT ".$intTopCount;
 			}
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 		}
 
 		return $dbRes;

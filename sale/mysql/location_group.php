@@ -113,7 +113,7 @@ class CSaleLocationGroup extends CAllSaleLocationGroup
 		}
 
 		$strSql .= $strSqlOrder;
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 		return $db_res;
 	}
 
@@ -127,7 +127,7 @@ class CSaleLocationGroup extends CAllSaleLocationGroup
 			"FROM b_sale_location_group LG ".
 			"	LEFT JOIN b_sale_location_group_lang LGL ON (LG.ID = LGL.LOCATION_GROUP_ID AND LGL.LID = '".$DB->ForSql($strLang, 2)."') ".
 			"WHERE LG.ID = ".$ID." ";
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 
 		if ($res = $db_res->Fetch())
 		{
@@ -156,7 +156,7 @@ class CSaleLocationGroup extends CAllSaleLocationGroup
 			"INSERT INTO b_sale_location_group(".$arInsert[0].") ".
 			"VALUES(".$arInsert[1].")";
 
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		$ID = intval($DB->LastID());
 
@@ -171,7 +171,7 @@ class CSaleLocationGroup extends CAllSaleLocationGroup
 				"INSERT INTO b_sale_location_group_lang(LOCATION_GROUP_ID, ".$arInsert[0].") ".
 				"VALUES(".$ID.", ".$arInsert[1].")";
 
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 		}
 
 		if(CSaleLocation::isLocationProMigrated())
@@ -217,13 +217,13 @@ class CSaleLocationGroup extends CAllSaleLocationGroup
 				}
 				else
 				{
-					$DB->Query($strSqlHead.$strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+					$DB->Query($strSqlHead.$strSql);
 					$strSql = $tmpSql;
 				}
 			}
 
 			if($strSql <> '')
-				$DB->Query($strSqlHead.$strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$DB->Query($strSqlHead.$strSql);
 		}
 
 		$events = GetModuleEvents("sale", "OnLocationGroupAdd");

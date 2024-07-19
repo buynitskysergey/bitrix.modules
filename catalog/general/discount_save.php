@@ -387,9 +387,9 @@ class CAllCatalogDiscountSave
 		if ($intID <= 0)
 			return false;
 
-		$DB->Query("delete from b_catalog_disc_save_range where DISCOUNT_ID = ".$intID, false, "File: ".__FILE__."<br>Line: ".__LINE__);
-		$DB->Query("delete from b_catalog_disc_save_group where DISCOUNT_ID = ".$intID, false, "File: ".__FILE__."<br>Line: ".__LINE__);
-		$DB->Query("delete from b_catalog_disc_save_user where DISCOUNT_ID = ".$intID, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query("delete from b_catalog_disc_save_range where DISCOUNT_ID = ".$intID);
+		$DB->Query("delete from b_catalog_disc_save_group where DISCOUNT_ID = ".$intID);
+		$DB->Query("delete from b_catalog_disc_save_user where DISCOUNT_ID = ".$intID);
 
 		return $DB->Query("delete from b_catalog_discount where ID = ".$intID." and TYPE = ".self::ENTITY_ID, true);
 	}

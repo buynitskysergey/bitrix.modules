@@ -14,7 +14,7 @@ class CCatalogExport extends CAllCatalogExport
 		$arInsert = $DB->PrepareInsert("b_catalog_export", $arFields);
 
 		$strSql = "insert into b_catalog_export(".$arInsert[0].") values(".$arInsert[1].")";
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		$ID = (int)$DB->LastID();
 
@@ -37,7 +37,7 @@ class CCatalogExport extends CAllCatalogExport
 		if (!empty($strUpdate))
 		{
 			$strSql = "update b_catalog_export set ".$strUpdate." where ID = ".$ID." and IS_EXPORT = 'Y'";
-			$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$DB->Query($strSql);
 		}
 
 		return $ID;

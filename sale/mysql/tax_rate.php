@@ -14,7 +14,7 @@ class CSaleTaxRate extends CAllSaleTaxRate
 		$strSql =
 			"INSERT INTO b_sale_tax_rate(".$arInsert[0].", TIMESTAMP_X) ".
 			"VALUES(".$arInsert[1].", ".$DB->GetNowFunction().")";
-		$DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$DB->Query($strSql);
 
 		$ID = intval($DB->LastID());
 
@@ -187,7 +187,7 @@ class CSaleTaxRate extends CAllSaleTaxRate
 		$strSql .= $strSqlOrder;
 		//echo "<br>".htmlspecialcharsbx($strSql)."<br>";
 
-		$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+		$db_res = $DB->Query($strSql);
 		return $db_res;
 	}
 }

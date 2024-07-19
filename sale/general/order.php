@@ -1270,7 +1270,8 @@ class CAllSaleOrder
 							{
 								array_walk(
 									$vals,
-									function (&$item) {
+									function (&$item)
+									{
 										$item = (int)$item;
 									}
 								);
@@ -1302,7 +1303,8 @@ class CAllSaleOrder
 							{
 								array_walk(
 									$vals,
-									function (&$item) {
+									function (&$item)
+									{
 										$item = "'".$GLOBALS["DB"]->ForSql($item)."'";
 									}
 								);
@@ -1318,7 +1320,8 @@ class CAllSaleOrder
 							{
 								array_walk(
 									$vals,
-									function (&$item) {
+									function (&$item)
+									{
 										$item = $GLOBALS["DB"]->CharToDateFunction($item, "FULL");
 									}
 								);
@@ -1334,7 +1337,8 @@ class CAllSaleOrder
 							{
 								array_walk(
 									$vals,
-									function (&$item) {
+									function (&$item)
+									{
 										$item = $GLOBALS["DB"]->CharToDateFunction($item, "SHORT");
 									}
 								);
@@ -1604,7 +1608,7 @@ class CAllSaleOrder
 					"FROM b_sale_order O ".
 					"WHERE O.ID = ".$ID."";
 
-				$db_res = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+				$db_res = $DB->Query($strSql);
 			}
 
 			if ($res = $db_res->Fetch())
@@ -3039,7 +3043,7 @@ class CAllSaleOrder
 
 		if (is_array($arGroupBy) && count($arGroupBy) == 0)
 		{
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 			if ($arRes = $dbRes->Fetch())
 				return $arRes["CNT"];
 			else
@@ -3054,7 +3058,7 @@ class CAllSaleOrder
 			if ($arSqls["GROUPBY"] <> '')
 				$strSql_tmp .= "GROUP BY ".$arSqls["GROUPBY"]." ";
 
-			$dbRes = $DB->Query($strSql_tmp, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql_tmp);
 			$cnt = 0;
 			if ($arSqls["GROUPBY"] == '')
 			{
@@ -3076,7 +3080,7 @@ class CAllSaleOrder
 				$strSql = $DB->TopSql($strSql, $arNavStartParams["nTopCount"]);
 			}
 
-			$dbRes = $DB->Query($strSql, false, "File: ".__FILE__."<br>Line: ".__LINE__);
+			$dbRes = $DB->Query($strSql);
 		}
 
 		return $dbRes;
