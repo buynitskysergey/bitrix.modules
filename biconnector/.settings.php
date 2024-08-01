@@ -2,6 +2,7 @@
 
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardTagProvider;
+use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetScopeProvider;
 
 return [
 	'controllers' => [
@@ -28,6 +29,13 @@ return [
 					'provider' => [
 						'moduleId' => 'biconnector',
 						'className' => SupersetDashboardTagProvider::class,
+					],
+				],
+				[
+					'entityId' => 'biconnector-superset-scope',
+					'provider' => [
+						'moduleId' => 'biconnector',
+						'className' => SupersetScopeProvider::class,
 					],
 				],
 			],

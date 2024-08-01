@@ -11,13 +11,13 @@ use Bitrix\Main\Web\Http\MultipartStream;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Json;
 
-final class ProxySender extends MicroService\BaseSender
+class Sender extends MicroService\BaseSender
 {
 	private const API_VERSION = 2;
 
 	protected function getServiceUrl(): string
 	{
-		return SupersetServiceLocation::getCurrentServiceUrl();
+		return ServiceLocation::getCurrentServiceUrl();
 	}
 
 	protected function getProxyPath(): string

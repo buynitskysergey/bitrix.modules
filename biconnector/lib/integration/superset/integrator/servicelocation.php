@@ -5,7 +5,7 @@ namespace Bitrix\BIConnector\Integration\Superset\Integrator;
 use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 
-final class SupersetServiceLocation
+final class ServiceLocation
 {
 	private const SERVICE_URL_RU = 'https://ss.bitrix.info';
 	private const SERVICE_URL_DE = 'https://ss-de.bitrix.info';

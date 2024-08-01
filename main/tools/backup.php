@@ -1,5 +1,12 @@
 <?php
-if (ini_get('short_open_tag') == 0 && mb_strtoupper(ini_get('short_open_tag')) != 'ON')
+
+/**
+ * @global CUser $USER
+ * @global CMain $APPLICATION
+ * @global CDatabase $DB
+ */
+
+if (ini_get('short_open_tag') == 0 && strtoupper(ini_get('short_open_tag')) != 'ON')
 	die("Error: short_open_tag parameter must be turned on in php.ini\n");
 
 error_reporting(E_ALL & ~E_NOTICE & ~E_STRICT & ~E_DEPRECATED & ~E_WARNING);
@@ -79,7 +86,7 @@ if (!defined('DOCUMENT_ROOT'))
 	define('DOCUMENT_ROOT', rtrim(str_replace('\\','/',$_SERVER['DOCUMENT_ROOT']),'/'));
 require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/classes/general/backup.php");
 
-$public = $USER->IsAdmin();
+$public = $USER?->IsAdmin();
 if ($public) // backup from public
 {
 	$NS =& $_SESSION['BX_DUMP_STATE'];
@@ -90,7 +97,6 @@ elseif (!CLI) // hit from bitrixcloud service
 {
 	if ((!$backup_secret_key =  CPasswordStorage::Get('backup_secret_key')) || $backup_secret_key != $_REQUEST['secret_key'])
 	{
-#		echo $backup_secret_key."\n"; COption::SetOptionInt('main', 'dump_auto_enable'.'_auto', 2); # debug
 		RaiseErrorAndDie('Secret key is incorrect', 10);
 	}
 	elseif (isset($_REQUEST['check_auth']) && $_REQUEST['check_auth'])
@@ -175,22 +181,19 @@ else
 
 	$arExpertBackupDefaultParams = array(
 		'dump_base' => IntOption('dump_base', 1),
-		'dump_base_skip_stat' => IntOption('dump_base_skip_stat', 0),
-		'dump_base_skip_search' => IntOption('dump_base_skip_search', 0),
-		'dump_base_skip_log' => IntOption('dump_base_skip_log', 0),
+		'dump_base_skip_stat' => IntOption('dump_base_skip_stat'),
+		'dump_base_skip_search' => IntOption('dump_base_skip_search'),
+		'dump_base_skip_log' => IntOption('dump_base_skip_log'),
 
 		'dump_file_public' => IntOption('dump_file_public', 1),
 		'dump_file_kernel' => IntOption('dump_file_kernel', 1),
 		'dump_do_clouds' => IntOption('dump_do_clouds', 1),
-		'skip_mask' => IntOption('skip_mask', 0),
+		'skip_mask' => IntOption('skip_mask'),
 		'skip_mask_array' => is_array($ar = unserialize(COption::GetOptionString("main","skip_mask_array_auto"), ['allowed_classes' => false])) ? $ar : array(),
-		'dump_max_file_size' => IntOption('dump_max_file_size', 0),
+		'dump_max_file_size' => IntOption('dump_max_file_size'),
 	);
 
-	if (!is_array($arExpertBackupParams))
-		$arExpertBackupParams = array();
-
-	$arParams = array_merge($arExpertBackupDefaultParams, $arExpertBackupParams, $arParams);
+	$arParams = array_merge($arExpertBackupDefaultParams, $arParams);
 }
 
 $skip_mask_array = $arParams['skip_mask_array'];
@@ -229,7 +232,7 @@ if (!$NS['step'])
 	else
 	{
 		$prefix = str_replace('/', '', COption::GetOptionString("main", "server_name", ""));
-		$arc_name = CBackup::GetArcName(preg_match('#^[a-z0-9\.\-]+$#i', $prefix) ? substr($prefix, 0, 20).'_' : '');
+		$arc_name = CBackup::GetArcName(preg_match('#^[a-z0-9.\-]+$#i', $prefix) ? substr($prefix, 0, 20).'_' : '');
 	}
 
 	$NS['arc_name'] = $arc_name.($NS['dump_encrypt_key'] ? ".enc" : ".tar").($arParams['dump_use_compression'] ? ".gz" : '');
@@ -812,8 +815,7 @@ if (defined('LOCK_FILE'))
 if (!CLI)
 	echo 'FINISH';
 COption::SetOptionInt('main', 'last_backup_end_time', time());
-##########################################
-########################### Functions ####
+
 function IntOption($name, $def = 0)
 {
 	global $arParams;

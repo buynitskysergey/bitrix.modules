@@ -20,7 +20,6 @@ class Calendar implements Tabable
 	private const OLD_COMPONENT = 'calendar:calendar.events';
 	private const MINIMAL_API_VERSION = 52;
 
-
 	/** @var Context $context */
 	private $context;
 
@@ -68,13 +67,13 @@ class Calendar implements Tabable
 			'params' => [
 				'onclick' => Utils::getComponentJSCode($this->getComponentParams()),
 				'counter' => $this->getId(),
-			]
+			],
 		];
 	}
 
 	public function shouldShowInMenu(): bool
 	{
-		return $this->isAvailable() && \Bitrix\MobileApp\Mobile::getInstance()::getApiVersion() < 54;
+		return $this->isAvailable() && Mobile::getInstance()::getApiVersion() < 54;
 	}
 
 	public function canBeRemoved(): bool
