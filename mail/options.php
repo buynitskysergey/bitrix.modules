@@ -26,7 +26,7 @@ $arAllOptions = array(
 
 if($MOD_RIGHT>="W" && check_bitrix_sessid())
 {
-	if ($REQUEST_METHOD=="GET" && $RestoreDefaults <> '')
+	if ($_SERVER['REQUEST_METHOD']=="GET" && $RestoreDefaults <> '')
 	{
 		COption::RemoveOption($module_id);
 		$z = CGroup::GetList("id", "asc", array("ACTIVE" => "Y", "ADMIN" => "N"));
@@ -34,7 +34,7 @@ if($MOD_RIGHT>="W" && check_bitrix_sessid())
 			$APPLICATION->DelGroupRight($module_id, array($zr["ID"]));
 	}
 
-	if($REQUEST_METHOD=="POST" && $Update <> '')
+	if($_SERVER['REQUEST_METHOD']=="POST" && $Update <> '')
 	{
 		for($i=0; $i<count($arAllOptions); $i++)
 		{

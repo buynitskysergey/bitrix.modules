@@ -14,7 +14,20 @@ return [
 				'constructor' => static function () {
 					$feature = \Bitrix\Transformer\Integration\Baas::getDedicatedControllerFeature();
 
-					return new \Bitrix\Transformer\Integration\Analytics\Registrar($feature);
+					$resolver = \Bitrix\Main\DI\ServiceLocator::getInstance()->get('transformer.http.controllerResolver');
+					if ($resolver->getBaasDedicatedControllerUrl())
+					{
+						$dedicatedControllerUri = new \Bitrix\Main\Web\Uri($resolver->getBaasDedicatedControllerUrl());
+					}
+					else
+					{
+						$dedicatedControllerUri = null;
+					}
+
+					return new \Bitrix\Transformer\Integration\Analytics\Registrar(
+						$feature,
+						$dedicatedControllerUri,
+					);
 				},
 			],
 		],
