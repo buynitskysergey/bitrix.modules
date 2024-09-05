@@ -49,7 +49,7 @@ if($MOD_RIGHT>='R'):
 
 if($MOD_RIGHT>='Y' || $USER->IsAdmin()):
 
-	if ($REQUEST_METHOD=='GET' && $RestoreDefaults <> '' && check_bitrix_sessid())
+	if ($_SERVER['REQUEST_METHOD']=='GET' && $RestoreDefaults <> '' && check_bitrix_sessid())
 	{
 		COption::RemoveOption($module_id);
 		$z = CGroup::GetList('id', 'asc', array('ACTIVE' => 'Y', 'ADMIN' => 'N'));
@@ -57,7 +57,7 @@ if($MOD_RIGHT>='Y' || $USER->IsAdmin()):
 			$APPLICATION->DelGroupRight($module_id, array($zr['ID']));
 	}
 
-	if($REQUEST_METHOD=='POST' && $Update <> '' && check_bitrix_sessid())
+	if($_SERVER['REQUEST_METHOD']=='POST' && $Update <> '' && check_bitrix_sessid())
 	{
 		$arOptions = $arAllOptions;
 		if(IsModuleInstalled('forum'))

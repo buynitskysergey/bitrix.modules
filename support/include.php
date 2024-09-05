@@ -1,4 +1,4 @@
-<?
+<?php
 global $DB, $APPLICATION;
 IncludeModuleLangFile(__FILE__);
 IncludeModuleLangFile($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/support/errors.php");

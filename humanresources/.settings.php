@@ -85,13 +85,4 @@ return [
 			'enabled' => false,
 		],
 	],
-	'controllers' => [
-		'value' => [
-			'namespaces' => [
-				'\\Bitrix\\HumanResources\\Controller' => 'api',
-			],
-			'defaultNamespace' => '\\Bitrix\\HumanResources\\Controller'
-		],
-		'readonly' => true
-	],
 ];

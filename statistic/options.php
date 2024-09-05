@@ -43,7 +43,7 @@ if ($STAT_RIGHT>="R"):
 	}
 	$tabControl2 = new CAdminTabControl("tabControl2", $aTabs, true, true);
 
-	if ($REQUEST_METHOD=="POST" && $STAT_RIGHT=="W" && $RestoreDefaults <> '' && check_bitrix_sessid())
+	if ($_SERVER['REQUEST_METHOD']=="POST" && $STAT_RIGHT=="W" && $RestoreDefaults <> '' && check_bitrix_sessid())
 	{
 		COption::RemoveOption($module_id);
 		$z = CGroup::GetList("id", "asc", array("ACTIVE" => "Y", "ADMIN" => "N"));
@@ -152,7 +152,7 @@ if ($STAT_RIGHT>="R"):
 		),
 	);
 
-	if($REQUEST_METHOD=="POST" && $Update.$Apply <> '' && $STAT_RIGHT>="W" && check_bitrix_sessid())
+	if($_SERVER['REQUEST_METHOD']=="POST" && $Update.$Apply <> '' && $STAT_RIGHT>="W" && check_bitrix_sessid())
 	{
 		if (CheckFDate($next_exec, GetMessage("STAT_OPT_WRONG_NEXT_EXEC")))
 		{
@@ -269,7 +269,7 @@ if ($STAT_RIGHT>="R"):
 	$arSKIP_STATISTIC_GROUPS = explode(",", COption::GetOptionString($module_id, "SKIP_STATISTIC_GROUPS"));
 	$SKIP_STATISTIC_IP_RANGES = COption::GetOptionString($module_id, "SKIP_STATISTIC_IP_RANGES");
 
-	if ($cleanup <> '' && $REQUEST_METHOD=="POST" && $STAT_RIGHT>="W" && check_bitrix_sessid())
+	if ($cleanup <> '' && $_SERVER['REQUEST_METHOD']=="POST" && $STAT_RIGHT>="W" && check_bitrix_sessid())
 	{
 		if (CheckFDate($cleanup_date, GetMessage("STAT_OPT_WRONG_CLEANUP_DATE")))
 		{
@@ -290,7 +290,7 @@ if ($STAT_RIGHT>="R"):
 		}
 	}
 
-	if($runsql <> '' && $REQUEST_METHOD=="POST" && $STAT_RIGHT>="W" && check_bitrix_sessid())
+	if($runsql <> '' && $_SERVER['REQUEST_METHOD']=="POST" && $STAT_RIGHT>="W" && check_bitrix_sessid())
 	{
 		set_time_limit(0);
 		ignore_user_abort(true);
@@ -317,7 +317,7 @@ if ($STAT_RIGHT>="R"):
 		}
 	}
 
-	if ($optimize <> '' && $REQUEST_METHOD=="POST" && $STAT_RIGHT>="W" && check_bitrix_sessid())
+	if ($optimize <> '' && $_SERVER['REQUEST_METHOD']=="POST" && $STAT_RIGHT>="W" && check_bitrix_sessid())
 	{
 		set_time_limit(0);
 		ignore_user_abort(true);
