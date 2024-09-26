@@ -136,6 +136,10 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && ($_POST['Update'] || $_POST['Apply'] ||
 	{
 		foreach($arAllOptions as $arOption)
 		{
+			if (!is_array($arOption))
+			{
+				continue;
+			}
 			if (isset($arOption['section']))
 			{
                 continue;

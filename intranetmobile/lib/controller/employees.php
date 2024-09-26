@@ -63,9 +63,52 @@ class Employees extends Base
 
 	public function getSearchBarPresetsAction(): array
 	{
+		$presets = (new UserProvider())->getPresets();
+
+		$intranetUser = new \Bitrix\Intranet\User();
+		$result = [];
+
+		foreach ($presets as $preset)
+		{
+			if ($preset['id'] === 'invited')
+			{
+				$preset['value'] = $intranetUser->getInvitationCounterValue();
+			}
+			if ($preset['id'] === 'wait_confirmation')
+			{
+				$preset['value'] = $intranetUser->getWaitConfirmationCounterValue();
+			}
+			$result[] = $preset;
+		}
+
 		return [
-			'presets' => (new UserProvider())->getPresets(),
-			'counters' => [],
+			'presets' => $result,
 		];
+	}
+
+	public function updateDepartmentAction(array $newDepartmentsIds, int $userId): array|bool
+	{
+		$allDepartments = \CIntranetRestService::departmentGet([]);
+
+		foreach ($allDepartments as $department)
+		{
+			if (!is_array($department))
+			{
+				continue;
+			}
+
+			if ((int)$department['UF_HEAD'] === $userId && !in_array($department['ID'], $newDepartmentsIds))
+			{
+				\CIntranetRestService::departmentUpdate([
+					'ID' => $department['ID'],
+					'UF_HEAD' => '0',
+				]);
+			}
+		}
+
+		return \Bitrix\Rest\Api\User::userUpdate([
+			'id' => $userId,
+			'UF_DEPARTMENT' => $newDepartmentsIds,
+		]);
 	}
 }
