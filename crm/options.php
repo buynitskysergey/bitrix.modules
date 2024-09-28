@@ -147,6 +147,17 @@ if($MOD_RIGHT>='Y' || $USER->IsAdmin()):
 				$val = 'N';
 			if($option[3][0] == 'multiselectbox')
 				$val = @implode(',', $val);
+			if ($option[3][0] == "password")
+			{
+				if (isset($_REQUEST[$name . '_delete']) && $_REQUEST[$name . '_delete'] == "Y")
+				{
+					$val = '';
+				}
+				elseif ($val == '')
+				{
+					continue;
+				}
+			}
 			if($name == 'sale_deal_assigned_by_id_tmp')
 			{
 				$name = 'sale_deal_assigned_by_id';

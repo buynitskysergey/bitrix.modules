@@ -4,14 +4,12 @@ namespace Bitrix\Im\V2;
 
 use ArrayAccess;
 use Bitrix\Im\V2\Message\Reaction\ReactionMessage;
-use Bitrix\Main\Engine\UrlManager;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\ObjectException;
 use Bitrix\Main\UrlPreview\UrlPreview;
 use Bitrix\Im;
-use Bitrix\Im\User;
 use Bitrix\Im\Text;
 use Bitrix\Im\Notify;
 use Bitrix\Im\Recent;
@@ -31,7 +29,6 @@ use Bitrix\Im\V2\Message\Param\Menu;
 use Bitrix\Im\V2\Message\Param\Keyboard;
 use Bitrix\Im\V2\Message\Param\AttachArray;
 use Bitrix\Im\V2\Message\ReadService;
-use Bitrix\Im\V2\Message\ViewedService;
 use Bitrix\Im\V2\Message\MessageParameter;
 use Bitrix\Im\V2\Rest\PopupData;
 use Bitrix\Im\V2\Rest\RestEntity;
@@ -158,6 +155,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 
 	protected bool $isUuidFilled = false;
 	protected bool $isUrlFilled = false;
+	protected bool $isMessageOutFilled = false;
 
 	protected ?string $pushMessage = null;
 	protected ?array $pushParams = null;
@@ -166,6 +164,8 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	protected ?bool $isImportant = false;
 
 	protected ?array $importantFor = null;
+	protected ?string $dialogId = null;
+	protected ?int $prevId = null;
 
 	/**
 	 * @param int|array|EO_Message|null $source
@@ -202,6 +202,8 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			{
 				$result->addErrors($paramsSaveResult->getErrors());
 			}
+
+			$this->params = new Params();
 		}
 
 		return $result;
@@ -504,11 +506,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	public function setUuid(?string $uuid): self
 	{
 		$this->isUuidFilled = true;
-
-		if ($uuid && Im\Message\Uuid::validate($uuid))
-		{
-			$this->uuid = $uuid;
-		}
+		$this->uuid = $uuid;
 
 		return $this;
 	}
@@ -635,6 +633,26 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		return $this->files;
 	}
 
+	public function getPrevId(): int
+	{
+		if ($this->prevId !== null)
+		{
+			return $this->prevId;
+		}
+
+		$result = \Bitrix\Im\Model\MessageTable::query()
+			->setSelect(['ID'])
+			->where('CHAT_ID', $this->getChatId() ?? 0)
+			->where('ID', '<', $this->getId() ?? 0)
+			->setOrder(['DATE_CREATE' => 'DESC', 'ID' => 'DESC'])
+			->setLimit(1)
+			->fetch() ?: []
+		;
+		$this->prevId = (int)($result['ID'] ?? 0);
+
+		return $this->prevId;
+	}
+
 	/**
 	 * @param ReactionMessage $reactions
 	 * @return $this
@@ -664,48 +682,34 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	public function uploadFileFromText(): array
 	{
 		$files = [];
-		if ($this->getMessage() && $this->getChatId())
+		$message = $this->getMessage();
+		$chatId = $this->getChatId();
+
+		if (!$message || !$chatId)
 		{
-			$message = $this->getMessage();
-			if (preg_match_all("/\[DISK=([0-9]+)\]/i", $message, $matches))
+			return $files;
+		}
+
+		$diskFileIds = Im\V2\Entity\File\FileItem::getDiskFileIdsFromBbCodesInText($message);
+
+		foreach ($diskFileIds as $fileId)
+		{
+			$newFile = \CIMDisk::SaveFromLocalDisk($this->getChatId(), $fileId, false, $this->getContext()->getUserId());
+			if (!$newFile)
 			{
-				$fileFound = false;
-				foreach ($matches[1] as $fileId)
-				{
-					$newFile = \CIMDisk::SaveFromLocalDisk($this->getChatId(), $fileId, false, $this->getContext()->getUserId());
-					if ($newFile)
-					{
-						$files[] = $newFile;
-						$fileFound = true;
-						$file = new Im\V2\Entity\File\FileItem($newFile, $this->getChatId());
-						$this->addFile($file);
-					}
-				}
-				if ($fileFound)
-				{
-					$message = preg_replace("/\[DISK\=([0-9]+)\]/i", '', $message);
-				}
-				$this->setMessage($message);
+				continue;
 			}
+			$files[] = $newFile;
+			$file = new Im\V2\Entity\File\FileItem($newFile, $this->getChatId());
+			$this->addFile($file);
+		}
+
+		if (!empty($diskFileIds))
+		{
+			$this->setMessage(Im\V2\Entity\File\FileItem::removeDiskBbCodesFromText($message));
 		}
 
 		return $files;
-	}
-
-	public function formatFilesMessageOut(): self
-	{
-		if ($this->getChatId() && $this->hasFiles())
-		{
-			$messageFiles = $this->formatFileLinks();
-			if (!empty($messageFiles))
-			{
-				$messageOut = $this->getMessageOut() ? $this->getMessageOut() . "\n" : '';
-				$messageOut .= implode("\n", $messageFiles);
-				$this->setMessageOut($messageOut);
-			}
-		}
-
-		return $this;
 	}
 
 	/**
@@ -719,31 +723,6 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		}
 
 		return  [];
-	}
-
-	private function formatFileLinks(): array
-	{
-		$messageFiles = [];
-
-		$filesDataList = $this->getFilesDiskData();
-		if (!empty($filesDataList))
-		{
-			$urlManager = UrlManager::getInstance();
-			$hostUrl = $urlManager->getHostUrl();
-			foreach ($filesDataList as $fileData)
-			{
-				if ($fileData['status'] == 'done')
-				{
-					$messageFiles[] =
-						$fileData['name'] . ' (' . \CFile::formatSize($fileData['size']) . ')'
-						. "\n" . Loc::getMessage('IM_MESSAGE_FILE_DOWN')
-						. ' ' . $hostUrl . $fileData['urlDownload']
-						. "\n";
-				}
-			}
-		}
-
-		return $messageFiles;
 	}
 
 	//endregion
@@ -779,10 +758,10 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			$data->add(new Im\V2\Entity\File\FilePopupItem($this->getFiles()));
 		}
 
-		if (!in_array(Im\V2\Link\Reminder\ReminderPopupItem::class, $excludedList, true))
+		/*if (!in_array(Im\V2\Link\Reminder\ReminderPopupItem::class, $excludedList, true))
 		{
 			$data->add(new Im\V2\Link\Reminder\ReminderPopupItem($this->getReminder()));
-		}
+		}*/
 
 		return $data->mergeFromEntity($this->getReactions());
 	}
@@ -818,6 +797,11 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			$this->markAsSystem(true);
 		}
 
+		if ($this->context)
+		{
+			$this->context->setUserId($authorId);
+		}
+
 		return $authorId;
 	}
 
@@ -826,11 +810,11 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		return $this->authorId;
 	}
 
-	public function getAuthor(): ?User
+	public function getAuthor(): ?Entity\User\User
 	{
 		if ($this->getAuthorId())
 		{
-			return User::getInstance($this->getAuthorId());
+			return Im\V2\Entity\User\User::getInstance($this->getAuthorId());
 		}
 
 		return null;
@@ -887,7 +871,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			}
 		}
 
-		$this->message = $value ?: '';
+		$this->message = $value ?? '';
 		unset($this->parsedMessage, $this->formattedMessage, $this->url);
 		return $this;
 	}
@@ -923,7 +907,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	public function getQuotedMessage(?int $messageSize = null): string
 	{
 		$user = $this->getAuthor();
-		$userName = isset($user) ? $user->getFullName(false) : '';
+		$userName = $user?->getName() ?? '';
 		$date = FormatDate('X', $this->getDateCreate(), time() + \CTimeZone::GetOffset());
 		$contextTag = $this->getContextTag();
 		$quoteDelimiter = '------------------------------------------------------';
@@ -955,6 +939,37 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 
 	public function getMessageOut(): ?string
 	{
+		if ($this->isMessageOutFilled)
+		{
+			return $this->messageOut;
+		}
+
+		$this->fillMessageOut();
+
+		return $this->messageOut;
+	}
+
+	public function fillMessageOut(): ?string
+	{
+		if ($this->isMessageOutFilled)
+		{
+			return $this->messageOut;
+		}
+
+		if ($this->getChatId() && $this->hasFiles())
+		{
+			$messageFiles = $this->getFiles()->getMessageOut();
+			if (!empty($messageFiles))
+			{
+				$messageOut = $this->messageOut ?: $this->message;
+				$messageOut .= "\n";
+				$messageOut .= implode("\n", $messageFiles);
+				$this->setMessageOut($messageOut);
+			}
+		}
+
+		$this->isMessageOutFilled = true;
+
 		return $this->messageOut;
 	}
 
@@ -1284,6 +1299,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 				'field' => 'messageOut', /** @see Message::$messageOut */
 				'set' => 'setMessageOut', /** @see Message::setMessageOut */
 				'get' => 'getMessageOut', /** @see Message::getMessageOut */
+				'saveFilter' => 'fillMessageOut', /** @see Message::fillMessageOut */
 			],
 			'DATE_CREATE' => [
 				'field' => 'dateCreate', /** @see Message::$dateCreate */
@@ -1431,6 +1447,9 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			'PUSH_APP_ID' => [
 				'set' => 'setPushAppId', /** @see Message::setPushAppId */
 				'get' => 'getPushAppId', /** @see Message::getPushAppId */
+			],
+			'TO_CHAT_ID' => [
+				'alias' => 'CHAT_ID',
 			],
 		];
 	}
@@ -1632,7 +1651,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		return $userIds;
 	}
 
-	protected function getUserIdsFromMention(): array
+	public function getUserIdsFromMention(): array
 	{
 		if (isset($this->userIdsFromMention))
 		{
@@ -1649,6 +1668,13 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		}
 
 		return $this->userIdsFromMention;
+	}
+
+	public function getUserIdsToSendMentions(): array
+	{
+		$mentionedUsers = $this->getUserIdsFromMention();
+
+		return $this->getChat()->filterUsersToMention($mentionedUsers);
 	}
 
 	public function getEnrichedParams(bool $withUrl = true): Params
@@ -1709,7 +1735,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		;
 	}
 
-	protected function getForwardInfo(): ?array
+	public function getForwardInfo(): ?array
 	{
 		if (!$this->isForward())
 		{
@@ -1838,14 +1864,14 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		return $this;
 	}
 
-	public function autocompleteParams(bool $urlPreview): self
+	public function autocompleteParams(Im\V2\Message\Send\SendingConfig $config): self
 	{
 		$this->getParams()->get(Params::LARGE_FONT)->setValue(Text::isOnlyEmoji($this->getMessage() ?? ''));
 		$dateText = [];
 		$dateTs = [];
 		$urlIds = [];
 		$isUrlOnly = false;
-		if ($urlPreview)
+		if ($config->generateUrlPreview())
 		{
 			$results = Text::getDateConverterParams($this->getMessage() ?? '');
 			foreach ($results as $result)
@@ -1865,12 +1891,60 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 				$isUrlOnly = $this->isUrlOnly($url);
 			}
 		}
+		if ($config->keepConnectorSilence())
+		{
+			$this->getParams()->get(Params::STYLE_CLASS)->setValue('bx-messenger-content-item-system');
+		}
 		$this->getParams()->get(Params::DATE_TEXT)->setValue($dateText);
 		$this->getParams()->get(Params::DATE_TS)->setValue($dateTs);
 		$this->getParams()->get(Params::URL_ID)->setValue($urlIds);
 		$this->getParams()->get(Params::URL_ONLY)->setValue($isUrlOnly);
 
 		return $this;
+	}
+
+	public function getCopilotData(): ?array
+	{
+		$chat = $this->getChat();
+		$roleManager = new \Bitrix\Im\V2\Integration\AI\RoleManager();
+
+		if (
+			!$this->getParams()->isSet(Params::COPILOT_ROLE)
+			&& !$chat instanceof Im\V2\Chat\CopilotChat
+		)
+		{
+			return null;
+		}
+
+		$roles = [];
+		$messageRole = $this->getParams()->get(Params::COPILOT_ROLE)->getValue() ?? $this->getDefaultCopilotRole();
+		$roles[] = $messageRole;
+		$chatRoleInfo = null;
+
+		if ($chat instanceof Im\V2\Chat\CopilotChat)
+		{
+			$chatRole = $roleManager->getMainRole($this->getChatId());
+			$roles[] = $chatRole;
+			$chatRoleInfo = [['dialogId' => $this->getChat()->getDialogId(), 'role' => $chatRole]];
+		}
+
+		return [
+			'chats' => $chatRoleInfo,
+			'messages' => $messageRole ? [['id' => $this->getId(), 'role' => $messageRole]] : null,
+			'roles' => $roleManager->getRoles($roles, $this->getAuthorId()),
+		];
+	}
+
+	protected function getDefaultCopilotRole(): ?string
+	{
+		if (\Bitrix\Main\Loader::includeModule('imbot')
+			&& $this->getAuthorId() === \Bitrix\Imbot\Bot\CopilotChatBot::getBotId()
+		)
+		{
+			return \Bitrix\Im\V2\Integration\AI\RoleManager::getDefaultRoleCode();
+		}
+
+		return null;
 	}
 
 	private function isUrlOnly(?UrlItem $url): bool

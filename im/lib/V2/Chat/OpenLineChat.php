@@ -3,15 +3,16 @@
 namespace Bitrix\Im\V2\Chat;
 
 use Bitrix\Im\Recent;
-use Bitrix\Im\User;
 use Bitrix\Im\V2\Message;
-use Bitrix\Im\V2\Message\PushFormat;
+use Bitrix\Im\V2\Message\Send\SendingConfig;
 use Bitrix\Im\V2\MessageCollection;
-use Bitrix\Im\V2\Relation;
+use Bitrix\Im\V2\Relation\Reason;
 use Bitrix\Im\V2\RelationCollection;
 use Bitrix\Im\V2\Result;
 use Bitrix\ImOpenLines\Config;
 use Bitrix\ImOpenLines\Model\ChatIndexTable;
+use Bitrix\ImOpenLines\Model\SessionTable;
+use Bitrix\ImOpenLines;
 use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 
@@ -52,6 +53,9 @@ class OpenLineChat extends EntityChat
 			'silentMode',
 		],
 	];
+	protected bool $isSessionFilled = false;
+	protected ?RelationCollection $fakeRelation = null;
+	protected ?array $session = null;
 
 	public function setEntityMap(array $entityMap): EntityChat
 	{
@@ -102,6 +106,81 @@ class OpenLineChat extends EntityChat
 		}
 
 		return parent::readMessages($messages, $byEvent);
+	}
+
+	public function getRelations(): RelationCollection
+	{
+		if (isset($this->fakeRelation))
+		{
+			return $this->fakeRelation;
+		}
+
+		return parent::getRelations();
+	}
+
+	public function setFakeRelation(array $userIds): self
+	{
+		$this->fakeRelation = RelationCollection::createFake($userIds, $this);
+
+		return $this;
+	}
+
+	public function unsetFakeRelation(): self
+	{
+		$this->fakeRelation = null;
+
+		return $this;
+	}
+
+	protected function onBeforeMessageSend(Message $message, SendingConfig $config): Result
+	{
+		if ($config->fakeRelation())
+		{
+			$this->setFakeRelation([$config->fakeRelation()]);
+		}
+		elseif (Loader::includeModule('imopenlines'))
+		{
+			$userIds = (new ImOpenLines\Relation($this->getId()))->getRelationUserIds();
+			if (!empty($userIds))
+			{
+				$this->setFakeRelation($userIds);
+			}
+		}
+
+		return parent::onBeforeMessageSend($message, $config);
+	}
+
+	public function getLineData(): ?array
+	{
+		$session = $this->getSession();
+
+		if ($session === null)
+		{
+			return null;
+		}
+
+		return [
+			'id' => (int)$session['ID'],
+			'status' => (int)$session['STATUS'],
+			'date_create' => $session['DATE_CREATE'],
+		];
+	}
+
+	protected function getSession(): ?array
+	{
+		if ($this->isSessionFilled)
+		{
+			return $this->session;
+		}
+
+		$this->isSessionFilled = true;
+
+		if ($this->getSessionId())
+		{
+			$this->session = SessionTable::getByPrimary($this->getSessionId())->fetch() ?: null;
+		}
+
+		return $this->session;
 	}
 
 	protected function getDefaultType(): string
@@ -196,58 +275,73 @@ class OpenLineChat extends EntityChat
 		return true;
 	}
 
-	/**
-	 * @param Message $message
-	 * @return void
-	 */
-	public function riseInRecent(Message $message): void
+	protected function updateRecentAfterMessageSend(Message $message, SendingConfig $config): Result
 	{
-		/** @var Relation $relation */
-		foreach ($this->getRelations() as $relation)
+		if (
+			$this->getSessionId()
+			&& Loader::includeModule('imopenlines')
+			&& ImOpenLines\Recent::isRecentAvailableByStatus($this->getSession()['STATUS'] ?? null)
+		)
 		{
-			if (!User::getInstance($relation->getUserId())->isActive())
-			{
-				continue;
-			}
+			ImOpenLines\Recent::update($message);
 
-			$sessionId = 0;
-			if ($this->getEntityType() == self::ENTITY_TYPE_LINE)
-			{
-				if (User::getInstance($relation->getUserId())->getExternalAuthId() == 'imconnector')
-				{
-					continue;
-				}
-
-				if ($this->getEntityData1())
-				{
-					//todo: replace it with method
-					$fieldData = explode("|", $this->getEntityData1());
-					$sessionId = (int)$fieldData[5];
-				}
-			}
-
-			\CIMContactList::SetRecent([
-				'ENTITY_ID' => $this->getChatId(),
-				'MESSAGE_ID' => $message->getMessageId(),
-				'CHAT_TYPE' => $this->getType(),
-				'USER_ID' => $relation->getUserId(),
-				'CHAT_ID' => $relation->getChatId(),
-				'RELATION_ID' => $relation->getId(),
-				'SESSION_ID' => $sessionId,
-			]);
-
-			if ($relation->getUserId() == $message->getAuthorId())
-			{
-				$relation
-					->setLastId($message->getMessageId())
-					->save();
-			}
+			return new Result();
 		}
+
+		return parent::updateRecentAfterMessageSend($message, $config);
 	}
 
-	protected function filterUsersToAdd(array $userIds): array
+	protected function updateRelationsAfterMessageSend(Message $message): Result
 	{
-		$filteredUsers = parent::filterUsersToAdd($userIds);
+		if ($this->hasFakeRelations())
+		{
+			return new Result();
+		}
+
+		return parent::updateRelationsAfterMessageSend($message);
+	}
+
+	protected function updateCountersAfterMessageSend(Message $message, SendingConfig $sendingConfig): Result
+	{
+		if ($this->hasFakeRelations())
+		{
+			$counters = [];
+			foreach ($this->fakeRelation as $fakeRelation)
+			{
+				$counters[$fakeRelation->getUserId()] = 1;
+			}
+
+			return (new Result())->setResult(['COUNTERS' => $counters]);
+		}
+
+		return parent::updateCountersAfterMessageSend($message, $sendingConfig);
+	}
+
+	protected function getFieldsForRecent(int $userId, Message $message): array
+	{
+		$fields = parent::getFieldsForRecent($userId, $message);
+		if (empty($fields))
+		{
+			return [];
+		}
+		$fields['ITEM_OLID'] = $this->getSessionId();
+
+		return $fields;
+	}
+
+	public function getSessionId(): int
+	{
+		if (!$this->getEntityData1())
+		{
+			return 0;
+		}
+
+		return (int)(explode('|', $this->getEntityData1())[5] ?? 0);
+	}
+
+	protected function resolveRelationConflicts(array $userIds, Reason $reason = Reason::DEFAULT): array
+	{
+		$filteredUsers = parent::resolveRelationConflicts($this->getValidUsersToAdd($userIds), $reason);
 
 		foreach ($filteredUsers as $key => $userId)
 		{
@@ -313,5 +407,10 @@ class OpenLineChat extends EntityChat
 		ChatIndexTable::updateIndex($this->getId(), $this->getTitle());
 
 		return $this;
+	}
+
+	protected function hasFakeRelations(): bool
+	{
+		return isset($this->fakeRelation);
 	}
 }

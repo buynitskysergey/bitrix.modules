@@ -4,6 +4,7 @@ namespace Bitrix\Intranet\User\Filter\Provider;
 
 use Bitrix\Intranet\CurrentUser;
 use Bitrix\Intranet\User\Filter\IntranetUserSettings;
+use Bitrix\Intranet\Util;
 use Bitrix\Main\Filter\EntityDataProvider;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
@@ -19,7 +20,6 @@ class IntranetUserDataProvider extends EntityDataProvider
 	private const MAC_APP = 'mac';
 	private const WINDOWS_APP = 'windows';
 	private const NOT_INSTALLED_APP = 'notInstalled';
-	private const APP_ACTIVITY_TIMEOUT = 6 * 30 * 24 * 60 * 60; // 6 months (180 days)
 	private IntranetUserSettings $settings;
 
 	public function __construct(IntranetUserSettings $settings)
@@ -465,10 +465,11 @@ class IntranetUserDataProvider extends EntityDataProvider
 				is_array($names) ? '@NAME' : 'NAME' => $names,
 			]
 		);
+		$appActivityTimeout = Util::getAppsActivityTimeout();
 
 		while ($option = $result->Fetch())
 		{
-			if ($option['VALUE'] && $option['VALUE'] > time() - self::APP_ACTIVITY_TIMEOUT)
+			if ($option['VALUE'] && $option['VALUE'] > time() - $appActivityTimeout)
 			{
 				$userIds[] = $option['USER_ID'];
 			}

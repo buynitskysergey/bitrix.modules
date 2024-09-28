@@ -258,4 +258,12 @@ abstract class BaseController extends Controller
 
 		return $data[$key] ?? null;
 	}
+
+	protected function prepareFields(array $fields, array $whiteList): array
+	{
+		$converter = new Converter(Converter::TO_SNAKE | Converter::TO_UPPER | Converter::KEYS);
+		$fields = $converter->process($fields);
+
+		return  $this->checkWhiteList($fields, $whiteList);
+	}
 }

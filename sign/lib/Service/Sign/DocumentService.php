@@ -31,7 +31,6 @@ use Bitrix\Sign\Operation\CheckDocumentAccess;
 
 class DocumentService
 {
-	private const ENTITY_TYPE_SMART = EntityType::SMART;
 	private const DOCUMENT_NAME_LENGTH_LIMIT = 100;
 	private DocumentRepository $documentRepository;
 	private BlankRepository $blankRepository;
@@ -903,5 +902,17 @@ class DocumentService
 		}
 
 		return new Main\Result();
+	}
+
+	public function resolveDocumentByCrmEntity(string $entityType, int $entityId): ?Item\Document
+	{
+		return $this->documentRepository
+			->getByEntityIdAndType($entityId, $entityType)
+		;
+	}
+
+	public function getSignDocumentBySmartDocumentId(int $entityId): ?Item\Document
+	{
+		return $this->resolveDocumentByCrmEntity(EntityType::SMART, $entityId);
 	}
 }

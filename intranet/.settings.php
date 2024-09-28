@@ -34,6 +34,13 @@ return [
 		'value' => [
 			'intranet.customSection.manager' => [
 				'className' => '\\Bitrix\\Intranet\\CustomSection\\Manager',
+			],
+			'intranet.option.mobile_app' => [
+				'constructor' => function () {
+					return new \Bitrix\Intranet\Service\MobileAppSettings(
+						new \Bitrix\Intranet\Service\IntranetOption()
+					);
+				},
 			]
 		],
 		'readonly' => true,

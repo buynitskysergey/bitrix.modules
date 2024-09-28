@@ -2,9 +2,12 @@
 
 namespace Bitrix\Intranet\User\Grid\Row\Assembler\Field\JsFields;
 
+use Bitrix\Intranet\CurrentUser;
 use Bitrix\Intranet\User\Grid\Settings\UserSettings;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Context;
 use Bitrix\Main\Grid\Settings;
+use Bitrix\Main\ModuleManager;
 
 /**
  * @method UserSettings getSettings()
@@ -35,6 +38,7 @@ class ActivityDateFieldAssembler extends JsExtensionFieldAssembler
 			'userId' => $rawValue['ID'],
 			'isExtranet' => empty($rawValue['UF_DEPARTMENT']),
 			'gridId' => $this->getSettings()->getID(),
+			'enabled' => $this->getSettings()->isInvitationAvailable(),
 		];
 	}
 

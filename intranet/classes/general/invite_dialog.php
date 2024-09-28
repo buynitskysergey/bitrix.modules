@@ -19,6 +19,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Engine\Router;
 use Bitrix\Main\Engine\UrlManager;
 use Bitrix\Main\Config\Option;
+use Bitrix\Bitrix24\Integration;
 
 Loc::loadMessages(__FILE__);
 
@@ -332,6 +333,7 @@ class CIntranetInviteDialog
 					{
 						$url = (CMain::IsHTTPS() ? "https" : "http") . "://" . $serverName . $site["DIR"];
 					}
+					$messageId = self::getMessageId($bitrix24Installed ? "BITRIX24_USER_ADD" : "INTRANET_USER_ADD", $siteIdByDepartmentId, LANGUAGE_ID);
 					CEvent::SendImmediate(
 						$bitrix24Installed ? "BITRIX24_USER_ADD" : "INTRANET_USER_ADD",
 						$siteIdByDepartmentId,
@@ -341,7 +343,9 @@ class CIntranetInviteDialog
 							"USER_ID_FROM" => $USER->GetID(),
 							"PASSWORD" => $strPassword,
 							"USER_TEXT" => $messageText
-						)
+						),
+						null,
+						$messageId
 					);
 				}
 				else
@@ -360,13 +364,14 @@ class CIntranetInviteDialog
 					}
 					elseif ($bitrix24Installed)
 					{
+						$messageId = self::getMessageId("BITRIX24_USER_INVITATION", $siteIdByDepartmentId, LANGUAGE_ID);
 						CEvent::SendImmediate("BITRIX24_USER_INVITATION", $siteIdByDepartmentId, array(
 							"EMAIL_FROM" => $USER->GetEmail(),
 							"USER_ID_FROM" => $USER->GetID(),
 							"EMAIL_TO" => $arUser["EMAIL"],
 							"LINK" => self::getInviteLink($arUser, $siteIdByDepartmentId),
 							"USER_TEXT" => $messageText
-						));
+						), null, $messageId);
 					}
 					else
 					{
@@ -1148,6 +1153,17 @@ class CIntranetInviteDialog
 				)
 			)
 		);
+		$isCloud = Loader::includeModule('bitrix24');
+
+		if ($isCloud && isset($arUser['ID']))
+		{
+			$networkEmail = (new Integration\Network\Invitation())->getEmailByUserId((int)$arUser['ID']);
+			$emailTo = $networkEmail ?? $arUser['EMAIL'];
+		}
+		else
+		{
+			$emailTo = $arUser['EMAIL'];
+		}
 
 		$siteIdByDepartmentId = self::getUserSiteId(array(
 			"UF_DEPARTMENT" => $arUser["UF_DEPARTMENT"],
@@ -1156,33 +1172,71 @@ class CIntranetInviteDialog
 
 		if ($bExtranet)
 		{
+			$messageId = self::getMessageId("EXTRANET_INVITATION", $siteIdByDepartmentId, LANGUAGE_ID);
 			CEvent::SendImmediate("EXTRANET_INVITATION", $siteIdByDepartmentId, array(
 				"USER_ID" => $arUser["ID"],
 				"USER_ID_FROM" => $USER->GetID(),
 				"CHECKWORD" => $arUser["CONFIRM_CODE"],
-				"EMAIL" => $arUser["EMAIL"],
+				"EMAIL" => $emailTo,
 				"USER_TEXT" => $messageText
-			));
+			), null, $messageId);
 		}
-		elseif (ModuleManager::isModuleInstalled("bitrix24"))
+		elseif ($isCloud)
 		{
+			$messageId = self::getMessageId("BITRIX24_USER_INVITATION", $siteIdByDepartmentId, LANGUAGE_ID);
 			CEvent::SendImmediate("BITRIX24_USER_INVITATION", $siteIdByDepartmentId, array(
 				"EMAIL_FROM" => $USER->GetEmail(),
 				"USER_ID_FROM" => $USER->GetID(),
-				"EMAIL_TO" => $arUser["EMAIL"],
+				"EMAIL_TO" => $emailTo,
 				"LINK" => self::getInviteLink($arUser, $siteIdByDepartmentId),
 				"USER_TEXT" => $messageText,
-			));
+			), null, $messageId);
 		}
 		else
 		{
+			$messageId = self::getMessageId("INTRANET_USER_INVITATION", $siteIdByDepartmentId, LANGUAGE_ID);
 			CEvent::SendImmediate("INTRANET_USER_INVITATION", $siteIdByDepartmentId, array(
-				"EMAIL_TO" => $arUser["EMAIL"],
+				"EMAIL_TO" => $emailTo,
 				"USER_ID_FROM" => $USER->GetID(),
 				"LINK" => self::getInviteLink($arUser, $siteIdByDepartmentId),
 				"USER_TEXT" => $messageText,
-			));
+			), null, $messageId);
 		}
+	}
+
+	public static function getMessageId($eventName, $siteId, $languageId)
+	{
+		$arEventMessageFilter = [
+			'=ACTIVE' => 'Y',
+			'=EVENT_NAME' => $eventName,
+			'=EVENT_MESSAGE_SITE.SITE_ID' => $siteId,
+		];
+
+		if(LANGUAGE_ID <> '')
+		{
+			$arEventMessageFilter[] = [
+				"LOGIC" => "OR",
+				["=LANGUAGE_ID" => $languageId],
+				["=LANGUAGE_ID" => null],
+			];
+		}
+
+		$messageDb = Bitrix\Main\Mail\Internal\EventMessageTable::getList([
+			'select' => ['ID'],
+			'filter' => $arEventMessageFilter,
+			'group' => ['ID'],
+			'order' => ['LANGUAGE_ID' => 'desc'],
+			'limit' => 1
+		]);
+
+		$arMessage = $messageDb->fetch();
+		if (is_null($arMessage))
+		{
+			return null;
+		}
+
+		return $arMessage['ID'];
+
 	}
 
 	public static function ReinviteUser($SITE_ID, $USER_ID)
@@ -1709,13 +1763,14 @@ class CIntranetInviteDialog
 		{
 			if (ModuleManager::isModuleInstalled("bitrix24"))
 			{
+				$messageId = self::getMessageId("BITRIX24_USER_INVITATION", $arParams["SITE_ID"], LANGUAGE_ID);
 				CEvent::SendImmediate("BITRIX24_USER_INVITATION", $arParams["SITE_ID"], array(
 					"EMAIL_FROM" => $USER->GetEmail(),
 					"USER_ID_FROM" => $USER->GetID(),
 					"EMAIL_TO" => $arUser["EMAIL"],
 					"LINK" => self::getInviteLink($arUser, $siteIdToSend),
 					"USER_TEXT" => $messageText
-				));
+				), null, $messageId);
 			}
 			else
 			{

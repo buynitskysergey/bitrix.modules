@@ -115,6 +115,30 @@ return array(
 			],
 			'tasks.flow.kanban.service' => [
 				'className' => \Bitrix\Tasks\Flow\Kanban\KanbanService::class,
+			],
+			'tasks.flow.kanban.bizproc.service' => [
+				'className' => \Bitrix\Tasks\Flow\Kanban\BizProcService::class,
+			],
+			'tasks.flow.template.permission.service' => [
+				'className' => \Bitrix\Tasks\Flow\Template\Access\Permission\TemplatePermissionService::class
+			],
+			'tasks.flow.notification.service' => [
+				'className' => \Bitrix\Tasks\Flow\Notification\NotificationService::class,
+			],
+			'tasks.flow.service' => [
+				'className' => \Bitrix\Tasks\Flow\Control\FlowService::class,
+			],
+
+			'tasks.flow.efficiency.service' => [
+				'className' => \Bitrix\Tasks\Flow\Efficiency\EfficiencyService::class
+			],
+
+			'tasks.regular.replicator' => [
+				'className' => \Bitrix\Tasks\Replication\Replicator\RegularTemplateTaskReplicator::class,
+			],
+
+			'tasks.user.option.automute.service' => [
+				'className' => \Bitrix\Tasks\Internals\UserOption\Service\AutoMuteService::class,
 			]
 		],
 	],

@@ -8,7 +8,6 @@
 # mailto:admin@bitrixsoft.com                #
 ##############################################
 */
-global $DOCUMENT_ROOT, $MESS;
 IncludeModuleLangFile(__FILE__);
 define("DEBUG_FILE_MAN", false);
 if(!defined("CACHED_stickers_count")) define("CACHED_stickers_count", 36000000);
@@ -94,9 +93,12 @@ class CFileMan
 {
 	public static function OnPanelCreate()
 	{
-		global $APPLICATION, $REQUEST_URI;
+		global $APPLICATION;
+
 		if($APPLICATION->GetGroupRight("fileman")<="D")
 			return;
+
+		$requestUri = $_SERVER['REQUEST_URI'];
 
 		$cur_page = $APPLICATION->GetCurPage(true);
 		$cur_dir = $APPLICATION->GetCurDir();
@@ -132,7 +134,7 @@ class CFileMan
 		if ($sect_permission>="W")
 		{
 			// New page
-			$href = "/bitrix/admin/fileman_".$editor_type."_edit.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&path=".UrlEncode($APPLICATION->GetCurDir())."&new=Y&templateID=".urlencode(SITE_TEMPLATE_ID)."&back_url=".UrlEncode($REQUEST_URI);
+			$href = "/bitrix/admin/fileman_".$editor_type."_edit.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&path=".UrlEncode($APPLICATION->GetCurDir())."&new=Y&templateID=".urlencode(SITE_TEMPLATE_ID)."&back_url=".UrlEncode($requestUri);
 			$APPLICATION->AddPanelButtonMenu('create', array("SEPARATOR"=>true, "SORT"=>99));
 			$APPLICATION->AddPanelButtonMenu('create', array(
 				"TEXT" => GetMessage("fileman_panel_admin"),
@@ -142,7 +144,7 @@ class CFileMan
 			));
 
 			//New folder
-			$href = "/bitrix/admin/fileman_newfolder.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&path=". UrlEncode($APPLICATION->GetCurDir())."&back_url=".UrlEncode($REQUEST_URI);
+			$href = "/bitrix/admin/fileman_newfolder.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&path=". UrlEncode($APPLICATION->GetCurDir())."&back_url=".UrlEncode($requestUri);
 			$APPLICATION->AddPanelButtonMenu('create_section', array("SEPARATOR"=>true, "SORT"=>99));
 			$APPLICATION->AddPanelButtonMenu('create_section', array(
 				"TEXT" => GetMessage("fileman_panel_admin"),
@@ -154,7 +156,7 @@ class CFileMan
 		// Edit page
 		if ($page_permission>="W")
 		{
-			$href = "/bitrix/admin/fileman_".$editor_type."_edit.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&templateID=".urlencode(SITE_TEMPLATE_ID).$full_src."&path=".UrlEncode(isset($_SERVER["REAL_FILE_PATH"]) && $_SERVER["REAL_FILE_PATH"]<>""? $_SERVER["REAL_FILE_PATH"] : $cur_page)."&back_url=".UrlEncode($REQUEST_URI);
+			$href = "/bitrix/admin/fileman_".$editor_type."_edit.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&templateID=".urlencode(SITE_TEMPLATE_ID).$full_src."&path=".UrlEncode(isset($_SERVER["REAL_FILE_PATH"]) && $_SERVER["REAL_FILE_PATH"]<>""? $_SERVER["REAL_FILE_PATH"] : $cur_page)."&back_url=".UrlEncode($requestUri);
 			$APPLICATION->AddPanelButtonMenu('edit', array("SEPARATOR"=>true, "SORT"=>99));
 			$APPLICATION->AddPanelButtonMenu('edit', array(
 				"TEXT" => GetMessage("fileman_panel_admin"),
@@ -168,7 +170,7 @@ class CFileMan
 		$alt = GetMessage("FILEMAN_FOLDER_PROPS");
 		if ($sect_permission>="W")
 		{
-			$href = "/bitrix/admin/fileman_folder.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&path=".UrlEncode($APPLICATION->GetCurDir())."&back_url=".UrlEncode($REQUEST_URI);
+			$href = "/bitrix/admin/fileman_folder.php?lang=".LANGUAGE_ID."&site=".SITE_ID."&path=".UrlEncode($APPLICATION->GetCurDir())."&back_url=".UrlEncode($requestUri);
 			$APPLICATION->AddPanelButtonMenu('edit_section', array("SEPARATOR"=>true, "SORT"=>99));
 			$APPLICATION->AddPanelButtonMenu('edit_section', array(
 				"TEXT" => GetMessage("fileman_panel_admin"),

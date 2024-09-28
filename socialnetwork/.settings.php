@@ -78,5 +78,12 @@ return [
 			'extensions' => ['socialnetwork.entity-selector'],
 		],
 		'readonly' => true,
-	]
+	],
+	'services' => [
+		'value' => [
+			'socialnetwork.group.service' => [
+				'className' => \Bitrix\Socialnetwork\Control\GroupService::class,
+			],
+		],
+	],
 ];

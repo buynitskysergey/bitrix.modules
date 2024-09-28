@@ -14,12 +14,14 @@ use Bitrix\Intranet\Counters\Synchronizations\WaitConfirmationSynchronization;
 use Bitrix\Intranet\Internals\InvitationTable;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentOutOfRangeException;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventManager;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main;
+use Bitrix\Socialnetwork\UserToGroupTable;
 use Bitrix\Socialservices\Network;
 
 class Invitation
@@ -41,7 +43,7 @@ class Invitation
 		];
 	}
 
-	public static function isAllowed(): bool
+	protected static function isAvailable(): bool
 	{
 		if (
 			Loader::includeModule('bitrix24')
@@ -261,14 +263,14 @@ class Invitation
 
 	public static function getRegisterSharingMessage()
 	{
-		return Loc::getMessage('INTRANET_INVITATION_SHARING_MESSAGE');
+		return Loc::getMessage('INTRANET_INVITATION_SHARING_MESSAGE_MSGVER_1');
 	}
 
 	public static function canCurrentUserInvite(): bool
 	{
 		global $USER;
 
-		if (!self::isAllowed())
+		if (!self::isAvailable())
 		{
 			return false;
 		}
@@ -281,6 +283,19 @@ class Invitation
 			!ModuleManager::isModuleInstalled('bitrix24')
 			&& $USER->CanDoOperation('edit_all_users')
 		);
+	}
+
+	public static function canCurrentUserInviteByPhone(): bool
+	{
+		return
+			Loader::includeModule('bitrix24')
+			&& self::canCurrentUserInvite()
+			&& Option::get('bitrix24', 'phone_invite_allowed', 'N') === 'Y';
+	}
+
+	public static function canCurrentUserInviteByLink(): bool
+	{
+		return self::getRegisterSettings()['REGISTER'] === 'Y';
 	}
 
 	public static function getRootStructureSectionId(): int
@@ -504,6 +519,59 @@ class Invitation
 				}
 			}
 		);
+
+		return true;
+	}
+
+	public static function onSocNetUserToGroupAddHandler($ID, $data)
+	{
+		if (!\Bitrix\Main\Loader::includeModule('socialnetwork'))
+		{
+			return true;
+		}
+
+		$userId = (int)$data['USER_ID'];
+		if ($userId <= 0 || !in_array($data['ROLE'], UserToGroupTable::getRolesMember()))
+		{
+			return true;
+		}
+		static::fullSyncCounterByUser(new User($userId));
+
+		return true;
+	}
+
+	public static function onSocNetUserToGroupUpdateHandler($ID, $changedData, $oldData)
+	{
+		if (!\Bitrix\Main\Loader::includeModule('socialnetwork'))
+		{
+			return true;
+		}
+		$userId = (int)$oldData['USER_ID'];
+		$changedRole = isset($changedData['ROLE'])
+			&& $changedData['ROLE'] !== $oldData['ROLE']
+			&& in_array($changedData['ROLE'], UserToGroupTable::getRolesMember());
+		if ($userId <= 0 || !$changedRole)
+		{
+			return true;
+		}
+		static::fullSyncCounterByUser(new User($userId));
+
+		return true;
+	}
+
+	public static function onSocNetUserToGroupDeleteHandler(Event $event)
+	{
+		if (!\Bitrix\Main\Loader::includeModule('socialnetwork'))
+		{
+			return true;
+		}
+		$userId = $event->getParameter('USER_ID');
+		if ($userId <= 0)
+		{
+			return true;
+		}
+
+		static::fullSyncCounterByUser(new User($userId));
 
 		return true;
 	}

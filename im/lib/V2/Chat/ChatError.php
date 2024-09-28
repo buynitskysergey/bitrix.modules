@@ -32,7 +32,8 @@ class ChatError extends Error
 		COPILOT_DELETE_ERROR = 'COPILOT_DELETE_ERROR',
 		TASK_ACCESS_ERROR = 'TASK_ACCESS_ERROR',
 		CONVERT_ERROR = 'CONVERT_ERROR',
-		WRONG_CHAT_TYPE = 'WRONG_CHAT_TYPE'
+		WRONG_CHAT_TYPE = 'WRONG_CHAT_TYPE',
+		MANAGE_ACCESS_DENIED = 'MANAGE_ACCESS_DENIED'
 	;
 
 	protected function loadErrorMessage($code, $replacements): string

@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\Intranet\Controller;
 
+use Bitrix\Bitrix24\Integration\Network\ProfileService;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
@@ -90,15 +91,62 @@ class Invite extends Main\Engine\Controller
 		];
 	}
 
+	public function reinviteWithChangeContactAction(int $userId, ?string $newEmail = null, ?string $newPhone = null): ?array
+	{
+		$result = ProfileService::getInstance()->reInviteUserWithChangeContact($userId, $newEmail, $newPhone);
+		if (!$result->isSuccess())
+		{
+			$errorCode = null;
+			$errorMessage = 'Unknown error';
+
+			foreach ($result->getErrors() as $error)
+			{
+				// TODO: append loc messages
+				//$messageCode = match($error->getCode()) {
+				//	'user_not_found' => '',
+				//	'user_already_confirmed' => '',
+				//	'invalid_response' => '',
+				//	'invite_limit' => '',
+				//	default => null,
+				//};
+
+				if (isset($messageCode))
+				{
+					$errorCode = $error->getCode();
+					$errorMessage = Loc::getMessage($messageCode);
+
+					break;
+				}
+			}
+
+			$this->addError(
+				new Error($errorMessage, $errorCode)
+			);
+
+			return null;
+		}
+
+		return $this->reInviteInternal($userId);
+	}
+
 	public function reinviteAction(array $params = [])
 	{
 		$userId = (!empty($params['userId']) ? intval($params['userId']) : 0);
 		if ($userId <= 0)
 		{
 			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROLLER_INVITE_NO_USER_ID'), 'INTRANET_CONTROLLER_INVITE_NO_USER_ID'));
+
 			return null;
 		}
 
+		return $this->reInviteInternal(
+			$userId,
+			isset($params['extranet']) ? $params['extranet'] === 'Y' : null,
+		);
+	}
+
+	private function reInviteInternal(int $userId, ?bool $extranet = null): ?array
+	{
 		$res = UserTable::getList([
 			'filter' => [
 				'=ID' => $userId
@@ -125,15 +173,10 @@ class Invite extends Main\Engine\Controller
 			return null;
 		}
 
-		$extranet = (
-			isset($params['extranet'])
-				? (!empty($params['extranet']) && $params['extranet'] == 'Y')
-				: (
-					Loader::includeModule('extranet')
-					&& !\CExtranet::isIntranetUser(SITE_ID, $userId)
-				)
-		);
-
+		$extranet ??=
+			Loader::includeModule('extranet')
+			&& !\CExtranet::isIntranetUser(SITE_ID, $userId)
+		;
 		if (!$extranet)
 		{
 			if ($userFields['EMAIL'])

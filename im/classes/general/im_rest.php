@@ -4141,8 +4141,8 @@ class CIMRestService extends IRestService
 
 		$arParams['SILENT_MODE'] = $arParams['SILENT_MODE'] == 'Y';
 
-		$chatRelation = CIMChat::GetRelationById($chatId, false, true, false);
-		if (!$chatRelation[CIMDisk::GetUserId()])
+		$chatRelation = \Bitrix\Im\V2\Chat::getInstance($chatId)->getRelations();
+		if (!$chatRelation->hasUser(CIMDisk::GetUserId(), $chatId))
 		{
 			throw new Bitrix\Rest\RestException("You don't have access to this chat", "ACCESS_ERROR", CRestServer::STATUS_WRONG_REQUEST);
 		}

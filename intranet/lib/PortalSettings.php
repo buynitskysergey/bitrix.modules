@@ -187,7 +187,7 @@ class PortalSettings
 
 		if (!empty($logo2x))
 		{
-			$this->siteLogoIdForRetina = (int) $logo2x;
+			$this->siteLogoIdForRetina = (int)$logo2x;
 			Main\Config\Option::set('bitrix24', 'client_logo_retina', $this->siteLogoIdForRetina, $this->siteId);
 		}
 	}
@@ -244,6 +244,34 @@ class PortalSettings
 		}
 
 		return $this->settingsPath;
+	}
+
+	public function getDefaultLogo(): array
+	{
+		if (LANGUAGE_ID === 'ru')
+		{
+			$region = \Bitrix\Main\Application::getInstance()->getLicense()->getRegion();
+
+			if ($region === 'by')
+			{
+				return [
+					'white' => '/bitrix/images/intranet/logo/bitrix24/by/bitrix24-logo-by-white.svg',
+					'black' => '/bitrix/images/intranet/logo/bitrix24/by/bitrix24-logo-by-black.svg',
+				];
+			}
+			else
+			{
+				return [
+					'white' => '/bitrix/images/intranet/logo/bitrix24/ru/bitrix24-logo-ru-white.svg',
+					'black' => '/bitrix/images/intranet/logo/bitrix24/ru/bitrix24-logo-ru-black.svg',
+				];
+			}
+		}
+
+		return [
+			'white' => '/bitrix/images/intranet/logo/bitrix24/en/bitrix24-logo-en-white.svg',
+			'black' => '/bitrix/images/intranet/logo/bitrix24/en/bitrix24-logo-en-black.svg',
+		];
 	}
 
 	final public static function getInstance(): static

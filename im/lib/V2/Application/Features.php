@@ -27,8 +27,6 @@ class Features
 
 	public static function get(): self
 	{
-
-
 		return new self(
 			!Settings::isLegacyChatActivated(),
 			Structure::isSyncAvailable(),

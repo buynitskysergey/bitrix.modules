@@ -6,6 +6,7 @@ use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Entity\User\NullUser;
 use Bitrix\Im\V2\Entity\User\User;
 use Bitrix\Im\V2\Message;
+use Bitrix\Im\V2\Message\Send\PushService;
 use Bitrix\Im\V2\Message\Send\SendingConfig;
 use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Im\V2\Relation;
@@ -66,7 +67,7 @@ class NullChat extends Chat
 		return false;
 	}
 
-	public function getRelations(array $options = []): RelationCollection
+	public function getRelations(): RelationCollection
 	{
 		return new RelationCollection();
 	}
@@ -81,7 +82,7 @@ class NullChat extends Chat
 		return new Result();
 	}
 
-	public function getSelfRelation(array $options = []): ?Relation
+	public function getSelfRelation(): ?Relation
 	{
 		return null;
 	}
@@ -152,5 +153,15 @@ class NullChat extends Chat
 	protected function updateIndex(): Chat
 	{
 		return $this;
+	}
+
+	protected function getPushService(Message $message, SendingConfig $config): PushService
+	{
+		return new Message\Send\Push\GroupPushService($message, $config);
+	}
+
+	public function canDo(string $action, mixed $target = null): bool
+	{
+		return false;
 	}
 }

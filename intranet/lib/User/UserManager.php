@@ -16,7 +16,7 @@ use Bitrix\Main\SystemException;
 final class UserManager
 {
 	public const SORT_STRUCTURE = ['STRUCTURE_SORT' => 'DESC'];
-	public const SORT_INVITATION = ['DATE_REGISTER' => 'DESC'];
+	public const SORT_INVITATION = ['INVITATION_DATE_SORT' => 'DESC'];
 	public const SORT_APH = ['NAME' => 'ASC'];
 	public const SORT_INVITED = ['INVITED_SORT' => 'ASC'];
 	public const SORT_WAITING_CONFIRMATION = ['WAITING_CONFIRMATION_SORT' => 'ASC'];

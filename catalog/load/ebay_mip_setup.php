@@ -122,7 +122,7 @@ if ($STEP>1)
 }
 
 if (!empty($arSetupErrors))
-	echo ShowError(implode('<br />', $arSetupErrors));
+	ShowError(implode('<br />', $arSetupErrors));
 
 $aMenu = array(
 	array(

@@ -21,6 +21,8 @@ use Bitrix\Main\ORM\Query\Query;
  */
 class FileCollection extends EntityCollection
 {
+	protected static array $preloadDiskFiles = [];
+
 	/**
 	 * @param int[]|File[]|null $diskFiles
 	 * @param int|null $chatId
@@ -55,11 +57,49 @@ class FileCollection extends EntityCollection
 			return new static();
 		}
 
-		$diskFiles = File::getModelList([
-			'filter' => Query::filter()->whereIn('ID', $diskFilesIds)->where('TYPE', FileTable::TYPE)
-		]);
+		[$preloadDiskFiles, $filesToLoad] = static::getPreloadDiskFile($diskFilesIds);
+		$diskFiles = [];
 
-		return new static($diskFiles, $chatId);
+		if (!empty($filesToLoad))
+		{
+			$diskFiles = File::getModelList([
+				'filter' => Query::filter()->whereIn('ID', $filesToLoad)->where('TYPE', FileTable::TYPE)
+			]);
+		}
+
+		return new static(array_merge($diskFiles, $preloadDiskFiles), $chatId);
+	}
+
+	public function getDiskFiles(): array
+	{
+		$diskFiles = [];
+
+		foreach ($this as $file)
+		{
+			$diskFile = $file->getDiskFile();
+			if ($diskFile)
+			{
+				$diskFiles[$diskFile->getId()] = $diskFile;
+			}
+		}
+
+		return $diskFiles;
+	}
+
+	public function getMessageOut(): array
+	{
+		$result = [];
+
+		foreach ($this as $file)
+		{
+			$messageOut = $file->getMessageOut();
+			if ($messageOut)
+			{
+				$result[] = $messageOut;
+			}
+		}
+
+		return $result;
 	}
 
 	public function getCopies(?Storage $storage = null): self
@@ -109,6 +149,41 @@ class FileCollection extends EntityCollection
 		}
 
 		return $resultData;
+	}
+
+	/**
+	 * @param File[] $diskFiles
+	 * @return void
+	 */
+	public static function addDiskFilesToPreload(array $diskFiles): void
+	{
+		foreach ($diskFiles as $diskFile)
+		{
+			if ($diskFile instanceof File)
+			{
+				static::$preloadDiskFiles[$diskFile->getId()] = $diskFile;
+			}
+		}
+	}
+
+	protected static function getPreloadDiskFile(array $diskFileIds): array
+	{
+		$preloadDiskFiles = [];
+		$filesToLoad = [];
+
+		foreach ($diskFileIds as $diskFileId)
+		{
+			if (isset(self::$preloadDiskFiles[$diskFileId]))
+			{
+				$preloadDiskFiles[] = self::$preloadDiskFiles[$diskFileId];
+			}
+			else
+			{
+				$filesToLoad[] = $diskFileId;
+			}
+		}
+
+		return [$preloadDiskFiles, $filesToLoad];
 	}
 
 	public function getPopupData(array $excludedList = []): PopupData

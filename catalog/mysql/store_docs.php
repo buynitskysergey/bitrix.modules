@@ -46,6 +46,11 @@ class CCatalogDocs extends CAllCatalogDocs
 			return false;
 		}
 
+		if (!static::checkRequiredFields($arFields, $arFields['DOC_TYPE']))
+		{
+			return false;
+		}
+
 		self::increaseDocumentTypeNumber($arFields['DOC_TYPE']);
 		if (empty($arFields['TITLE']))
 		{

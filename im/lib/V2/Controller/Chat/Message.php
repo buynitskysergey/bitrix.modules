@@ -2,10 +2,10 @@
 
 namespace Bitrix\Im\V2\Controller\Chat;
 
+use Bitrix\Im\V2\Analytics\MessageAnalytics;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Controller\BaseController;
 use Bitrix\Im\V2\Controller\Filter\CheckActionAccess;
-use Bitrix\Im\V2\Controller\Filter\CheckMessageDisappearingDuration;
 use Bitrix\Im\V2\Controller\Filter\UpdateStatus;
 use Bitrix\Im\V2\Entity\View\ViewCollection;
 use Bitrix\Im\V2\Message\Delete\DisappearService;
@@ -116,11 +116,6 @@ class Message extends BaseController
 	public function configureActions()
 	{
 		return [
-			'disappear' => [
-				'+prefilters' => [
-					new CheckMessageDisappearingDuration(),
-				]
-			],
 			'read' => [
 				'+postfilters' => [
 					new UpdateStatus(),
@@ -346,7 +341,7 @@ class Message extends BaseController
 		}
 
 		$fields['message'] = $this->getRawValue('fields')['message'] ?? $fields['message'] ?? null;
-		$fields = $this->prepareMessageFields($fields, self::ALLOWED_FIELDS_SEND);
+		$fields = $this->prepareFields($fields, self::ALLOWED_FIELDS_SEND);
 		$result = (new SendingService())->prepareFields($chat, $fields, $forwardMessages, $restServer);
 
 		if (!$result->isSuccess())
@@ -357,6 +352,7 @@ class Message extends BaseController
 		}
 
 		$fields = $result->getResult();
+		$fields['SKIP_USER_CHECK'] = 'Y';
 
 		$massageId = \CIMMessenger::Add($fields);
 
@@ -368,6 +364,11 @@ class Message extends BaseController
 				$this->addErrors($forwardResult->getErrors());
 
 				return null;
+			}
+
+			foreach ($forwardMessages as $message)
+			{
+				(new MessageAnalytics())->addShareMessage($chat, $message);
 			}
 		}
 
@@ -388,7 +389,7 @@ class Message extends BaseController
 	): ?bool
 	{
 		$fields['message'] = $this->getRawValue('fields')['message'] ?? $fields['message'] ?? null;
-		$fields = $this->prepareMessageFields($fields, self::ALLOWED_FIELDS_UPDATE);
+		$fields = $this->prepareFields($fields, self::ALLOWED_FIELDS_UPDATE);
 		$message->setBotId($botId);
 		$result = (new UpdateService($message))
 			->setUrlPreview($this->convertCharToBool($urlPreview))
@@ -422,7 +423,7 @@ class Message extends BaseController
 
 		$message->markAsImportant(true);
 
-		$result = (new PushFormat())->validateDataForInform($message, $chat);
+		$result = (new PushFormat($message))->validateDataForInform();
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -431,7 +432,7 @@ class Message extends BaseController
 		}
 
 		$pushService = new \Bitrix\Im\V2\Message\Inform\PushService();
-		$pushService->sendInformPushPrivateChat($chat, $message);
+		$pushService->sendInformPushPrivateChat($message);
 
 		return ['result' => true];
 	}
@@ -521,13 +522,5 @@ class Message extends BaseController
 		}
 
 		return $result;
-	}
-
-	private function prepareMessageFields(array $fields, array $whiteList): array
-	{
-		$converter = new Converter(Converter::TO_SNAKE | Converter::TO_UPPER | Converter::KEYS);
-		$fields = $converter->process($fields);
-
-		return  $this->checkWhiteList($fields, $whiteList);
 	}
 }

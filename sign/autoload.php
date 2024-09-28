@@ -17,4 +17,5 @@
 	\Bitrix\Sign\Controllers\V1\B2e\Member\Communication::class => 'lib/Controllers/V1/B2e/Member/Communication.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Member::class => 'lib/Controllers/V1/B2e/Member.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Member\Link::class => 'lib/Controllers/V1/B2e/Member/Link.php',
+	\Bitrix\Sign\Controllers\V1\B2e\Member\Reminder::class => 'lib/Controllers/V1/B2e/Member/Reminder.php',
 ]);

@@ -68,6 +68,27 @@ class OpenChannelChat extends ChannelChat
 		return $this;
 	}
 
+	public function filterUsersToMention(array $userIds): array
+	{
+		$result = [];
+		$relations = $this->getRelationsByUserIds($userIds);
+
+		foreach ($userIds as $userId)
+		{
+			$relation = $relations->getByUserId($userId, $this->getChatId());
+			if (
+				($relation === null
+				|| $relation->getNotifyBlock())
+				&& \CIMSettings::GetNotifyAccess($userId, 'im', 'mention', \CIMSettings::CLIENT_SITE)
+			)
+			{
+				$result[$userId] = $userId;
+			}
+		}
+
+		return $result;
+	}
+
 	public function needToSendPublicPull(): bool
 	{
 		return true;

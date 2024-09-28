@@ -109,21 +109,21 @@ class CopilotChat extends GroupChat
 		return parent::add($params, $context);
 	}
 
-	public function addUsers(array $userIds, array $managerIds = [], ?bool $hideHistory = null, bool $withMessage = true, bool $skipRecent = false, Im\V2\Relation\Reason $reason = Im\V2\Relation\Reason::DEFAULT): Chat
+	public function addUsers(
+		array $userIds,
+		array $managerIds = [],
+		?bool $hideHistory = null,
+		bool $withMessage = true,
+		bool $skipRecent = false,
+		Im\V2\Relation\Reason $reason = Im\V2\Relation\Reason::DEFAULT
+	): Chat
 	{
 		if (empty($userIds) || !$this->getChatId())
 		{
 			return $this;
 		}
 
-		$usersToAdd = $this->filterUsersToAdd($userIds);
-
-		if (empty($usersToAdd))
-		{
-			return $this;
-		}
-
-		$usersToAdd = $this->getUsersWithoutBots($usersToAdd);
+		$usersToAdd = $this->getUsersWithoutBots($userIds);
 
 		return parent::addUsers($usersToAdd, $managerIds, $hideHistory, $withMessage, $skipRecent, $reason);
 	}
@@ -134,8 +134,10 @@ class CopilotChat extends GroupChat
 
 		foreach ($userIds as $userId)
 		{
+			$userId = (int)$userId;
+
 			$user = Im\V2\Entity\User\User::getInstance($userId);
-			if (!$user->isBot())
+			if ($user->isExist() && $user->isActive() && !$user->isBot())
 			{
 				$usersToAdd[$userId] = $userId;
 			}
@@ -343,5 +345,13 @@ class CopilotChat extends GroupChat
 		}
 
 		return parent::deleteUser($userId, $withMessage, $skipRecent, $skipCheckReason);
+	}
+
+	public function toPullFormat(): array
+	{
+		$pull = parent::toPullFormat();
+		$pull['ai_provider'] = IM\V2\Integration\AI\AIHelper::getProviderName();
+
+		return $pull;
 	}
 }

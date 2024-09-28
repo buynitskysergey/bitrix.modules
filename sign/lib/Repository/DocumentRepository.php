@@ -438,6 +438,19 @@ class DocumentRepository
 		;
 	}
 
+	public function listByEntityIdsAndType(array $entityIds, string $entityType): Item\DocumentCollection
+	{
+		$models = Internal\DocumentTable::query()
+			->addSelect('*')
+			->whereIn('ENTITY_ID', $entityIds)
+			->where('ENTITY_TYPE', $entityType)
+			->fetchCollection()
+		;
+		return $models === null
+			? new Item\DocumentCollection()
+			: $this->extractItemCollectionByModelCollection($models);
+	}
+
 	public function getByEntityIdAndType(int $entityId, string $entityType): ?Item\Document
 	{
 		$document = Internal\DocumentTable::query()

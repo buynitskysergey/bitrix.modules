@@ -461,6 +461,11 @@ class MemberService
 		return $this->memberRepository->getById($memberId);
 	}
 
+	public function listByDocumentId(int $documentId): Item\MemberCollection
+	{
+		return $this->memberRepository->listByDocumentId($documentId);
+	}
+
 	private function prepareDefaultCrmRequisite(Item\Member $member): Main\ORM\Data\AddResult|Main\Result
 	{
 		$document = $this->documentRepository->getById($member->documentId);

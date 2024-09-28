@@ -35,6 +35,9 @@ final class MemberStatus
 		];
 	}
 
+	/**
+	 * @return list<self::*>
+	 */
 	public static function getReadyForSigning(): array
 	{
 		return [

@@ -813,47 +813,33 @@ class Form
 		}
 
 		$editFields = \Bitrix\Main\Config\Option::get("intranet", "user_profile_edit_fields", false, SITE_ID);
-		$editFields = is_string($editFields) ? explode(",", $editFields) : (
-			is_array($arParams["EDITABLE_FIELDS"] ?? null) ? $arParams["EDITABLE_FIELDS"] : []
-		);
+		if ($editFields === false)
+		{
+			$editFields = $arParams["EDITABLE_FIELDS"];
+			\Bitrix\Main\Config\Option::set(
+				"intranet",
+				"user_profile_edit_fields",
+				implode(',', $editFields),
+				SITE_ID
+			);
+		}
+		else
+		{
+			$editFields = explode(",", $editFields);
+		}
 
 		$arResult["SettingsFieldsEdit"] = [];
 
 		$viewFields = \Bitrix\Main\Config\Option::get("intranet", "user_profile_view_fields", false, SITE_ID);
 		if ($viewFields === false)
 		{
-			$viewFields = [];
-
-			if (!empty($arParams['USER_FIELDS_MAIN']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['USER_FIELDS_MAIN']));
-			}
-			if (!empty($arParams['USER_PROPERTY_MAIN']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['USER_PROPERTY_MAIN']));
-			}
-			if (!empty($arParams['USER_FIELDS_CONTACT']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['USER_FIELDS_CONTACT']));
-			}
-			if (!empty($arParams['USER_PROPERTY_CONTACT']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['USER_PROPERTY_CONTACT']));
-			}
-			if (!empty($arParams['USER_FIELDS_PERSONAL']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['USER_FIELDS_PERSONAL']));
-			}
-			if (!empty($arParams['USER_PROPERTY_PERSONAL']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['USER_PROPERTY_PERSONAL']));
-			}
-			if (!empty($arParams['EDITABLE_FIELDS']))
-			{
-				$viewFields = array_merge($viewFields, array_values($arParams['EDITABLE_FIELDS']));
-			}
-
-			$viewFields = array_unique($viewFields);
+			$viewFields = $this->createAllowFieldList($arParams);
+			\Bitrix\Main\Config\Option::set(
+				"intranet",
+				"user_profile_view_fields",
+				implode(',', $viewFields),
+				SITE_ID
+			);
 		}
 		else
 		{
@@ -909,5 +895,47 @@ class Form
 		}
 
 		$arResult["SettingsFieldsAll"] = $settingsFields;
+	}
+
+	/**
+	 * @param $arParams
+	 * @return array
+	 */
+	public function createAllowFieldList($arParams): array
+	{
+		$viewFields = [];
+
+		if (!empty($arParams['USER_FIELDS_MAIN']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['USER_FIELDS_MAIN']));
+		}
+		if (!empty($arParams['USER_PROPERTY_MAIN']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['USER_PROPERTY_MAIN']));
+		}
+		if (!empty($arParams['USER_FIELDS_CONTACT']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['USER_FIELDS_CONTACT']));
+		}
+		if (!empty($arParams['USER_PROPERTY_CONTACT']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['USER_PROPERTY_CONTACT']));
+		}
+		if (!empty($arParams['USER_FIELDS_PERSONAL']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['USER_FIELDS_PERSONAL']));
+		}
+		if (!empty($arParams['USER_PROPERTY_PERSONAL']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['USER_PROPERTY_PERSONAL']));
+		}
+		if (!empty($arParams['EDITABLE_FIELDS']))
+		{
+			$viewFields = array_merge($viewFields, array_values($arParams['EDITABLE_FIELDS']));
+		}
+
+		$viewFields = array_unique($viewFields);
+
+		return $viewFields;
 	}
 }

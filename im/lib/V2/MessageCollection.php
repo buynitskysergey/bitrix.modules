@@ -564,7 +564,7 @@ class MessageCollection extends Collection implements RestConvertible, PopupData
 		$popup = [
 			new UserPopupItem($this->getUserIds()),
 			new FilePopupItem($this->getFiles()),
-			new ReminderPopupItem($this->getReminders()),
+			//new ReminderPopupItem($this->getReminders()),
 			new AdditionalMessagePopupItem($this->getReplayedMessageIds()),
 			new CopilotPopupItem($this->getCopilotRoles(), CopilotPopupItem::ENTITIES['messageCollection']),
 		];

@@ -274,6 +274,8 @@ class Manager
 				'FIRST_TAB_ID' => $firstTabId,
 				'HUMAN_RESOURCES_STRUCTURE_AVAILABLE' => $humanResourcesStructureAvailable ? 'Y' : 'N',
 				'ENABLE_DEV_WORKSPACE' => $enableDevWorkspace ? 'Y' : 'N',
+				'IS_LINKS_MIGRATED' => Option::get('im', 'im_link_url_migration', 'N') === 'Y',
+				'IS_FILES_MIGRATED' => Option::get('im', 'im_link_file_migration', 'N') === 'Y',
 			],
 			$this->getInvitationParams(),
 		);

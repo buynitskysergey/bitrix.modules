@@ -10,6 +10,11 @@ class NullUser extends User
 		return null;
 	}
 
+	public function getName(): ?string
+	{
+		return \Bitrix\Im\User::formatFullNameFromDatabase([]);
+	}
+
 	public function isOnlineDataFilled(bool $withStatus): bool
 	{
 		return true;

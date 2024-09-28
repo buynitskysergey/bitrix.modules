@@ -60,19 +60,9 @@ class IntranetUserSettings extends UserSettings
 			&& !$isExtranetSite;
 
 		$this->filterAvailability[self::INVITED_FIELD] =
-			(
-				$canEditAllUsers
-				|| (
-					CurrentUser::get()->IsAuthorized()
-					&& ModuleManager::isModuleInstalled('bitrix24')
-					&& Option::get('bitrix24', 'allow_invite_users', 'N') === 'Y'
-				)
-			)
-			&& (
-				!ModuleManager::isModuleInstalled('extranet')
-				|| Option::get('extranet', 'extranet_site') == ''
-				|| !$isExtranetSite
-			);
+			!ModuleManager::isModuleInstalled('extranet')
+			|| Option::get('extranet', 'extranet_site') == ''
+			|| !$isExtranetSite;
 
 		$this->filterAvailability[self::WAIT_CONFIRMATION_FIELD] =
 			ModuleManager::isModuleInstalled('bitrix24')

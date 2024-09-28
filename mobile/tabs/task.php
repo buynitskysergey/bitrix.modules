@@ -13,6 +13,8 @@ use Bitrix\Mobile\Tab\Tabable;
 use Bitrix\Mobile\Tab\Utils;
 use Bitrix\MobileApp\Janative\Manager;
 use Bitrix\Socialnetwork\Component\WorkgroupList;
+use Bitrix\Socialnetwork\Helper\Feature;
+use Bitrix\TasksMobile\Provider\TariffPlanRestrictionProvider;
 use Bitrix\TasksMobile\Settings;
 
 class Task implements Tabable
@@ -172,6 +174,9 @@ class Task implements Tabable
 				'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_HEADER'),
 				'componentCode' => 'tasks.dashboard',
 				'scriptPath' => Manager::getComponentPath('tasks:tasks.dashboard'),
+				'settings' => [
+					'preload' => true,
+				],
 				'rootWidget' => [
 					'name' => 'layout',
 					'settings' => [
@@ -208,10 +213,17 @@ class Task implements Tabable
 			return null;
 		}
 
+		$isProjectRestricted = (
+			!Feature::isFeatureEnabled(Feature::PROJECTS_GROUPS)
+			&& !Feature::canTurnOnTrial(Feature::PROJECTS_GROUPS)
+		);
+
 		return [
 			'id' => 'tasks.project.list',
 			'testId' => 'tasks_project',
 			'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_TAB_PROJECTS'),
+			'icon' => ($isProjectRestricted ? 'lock' : null),
+			'selectable' => !$isProjectRestricted,
 			'component' => [
 				'name' => 'JSStackComponent',
 				'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_HEADER'),
@@ -334,6 +346,7 @@ class Task implements Tabable
 			'id' => 'tasks.efficiency',
 			'testId' => 'tasks_efficiency',
 			'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_TAB_EFFICIENCY'),
+			'icon' => (TariffPlanRestrictionProvider::isEfficiencyRestricted() ? 'lock' : null),
 			'selectable' => false,
 		];
 	}
