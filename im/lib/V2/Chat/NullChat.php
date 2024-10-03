@@ -34,9 +34,9 @@ class NullChat extends Chat
 		return new NullUser();
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		return false;
+		return (new Result())->addError(new ChatError(ChatError::ACCESS_DENIED));
 	}
 
 	public function getStartId(?int $userId = null): int
@@ -54,15 +54,6 @@ class NullChat extends Chat
 	 * @return bool
 	 */
 	public function allowMention(): bool
-	{
-		return false;
-	}
-
-	/**
-	 * Does nothing.
-	 * @inheritdoc
-	 */
-	public function hasAccess($user = null): bool
 	{
 		return false;
 	}

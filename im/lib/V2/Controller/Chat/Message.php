@@ -53,7 +53,7 @@ class Message extends BaseController
 			\Bitrix\Im\V2\Message::class,
 			'message',
 			function ($className, int $id) {
-				return $this->getMessageById($id);
+				return new \Bitrix\Im\V2\Message($id);
 			}
 		);
 	}
@@ -308,7 +308,7 @@ class Message extends BaseController
 		$deleteService = new DeleteService($message);
 		if ($deleteService->canDelete() < DeleteService::DELETE_HARD)
 		{
-			$this->addError(new MessageError(MessageError::MESSAGE_ACCESS_ERROR));
+			$this->addError(new MessageError(MessageError::ACCESS_DENIED));
 
 			return null;
 		}
@@ -498,8 +498,9 @@ class Message extends BaseController
 		);
 
 		$rest = $this->toRestFormat($messages);
+		$wasFilteredByTariffRestrictions = $rest['tariffRestrictions']['isHistoryLimitExceeded'] ?? false;
 		//todo: refactor. Change to popup data.
-		$rest['hasNextPage'] = $messages->count() >= $limit;
+		$rest['hasNextPage'] = !$wasFilteredByTariffRestrictions && $messages->count() >= $limit;
 
 		return $rest;
 	}

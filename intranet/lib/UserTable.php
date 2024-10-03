@@ -196,6 +196,29 @@ class UserTable extends \Bitrix\Main\UserTable
 			\Bitrix\Main\ORM\Query\Join::on('this.ID', 'ref.USER_ID'))
 			)->configureJoinType(\Bitrix\Main\ORM\Query\Join::TYPE_INNER)
 		);
+
+
+		$entity->addField(new ExpressionField(
+			'PERSONAL_MOBILE_FORMATTED',
+			'%s',
+			['PERSONAL_MOBILE'],
+			[
+				'data_type' => '\Bitrix\Main\ORM\Fields\StringField',
+				'fetch_data_modification' => function () {
+					return [
+						function ($value, $query, $data, $alias) {
+							if ($value) {
+								$parsedPhoneNumber = \Bitrix\Main\PhoneNumber\Parser::getInstance()->parse($value);
+								$value = $parsedPhoneNumber->isValid()
+									? $parsedPhoneNumber->format(\Bitrix\Main\PhoneNumber\Format::E164)
+									: $value;
+							}
+							return $value;
+						}
+					];
+				}
+			]
+		));
 	}
 
 	public static function createInvitedQuery(): Query

@@ -8,6 +8,7 @@ use Bitrix\Main\Context;
 use Bitrix\Main\IO\Path;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
+use Bitrix\Sign\Compatibility\Document\Scheme;
 use Bitrix\Sign\Document;
 use Bitrix\Sign\Integration\CRM\Model\EventData;
 use Bitrix\Sign\Item\Blank;

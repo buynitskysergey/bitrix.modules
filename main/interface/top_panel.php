@@ -386,18 +386,14 @@ class CAdminTopPanel
 				if (\Bitrix\Main\Loader::includeModule('security')): ?>
 					<?php
 					if ($modulesToUpdateCount): ?>
-						<a href="/bitrix/admin/security_dashboard.php">
-							<div
-								class="adm-header-btn adm-security-btn --warning"><?= Loc::getMessage('adm_top_panel_wwall_unsec') ?></div>
-						</a>
+						<a href="/bitrix/admin/security_dashboard.php"><div
+							class="adm-header-btn adm-security-btn --warning"><?= Loc::getMessage('adm_top_panel_wwall_unsec') ?></div></a>
 					<?php
 					else: ?>
-						<a href="/bitrix/admin/security_dashboard.php">
-							<div class="adm-header-btn adm-security-btn"><?=
-								$isPortal
-									? Loc::getMessage('adm_top_panel_wwall_sec_cp')
-									: Loc::getMessage('adm_top_panel_wwall_sec') ?></div>
-						</a>
+						<a href="/bitrix/admin/security_dashboard.php"><div class="adm-header-btn adm-security-btn"><?=
+							$isPortal
+								? Loc::getMessage('adm_top_panel_wwall_sec_cp')
+								: Loc::getMessage('adm_top_panel_wwall_sec') ?></div></a>
 					<?php
 					endif; ?>
 				<?php

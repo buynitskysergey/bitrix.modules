@@ -5076,9 +5076,16 @@ END:VEVENT'."\n";
 			if(($iblock_id = COption::GetOptionInt('intranet', 'iblock_structure', 0)) > 0)
 			{
 				$structure = array();
-				$sec = CIBlockSection::GetList(Array("left_margin"=>"asc","SORT"=>"ASC"), Array("ACTIVE"=>"Y","CNT_ACTIVE"=>"Y","IBLOCK_ID"=>$iblock_id), true);
-				while($ar = $sec->GetNext())
-					$structure[] = $ar;
+				$departmentRepository = \Bitrix\Intranet\Service\ServiceContainer::getInstance()->departmentRepository();
+				$departmentCollection = $departmentRepository->getAllTree(
+					null,
+					\Bitrix\Intranet\Enum\DepthLevel::FULL,
+					\Bitrix\Intranet\Enum\DepartmentActiveFilter::ONLY_ACTIVE
+				);
+				foreach ($departmentCollection as $department)
+				{
+					$structure[] = $department->toIblockArray();
+				}
 
 				//get users in the structure
 				$usersInStructure = array();

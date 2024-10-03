@@ -122,7 +122,9 @@ class blogTextParser extends CTextParser
 			AddEventHandler("main", "TextParserVideoConvert", Array("blogTextParser", "blogConvertVideo"));
 		}
 
-		$text = $this->convertText($text);
+		$attributes = !empty($arParams) && is_array($arParams) && isset($arParams["ATTRIBUTES"]) ? $arParams["ATTRIBUTES"] : [];
+		$text = $this->convertText($text, $attributes);
+
 		return trim($text);
 	}
 

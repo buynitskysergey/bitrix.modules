@@ -10,16 +10,20 @@ use Bitrix\Im\Model\EO_FileTemporary;
 use Bitrix\Im\Model\EO_FileTemporary_Collection;
 use Bitrix\Im\V2\Entity\EntityCollection;
 use Bitrix\Im\V2\Entity\User\UserPopupItem;
+use Bitrix\Im\V2\Registry;
 use Bitrix\Im\V2\Rest\PopupData;
 use Bitrix\Im\V2\Result;
+use Bitrix\Im\V2\TariffLimit\DateFilterable;
+use Bitrix\Im\V2\TariffLimit\FilterResult;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Query\Query;
+use Bitrix\Main\Type\DateTime;
 
 /**
- * @implements \IteratorAggregate<int,FileItem>
+ * @extends Registry<FileItem>
  * @method FileItem offsetGet($key)
  */
-class FileCollection extends EntityCollection
+class FileCollection extends EntityCollection implements DateFilterable
 {
 	protected static array $preloadDiskFiles = [];
 
@@ -191,5 +195,19 @@ class FileCollection extends EntityCollection
 		$data = new PopupData([new UserPopupItem()], $excludedList);
 
 		return parent::getPopupData($excludedList)->merge($data);
+	}
+
+	public function filterByDate(DateTime $date): FilterResult
+	{
+		$filtered = $this->filter(
+			static fn (FileItem $file) => $file->getDiskFile()?->getCreateTime()?->getTimestamp() > $date->getTimestamp()
+		);
+
+		return (new FilterResult())->setResult($filtered)->setFiltered($this->count() !== $filtered->count());
+	}
+
+	public function getRelatedChatId(): ?int
+	{
+		return $this->getAny()?->getChatId();
 	}
 }

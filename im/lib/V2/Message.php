@@ -3,7 +3,11 @@
 namespace Bitrix\Im\V2;
 
 use ArrayAccess;
+use Bitrix\Im\V2\Message\MessageError;
 use Bitrix\Im\V2\Message\Reaction\ReactionMessage;
+use Bitrix\Im\V2\TariffLimit\DateFilterable;
+use Bitrix\Im\V2\TariffLimit\FilterResult;
+use Bitrix\Im\V2\TariffLimit\Limit;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\Type\DateTime;
@@ -37,7 +41,7 @@ use Bitrix\Im\V2\Rest\PopupDataAggregatable;
 /**
  * Chat version #2
  */
-class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, PopupDataAggregatable
+class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, PopupDataAggregatable, DateFilterable
 {
 	use FieldAccessImplementation;
 	use ActiveRecordImplementation
@@ -1526,7 +1530,7 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 
 		if (!$isSuccessMark)
 		{
-			$result->addError(new Im\V2\Message\MessageError(Im\V2\Message\MessageError::MARK_FAILED));
+			$result->addError(new MessageError(MessageError::MARK_FAILED));
 		}
 
 		return $result;
@@ -1620,12 +1624,34 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		return $text;
 	}
 
-	public function hasAccess(?int $userId = null): bool
+	public function checkAccess(?int $userId = null): Result
 	{
 		$userId ??= $this->getContext()->getUserId();
 		$chat = $this->getChat();
+		$result = new Result();
 
-		return $this->getId() && $chat->hasAccess($userId) && $chat->getStartId($userId) <= $this->getId();
+		if (!$this->getId())
+		{
+			return $result->addError(new MessageError(MessageError::NOT_FOUND));
+		}
+
+		$chatAccess = $chat->checkAccess($userId);
+		if (!$chatAccess->isSuccess())
+		{
+			return $chatAccess;
+		}
+
+		if ($chat->getStartId($userId) > $this->getId())
+		{
+			return $result->addError(new MessageError(MessageError::ACCESS_DENIED));
+		}
+
+		if (!Limit::getInstance()->hasAccessByDate($this, $this->getDateCreate() ?? new DateTime()))
+		{
+			return $result->addError(new MessageError(MessageError::MESSAGE_ACCESS_DENIED_BY_TARIFF));
+		}
+
+		return $result;
 	}
 
 	public static function getRestEntityName(): string
@@ -2004,5 +2030,22 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 		$service = new Im\V2\Message\Delete\DeleteService($this);
 		$service->setMode(Im\V2\Message\Delete\DeleteService::MODE_COMPLETE);
 		return $service->delete();
+	}
+
+	public function filterByDate(DateTime $date): FilterResult
+	{
+		$result = new FilterResult();
+
+		if ($this->getDateCreate()?->getTimestamp() > $date->getTimestamp())
+		{
+			return $result->setResult($this);
+		}
+
+		return $result->setResult(null)->setFiltered(true);
+	}
+
+	public function getRelatedChatId(): ?int
+	{
+		return $this->getChatId();
 	}
 }

@@ -3,6 +3,7 @@
 namespace Bitrix\Im\V2\Chat;
 
 use Bitrix\Im\V2\Entity\User\User;
+use Bitrix\Im\V2\Result;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 
@@ -118,16 +119,23 @@ class OpenChannelChat extends ChannelChat
 		return self::IM_TYPE_OPEN_CHANNEL;
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		$hasAccess = parent::checkAccessWithoutCaching($userId);
+		$checkResult = parent::checkAccessInternal($userId);
 
-		if ($hasAccess)
+		if ($checkResult->isSuccess())
 		{
-			return true;
+			return $checkResult;
 		}
 
-		return !User::getInstance($userId)->isExtranet();
+		$result = new Result();
+
+		if (User::getInstance($userId)->isExtranet())
+		{
+			$result->addError(new ChatError(ChatError::ACCESS_DENIED));
+		}
+
+		return $result;
 	}
 
 	public static function extendPullWatchToCommonList(?int $userId = null): void

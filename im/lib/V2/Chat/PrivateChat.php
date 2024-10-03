@@ -34,9 +34,9 @@ class PrivateChat extends Chat implements PopupDataAggregatable
 		return self::IM_TYPE_PRIVATE;
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		return $this->getCompanion($userId)->hasAccess($userId);
+		return $this->getCompanion($userId)->checkAccess($userId);
 	}
 
 	/**

@@ -183,6 +183,12 @@ return [
 			'sign.service.hrbotmessage' => [
 				'className' => Service\HrBotMessageService::class
 			],
+			'sign.service.integration.im.groupChat' => [
+				'className' => Service\Integration\Im\GroupChatService::class
+			],
+			'sign.service.sign.documentChat.chatTypeConverter' => [
+				'className' => Service\Sign\DocumentChat\ChatTypeConverterService::class
+			],
 			'sign.service.integration.crm.events' => [
 				'className' => \Bitrix\Sign\Service\Integration\Crm\EventHandlerService::class,
 			],
@@ -308,6 +314,9 @@ return [
 			'sign.repository.member' => [
 				'className' => Repository\MemberRepository::class,
 			],
+			'sign.repository.documentChat' => [
+				'className' => Repository\DocumentChatRepository::class,
+			],
 			'sign.service.sign.document.agent' => [
 				'className' =>  Service\Sign\DocumentAgentService::class,
 			],
@@ -348,9 +357,6 @@ return [
 			],
 			'sign.repository.service_user' => [
 				'className' => Repository\ServiceUserRepository::class,
-			],
-			'sign.repository.member.notification.remember' => [
-				'className' => Repository\Member\Notification\ReminderSettingsRepository::class,
 			],
 			'sign.service.api.b2e.user' => [
 				'className' => Service\Api\B2e\UserService::class,

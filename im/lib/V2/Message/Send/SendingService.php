@@ -656,9 +656,10 @@ class SendingService
 		$result = new Result();
 
 		$message = new \Bitrix\Im\V2\Message((int)$fieldsToSend['REPLY_ID']);
-		if (!$message->hasAccess())
+		$messageAccess = $message->checkAccess();
+		if (!$messageAccess->isSuccess())
 		{
-			return $result->addError(new MessageError(MessageError::REPLY_ERROR, 'Action unavailable'));
+			return $result->addErrors($messageAccess->getErrors());
 		}
 
 		if ($message->getChat()->getId() !== $chat->getId())

@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\Intranet\Controller;
 
+use Bitrix\Main\Config\Option;
 use Bitrix\Bitrix24\Integration\Network\ProfileService;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
@@ -24,95 +25,67 @@ class Invite extends Main\Engine\Controller
 		return $preFilters;
 	}
 
+	public function configureActions(): array
+	{
+		$configureActions = parent::configureActions();
+
+		$configureActions['register'] = [
+			'+prefilters' => [
+				new Intranet\ActionFilter\InviteLimitControl()
+			]
+		];
+
+		return $configureActions;
+	}
+
 	public function registerAction(array $fields)
 	{
-		$errorList = [];
-		$convertedPhoneNumbers = [];
-		$userIdList = \CIntranetInviteDialog::registerNewUser(\CSite::getDefSite(), $fields, $errorList);
+		$result = \Bitrix\Intranet\Invitation::inviteUsers($fields);
 
-		if (!empty($errorList))
+		if (!$result->isSuccess())
 		{
-			$errorText = implode(
-				"\n",
-				array_filter(
-					$errorList,
-					function ($value)
-					{
-						return !empty($value);
-					}
-				)
-			);
-			$this->addError(new Error($errorText, 'INTRANET_CONTROLLER_INVITE_REGISTER_ERROR'));
-		}
-		else
-		{
-			$phoneNumbers = $fields['PHONE'];
-			$phoneCountries = $fields['PHONE_COUNTRY'];
-			$hasPhoneNumbers = !empty($phoneNumbers) && is_array($phoneNumbers);
-			if ($hasPhoneNumbers)
-			{
-				foreach ($phoneNumbers as $index => $phoneNumber)
-				{
-					$phoneCountry = $phoneCountries[$index] ?? '';
-					$parsedPhoneNumber = \Bitrix\Main\PhoneNumber\Parser::getInstance()->parse($phoneNumber, $phoneCountry);
-					if($parsedPhoneNumber->isValid())
-					{
-						$convertedPhoneNumbers[] = $parsedPhoneNumber->format(\Bitrix\Main\PhoneNumber\Format::E164);
-					}
-				}
-			}
-			\CIntranetInviteDialog::logAction(
-				$userIdList,
-				(
-					isset($fields['DEPARTMENT_ID'])
-					&& (int)$fields['DEPARTMENT_ID'] > 0
-						? 'intranet'
-						: 'extranet'
-				),
-				'invite_user',
-				(
-					!empty($fields['PHONE'])
-						? 'sms_dialog'
-						: 'invite_dialog'
-				),
-				(
-					!empty($fields['CONTEXT'])
-					&& $fields['CONTEXT'] === 'mobile'
-						? 'mobile'
-						: 'web'
-				)
-			);
+			$this->addErrors($result->getErrors());
 		}
 
-		return [
-			'userIdList' => $userIdList,
-			'convertedPhoneNumbers' => $convertedPhoneNumbers,
-			'errors' => []
-		];
+		return $result->getData();
 	}
 
 	public function reinviteWithChangeContactAction(int $userId, ?string $newEmail = null, ?string $newPhone = null): ?array
 	{
 		$result = ProfileService::getInstance()->reInviteUserWithChangeContact($userId, $newEmail, $newPhone);
+
 		if (!$result->isSuccess())
 		{
-			$errorCode = null;
+			$errorCode = 'Unknown error';
 			$errorMessage = 'Unknown error';
 
 			foreach ($result->getErrors() as $error)
 			{
-				// TODO: append loc messages
-				//$messageCode = match($error->getCode()) {
-				//	'user_not_found' => '',
-				//	'user_already_confirmed' => '',
-				//	'invalid_response' => '',
-				//	'invite_limit' => '',
-				//	default => null,
-				//};
+				$messageCode = match($error->getMessage()) {
+					'user_is_not_employee' => 'INTRANET_CONTROLLER_INVITE_ERROR_USER_IS_NOT_EMPLOYEE',
+					'user_not_found' => 'INTRANET_CONTROLLER_INVITE_ERROR_USER_NOT_FOUND',
+					'user_already_confirmed' => 'INTRANET_CONTROLLER_INVITE_ERROR_USER_ALREADY_CONFIRMED',
+					'invalid_response' => 'INTRANET_CONTROLLER_INVITE_ERROR_INVALID_RESPONSE',
+					'invite_limit' => 'INTRANET_CONTROLLER_INVITE_ERROR_INVITE_LIMIT',
+					default => null,
+				};
+
+				if (empty($messageCode))
+				{
+					if (is_string($error->getCode()) && !empty($error->getCode()))
+					{
+						$errorMessage = $error->getCode();
+						$errorCode = $error->getMessage();
+					}
+					else
+					{
+						$messageCode = 'INTRANET_CONTROLLER_INVITE_ERROR_UNKNOWN';
+					}
+				}
 
 				if (isset($messageCode))
 				{
-					$errorCode = $error->getCode();
+					$errorCode = $error->getMessage();
 					$errorMessage = Loc::getMessage($messageCode);
 
 					break;
@@ -126,7 +99,16 @@ class Invite extends Main\Engine\Controller
 			return null;
 		}
 
-		return $this->reInviteInternal($userId);
+		if (isset($newPhone))
+		{
+			return [
+				'result' => true
+			];
+		}
+		else
+		{
+			return $this->reInviteInternal($userId);
+		}
 	}
 
 	public function reinviteAction(array $params = [])
@@ -251,6 +233,8 @@ class Invite extends Main\Engine\Controller
 			'disableAdminConfirm' => !Invitation::canListDelete(),
 			'sharingMessage' => Invitation::getRegisterSharingMessage(),
 			'rootStructureSectionId' => Invitation::getRootStructureSectionId(),
+			'emailRequired' => Option::get('main', 'new_user_email_required', 'N') === 'Y',
+			'phoneRequired' => Option::get('main', 'new_user_phone_required', 'N') === 'Y'
 		];
 
 		if (Loader::includeModule('bitrix24'))

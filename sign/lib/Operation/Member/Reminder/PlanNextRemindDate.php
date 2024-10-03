@@ -25,7 +25,7 @@ final class PlanNextRemindDate implements Contract\Operation
 
 	private readonly MemberRepository $memberRepository;
 	private readonly MemberService $memberService;
-	private readonly ProviderCodeService $providerCodeSerivce;
+	private readonly ProviderCodeService $providerCodeService;
 	private readonly UserService $userService;
 	private readonly Config\Reminder $reminderConfig;
 
@@ -41,7 +41,7 @@ final class PlanNextRemindDate implements Contract\Operation
 	{
 		$this->memberRepository = $memberRepository ?? Container::instance()->getMemberRepository();
 		$this->memberService = $memberService ?? Container::instance()->getMemberService();
-		$this->providerCodeSerivce = $providerCodeService ?? Container::instance()->getProviderCodeService();
+		$this->providerCodeService = $providerCodeService ?? Container::instance()->getProviderCodeService();
 		$this->userService = $userService ?? Container::instance()->getUserService();
 		$this->reminderConfig = Config\Reminder::instance();
 	}
@@ -78,7 +78,7 @@ final class PlanNextRemindDate implements Contract\Operation
 			->withAdd(self::REMIND_SENDING_DURATION)
 			->withTime(23, 59, 59)
 		;
-		$result = $this->providerCodeSerivce->loadByDocument($document);
+		$result = $this->providerCodeService->loadByDocument($document);
 		if (!$result->isSuccess())
 		{
 			return $result;

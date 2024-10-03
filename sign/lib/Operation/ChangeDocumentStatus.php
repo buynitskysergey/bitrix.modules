@@ -2,6 +2,7 @@
 
 namespace Bitrix\Sign\Operation;
 
+use Bitrix\Sign\Operation\DocumentChat\AddMembersByStoppedDocument;
 use Bitrix\Sign\Repository\DocumentRepository;
 use Bitrix\Sign\Repository\MemberRepository;
 use Bitrix\Sign\Service\HrBotMessageService;
@@ -94,6 +95,11 @@ final class ChangeDocumentStatus implements Contract\Operation
 			}
 			if ($this->status === Type\DocumentStatus::STOPPED)
 			{
+				$addMembersResult = (new AddMembersByStoppedDocument($this->document))->launch();
+				if (!$addMembersResult->isSuccess())
+				{
+					return $result->addErrors($addMembersResult->getErrors());
+				}
 				$this->b2eUserToSignDocumentCounterService->updateByDocument($this->document);
 				if ($this->stopInitiatorMember)
 				{

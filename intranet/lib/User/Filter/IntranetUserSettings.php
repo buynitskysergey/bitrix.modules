@@ -7,6 +7,7 @@ use Bitrix\Main\Config\Option;
 use Bitrix\Main\Filter\UserSettings;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
+use Bitrix\Socialnetwork\UserToGroupTable;
 
 class IntranetUserSettings extends UserSettings
 {
@@ -34,6 +35,16 @@ class IntranetUserSettings extends UserSettings
 	public function isFilterAvailable(string $filterField): bool
 	{
 		return $this->getFilterAvailability()[$filterField] ?? true;
+	}
+
+	public function isCurrentUserAdmin(): bool
+	{
+		return CurrentUser::get()->isAdmin();
+	}
+
+	public function getCurrentUserId(): int
+	{
+		return CurrentUser::get()->getId();
 	}
 
 	private function initFilterAvailability(): void

@@ -31,11 +31,11 @@ FormDecode();
 
 $application = \Bitrix\Main\HttpApplication::getInstance();
 
-//Defined in dbconn.php
+// Defined in dbconn.php
 global $DBType, $DBDebug, $DBDebugToFile, $DBHost, $DBName, $DBLogin, $DBPassword;
 
-//read various parameters
-require_once($_SERVER["DOCUMENT_ROOT"] . BX_PERSONAL_ROOT . '/php_interface/dbconn.php');
+// read various parameters
+require_once $_SERVER["DOCUMENT_ROOT"] . getLocalPath('php_interface/dbconn.php', BX_PERSONAL_ROOT);
 
 // not used anymore
 $DBType = 'mysql';
@@ -64,12 +64,12 @@ if ($DBDebugToFile)
 $show_sql_stat = '';
 if (isset($_GET['show_sql_stat']))
 {
-	$show_sql_stat = (strtoupper($_GET['show_sql_stat']) == 'Y' ? 'Y' : '');
+	$show_sql_stat = ($_GET['show_sql_stat'] == 'Y' ? 'Y' : '');
 	setcookie('show_sql_stat', $show_sql_stat, false, '/');
 }
-elseif (isset($_COOKIE['show_sql_stat']))
+elseif (isset($_COOKIE['show_sql_stat']) && $_COOKIE['show_sql_stat'] == 'Y')
 {
-	$show_sql_stat = $_COOKIE['show_sql_stat'];
+	$show_sql_stat = 'Y';
 }
 if ($show_sql_stat == 'Y')
 {

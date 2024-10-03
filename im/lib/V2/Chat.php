@@ -534,11 +534,7 @@ abstract class Chat implements RegistryEntry, ActiveRecord, Im\V2\Rest\RestEntit
 
 	//region Access & Permissions
 
-	/**
-	 * @param int|User|null $user
-	 * @return bool
-	 */
-	public function hasAccess($user = null): bool
+	final public function checkAccess(int|User|null $user = null): Result
 	{
 		$userId = $this->getUserId($user);
 
@@ -549,19 +545,19 @@ abstract class Chat implements RegistryEntry, ActiveRecord, Im\V2\Rest\RestEntit
 
 		if (!$userId || !$this->getChatId())
 		{
-			$this->accessCache[$userId] = false;
+			$this->accessCache[$userId] = (new Result())->addError(new ChatError(ChatError::NOT_FOUND));
 
-			return false;
+			return $this->accessCache[$userId];
 		}
 
-		$this->accessCache[$userId] = $this->checkAccessWithoutCaching($userId);
+		$this->accessCache[$userId] = $this->checkAccessInternal($userId);
 
 		return $this->accessCache[$userId];
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		return false;
+		return (new Result())->addError(new ChatError(ChatError::ACCESS_DENIED));
 	}
 
 	protected function getUserId($user): int

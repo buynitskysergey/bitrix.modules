@@ -54,9 +54,16 @@ class GroupChat extends Chat implements PopupDataAggregatable
 		return !$this->getEntityType();
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		return $this->getRelationByUserId($userId) !== null;
+		$result = new Result();
+
+		if ($this->getRelationByUserId($userId) === null)
+		{
+			$result->addError(new ChatError(ChatError::ACCESS_DENIED));
+		}
+
+		return $result;
 	}
 
 	public function linkToStructureNodes(array $structureNodes): void

@@ -1095,7 +1095,7 @@ class CAdminMenu
 					"menu_id"=>$aMenu["menu_id"] ?? null,
 					"page_icon"=>$aMenu["page_icon"] ?? null,
 					"text"=>$aMenu["text"],
-					"url"=>$aMenu["url"],
+					"url"=>$aMenu["url"] ?? null,
 					"skip_chain"=>$aMenu["skip_chain"] ?? null,
 					"help_section"=>$aMenu["help_section"] ?? null,
 				);

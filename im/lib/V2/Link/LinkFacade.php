@@ -22,7 +22,11 @@ class LinkFacade
 	{
 		if (!$this->config->skipUrlIndex())
 		{
-			$resultUrls = (new UrlService())->setContext($this->context)->saveUrlsFromMessage($message);
+			$resultUrls = (new UrlService())
+				->setContext($this->context)
+				->setBackgroundMode(false)
+				->saveUrlsFromMessage($message)
+			;
 		}
 		$resultFiles = (new FileService())->setContext($this->context)->save($message);
 

@@ -15,12 +15,15 @@ use Bitrix\Intranet\Internals\InvitationTable;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\Error;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventManager;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main;
+use Bitrix\Main\Result;
+use Bitrix\Main\UserTable;
 use Bitrix\Socialnetwork\UserToGroupTable;
 use Bitrix\Socialservices\Network;
 
@@ -34,6 +37,8 @@ class Invitation
 	const TYPE_EMAIL = 'email';
 	const TYPE_PHONE = 'phone';
 	const PULL_MESSAGE_TAG = 'INTRANET_USER_INVITATIONS';
+
+	public const INTRANET_INVITE_REGISTER_ERROR = 'INTRANET_CONTROLLER_INVITE_REGISTER_ERROR';
 
 	protected static function getTypesAvailable()
 	{
@@ -295,7 +300,9 @@ class Invitation
 
 	public static function canCurrentUserInviteByLink(): bool
 	{
-		return self::getRegisterSettings()['REGISTER'] === 'Y';
+		return
+			self::canCurrentUserInvite()
+			&& self::getRegisterSettings()['REGISTER'] === 'Y';
 	}
 
 	public static function getRootStructureSectionId(): int
@@ -650,5 +657,115 @@ class Invitation
 	{
 		$user = new User((int)$userId);
 		static::fullSyncCounterByUser($user);
+	}
+
+	public static function inviteUsers(array $fields): Main\Result
+	{
+		$result = new Main\Result();
+		$errorList = [];
+		$convertedPhoneNumbers = [];
+		$userList = [];
+		$userIdList = \CIntranetInviteDialog::registerNewUser(\CSite::getDefSite(), $fields, $errorList) ?? [];
+
+		if (!empty($errorList))
+		{
+			foreach ($errorList as $error)
+			{
+				if ($error instanceof Error)
+				{
+					$result->addError($error);
+				}
+				elseif (is_string($error) && !empty($error))
+				{
+					$result->addError(new Error($error, self::INTRANET_INVITE_REGISTER_ERROR));
+				}
+			}
+		}
+
+		if (!empty($userIdList))
+		{
+			\CIntranetInviteDialog::logAction(
+				$userIdList,
+				(
+				isset($fields['DEPARTMENT_ID'])
+				&& (int)$fields['DEPARTMENT_ID'] > 0
+					? 'intranet'
+					: 'extranet'
+				),
+				'invite_user',
+				(
+				!empty($fields['PHONE'])
+					? 'sms_dialog'
+					: 'invite_dialog'
+				),
+				(
+				!empty($fields['CONTEXT'])
+				&& $fields['CONTEXT'] === 'mobile'
+					? 'mobile'
+					: 'web'
+				)
+			);
+
+			$userQuery = UserTable::getList([
+				'select' => ['ID', 'NAME', 'LAST_NAME', 'PERSONAL_MOBILE', 'EMAIL'],
+				'filter' => ['@ID' => $userIdList]
+			]);
+
+			while($user = $userQuery->fetch())
+			{
+				$user["FULL_NAME"] = \CUser::FormatName(\CSite::GetNameFormat(), $user, true, false);
+				$userList[] = $user;
+				$convertedPhoneNumbers[] = $user['PERSONAL_MOBILE']; // TODO: PERSONAL_MOBILE_FORMATTED
+			}
+		}
+
+		return $result->setData([
+			'userList' => $userList,
+			'userIdList' => $userIdList,
+			'convertedPhoneNumbers' => $convertedPhoneNumbers,
+			'errors' => [],
+		]);
+	}
+
+	/**
+	 * @param array $phoneUsers phoneUser must contain fields ['PHONE', 'PHONE_COUNTRY'] and may contain fields ['NAME', 'LAST_NAME']
+	 * @param string $context 'web' or 'mobile'
+	 * @param int $departmentId
+	 * @return Result
+	 */
+	public static function inviteUsersByPhoneNumbers(array $phoneUsers, string $context = 'web', int $departmentId = 0): Main\Result
+	{
+		$fields = [
+			'PHONE' => $phoneUsers,
+			'CONTEXT' => $context,
+		];
+
+		if ($departmentId > 0)
+		{
+			$fields['DEPARTMENT_ID'] = $departmentId;
+		}
+
+		return self::inviteUsers($fields);
+	}
+
+	/**
+	 * @param array $emailUsers emailUser must contain fields ['EMAIL'] and may contain fields ['NAME', 'LAST_NAME']
+	 * @param string $context 'web' or 'mobile'
+	 * @param int $departmentId
+	 * @return Result
+	 */
+	public static function inviteUsersByEmails(array $emailUsers, string $context = 'web', int $departmentId = 0): Main\Result
+	{
+		$fields = [
+			'EMAIL' => $emailUsers,
+			'CONTEXT' => $context,
+		];
+
+		if ($departmentId > 0)
+		{
+			$fields['DEPARTMENT_ID'] = $departmentId;
+		}
+
+		return self::inviteUsers($fields);
 	}
 }

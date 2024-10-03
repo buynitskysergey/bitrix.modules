@@ -842,7 +842,11 @@ class CPushManager
 				$messages = null;
 				while($messages = array_slice($arPushMessages[$serviceID],$offset, $batchMessageCount))
 				{
-					$batches[] = $service->getBatch($messages);
+					if (!empty($service->getBatch($messages)))
+					{
+						$batches[] = $service->getBatch($messages);
+					}
+
 					$offset += count($messages);
 				}
 			}

@@ -22,6 +22,7 @@ class PortalSettings
 	protected ?int $siteLogoId = null;
 	protected ?int $siteLogoIdForRetina = null;
 	protected ?string $settingsPath = null;
+	private ?array $desktopDownloadLinks = null;
 
 	protected function __construct(?string $siteId = null)
 	{
@@ -272,6 +273,79 @@ class PortalSettings
 			'white' => '/bitrix/images/intranet/logo/bitrix24/en/bitrix24-logo-en-white.svg',
 			'black' => '/bitrix/images/intranet/logo/bitrix24/en/bitrix24-logo-en-black.svg',
 		];
+	}
+
+	final public function getDesktopDownloadLinks(): array
+	{
+		if (isset($this->desktopDownloadLinks))
+		{
+			return $this->desktopDownloadLinks;
+		}
+
+		$region = \Bitrix\Main\Application::getInstance()->getLicense()->getRegion();
+
+		if (in_array($region, ['ru', 'by']))
+		{
+			$this->desktopDownloadLinks = [
+				'windows' => 'https://repos.1c-bitrix.ru/b24/bitrix24_desktop_ru.exe',
+				'macos' => 'https://repos.1c-bitrix.ru/b24/bitrix24_desktop_ru.dmg',
+				'linuxDeb' => 'https://repos.1c-bitrix.ru/b24/bitrix24_desktop_ru.deb',
+				'linuxRpm' => 'https://repos.1c-bitrix.ru/b24/bitrix24_desktop_ru.rpm',
+				'msi' => 'https://repos.1c-bitrix.ru/b24/bitrix24_desktop_ru.msi',
+				'macosArm' => 'https://repos.1c-bitrix.ru/b24/bitrix24_macos_arm_ru.dmg',
+			];
+		}
+		else
+		{
+			$this->desktopDownloadLinks = [
+				'windows' => 'https://dl.bitrix24.com/b24/bitrix24_desktop.exe',
+				'macos' => 'https://dl.bitrix24.com/b24/bitrix24_desktop.dmg',
+				'linuxDeb' => 'https://dl.bitrix24.com/b24/bitrix24_desktop.deb',
+				'linuxRpm' => 'https://dl.bitrix24.com/b24/bitrix24_desktop.rpm',
+				'msi' => 'https://dl.bitrix24.com/b24/bitrix24_desktop.msi',
+				'macosArm' => 'https://dl.bitrix24.com/b24/bitrix24_macos_arm.dmg',
+			];
+		}
+
+		return $this->desktopDownloadLinks;
+	}
+
+	/**
+	 * @param string $userAgent from \Bitrix\Main\Application::getInstance()->getContext()->getRequest()->getUserAgent()
+	 * @return string
+	 */
+	final public function getDesktopDownloadLinkByUserAgent(string $userAgent): string
+	{
+		$links = $this->getDesktopDownloadLinks();
+
+		if (mb_stripos($userAgent, 'Windows') !== false)
+		{
+			return $links['windows'];
+		}
+
+		if (
+			mb_stripos($userAgent, 'Macintosh') !== false
+			|| mb_stripos($userAgent, 'Mac OS X') !== false
+		)
+		{
+			return $links['macos'];
+		}
+
+		if (mb_stripos($userAgent, 'Linux') !== false)
+		{
+			if (
+				mb_stripos($userAgent, 'Fedora') !== false
+				|| mb_stripos($userAgent, 'CentOS') !== false
+				|| mb_stripos($userAgent, 'Red Hat') !== false
+			)
+			{
+				return $links['linuxRpm'];
+			}
+
+			return $links['linuxDeb'];
+		}
+
+		return $links['windows'];
 	}
 
 	final public static function getInstance(): static

@@ -1,4 +1,4 @@
-<?
+<?php
 /**
  * Bitrix Framework
  * @package bitrix
@@ -612,6 +612,7 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && !empty($_POST["Update"]) && ($USER->Can
 	COption::SetOptionString("main", "show_panel_for_users", serialize($_POST["show_panel_for_users"] ?? ''));
 	COption::SetOptionString("main", "hide_panel_for_users", serialize($_POST["hide_panel_for_users"] ?? ''));
 	COption::SetOptionString("main", "imageeditor_proxy_white_list", serialize($_POST["imageeditor_proxy_white_list"] ?? ''));
+	COption::SetOptionString("main", "cookie_name", \Bitrix\Main\Web\Cookie::normalizeName($_POST["cookie_name"]));
 
 	$module_id = "main";
 	COption::SetOptionString($module_id, "GROUP_DEFAULT_TASK", $GROUP_DEFAULT_TASK, "Task for groups by default");
@@ -970,7 +971,7 @@ $message = null;
 if(
 	!IsModuleInstalled("controller")
 	&& $_SERVER["REQUEST_METHOD"] == "POST"
-	&& ($_POST["controller_join"] <> '' || $_POST["controller_remove"] <> '' || $_POST["controller_save_proxy"] <> '')
+	&& (!empty($_POST["controller_join"]) || !empty($_POST["controller_remove"]) || !empty($_POST["controller_save_proxy"]))
 	&& $USER->IsAdmin()
 	&& check_bitrix_sessid()
 )
@@ -978,13 +979,21 @@ if(
 	COption::SetOptionString("main", "controller_proxy_url", $_POST["controller_proxy_url"]);
 	COption::SetOptionString("main", "controller_proxy_port", $_POST["controller_proxy_port"]);
 	COption::SetOptionString("main", "controller_proxy_user", $_POST["controller_proxy_user"]);
-	COption::SetOptionString("main", "controller_proxy_password", $_POST["controller_proxy_password"]);
+
+	if (isset($_POST['controller_proxy_password_delete']) && $_POST['controller_proxy_password_delete'] == "Y")
+	{
+		COption::SetOptionString("main", "controller_proxy_password", '');
+	}
+	elseif (!empty($_POST["controller_proxy_password"]))
+	{
+		COption::SetOptionString("main", "controller_proxy_password", $_POST["controller_proxy_password"]);
+	}
 }
 
 if(
 	!IsModuleInstalled("controller")
 	&& $_SERVER["REQUEST_METHOD"] == "POST"
-	&& ($_POST["controller_join"] <> '' && $_POST["controller_save_proxy"] == '')
+	&& (!empty($_POST["controller_join"]) && empty($_POST["controller_save_proxy"]))
 	&& $USER->IsAdmin()
 	&& check_bitrix_sessid()
 	&& COption::GetOptionString("main", "controller_member", "N") != "Y"
@@ -1016,7 +1025,7 @@ $bControllerRemoveError = false;
 if(
 	!IsModuleInstalled("controller")
 	&& $_SERVER["REQUEST_METHOD"] == "POST"
-	&& ($_POST["controller_remove"] <> '' && $_POST["controller_save_proxy"] == '')
+	&& (!empty($_POST["controller_remove"]) && empty($_POST["controller_save_proxy"]))
 	&& $USER->IsAdmin()
 	&& check_bitrix_sessid()
 	&& COption::GetOptionString("main", "controller_member", "N") == "Y"
@@ -1202,7 +1211,13 @@ if(COption::GetOptionString("main", "controller_member", "N")!="Y"):
 	</tr>
 	<tr>
 		<td><?echo GetMessage("MAIN_OPTION_CONTROLLER_PROXY_PASSWORD")?></td>
-		<td><input type="password" size="30" maxlength="255" value="<?=htmlspecialcharsbx(COption::GetOptionString("main", "controller_proxy_password"));?>" name="controller_proxy_password" id="controller_proxy_password"></td>
+		<td>
+			<?php
+				$val = COption::GetOptionString("main", "controller_proxy_password");
+			?>
+			<input type="password" size="30" maxlength="255" value="" name="controller_proxy_password" id="controller_proxy_password"<?php if ($val != ''):?> placeholder="<?= GetMessage('MAIN_OPTION_CONTROLLER_PROXY_PASS_SET') ?>"<?php endif; ?> autocomplete="new-password">
+			<?php if ($val != ''):?><label><input type="checkbox" name="controller_proxy_password_delete" value="Y" title="<?= GetMessage('MAIN_OPTION_CONTROLLER_PROXY_PASS_DEL_TITLE') ?>"> <?= GetMessage('MAIN_OPTION_CONTROLLER_PROXY_PASS_DEL') ?></label><?php endif?>
+		</td>
 	</tr>
 	<tr>
 		<td>&nbsp;</td>

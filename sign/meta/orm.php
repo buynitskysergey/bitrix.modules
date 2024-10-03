@@ -1512,6 +1512,160 @@ namespace Bitrix\Sign\Internal {
 	 */
 	class EO_File_Entity extends \Bitrix\Main\ORM\Entity {}
 }
+/* ORMENTITYANNOTATION:Bitrix\Sign\Internal\DocumentChatTable:sign/lib/internal/documentchattable.php */
+namespace Bitrix\Sign\Internal {
+	/**
+	 * DocumentChat
+	 * @see \Bitrix\Sign\Internal\DocumentChatTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getChatId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat setChatId(\int|\Bitrix\Main\DB\SqlExpression $chatId)
+	 * @method bool hasChatId()
+	 * @method bool isChatIdFilled()
+	 * @method bool isChatIdChanged()
+	 * @method \int remindActualChatId()
+	 * @method \int requireChatId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat resetChatId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat unsetChatId()
+	 * @method \int fillChatId()
+	 * @method \int getDocumentId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat setDocumentId(\int|\Bitrix\Main\DB\SqlExpression $documentId)
+	 * @method bool hasDocumentId()
+	 * @method bool isDocumentIdFilled()
+	 * @method bool isDocumentIdChanged()
+	 * @method \int remindActualDocumentId()
+	 * @method \int requireDocumentId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat resetDocumentId()
+	 * @method \Bitrix\Sign\Internal\DocumentChat unsetDocumentId()
+	 * @method \int fillDocumentId()
+	 * @method \int getType()
+	 * @method \Bitrix\Sign\Internal\DocumentChat setType(\int|\Bitrix\Main\DB\SqlExpression $type)
+	 * @method bool hasType()
+	 * @method bool isTypeFilled()
+	 * @method bool isTypeChanged()
+	 * @method \int remindActualType()
+	 * @method \int requireType()
+	 * @method \Bitrix\Sign\Internal\DocumentChat resetType()
+	 * @method \Bitrix\Sign\Internal\DocumentChat unsetType()
+	 * @method \int fillType()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\Sign\Internal\DocumentChat set($fieldName, $value)
+	 * @method \Bitrix\Sign\Internal\DocumentChat reset($fieldName)
+	 * @method \Bitrix\Sign\Internal\DocumentChat unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method mixed fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\Sign\Internal\DocumentChat wakeUp($data)
+	 */
+	class EO_DocumentChat {
+		/* @var \Bitrix\Sign\Internal\DocumentChatTable */
+		static public $dataClass = '\Bitrix\Sign\Internal\DocumentChatTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\Sign\Internal {
+	/**
+	 * EO_DocumentChat_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getChatIdList()
+	 * @method \int[] fillChatId()
+	 * @method \int[] getDocumentIdList()
+	 * @method \int[] fillDocumentId()
+	 * @method \int[] getTypeList()
+	 * @method \int[] fillType()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\Sign\Internal\DocumentChat $object)
+	 * @method bool has(\Bitrix\Sign\Internal\DocumentChat $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\Sign\Internal\DocumentChat getByPrimary($primary)
+	 * @method \Bitrix\Sign\Internal\DocumentChat[] getAll()
+	 * @method bool remove(\Bitrix\Sign\Internal\DocumentChat $object)
+	 * @method void removeByPrimary($primary)
+	 * @method array|\Bitrix\Main\ORM\Objectify\Collection|null fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\Sign\Internal\EO_DocumentChat_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\Sign\Internal\DocumentChat current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\Sign\Internal\EO_DocumentChat_Collection merge(?\Bitrix\Sign\Internal\EO_DocumentChat_Collection $collection)
+	 * @method bool isEmpty()
+	 */
+	class EO_DocumentChat_Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\Sign\Internal\DocumentChatTable */
+		static public $dataClass = '\Bitrix\Sign\Internal\DocumentChatTable';
+	}
+}
+namespace Bitrix\Sign\Internal {
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_DocumentChat_Result exec()
+	 * @method \Bitrix\Sign\Internal\DocumentChat fetchObject()
+	 * @method \Bitrix\Sign\Internal\EO_DocumentChat_Collection fetchCollection()
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 */
+	class EO_DocumentChat_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\Sign\Internal\DocumentChat fetchObject()
+	 * @method \Bitrix\Sign\Internal\EO_DocumentChat_Collection fetchCollection()
+	 */
+	class EO_DocumentChat_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\Sign\Internal\DocumentChat createObject($setDefaultValues = true)
+	 * @method \Bitrix\Sign\Internal\EO_DocumentChat_Collection createCollection()
+	 * @method \Bitrix\Sign\Internal\DocumentChat wakeUpObject($row)
+	 * @method \Bitrix\Sign\Internal\EO_DocumentChat_Collection wakeUpCollection($rows)
+	 */
+	class EO_DocumentChat_Entity extends \Bitrix\Main\ORM\Entity {}
+}
 /* ORMENTITYANNOTATION:Bitrix\Sign\Internal\MemberTable:sign/lib/internal/membertable.php */
 namespace Bitrix\Sign\Internal {
 	/**

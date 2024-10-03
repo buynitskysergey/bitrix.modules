@@ -60,15 +60,8 @@ class User
 	{
 		$fields = $this->getFields();
 
-		if (
-			array_key_exists('EXTERNAL_AUTH_ID', $fields)
-			&& $fields['EXTERNAL_AUTH_ID'] === 'email'
-		)
-		{
-			return true;
-		}
-
-		return false;
+		return array_key_exists('EXTERNAL_AUTH_ID', $fields)
+			&& $fields['EXTERNAL_AUTH_ID'] === 'email';
 	}
 
 	private function hasDepartment(): bool
@@ -113,6 +106,7 @@ class User
 		if ($this->currentUser->getId() === $this->userId && $this->currentUser->isAdmin())
 		{
 			self::$cacheAdmin[$this->userId] = true;
+
 			return self::$cacheAdmin[$this->userId];
 		}
 
@@ -126,10 +120,12 @@ class User
 		)
 		{
 			self::$cacheAdmin[$this->userId] = true;
+
 			return self::$cacheAdmin[$this->userId];
 		}
 
 		self::$cacheAdmin[$this->userId] = false;
+
 		return self::$cacheAdmin[$this->userId];
 	}
 
@@ -142,6 +138,7 @@ class User
 
 		$result = \CUser::GetById($this->userId)->fetch();
 		self::$cacheFields[$this->userId] = is_array($result) ? $result : [];
+
 		return self::$cacheFields[$this->userId];
 	}
 

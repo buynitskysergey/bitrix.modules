@@ -70,7 +70,7 @@ class UpdateService
 	{
 		if ($this->withCheckAccess && !$this->canUpdate())
 		{
-			return (new Result())->addError(new Message\MessageError(Message\MessageError::MESSAGE_ACCESS_ERROR));
+			return (new Result())->addError(new Message\MessageError(Message\MessageError::ACCESS_DENIED));
 		}
 
 		$this->message->fill($fieldsToUpdate);

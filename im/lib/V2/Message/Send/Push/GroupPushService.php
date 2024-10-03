@@ -29,7 +29,7 @@ class GroupPushService extends PushService
 		];
 
 		$watchPullMessage = $pullMessage;
-		$watchPullMessage['params']['message']['params']['NOTIFY'] = false;
+		$watchPullMessage['params']['message']['params']['NOTIFY'] = 'N';
 		if ($chat->needToSendPublicPull())
 		{
 			\CPullWatch::AddToStack('IM_PUBLIC_'. $chat->getChatId(), $watchPullMessage);

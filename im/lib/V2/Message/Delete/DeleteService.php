@@ -140,7 +140,7 @@ class DeleteService
 				$this->fireEventAfterMessageDelete($message, true);
 				break;
 			default:
-				return (new Result())->addError(new Message\MessageError(Message\MessageError::MESSAGE_ACCESS_ERROR));
+				return (new Result())->addError(new Message\MessageError(Message\MessageError::ACCESS_DENIED));
 		}
 
 		if (Option::get('im', 'message_history_index'))
@@ -173,7 +173,7 @@ class DeleteService
 			return self::DELETE_COMPLETE;
 		}
 
-		if (!$this->chat->hasAccess($this->getContext()->getUserId()))
+		if (!$this->chat->checkAccess($this->getContext()->getUserId())->isSuccess())
 		{
 			return self::DELETE_NONE;
 		}

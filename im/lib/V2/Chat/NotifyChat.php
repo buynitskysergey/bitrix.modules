@@ -27,9 +27,9 @@ class NotifyChat extends Chat
 		return self::IM_TYPE_SYSTEM;
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		return false;
+		return (new Result())->addError(new ChatError(ChatError::ACCESS_DENIED));
 	}
 
 	/**

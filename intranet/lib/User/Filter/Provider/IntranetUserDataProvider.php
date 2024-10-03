@@ -2,7 +2,6 @@
 
 namespace Bitrix\Intranet\User\Filter\Provider;
 
-use Bitrix\Intranet\CurrentUser;
 use Bitrix\Intranet\User\Filter\IntranetUserSettings;
 use Bitrix\Intranet\Util;
 use Bitrix\Main\Filter\EntityDataProvider;
@@ -102,8 +101,6 @@ class IntranetUserDataProvider extends EntityDataProvider
 	{
 		$filterValue = parent::prepareFilterValue($rawFilterValue);
 
-		$filterValue['IS_REAL_USER'] = 'Y';
-
 		// compatibility with old filters
 		$this->checkFiredField($filterValue);
 		$this->checkExtranetField($filterValue);
@@ -125,12 +122,12 @@ class IntranetUserDataProvider extends EntityDataProvider
 		{
 			$invitedFilter = [
 				'=ACTIVE' => 'Y',
-				'!CONFIRM_CODE' => false,
+				'!CONFIRM_CODE' => '',
 			];
 
-			if (!CurrentUser::get()->isAdmin())
+			if (!$this->getSettings()->isCurrentUserAdmin())
 			{
-				$invitedFilter['INVITATION.ORIGINATOR_ID'] = CurrentUser::get()->getId();
+				$invitedFilter['INVITATION.ORIGINATOR_ID'] = $this->getSettings()->getCurrentUserId();
 			}
 		}
 		else
@@ -142,7 +139,7 @@ class IntranetUserDataProvider extends EntityDataProvider
 		{
 			$waitingFilter = [
 				'=ACTIVE' => 'N',
-				'!CONFIRM_CODE' => false,
+				'!CONFIRM_CODE' => '',
 			];
 		}
 		else
@@ -161,11 +158,11 @@ class IntranetUserDataProvider extends EntityDataProvider
 				$invitedFilter,
 				[
 					'=ACTIVE' => 'Y',
-					'CONFIRM_CODE' => false,
+					'CONFIRM_CODE' => '',
 				],
 				[
 					'=ACTIVE' => 'N',
-					'CONFIRM_CODE' => false,
+					'CONFIRM_CODE' => '',
 				],
 			];
 		}
@@ -181,7 +178,7 @@ class IntranetUserDataProvider extends EntityDataProvider
 				$invitedFilter,
 				[
 					'=ACTIVE' => 'Y',
-					'CONFIRM_CODE' => false,
+					'CONFIRM_CODE' => '',
 				]
 			];
 		}
@@ -192,7 +189,7 @@ class IntranetUserDataProvider extends EntityDataProvider
 		)
 		{
 			$filterValue['=ACTIVE'] = 'N';
-			$filterValue['CONFIRM_CODE'] = false;
+			$filterValue['CONFIRM_CODE'] = '';
 		}
 	}
 
@@ -261,7 +258,7 @@ class IntranetUserDataProvider extends EntityDataProvider
 			if ($filterValue[IntranetUserSettings::INVITED_FIELD] === 'Y')
 			{
 				$filterValue['=ACTIVE'] = 'Y';
-				$filterValue['!CONFIRM_CODE'] = false;
+				$filterValue['!CONFIRM_CODE'] = '';
 			}
 			elseif ($filterValue[IntranetUserSettings::INVITED_FIELD] === 'N')
 			{
@@ -269,11 +266,11 @@ class IntranetUserDataProvider extends EntityDataProvider
 					'LOGIC' => 'OR',
 					[
 						'=ACTIVE' => 'N',
-						'!CONFIRM_CODE' => false,
+						'!CONFIRM_CODE' => '',
 					],
 					[
 						'=ACTIVE' => 'Y',
-						'CONFIRM_CODE' => false,
+						'CONFIRM_CODE' => '',
 					]
 				];
 			}
@@ -306,9 +303,14 @@ class IntranetUserDataProvider extends EntityDataProvider
 		)
 		{
 			$filterValue['=GROUPS.GROUP_ID'] = 1;
-			if (Loader::includeModule('bitrix24'))
+
+			if (
+				Loader::includeModule('bitrix24')
+				&& $this->getSettings()->isFilterAvailable(IntranetUserSettings::INTEGRATOR_FIELD)
+			)
 			{
 				$integratorGroupId = \Bitrix\Bitrix24\Integrator::getIntegratorGroupId();
+
 				if ($integratorGroupId)
 				{
 					$filterValue['!=GROUPS.GROUP_ID'] = $integratorGroupId;
@@ -349,11 +351,11 @@ class IntranetUserDataProvider extends EntityDataProvider
 			if ($filterValue[IntranetUserSettings::WAIT_CONFIRMATION_FIELD] === 'Y')
 			{
 				$filterValue['=ACTIVE'] = 'N';
-				$filterValue['!CONFIRM_CODE'] = false;
+				$filterValue['!CONFIRM_CODE'] = '';
 			}
 			elseif ($filterValue[IntranetUserSettings::WAIT_CONFIRMATION_FIELD] === 'N')
 			{
-				$filterValue['CONFIRM_CODE'] = false;
+				$filterValue['CONFIRM_CODE'] = '';
 			}
 		}
 	}

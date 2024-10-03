@@ -8,13 +8,13 @@ use Bitrix\Sign\Contract;
 use Bitrix\Sign\Item\Document;
 use Bitrix\Sign\Repository\MemberRepository;
 use Bitrix\Sign\Service\Container;
+use Bitrix\Sign\Service\NotifyCalculationService;
 use Bitrix\Sign\Type\DateTime;
 use Bitrix\Sign\Type\Member\Notification\ReminderType;
 
 final class Start implements Contract\Operation
 {
-	private const INTERVAL_BETWEEN_EXECUTION = 60 * 10;
-	private const NEXT_EXEC_TIME = 60 * 10;
+	private const SECONDS_IN_MINUTE = 60;
 	private readonly MemberRepository $memberRepository;
 
 	public function __construct(
@@ -36,11 +36,15 @@ final class Start implements Contract\Operation
 			return new Main\Result();
 		}
 
-		$nextExecTime = (new DateTime())->withAddSeconds(self::NEXT_EXEC_TIME);
+		$countMembers = $this->memberRepository->countByDocumentId($this->document->id);
+		$intervalBetweenExecAndNextExecTime = (new NotifyCalculationService())->getIntervalsBetweenExecAndNextExecTimeInMinutes($countMembers);
+		$minuteIntervalBetweenExecAndNextExecTime = self::SECONDS_IN_MINUTE * $intervalBetweenExecAndNextExecTime;
+
+		$nextExecTime = (new DateTime())->withAddSeconds($minuteIntervalBetweenExecAndNextExecTime);
 		$agentId = \CAgent::AddAgent(
 			name: SigningReminderAgent::getPlanNextRemindDateAgentName($this->document->id),
 			module: 'sign',
-			interval: self::INTERVAL_BETWEEN_EXECUTION,
+			interval: $minuteIntervalBetweenExecAndNextExecTime,
 			next_exec: $nextExecTime,
 			existError: false,
 		);
@@ -52,7 +56,7 @@ final class Start implements Contract\Operation
 		$agentId = \CAgent::AddAgent(
 			name: SigningReminderAgent::getNotifyAgentName($this->document->id),
 			module: 'sign',
-			interval: self::INTERVAL_BETWEEN_EXECUTION,
+			interval: $minuteIntervalBetweenExecAndNextExecTime,
 			next_exec: $nextExecTime,
 			existError: false,
 		);

@@ -102,11 +102,6 @@ class CAdminFilter
 		}
 	}
 
-	private static function err_mess()
-	{
-		return "<br>Class: CAdminFilter<br>File: ".__FILE__;
-	}
-
 	private function AddItem($arItem, $bInsertFirst = false)
 	{
 		//if user "deleted" preset http://jabber.bx/view.php?id=34405
@@ -445,7 +440,6 @@ class CAdminFilter
 	{
 		global $DB;
 
-		$err_mess = (static::err_mess())."<br>Function: GetList<br>Line: ";
 		$arSqlSearch = Array();
 		if (is_array($arFilter))
 		{

@@ -2,14 +2,19 @@
 
 namespace Bitrix\Intranet\User;
 
+use Bitrix\Intranet\User\Filter\ExtranetUserSettings;
 use Bitrix\Intranet\User\Filter\IntranetUserSettings;
 use Bitrix\Intranet\User\Filter\Presets\FilterPreset;
+use Bitrix\Intranet\User\Filter\Provider\ExtranetUserDataProvider;
 use Bitrix\Intranet\User\Filter\Provider\IntegerUserDataProvider;
 use Bitrix\Intranet\User\Filter\Provider\IntranetUserDataProvider;
+use Bitrix\Intranet\User\Filter\Provider\PhoneUserDataProvider;
+use Bitrix\Intranet\User\Filter\Provider\StringUserDataProvider;
 use Bitrix\Intranet\User\Filter\UserFilter;
 use Bitrix\Intranet\UserTable;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Filter\UserDataProvider;
+use Bitrix\Main\ModuleManager;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 
@@ -32,13 +37,24 @@ final class UserManager
 			'ID' => $filterId,
 		]);
 
+		$extraProviders = [
+			new IntranetUserDataProvider($filterSettings),
+			new IntegerUserDataProvider($filterSettings),
+			new PhoneUserDataProvider($filterSettings),
+		];
+
+		if (ModuleManager::isModuleInstalled('extranet'))
+		{
+			$extranetSettings = new ExtranetUserSettings([
+				'ID' => $filterId,
+			]);
+			$extraProviders[] = new \Bitrix\Intranet\User\Filter\Provider\ExtranetUserDataProvider($extranetSettings);
+		}
+
 		$this->filter = new UserFilter(
 			$filterId,
 			new UserDataProvider($filterSettings),
-			[
-				new IntranetUserDataProvider($filterSettings),
-				new IntegerUserDataProvider($filterSettings),
-			],
+			$extraProviders,
 			[
 				'FILTER_SETTINGS' => $filterSettings,
 			],

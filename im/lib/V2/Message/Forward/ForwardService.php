@@ -207,6 +207,6 @@ class ForwardService
 	{
 		$chat = $message->getChat();
 
-		return $chat->hasAccess($this->getContext()->getUserId()) && !($chat instanceof Chat\CommentChat);
+		return $chat->checkAccess($this->getContext()->getUserId())->isSuccess() && !($chat instanceof Chat\CommentChat);
 	}
 }

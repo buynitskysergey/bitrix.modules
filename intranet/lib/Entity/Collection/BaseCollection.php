@@ -60,6 +60,14 @@ abstract class BaseCollection implements Countable, IteratorAggregate
 	}
 
 	/**
+	 * @return T|null
+	 */
+	public function first(): mixed
+	{
+		return $this->get(0);
+	}
+
+	/**
 	 * @return list<T>
 	 */
 	public function all(): array

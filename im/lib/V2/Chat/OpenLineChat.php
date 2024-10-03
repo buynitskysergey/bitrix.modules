@@ -193,26 +193,35 @@ class OpenLineChat extends EntityChat
 		return self::ENTITY_TYPE_LINE;
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		$inChat = parent::checkAccessWithoutCaching($userId);
+		$checkResult = parent::checkAccessInternal($userId);
 
-		if ($inChat)
+		if ($checkResult->isSuccess())
 		{
-			return true;
+			return $checkResult;
 		}
+
+		$result = new Result();
 
 		if (!Loader::includeModule('imopenlines'))
 		{
-			return false;
+			return $result->addError(new ChatError(ChatError::ACCESS_DENIED));
 		}
 
 		$entityData = $this->getEntityData(true);
-		return Config::canJoin(
+		$canJoin = Config::canJoin(
 			$entityData['lineId'] ?? 0,
 			$entityData['crmEntityType'] ?? null,
 			$entityData['crmEntityId'] ?? null
 		);
+
+		if (!$canJoin)
+		{
+			$result->addError(new ChatError(ChatError::ACCESS_DENIED));
+		}
+
+		return $result;
 	}
 
 	public function canUpdateOwnMessage(): bool

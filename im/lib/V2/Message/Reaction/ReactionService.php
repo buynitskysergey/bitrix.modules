@@ -112,7 +112,7 @@ class ReactionService
 			$authorId === 0
 			|| $authorId === $this->getContext()->getUserId()
 			|| $chat->getEntityType() === 'LIVECHAT'
-			|| !$chat->hasAccess($authorId)
+			|| !$chat->checkAccess($authorId)->isSuccess()
 		)
 		{
 			return;

@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\Intranet\Component\UserProfile;
 
+use Bitrix\Intranet\Service\ServiceContainer;
 use Bitrix\Main;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
@@ -37,19 +38,17 @@ class Form
 
 		$isExtranetUser = empty($user["UF_DEPARTMENT"]) ? true : false;
 
-		$departmentList = array();
-		if (Loader::includeModule("iblock"))
+		$departmentList = [];
+
+		$departmentRepository = ServiceContainer::getInstance()->departmentRepository();
+		$departmentCollection = $departmentRepository->getAllTree();
+
+		foreach($departmentCollection as $department)
 		{
-			$departments = \CIBlockSection::GetTreeList(array(
-				"IBLOCK_ID"=>intval(\COption::GetOptionInt('intranet', 'iblock_structure', false)),
-			));
-			while($department = $departments->Fetch())
-			{
-				$departmentList[] = array(
-					'NAME' => /*str_repeat(" . ", $department["DEPTH_LEVEL"]).*/$department["NAME"],
-					'VALUE' => $department["ID"]
-				);
-			}
+			$departmentList[] = array(
+				'NAME' => $department->getName(),
+				'VALUE' => $department->getId()
+			);
 		}
 
 		$personalCountryItems = array(

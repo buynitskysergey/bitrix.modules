@@ -7,13 +7,11 @@ use Bitrix\Sign\Operation\Member\Reminder\CheckForgottenReminder;
 use Bitrix\Sign\Operation\Member\Reminder\PlanNextRemindDate;
 use Bitrix\Sign\Operation\Member\Reminder\Send;
 use Bitrix\Sign\Service\Container;
+use Bitrix\Sign\Service\NotifyCalculationService;
 use Bitrix\Sign\Type\DocumentStatus;
 
 final class SigningReminderAgent
 {
-	private const PLAN_MEMBER_LIMIT = 100;
-	private const SEND_REMINDER_LIMIT = 100;
-
 	public static function getPlanNextRemindDateAgentName(int $documentId): string
 	{
 		return "\\Bitrix\\Sign\\Agent\\Member\\SigningReminderAgent::planNextRemindDate($documentId);";
@@ -40,7 +38,7 @@ final class SigningReminderAgent
 			return '';
 		}
 
-		$result = (new PlanNextRemindDate($document, self::PLAN_MEMBER_LIMIT))->launch();
+		$result = (new PlanNextRemindDate($document, (new NotifyCalculationService)->getPlanMemberAndSendReminderLimit($documentId)))->launch();
 		if (!$result->isSuccess())
 		{
 			$logger = Logger::getInstance();
@@ -79,7 +77,7 @@ final class SigningReminderAgent
 			return '';
 		}
 
-		$result = (new Send($document, self::SEND_REMINDER_LIMIT))->launch();
+		$result = (new Send($document, (new NotifyCalculationService)->getPlanMemberAndSendReminderLimit($documentId)))->launch();
 		if (!$result->isSuccess())
 		{
 			$logger = Logger::getInstance();

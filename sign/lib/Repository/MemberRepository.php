@@ -1114,21 +1114,39 @@ class MemberRepository
 				Query::filter()
 					->logic('and')
 					->where('ENTITY_TYPE', '=', EntityType::USER)
-					->where('ENTITY_ID', $entityId),
+					->where('ENTITY_ID', $entityId)
+					->whereIn('DOCUMENT.STATUS', [DocumentStatus::SIGNING, DocumentStatus::STOPPED])
+					->where(
+						Query::filter()
+							->logic('or')
+							->where(Query::filter()
+										 ->logic('and')
+										 ->where('SIGNED', MemberStatus::READY)
+										 ->where('DOCUMENT.PROVIDER_CODE', Type\ProviderCode::GOS_KEY)
+										 ->whereIn('DOCUMENT.STATUS', [DocumentStatus::SIGNING, DocumentStatus::STOPPED])
+							)
+							->where(Query::filter()
+										 ->logic('and')
+										 ->whereIn('SIGNED', MemberStatus::getReadyForSigning())
+										 ->where('DOCUMENT.STATUS', DocumentStatus::SIGNING)
+							)
+					)
+				,
 			)
 			->where(
 				Query::filter()
 					->logic('and')
 					->where('ENTITY_TYPE', '=', EntityType::COMPANY)
 					->where('ROLE', '=', $this->convertRoleToInt(Role::ASSIGNEE))
-					->where('DOCUMENT.REPRESENTATIVE_ID', '=', $entityId),
+					->where('DOCUMENT.REPRESENTATIVE_ID', '=', $entityId)
+					->where('DOCUMENT.STATUS', DocumentStatus::SIGNING)
+				,
 		);
 
 		return Internal\MemberTable
 			::query()
 			->addSelect('*')
 			->whereIn('SIGNED', MemberStatus::getReadyForSigning())
-			->where('DOCUMENT.STATUS', DocumentStatus::SIGNING)
 			->where('DOCUMENT.ENTITY_TYPE', '=', Type\Document\EntityType::SMART_B2E)
 			->where($filter)
 		;

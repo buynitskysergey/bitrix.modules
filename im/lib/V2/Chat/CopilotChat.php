@@ -91,7 +91,12 @@ class CopilotChat extends GroupChat
 			return $result->addError(new ChatError(ChatError::IMBOT_NOT_INSTALLED));
 		}
 
-		if (!(new Restriction(Restriction::AI_COPILOT_CHAT))->isAvailable())
+		if (!self::isAvailable())
+		{
+			return $result->addError(new Error(Restriction::AI_AVAILABLE_ERROR));
+		}
+
+		if (!self::isActive())
 		{
 			return $result->addError(new Error(Restriction::AI_TEXT_ERROR));
 		}
@@ -330,11 +335,16 @@ class CopilotChat extends GroupChat
 		return Bot\CopilotChatBot::getBotId() ?: Bot\CopilotChatBot::register();
 	}
 
-	public static function isAvailable(): bool
+	public static function isActive(): bool
 	{
 		return Loader::includeModule('imbot')
-			&& (new Restriction(Restriction::AI_COPILOT_CHAT))->isAvailable()
+			&& (new Restriction(Restriction::AI_COPILOT_CHAT))->isActive()
 			&& static::getBotIdOrRegister();
+	}
+
+	public static function isAvailable(): bool
+	{
+		return (new Restriction(Restriction::AI_COPILOT_CHAT))->isAvailable();
 	}
 
 	public function deleteUser(int $userId, bool $withMessage = true, bool $skipRecent = false, bool $withNotification = true, bool $skipCheckReason = false): Result

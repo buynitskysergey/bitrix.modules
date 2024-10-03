@@ -30,7 +30,7 @@ class UserSettings extends \Bitrix\Main\Grid\Settings
 		$this->userFields = $USER_FIELD_MANAGER->getUserFields(\Bitrix\Main\UserTable::getUfId(), 0, LANGUAGE_ID, false);
 		$this->initViewFields();
 
-		$this->extensionName = $params['extensionName'] ?? 'Intranet.Grid.UserGrid';
+		$this->extensionName = $params['extensionName'] ?? 'Intranet.UserList';
 		$this->extensionLoadName = $params['extensionLoadName'] ?? 'intranet.grid.user-grid';
 	}
 
@@ -57,6 +57,11 @@ class UserSettings extends \Bitrix\Main\Grid\Settings
 		}
 
 		return in_array($userId, $this->getAdminIdList());
+	}
+
+	public function isCurrentUserAdmin(): bool
+	{
+		return $this->isUserAdmin($this->getCurrentUserId());
 	}
 
 	public function isUserIntegrator($userId): bool

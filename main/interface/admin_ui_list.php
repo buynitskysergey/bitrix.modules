@@ -565,19 +565,22 @@ class CAdminUiList extends CAdminList
 		$options->save();
 	}
 
-	public function DisplayFilter(array $filterFields = array())
+	public function DisplayFilter(array $filterFields = [], array $filterParams = [])
 	{
 		global $APPLICATION;
 
 		$filterFields = $this->getPreparedFilterFields($filterFields);
 
-		$params = array(
-			"FILTER_ID" => $this->table_id,
-			"GRID_ID" => $this->table_id,
-			"FILTER" => $filterFields,
-			"FILTER_PRESETS" => $this->filterPresets,
-			"ENABLE_LABEL" => true,
-			"ENABLE_LIVE_SEARCH" => true
+		$filterParams = array_merge(
+			$filterParams,
+			[
+				"FILTER_ID" => $this->table_id,
+				"GRID_ID" => $this->table_id,
+				"FILTER" => $filterFields,
+				"FILTER_PRESETS" => $this->filterPresets,
+				"ENABLE_LABEL" => true,
+				"ENABLE_LIVE_SEARCH" => true,
+			]
 		);
 
 		if ($this->currentPreset)
@@ -601,7 +604,7 @@ class CAdminUiList extends CAdminList
 					$APPLICATION->includeComponent(
 						"bitrix:main.ui.filter",
 						"",
-						$params,
+						$filterParams,
 						false,
 						array("HIDE_ICONS" => true)
 					);
@@ -621,7 +624,7 @@ class CAdminUiList extends CAdminList
 					$APPLICATION->includeComponent(
 						"bitrix:main.ui.filter",
 						"",
-						$params,
+						$filterParams,
 						false,
 						array("HIDE_ICONS" => true)
 					);
@@ -880,7 +883,9 @@ class CAdminUiList extends CAdminList
 			"AJAX_ID" => CAjax::getComponentID("bitrix:main.ui.grid", ".default", ""),
 			"ALLOW_PIN_HEADER" => true,
 			"ALLOW_VALIDATE" => false,
-			"HANDLE_RESPONSE_ERRORS" => true
+			"HANDLE_RESPONSE_ERRORS" => true,
+			'USE_CHECKBOX_LIST_FOR_SETTINGS_POPUP' => $arParams['USE_CHECKBOX_LIST_FOR_SETTINGS_POPUP'] ?? false,
+			'ENABLE_FIELDS_SEARCH' => $arParams['ENABLE_FIELDS_SEARCH'] ?? 'N',
 		);
 
 		$actionPanel = ($arParams["ACTION_PANEL"] ?? $this->GetGroupAction());

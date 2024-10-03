@@ -19,7 +19,9 @@ return [
 	'console' => [
 		'value' => [
 			'commands' => [
-				\Bitrix\Main\Cli\OrmAnnotateCommand::class,
+				\Bitrix\Main\Cli\Command\Orm\AnnotateCommand::class,
+				\Bitrix\Main\Cli\Command\Make\ControllerCommand::class,
+				\Bitrix\Main\Cli\Command\Make\TabletCommand::class,
 			],
 		],
 		'readonly' => true,

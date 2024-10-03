@@ -387,8 +387,6 @@ class Chat extends BaseController
 			return null;
 		}
 
-		//(new ChatAnalytics())->addSubmitCreateNew($result);
-
 		return $this->convertKeysToCamelCase($result->getResult());
 	}
 

@@ -4,6 +4,7 @@ namespace Bitrix\Sign\Operation;
 
 use Bitrix\Sign\Callback\Messages\Member\MemberStatusChanged;
 use Bitrix\Sign\Integration\CRM\Model\EventData;
+use Bitrix\Sign\Operation\DocumentChat\AddMemberByDocument;
 use Bitrix\Sign\Operation\Kanban\B2e\SendUpdateEntityPullEvent;
 use Bitrix\Sign\Repository\MemberRepository;
 use Bitrix\Sign\Service\HrBotMessageService;
@@ -83,7 +84,6 @@ final class ChangeMemberStatus implements Contract\Operation
 		}
 
 		$this->member->status = $this->status;
-
 		if ($this->member->dateSigned === null && $this->status === Type\MemberStatus::DONE)
 		{
 			$this->member->dateSigned = new Main\Type\DateTime();
@@ -98,6 +98,15 @@ final class ChangeMemberStatus implements Contract\Operation
 		if ($this->sendReadyEvents() === false)
 		{
 			$this->sendKanbanPullEvent();
+		}
+
+		if (Type\DocumentScenario::isB2EScenario($this->document->scenario ?? ''))
+		{
+			$addMemberResult = (new AddMemberByDocument($this->member, $this->document))->launch();
+			if (!$addMemberResult->isSuccess())
+			{
+				return $result->addErrors($addMemberResult->getErrors());
+			}
 		}
 
 		if (
@@ -123,9 +132,6 @@ final class ChangeMemberStatus implements Contract\Operation
 			$memberCollection = $this->memberRepository->listByDocumentId($this->document->id);
 			$this->pullService->sendMemberStatusChanged($this->document, $this->member, $memberCollection);
 		}
-
-		$updateReminderSettingsResult = $this->updateReminderSettings($this->document, $this->member);
-		$result->addErrors($updateReminderSettingsResult->getErrors());
 
 		$updateReminderSettingsResult = $this->updateReminderSettings($this->document, $this->member);
 		$result->addErrors($updateReminderSettingsResult->getErrors());

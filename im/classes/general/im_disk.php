@@ -2463,33 +2463,13 @@ class CIMDisk
 	}
 
 	/**
-	 * @return false|string
+	 * @deprecated Use \Bitrix\Im\V2\Integration\HumanResources\Department\Department::getTopCode()
 	 */
-	public static function GetTopDepartmentCode()
+	public static function GetTopDepartmentCode(): false|string
 	{
-		if (!\Bitrix\Main\Loader::includeModule("iblock"))
-		{
-			return false;
-		}
+		$topCode = IM\V2\Integration\HumanResources\Department\Department::getInstance()->getTopCode();
 
-		$code = false;
-		$res = \CIBlock::GetList(array(), array("CODE" => "departments"));
-		if ($iblock = $res->Fetch())
-		{
-			$res = \CIBlockSection::GetList(
-				array(),
-				array(
-					"SECTION_ID" => 0,
-					"IBLOCK_ID" => $iblock["ID"]
-				)
-			);
-			if ($department = $res->Fetch())
-			{
-				$code = "DR".$department['ID'];
-			}
-		}
-
-		return $code;
+		return $topCode ?? false;
 	}
 
 	/**

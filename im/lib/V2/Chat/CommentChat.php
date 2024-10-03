@@ -456,9 +456,11 @@ class CommentChat extends GroupChat
 		);
 	}
 
-	protected function checkAccessWithoutCaching(int $userId): bool
+	protected function checkAccessInternal(int $userId): Result
 	{
-		return $this->getParentMessage()?->hasAccess() ?? false;
+		return $this->getParentMessage()?->checkAccess($userId)
+			?? (new Result())->addError(new ChatError(ChatError::ACCESS_DENIED))
+		;
 	}
 
 	protected function addIndex(): Chat

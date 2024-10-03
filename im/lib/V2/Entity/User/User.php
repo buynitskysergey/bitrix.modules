@@ -5,11 +5,13 @@ namespace Bitrix\Im\V2\Entity\User;
 use Bitrix\Im\Common;
 use Bitrix\Im\Model\RelationTable;
 use Bitrix\Im\Model\StatusTable;
+use Bitrix\Im\V2\Chat\ChatError;
 use Bitrix\Im\V2\Chat\FavoriteChat;
 use Bitrix\Im\V2\Chat\PrivateChat;
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Entity\Department\Departments;
 use Bitrix\Im\V2\Rest\RestEntity;
+use Bitrix\Im\V2\Result;
 use Bitrix\Im\V2\Service\Locator;
 use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Loader;
@@ -176,20 +178,20 @@ class User implements RestEntity
 		return $createResult->getResult()['CHAT'];
 	}
 
-	final public function hasAccess(?int $idOtherUser = null): bool
+	final public function checkAccess(?int $idOtherUser = null): Result
 	{
-		$idOtherUser = $idOtherUser ?? Locator::getContext()->getUserId();
-
+		$result = new Result();
+		$idOtherUser ??= Locator::getContext()->getUserId();
 		$otherUser = User::getInstance($idOtherUser);
 
 		if (!$otherUser->isExist())
 		{
-			return false;
+			return $result->addError(new UserError(UserError::NOT_FOUND));
 		}
 
 		if ($this->getId() === $idOtherUser)
 		{
-			return true;
+			return $result;
 		}
 
 		if (isset($this->accessCache[$idOtherUser]))
@@ -197,35 +199,37 @@ class User implements RestEntity
 			return $this->accessCache[$idOtherUser];
 		}
 
-		$this->accessCache[$idOtherUser] = $this->checkAccessWithoutCaching($otherUser);
+		$this->accessCache[$idOtherUser] = $this->checkAccessInternal($otherUser);
 
 		return $this->accessCache[$idOtherUser];
 	}
 
-	protected function checkAccessWithoutCaching(self $otherUser): bool
+	protected function checkAccessInternal(self $otherUser): Result
 	{
+		$result = new Result();
+
 		if (!static::$moduleManager::isModuleInstalled('intranet'))
 		{
-			return $this->hasAccessBySocialNetwork($otherUser->getId());
+			if (!$this->hasAccessBySocialNetwork($otherUser->getId()))
+			{
+				$result->addError(new ChatError(ChatError::ACCESS_DENIED));
+			}
+
+			return $result;
 		}
 
 		if ($otherUser->isExtranet())
 		{
 			$inGroup = \Bitrix\Im\Integration\Socialnetwork\Extranet::isUserInGroup($this->getId(), $otherUser->getId());
-			if ($inGroup)
+			if (!$inGroup)
 			{
-				return true;
+				$result->addError(new ChatError(ChatError::ACCESS_DENIED));
 			}
 
-			return false;
+			return $result;
 		}
 
-		if ($this->isNetwork())
-		{
-			return true;
-		}
-
-		return true;
+		return $result;
 	}
 
 	final protected function hasAccessBySocialNetwork(int $idOtherUser): bool

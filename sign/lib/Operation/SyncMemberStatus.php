@@ -35,7 +35,7 @@ class SyncMemberStatus implements Operation
 
 		/** @var MemberWebStatusResult $result */
 
-		$operation =  (new ChangeMemberStatus(
+		$operation = (new ChangeMemberStatus(
 			$this->member,
 			$this->document,
 			$memberWebStatusResult->status,

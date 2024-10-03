@@ -47,6 +47,17 @@ final class MemberStatus
 		];
 	}
 
+	/**
+	 * @return list<self::*>
+	 */
+	public static function getStatusesNotDone(): array
+	{
+		return array_filter(
+			self::getAll(),
+			static fn ($status) => $status !== self::DONE
+		);
+	}
+
 	public static function isReadyForSigning(string $status): bool
 	{
 		return in_array($status, self::getReadyForSigning(), true);

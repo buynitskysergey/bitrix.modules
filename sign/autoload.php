@@ -12,6 +12,7 @@
 	\Bitrix\Sign\Controllers\V1\Document\Send::class => 'lib/Controllers/V1/Document/Send.php',
 	\Bitrix\Sign\Controllers\V1\Integration\Crm\Field::class => 'lib/Controllers/V1/Integration/Crm/Field.php',
 	\Bitrix\Sign\Controllers\V1\Integration\Crm\B2eCompany::class => 'lib/Controllers/V1/Integration/Crm/B2eCompany.php',
+	\Bitrix\Sign\Controllers\V1\Integration\Im\GroupChat::class => 'lib/Controllers/V1/Integration/Im/GroupChat.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Fields::class => 'lib/Controllers/V1/B2e/Fields.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Scheme::class => 'lib/Controllers/V1/B2e/Scheme.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Member\Communication::class => 'lib/Controllers/V1/B2e/Member/Communication.php',

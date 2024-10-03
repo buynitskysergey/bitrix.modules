@@ -338,4 +338,19 @@ class Container
 	{
 		return static::getService('sign.util.cache');
 	}
+
+	public function getGroupChatService(): Service\Integration\Im\GroupChatService
+	{
+		return static::getService('sign.service.integration.im.groupChat');
+	}
+
+	public function getDocumentChatRepository(): Repository\DocumentChatRepository
+	{
+		return static::getService('sign.repository.documentChat');
+	}
+
+	public function getChatTypeConverterService(): Service\Sign\DocumentChat\ChatTypeConverterService
+	{
+		return static::getService('sign.service.sign.documentChat.chatTypeConverter');
+	}
 }

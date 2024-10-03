@@ -65,7 +65,12 @@ abstract class BaseService implements PushService
 			}
 		}
 
-		return ";".implode(";", $batchComponents);
+		if (!empty($batchComponents))
+		{
+			$batch = ";".implode(";", $batchComponents);
+		}
+
+		return $batch;
 	}
 
 	protected static function getGroupedByServiceMode($arMessages): array
