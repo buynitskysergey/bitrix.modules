@@ -394,8 +394,8 @@ function generate_schema_ddl($sql, $tableFilter, $isDump, $source)
 
 function parse_values($values_str)
 {
-	static $search  = ['\\\'', '\\"'];
-	static $replace = ['\'\'', '"'  ];
+	static $search = ['\\\'', '\\"'];
+	static $replace = ['\'\'', '"'];
 	$result = [];
 	$tokens = token_get_all('<?php '.$values_str);
 	$row = [];
