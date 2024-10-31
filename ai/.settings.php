@@ -1,4 +1,7 @@
 <?php
+
+use Bitrix\AI\Integration\Ui\EntitySelector\PromptCategoriesProvider;
+
 return [
 	'controllers' => [
 		'value' => [
@@ -15,4 +18,19 @@ return [
 		],
 		'readonly' => true,
 	],
+	'ui.entity-selector' => [
+		'value' => [
+			'entities' => [
+				[
+					'entityId' => 'prompt-category',
+					'provider' => [
+						'moduleId' => 'ai',
+						'className' => PromptCategoriesProvider::class,
+					],
+				],
+			'extensions' => ['ai.entity-selector'],
+			],
+		],
+		'readonly' => true,
+	]
 ];

@@ -194,7 +194,7 @@ if ($postRight >= 'R'):
 	$allOptions[] = [
 		'max_history_per_user',
 		Loc::getMessage('AI_OPT_MAX_HISTORY_PER_USER') . ':',
-		['text', 4],
+		['number', 0, 1000, 1],
 	];
 
 	$allOptions[] = [
@@ -371,6 +371,8 @@ foreach($allOptions as $Option):
 			$Option[0] . '_1')?>" /><?php
 			?><input type="text" size="<?php echo $type[1]?>" maxlength="255" value="<?php echo htmlspecialcharsbx($val2)?>" name="<?php echo htmlspecialcharsbx(
 			$Option[0] . '_2')?>" /><?php
+		elseif ($type[0] === 'number'):
+			?><input type="number" min="<?php echo $type[1]?>" max="<?=$type[2]?>" value="<?php echo (int)htmlspecialcharsbx($val)?>" name="<?php echo htmlspecialcharsbx($Option[0])?>" /><?php
 		elseif ($type[0] === 'textarea'):
 			?><textarea rows="<?php echo $type[1]?>" cols="<?php echo $type[2]?>" name="<?php echo htmlspecialcharsbx(
 			$Option[0])?>"><?php echo htmlspecialcharsbx($val)?></textarea><?php
