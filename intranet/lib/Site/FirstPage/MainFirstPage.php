@@ -1,10 +1,15 @@
 <?php
 
-namespace Bitrix\Intranet\MainPage;
+namespace Bitrix\Intranet\Site\FirstPage;
 
+use Bitrix\Intranet\MainPage\Access;
+use Bitrix\Intranet\MainPage\Publisher;
+use Bitrix\Intranet\MainPage\Url;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Web\Uri;
 
-class Page
+// vibe page from landing
+class MainFirstPage implements FirstPage
 {
 	public function getName(): string
 	{
@@ -26,7 +31,7 @@ class Page
 		return (new Access)->canView();
 	}
 
-	public function enabled(): bool
+	public function isEnabled(): bool
 	{
 		return $this->isAvailable() && (new Publisher)->isPublished();
 	}
@@ -34,5 +39,10 @@ class Page
 	public function getSettingsPath(): string
 	{
 		return SITE_DIR . 'settings/configs/?page=mainpage';
+	}
+
+	public function getUri(): Uri
+	{
+		return (new Url)->getPublic();
 	}
 }

@@ -62,6 +62,43 @@ return [
 			'intranet.repository.invitation' => [
 				'className' => \Bitrix\Intranet\Repository\InvitationRepository::class,
 			],
+			'intranet.repository.user' => [
+				'className' => \Bitrix\Intranet\Repository\UserRepository::class,
+			],
+			'intranet.service.invitation' => [
+				'className' => \Bitrix\Intranet\Service\InviteService::class
+			],
+			'intranet.service.registration' => [
+				'className' => \Bitrix\Intranet\Service\RegistrationService::class,
+			],
+			'intranet.portal.settings.name' => [
+				'constructor' => function () {
+					return new \Bitrix\Intranet\Portal\Settings\PortalNameSettings(
+						new \Bitrix\Intranet\Service\SiteOption(SITE_ID, 'main')
+					);
+				},
+			],
+			'intranet.portal.settings.title' => [
+				'constructor' => function () {
+					return new \Bitrix\Intranet\Portal\Settings\PortalTitleSettings(
+						new \Bitrix\Intranet\Service\SiteOption(SITE_ID, 'bitrix24')
+					);
+				},
+			],
+			'intranet.portal.settings.logo' => [
+				'constructor' => function () {
+					return new \Bitrix\Intranet\Portal\Settings\LogoSettings(
+						new \Bitrix\Intranet\Service\SiteOption(SITE_ID, 'bitrix24')
+					);
+				},
+			],
+			'intranet.portal.settings.logo24' => [
+				'constructor' => function () {
+					return new \Bitrix\Intranet\Portal\Settings\Logo24Settings(
+						new \Bitrix\Intranet\Service\SiteOption(SITE_ID, 'bitrix24')
+					);
+				},
+			],
 		],
 		'readonly' => true,
 	],

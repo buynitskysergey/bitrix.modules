@@ -74,6 +74,13 @@ return [
 						'className' => EntitySelector\ProjectRolesProvider::class,
 					],
 				],
+				[
+					'entityId' => 'site-groups',
+					'provider' => [
+						'moduleId' => 'socialnetwork',
+						'className' => EntitySelector\SiteGroupsProvider::class,
+					],
+				],
 			],
 			'extensions' => ['socialnetwork.entity-selector'],
 		],
