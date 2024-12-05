@@ -559,6 +559,9 @@ return array(
 			'crm.binding.clientBinder' => [
 				'className' => \Bitrix\Crm\Binding\ClientBinder::class,
 			],
+			'crm.service.communication.rankingFactory' => [
+				'className' => \Bitrix\Crm\Service\Communication\Search\Ranking\RankingFactory::class,
+			],
 		],
 		'readonly' => true,
 	],

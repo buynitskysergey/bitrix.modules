@@ -76,14 +76,15 @@ class Document extends Controller
 
 		if ($result->isSuccess() && $link = $result->getLink())
 		{
-			return([
+			return [
 				'documentTitle' => $link->documentTitle,
 				'isReadyForSigning' => $link->isReadyForSigningOnMobile(),
 				'isGoskey' => $link->isGoskey(),
 				'role' => $link->getRole(),
 				'state' => $link->getDocumentSigningState(),
 				'url' => $link->url,
-			]);
+				'isExternal' => $link->isExternal(),
+			];
 		}
 
 		$this->addError(new Error(
@@ -239,8 +240,8 @@ class Document extends Controller
 			->acceptSigning($memberId)
 		;
 
-        $this->addErrors($result->getErrors());
-    }
+		$this->addErrors($result->getErrors());
+	}
 
 	public function listAction(): ?array
 	{
@@ -260,7 +261,7 @@ class Document extends Controller
 		$signingMemberDocumentList = Sign\Service\Container::instance()
 			->getSignMobileMemberService()
 			->getB2eSigningMemberDocumentList($currentUserId)
-		 ;
+		;
 
 		$signedMemberDocumentList = Sign\Service\Container::instance()
 			->getSignMobileMemberService()
@@ -292,5 +293,50 @@ class Document extends Controller
 		];
 
 		return $actionsConfiguration;
+	}
+
+	public function getExternalUrlAction(int $memberId): array
+	{
+		if (!$this->includeRequiredModules())
+		{
+			return [];
+		}
+
+		$currentUserId = CurrentUser::get()->getId();
+
+		if (!$currentUserId)
+		{
+			$this->addError(new Error('Access denied', 'ACCESS_DENIED'));
+
+			return [];
+		}
+
+		$checkAccessResult = Sign\Service\Container::instance()
+		   ->getMobileService()
+		   ->checkAccessToSigning($memberId, (int)$currentUserId)
+		;
+
+		if (!$checkAccessResult->isSuccess())
+		{
+			$this->addErrors($checkAccessResult->getErrors());
+
+			return [];
+		}
+
+		$result = Sign\Service\Container::instance()
+					->getMobileService()
+					->getExternalSigningUrl($memberId)
+		;
+
+		if ($result instanceof Sign\Result\Service\ExternalSigningUrlResult)
+		{
+			return [
+				'url' => $result->url,
+			];
+		}
+
+		$this->addErrors($result->getErrors());
+
+		return [];
 	}
 }

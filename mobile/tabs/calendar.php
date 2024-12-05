@@ -51,7 +51,7 @@ class Calendar implements Tabable
 		return [
 			'id' => $this->getId(),
 			'sort' => $this->defaultSortValue(),
-			'imageName' => $this->getId(),
+			'imageName' => "calendar_with_slots",
 			'badgeCode' => $this->getId(),
 			'component' => $this->getComponentParams(),
 		];
@@ -73,7 +73,7 @@ class Calendar implements Tabable
 
 	public function shouldShowInMenu(): bool
 	{
-		return $this->isAvailable() && Mobile::getInstance()::getApiVersion() < 54;
+		return $this->isAvailable();
 	}
 
 	public function canBeRemoved(): bool
@@ -167,6 +167,6 @@ class Calendar implements Tabable
 
 	public function getIconId(): string
 	{
-		return $this->getId();
+		return "calendar_with_slots";
 	}
 }

@@ -380,6 +380,9 @@ return [
 			'sign.service.sign.url.generator' => [
 				'className' => Service\Sign\UrlGeneratorService::class,
 			],
+			'sign.service.document.template' => [
+				'className' => Service\Sign\Document\TemplateService::class,
+			],
 			'sign.service.api.b2e.providerFields' => [
 				'className' => Service\Api\B2e\ProviderFieldsService::class,
 				'constructorParams' => static fn() => [
@@ -436,6 +439,9 @@ return [
 			'sign.repository.required_field' => [
 				'className' => Repository\RequiredFieldRepository::class,
 			],
+			'sign.repository.document.template' => [
+				'className' => Repository\Document\TemplateRepository::class,
+			],
 			'sign.service.license' => [
 				'className' => Service\LicenseService::class,
 				'constructorParams' => static fn() => [
@@ -450,6 +456,12 @@ return [
 			],
 			'sign.util.cache' => [
 				'className' => Util\MainCache::class,
+			],
+			'sign.service.block.frontendBlock' => [
+				'className' => Service\Sign\Block\FrontendBlockService::class,
+			],
+			'sign.service.integration.crm.myCompany' => [
+				'className' => Service\Integration\Crm\MyCompanyService::class,
 			],
 		]
 	],

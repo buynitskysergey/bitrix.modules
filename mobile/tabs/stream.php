@@ -2,11 +2,13 @@
 
 namespace Bitrix\Mobile\AppTabs;
 
+use Bitrix\DiskMobile\AirDiskFeature;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
+use Bitrix\Mobile\Config\Feature;
 use Bitrix\Mobile\Tab\Tabable;
 use Bitrix\MobileApp\Janative\Manager;
 use Bitrix\Socialnetwork\Helper\Path;
@@ -70,8 +72,9 @@ class Stream implements Tabable
 	private function getDataInternal(): array
 	{
 		$newsWebPath = $this->context->siteDir . 'mobile/index.php?version=' . $this->context->version;
+		$apiVersion = \Bitrix\MobileApp\Mobile::getApiVersion();
 
-		if (\Bitrix\MobileApp\Mobile::getApiVersion() < 41)
+		if ($apiVersion < 41)
 		{
 			return [
 				'sort' => 200,
@@ -126,7 +129,8 @@ class Stream implements Tabable
 		];
 
 		if (
-			in_array('files', $allowedFeatures, true)
+			Feature::isDisabled(AirDiskFeature::class)
+			&& in_array('files', $allowedFeatures, true)
 			&& Option::get('disk', 'successfully_converted', false)
 			&& ModuleManager::isModuleInstalled('disk')
 		)

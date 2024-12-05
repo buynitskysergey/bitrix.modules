@@ -105,6 +105,7 @@ class EventService
 					'memberId' => $notification->getSignMemberId(),
 					'role' => $priorityNotificationLink->getRole(),
 					'isGoskey' => $priorityNotificationLink->isGoskey(),
+					'isExternal' => $priorityNotificationLink->isExternal(),
 					'document' => [
 						'url' => $url,
 						'title' => $priorityNotificationLink->documentTitle,

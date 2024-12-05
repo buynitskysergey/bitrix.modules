@@ -238,7 +238,7 @@ class CBPRestActivity extends CBPActivity implements
 		if ($this->SetStatusMessage === 'Y')
 		{
 			$message = $this->StatusMessage;
-			if (empty($message))
+			if (empty($message) || !is_string($message))
 			{
 				$message = Loc::getMessage('BPRA_DEFAULT_STATUS_MESSAGE');
 			}

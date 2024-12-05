@@ -12,6 +12,30 @@ if (!Loader::includeModule('sale'))
 	return $arReturn;
 }
 
+function getAllowedFiles(): array
+{
+	$region = \Bitrix\Main\Application::getInstance()->getLicense()->getRegion();
+	$isBitrixSiteManagementOnly =
+		!\Bitrix\Main\Loader::includeModule('bitrix24')
+		&& !\Bitrix\Main\Loader::includeModule('intranet')
+	;
+
+	if ($region === 'ru' || $region === 'by' || $region === 'kz' || $isBitrixSiteManagementOnly)
+	{
+		return [
+			'loc_ussr.csv',
+			'loc_kz.csv',
+			'loc_usa.csv',
+			'loc_cntr.csv',
+			'locations.csv',
+		];
+	}
+
+	return [
+		'locations.csv',
+	];
+}
+
 function saleLocationLoadFile($arParams): array
 {
 	$arReturn = [
@@ -52,15 +76,7 @@ function saleLocationLoadFile($arParams): array
 	$CSVFILE = (string)($arParams['CSVFILE'] ?? '');
 	$LOADZIP = $arParams["LOADZIP"];
 
-	if ($CSVFILE !== '' && !in_array($CSVFILE, array(
-													'loc_ussr.csv',
-													'loc_ua.csv',
-													'loc_kz.csv',
-													'loc_usa.csv',
-													'loc_cntr.csv',
-													'locations.csv')
-										)
-		)
+	if ($CSVFILE !== '' && !in_array($CSVFILE, getAllowedFiles(), true))
 	{
 		$arReturn['ERROR'] = GetMessage('SL_IMPORT_ERROR_FILES');
 	}
@@ -186,14 +202,7 @@ function saleLocationImport($arParams): array
 		$sTmpFilePath = CTempFile::GetDirectoryName(12, 'sale');
 
 
-	if ($CSVFILE !== '' && !in_array($CSVFILE, array(	'loc_ussr.csv',
-															'loc_ua.csv',
-															'loc_kz.csv',
-															'loc_usa.csv',
-															'loc_cntr.csv',
-															'locations.csv')
-										)
-	)
+	if ($CSVFILE !== '' && !in_array($CSVFILE, getAllowedFiles(), true))
 	{
 		//echo GetMessage('SL_IMPORT_ERROR_FILES');
 		$arReturn['ERROR'] = GetMessage('SL_IMPORT_ERROR_FILES');

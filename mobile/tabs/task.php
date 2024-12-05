@@ -45,15 +45,16 @@ class Task implements Tabable
 			'useLetterImage' => true,
 			'color' => '#fabb3f',
 			'imageUrl' => 'favorite/icon-tasks.png',
+			'params' => [
+				'id' => 'tasks_tabs',
+			],
 		];
 
 		$data = $this->getDataInternal();
 		if (!empty($data['component']))
 		{
-			$result['params'] = [
-				'onclick' => Utils::getComponentJSCode($data['component']),
-				'counter' => 'tasks_total',
-			];
+			$result['params']['onclick'] = Utils::getComponentJSCode($data['component']);
+			$result['params']['counter'] =' tasks_total';
 		}
 		elseif (!empty($data['page']))
 		{

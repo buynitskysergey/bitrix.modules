@@ -78,11 +78,21 @@ return [
 			'humanresources.repository.user' => [
 				'className' => \Bitrix\HumanResources\Repository\UserRepository::class,
 			],
+			'humanresources.helper.node.member.counter' => [
+				'className' => \Bitrix\HumanResources\Util\NodeMemberCounterHelper::class,
+			],
+			'humanresources.repository.access.accessNodeRepository' => [
+				'className' => \Bitrix\HumanResources\Repository\Access\AccessNodeRepository::class
+			],
 		]
 	],
-	'humanresources_pages' => [
+	'controllers' => [
 		'value' => [
-			'enabled' => false,
+			'namespaces' => [
+				'\\Bitrix\\HumanResources\\Controller' => 'api',
+			],
+			'defaultNamespace' => '\\Bitrix\\HumanResources\\Controller'
 		],
+		'readonly' => true
 	],
 ];
