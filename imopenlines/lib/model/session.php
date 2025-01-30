@@ -24,7 +24,8 @@ use Bitrix\Main,
 	Bitrix\Main\ORM\Fields\Relations\Reference;
 
 use Bitrix\ImOpenLines\Crm,
-	Bitrix\ImOpenLines\Integrations\Report\Statistics;
+	Bitrix\ImOpenLines\Integrations\Report\Statistics,
+	Bitrix\ImOpenLines\V2\Session\Session;
 
 use Bitrix\Im,
 	Bitrix\Im\Model\ChatTable,
@@ -82,6 +83,15 @@ Loc::loadMessages(__FILE__);
  */
 class SessionTable extends DataManager
 {
+	private const INDEX_FIELDS = [
+		'END_ID',
+		'CHAT_ID',
+		'CRM_ACTIVITY_ID',
+		'OPERATOR_ID',
+		'USER_ID',
+		'EXTRA_URL',
+	];
+
 	/**
 	 * Returns DB table name for entity.
 	 *
@@ -471,9 +481,17 @@ class SessionTable extends DataManager
 	 */
 	public static function getList(array $parameters = [])
 	{
-		if (!empty($parameters['select']) && in_array('CHAT', array_map('mb_strtoupper', $parameters['select'])))
+		if (is_array($parameters['select'] ?? null))
 		{
-			Loader::includeModule('im');
+			foreach ($parameters['select'] as $param)
+			{
+				if (is_string($param) && mb_strtoupper($param) === 'CHAT')
+				{
+					Loader::includeModule('im');
+
+					break;
+				}
+			}
 		}
 
 		return parent::getList($parameters);
@@ -507,7 +525,18 @@ class SessionTable extends DataManager
 	{
 		$primary = $event->getParameter("id");
 		$id = $primary["ID"];
-		static::indexRecord($id);
+		$fields = $event->getParameter('fields');
+
+		if (isset($id))
+		{
+			Session::updateStateAfterOrmEvent($id, $fields);
+		}
+
+		if (array_intersect(array_keys($fields), self::INDEX_FIELDS))
+		{
+			static::indexRecord($id);
+		}
+
 		Statistics\EventHandler::onSessionUpdate($event);
 		return new EventResult();
 	}

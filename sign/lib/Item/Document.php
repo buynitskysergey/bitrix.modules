@@ -3,9 +3,7 @@
 namespace Bitrix\Sign\Item;
 
 use Bitrix\Main;
-
 use Bitrix\Sign\Contract;
-use Bitrix\Sign\Item\B2e\RequiredFieldsCollection;
 use Bitrix\Sign\Type\Document\InitiatedByType;
 
 class Document implements Contract\Item, Contract\Item\ItemWithOwner, Contract\Item\ItemWithCrmId
@@ -26,6 +24,7 @@ class Document implements Contract\Item, Contract\Item\ItemWithOwner, Contract\I
 		public ?int $resultFileId = null,
 		public ?int $version = null,
 		public ?int $createdById = null,
+		public ?int $groupId = null,
 		public ?string $companyUid = null,
 		public ?int $representativeId = null,
 		public ?string $scheme = null,
@@ -37,8 +36,11 @@ class Document implements Contract\Item, Contract\Item\ItemWithOwner, Contract\I
 		public ?Main\Type\DateTime $externalDateCreate = null,
 		public ?string $providerCode = null,
 		public ?int $templateId = null,
+		public ?int $chatId = null,
 		public ?int $createdFromDocumentId = null,
 		public InitiatedByType $initiatedByType = InitiatedByType::COMPANY,
+		public ?int $hcmLinkCompanyId = null,
+		public ?Main\Type\DateTime $dateStatusChanged = null,
 	) {}
 
 	public function getCrmId(): int
@@ -59,5 +61,10 @@ class Document implements Contract\Item, Contract\Item\ItemWithOwner, Contract\I
 	public function isTemplated(): bool
 	{
 		return $this->templateId !== null;
+	}
+
+	public function isInitiatedByEmployee(): bool
+	{
+		return $this->initiatedByType === InitiatedByType::EMPLOYEE;
 	}
 }

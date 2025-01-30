@@ -3,6 +3,8 @@ namespace Bitrix\ImOpenLines;
 
 use Bitrix\Im\V2\Message;
 use Bitrix\Im\V2\Message\ReadService;
+use Bitrix\Im\V2\Rest\RestAdapter;
+use Bitrix\ImOpenLines\V2\Status\StatusGroup;
 use Bitrix\Main;
 use Bitrix\Main\Event;
 use Bitrix\Main\Loader;
@@ -175,8 +177,9 @@ class Chat
 				$session === false
 				|| (
 					$session['STATUS'] < Session::STATUS_ANSWER
-					&& (int)$session['MESSAGE_COUNT'] === 0)
+					&& (int)$session['MESSAGE_COUNT'] === 0
 				)
+			)
 			{
 				$this->isCreated = true;
 			}
@@ -1399,7 +1402,7 @@ class Chat
 	 * @param $status
 	 * @return bool
 	 */
-	public function updateSessionStatus($status)
+	public function updateSessionStatus($status, ?int $sessionId = null)
 	{
 		$result = false;
 
@@ -1420,13 +1423,38 @@ class Chat
 				$users[] = $relation['USER_ID'];
 			}
 
+			$chat = \Bitrix\Im\V2\Chat::getInstance((int)$this->chat['ID']);
+			$lastMessageId = $chat->getLastMessageId();
+			$lastMessage = null;
+
+			if (isset($lastMessageId))
+			{
+				$lastMessage = $chat->getMessage($lastMessageId)?->toRestFormat(['MESSAGE_SHORT_INFO' => true]);
+			}
+
+			if (isset($sessionId))
+			{
+				$session = \Bitrix\ImOpenLines\V2\Session\Session::getInstance($sessionId)
+					?->toRestFormat(['OVERWRITE_STATUS' => $status]);
+			}
+			else
+			{
+				$session = \Bitrix\ImOpenLines\V2\Session\Session::getInstanceByChatId($this->chat['ID'])
+					?->toRestFormat(['OVERWRITE_STATUS' => $status]);
+			}
+
+			$params = [
+				'chatId' => $this->chat['ID'],
+				'status' => (int)$status,
+				'chat' => $chat->toPullFormat(),
+				'message' => $lastMessage ?? [],
+				'session' => $session ?? [],
+			];
+
 			Pull\Event::add($users, [
 				'module_id' => 'imopenlines',
 				'command' => 'updateSessionStatus',
-				'params' => [
-					'chatId' => $this->chat['ID'],
-					'status' => (int)$status
-				],
+				'params' => $params,
 			]);
 
 			$result = true;
@@ -1694,6 +1722,13 @@ class Chat
 							'CHECK_DATE_CLOSE' => $dateClose
 						);
 						$session->update($sessionUpdate);
+
+						$this->updateFieldData([
+							self::FIELD_SESSION => [
+								'ID' => $session->getData('ID'),
+								'LINE_ID' => $session->getData('LINE_ID'),
+							]
+						]);
 					}
 					else
 					{
@@ -2532,15 +2567,15 @@ class Chat
 						}
 
 						$this->chat[self::getFieldName($fieldType)] = $data['CRM'].'|'
-																	.$data['CRM_ENTITY_TYPE'].'|'
-																	.$data['CRM_ENTITY_ID'].'|'
-																	.$data['PAUSE'].'|'
-																	.$data['WAIT_ACTION'].'|'
-																	.$data['ID'].'|'
-																	.$data['DATE_CREATE'].'|'
-																	.$data['LINE_ID'].'|'
-																	.$data['BLOCK_DATE'].'|'
-																	.$data['BLOCK_REASON'];
+							.$data['CRM_ENTITY_TYPE'].'|'
+							.$data['CRM_ENTITY_ID'].'|'
+							.$data['PAUSE'].'|'
+							.$data['WAIT_ACTION'].'|'
+							.$data['ID'].'|'
+							.$data['DATE_CREATE'].'|'
+							.$data['LINE_ID'].'|'
+							.$data['BLOCK_DATE'].'|'
+							.$data['BLOCK_REASON'];
 
 						$updateDate[self::getFieldName($fieldType)] = $this->chat[self::getFieldName($fieldType)];
 					}
@@ -2610,12 +2645,12 @@ class Chat
 							$data['WELCOME_TEXT_SENT'] = $fieldData['WELCOME_TEXT_SENT'] === 'N'? 'N': 'Y';
 						}
 						$this->chat[self::getFieldName($fieldType)] = $data['READED'].'|'
-																	.$data['READED_ID'].'|'
-																	.$data['READED_TIME'].'|'
-																	.$data['SESSION_ID'].'|'
-																	.$data['SHOW_FORM'].'|'
-																	.$data['WELCOME_FORM_NEEDED'].'|'
-																	.$data['WELCOME_TEXT_SENT'];
+							.$data['READED_ID'].'|'
+							.$data['READED_TIME'].'|'
+							.$data['SESSION_ID'].'|'
+							.$data['SHOW_FORM'].'|'
+							.$data['WELCOME_FORM_NEEDED'].'|'
+							.$data['WELCOME_TEXT_SENT'];
 						$updateDate[self::getFieldName($fieldType)] = $this->chat[self::getFieldName($fieldType)];
 					}
 				}

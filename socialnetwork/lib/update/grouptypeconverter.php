@@ -46,8 +46,8 @@ final class GroupTypeConverter extends Stepper
 		$query = WorkgroupTable::query()
 			->setSelect(['ID', 'PROJECT', 'SCRUM_MASTER_ID'])
 			->whereNull('TYPE')
+			->where('ID', '>', $this->getLastId())
 			->setOrder(['ID' => 'ASC'])
-			->setOffset($this->getLastId())
 			->setLimit(self::LIMIT);
 
 		$this->groups = $query->exec()->fetchCollection();
@@ -73,11 +73,11 @@ final class GroupTypeConverter extends Stepper
 	{
 		if ($group->getScrumMasterId() > 0 && $group->getProject())
 		{
-			$group->setType(Type::SCRUM->value);
+			$group->setType(Type::Scrum->value);
 		}
 		elseif ($group->getProject())
 		{
-			$group->setType(Type::PROJECT->value);
+			$group->setType(Type::Project->value);
 		}
 		else
 		{

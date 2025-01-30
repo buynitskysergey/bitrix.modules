@@ -1,10 +1,13 @@
 <?php
 
+use Bitrix\Sign\Access\Service\AccessService;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Config;
 use Bitrix\Sign\Connector;
 use Bitrix\Sign\Repository;
 use Bitrix\Sign\Callback;
+use Bitrix\Sign\Service\Sign\Document\GroupService;
+use Bitrix\Sign\Service\CounterService;
 use Bitrix\Sign\Util;
 
 return [
@@ -121,6 +124,37 @@ return [
 		],
 		'readonly' => true,
 	],
+	'service.b2e.init-by-employee.publicity' => [
+		'value' => [
+			'ru' => true,
+			'by' => false,
+			'eu' => false,
+			'de' => false,
+			'fr' => false,
+			'it' => false,
+			'pl' => false,
+			'uk' => false,
+			'ur' => false,
+			'us' => false,
+			'en' => false,
+			'br' => false,
+			'la' => false,
+			'tr' => false,
+			'jp' => false,
+			'tc' => false,
+			'sc' => false,
+			'hi' => false,
+			'vn' => false,
+			'id' => false,
+			'ms' => false,
+			'th' => false,
+			'cn' => false,
+			'in' => false,
+			'co' => false,
+			'mx' => false,
+		],
+		'readonly' => true,
+	],
 	'service.publicity' => [
 		'value' => [
 			'ru' => true,
@@ -171,8 +205,14 @@ return [
 			'sign.service.integration.crm.kanban.b2e.entity' => [
 				'className' => Service\Integration\Crm\Kanban\B2e\EntityService::class,
 			],
-			'sign.service.counter.b2e.userToSignDocument' => [
-				'className' => Service\Counter\B2e\UserToSignDocumentCounterService::class,
+			'sign.service.analytic.analytic' => [
+				'className' => Service\Analytic\AnalyticService::class,
+			],
+			'sign.service.counter' => [
+				'className' => CounterService::class,
+			],
+			'sign.service.b2e.kanbanCategory' => [
+				'className' => Service\Sign\B2e\KanbanCategoryService::class,
 			],
 			'sign.service.integration.crm.b2e.document' => [
 				'className' => Service\Integration\Crm\B2eDocumentService::class
@@ -317,6 +357,9 @@ return [
 			'sign.repository.documentChat' => [
 				'className' => Repository\DocumentChatRepository::class,
 			],
+			'sign.repository.membernode' => [
+				'className' => Repository\MemberNodeRepository::class,
+			],
 			'sign.service.sign.document.agent' => [
 				'className' =>  Service\Sign\DocumentAgentService::class,
 			],
@@ -354,6 +397,9 @@ return [
 			],
 			'sign.connector.document.factory' => [
 				'className' => Connector\DocumentConnectorFactory::class,
+			],
+			'sign.accessibleItem.factory' => [
+				'className' => \Bitrix\Sign\Factory\Access\AccessibleItemFactory::class,
 			],
 			'sign.repository.service_user' => [
 				'className' => Repository\ServiceUserRepository::class,
@@ -436,11 +482,20 @@ return [
 					;
 				},
 			],
+			'sign.access.service.access' => [
+				'className' => AccessService::class,
+			],
+			'sign.service.document.group' => [
+				'className' => GroupService::class,
+			],
 			'sign.repository.required_field' => [
 				'className' => Repository\RequiredFieldRepository::class,
 			],
 			'sign.repository.document.template' => [
 				'className' => Repository\Document\TemplateRepository::class,
+			],
+			'sign.repository.document.group' => [
+				'className' => Repository\Document\GroupRepository::class,
 			],
 			'sign.service.license' => [
 				'className' => Service\LicenseService::class,
@@ -462,6 +517,39 @@ return [
 			],
 			'sign.service.integration.crm.myCompany' => [
 				'className' => Service\Integration\Crm\MyCompanyService::class,
+			],
+			'sign.service.provider.memberDynamic' => [
+				'className' => Service\Providers\MemberDynamicFieldInfoProvider::class,
+			],
+			'sign.repository.fieldValue' => [
+				'className' => Repository\FieldValueRepository::class,
+			],
+			'sign.service.integration.humanresources.hcmlink' => [
+				'className' => Service\Integration\HumanResources\HcmLinkService::class,
+			],
+			'sign.service.integration.humanresources.hcmlink.field' => [
+				'className' => Service\Integration\HumanResources\HcmLinkFieldService::class,
+			],
+			'sign.service.integration.humanresources.hcmlink.signedFile' => [
+				'className' => Service\Integration\HumanResources\HcmLinkSignedFileService::class,
+			],
+			'sign.service.provider.legal' => [
+				'className' => Service\Providers\LegalInfoProvider::class,
+			],
+			'sign.service.sign.permissions' => [
+				'className' => Service\Sign\PermissionsService::class,
+			],
+			'sign.service.b2e.myDocumentsGrid.data' => [
+				'className' => Service\B2e\MyDocumentsGrid\DataService::class,
+			],
+			'sign.service.b2e.myDocument.event' => [
+				'className' => Service\B2e\MyDocumentsGrid\EventService::class,
+			],
+			'sign.service.tour' => [
+				'className' => Service\Tour::class,
+			],
+			'sign.service.preset.templates' => [
+				'className' => Service\Sign\PresetTemplatesService::class,
 			],
 		]
 	],
