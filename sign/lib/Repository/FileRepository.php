@@ -144,19 +144,7 @@ class FileRepository
 			return null;
 		}
 
-		$dir = $fileData['SUBDIR'];
-		if (mb_strpos($dir, $this->path) === 0)
-		{
-			$dir = mb_substr($dir, mb_strlen($this->path) + 1);
-		}
-
-		$file = new Item\Fs\File(
-			name: $fileData['FILE_NAME'],
-			dir: $dir,
-			type: $fileData['CONTENT_TYPE'],
-			id: $id,
-			isImage: MimeType::isImage($fileData['CONTENT_TYPE']),
-		);
+		$file = $this->extractItemFromFileData($id, $fileData);
 
 		if ($readContent)
 		{
@@ -164,6 +152,46 @@ class FileRepository
 		}
 
 		return $file;
+	}
+
+	/**
+	 * Reads the given files in a single query, unlike a per-id sequence of getById().
+	 *
+	 * @param list<int> $ids
+	 */
+	public function listByIds(array $ids): Item\Fs\FileCollection
+	{
+		$ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+		if ($ids === [])
+		{
+			return new Item\Fs\FileCollection();
+		}
+
+		$collection = new Item\Fs\FileCollection();
+		$rows = \CFile::GetList([], ['@ID' => $ids]);
+		while ($fileData = $rows->Fetch())
+		{
+			$collection->addItem($this->extractItemFromFileData((int)$fileData['ID'], $fileData));
+		}
+
+		return $collection;
+	}
+
+	private function extractItemFromFileData(int $id, array $fileData): Item\Fs\File
+	{
+		$dir = $fileData['SUBDIR'];
+		if (mb_strpos($dir, $this->path) === 0)
+		{
+			$dir = mb_substr($dir, mb_strlen($this->path) + 1);
+		}
+
+		return new Item\Fs\File(
+			name: $fileData['FILE_NAME'],
+			dir: $dir,
+			type: $fileData['CONTENT_TYPE'],
+			id: $id,
+			isImage: MimeType::isImage($fileData['CONTENT_TYPE']),
+		);
 	}
 
 	public function readContent(Item\Fs\File $file): Item\Fs\FileContent

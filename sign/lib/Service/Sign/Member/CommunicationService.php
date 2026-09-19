@@ -107,13 +107,15 @@ final class CommunicationService
 			return $result->addError(new Main\Error("Members document doesnt exist"));
 		}
 
-
-
 		$accessAction = DocumentScenario::isB2EScenario($document->scenario)
 			? ActionDictionary::ACTION_B2E_DOCUMENT_EDIT
 			: ActionDictionary::ACTION_DOCUMENT_EDIT
 		;
-		$hasAccess = $this->accessController === null || $this->accessController->check($accessAction);
+		// Members are resolved by uid, so the document comes from the request payload indirectly:
+		// a global permission check would let any editor touch someone else's document (jabber #252857).
+		$hasAccess = $this->accessController === null
+			|| $this->accessController->checkByItem($accessAction, $document)
+		;
 		if (!$hasAccess)
 		{
 			return $result->addError(new Main\Error("Has no access to change document"));

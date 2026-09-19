@@ -162,8 +162,7 @@ final class AccessCheck extends Main\Engine\ActionFilter\Base
 		{
 			if ($this->hasInvalidItemIdentifier($rule))
 			{
-				// An item-aware rule without the object identifier in the request (e.g. on a non-JSON transport)
-				// must not fall back to a global permission check — fail-closed against IDOR.
+				// Reached e.g. on a non-JSON transport, where the identifier is absent from the request.
 				$rule->passes = false;
 			}
 			else
@@ -241,20 +240,13 @@ final class AccessCheck extends Main\Engine\ActionFilter\Base
 			return true;
 		}
 
-		// The object identifier must come from exactly one request source. A missing key
-		// (0 sources) must not let an item-aware rule degrade to a global permission check —
-		// fail-closed against IDOR (jabber #249372). Presence in several sources (>=2) means
-		// source spoofing: the filter would check one value while the action binder picks the
-		// value from another source by its own precedence — fail-closed (jabber #249595).
+		// The identifier must come from exactly one request source: fail-closed, so neither a missing
+		// key nor presence in several sources degrades an item-aware rule into a global check.
 		return $this->countParameterSources($rule->itemIdOrUidRequestKey) !== 1;
 	}
 
 	/**
-	 * Counts how many request sources contain the key. It iterates the same source set the
-	 * action binder uses, and detects presence the same way as Binder::findParameterInSourceList:
-	 * array_key_exists for plain arrays, offsetExists for \ArrayAccess, plus isset. This enforces
-	 * the invariant that the identifier must come from exactly one source; presence in several
-	 * sources is spoofing (jabber #249595), fail-closed.
+	 * Counts the request sources that contain the key, over the action binder's source list.
 	 *
 	 * @see Bitrix\Main\Engine\AutoWire\Binder::findParameterInSourceList
 	 */
@@ -273,9 +265,7 @@ final class AccessCheck extends Main\Engine\ActionFilter\Base
 	}
 
 	/**
-	 * Returns the key value from the first source that contains it (same traversal as
-	 * countParameterSources), or null. For a valid item-aware rule there is exactly one
-	 * source, so "first" equals "the only one".
+	 * Returns the key value from the first source that contains it, or null.
 	 *
 	 * @see Bitrix\Main\Engine\AutoWire\Binder::findParameterInSourceList
 	 */

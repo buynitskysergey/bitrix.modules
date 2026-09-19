@@ -77,6 +77,8 @@ final class ErrorHandler
 			'SMS_LIMIT_EXCEEDED' => Loc::getMessage('SIGN_SERVICE_ERROR_SMS_LIMIT_EXCEEDED'),
 			'MEMBERS_NOT_READY_FOR_RESEND' => Loc::getMessage('SIGN_SERVICE_ERROR_MEMBERS_NOT_READY_FOR_RESEND'),
 			'INCORRECT_TAX_ID', 'B2E_COMPANY_NAME_NOT_FOUND' => Loc::getMessage('SIGN_SERVICE_ERROR_INCORRECT_TAX_ID'),
+			// the service has no such route yet: its version is older than the portal one
+			'unknown_action' => Loc::getMessage('SIGN_SERVICE_ERROR_UNKNOWN_ACTION'),
 			'PROVIDER_ERROR' => $message, //bypass for rest
 			default => $this->getDefaultError($code),
 		};

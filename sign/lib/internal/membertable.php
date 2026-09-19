@@ -207,6 +207,20 @@ class MemberTable extends Entity\DataManager
 				->configureTitle('Status change date')
 				->configureNullable()
 			,
+			'ANNULLED' => (new Entity\BooleanField('ANNULLED'))
+				->configureTitle('Annulled')
+				->configureValues(0, 1)
+				->configureDefaultValue(false)
+				->configureNullable(false)
+			,
+			'ANNULLED_BY_ID' => (new IntegerField('ANNULLED_BY_ID'))
+				->configureTitle('Annulment last switched by id')
+				->configureNullable()
+			,
+			'DATE_ANNULLED' => (new Entity\DatetimeField('DATE_ANNULLED'))
+				->configureTitle('Annulment last switch date')
+				->configureNullable()
+			,
 		];
 	}
 

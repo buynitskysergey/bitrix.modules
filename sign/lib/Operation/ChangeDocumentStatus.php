@@ -43,11 +43,17 @@ final class ChangeDocumentStatus implements Contract\Operation
 	private readonly AnalyticService $analyticService;
 	private readonly HcmLinkService $hcmLinkService;
 
+	/**
+	 * @param bool $initiatorIsUnknown the status change repeats what already happened elsewhere - in the
+	 *   signing service or on the other party - so nobody here initiated it. Without this the legal log
+	 *   names the user who triggered the local change as the one who performed the action.
+	 */
 	public function __construct(
 		private Item\Document $document,
 		private readonly string $status,
 		private readonly ?DateTime $signDate = null,
 		private readonly ?Item\Member $initiatorMember = null,
+		private readonly bool $initiatorIsUnknown = false,
 	)
 	{
 		$container = Container::instance();
@@ -126,7 +132,11 @@ final class ChangeDocumentStatus implements Contract\Operation
 				: $this->document->stoppedById
 			;
 
-			$this->legalLogService->registerDocumentChangedStatus($this->document, $this->initiatorMember);
+			$this->legalLogService->registerDocumentChangedStatus(
+				$this->document,
+				$this->initiatorMember,
+				$this->initiatorIsUnknown,
+			);
 
 			$sendMessageResult = $this->hrBotMessageService->handleDocumentStatusChangedMessage(
 				$this->document,

@@ -11,6 +11,9 @@ IncludeModuleLangFile(__FILE__);
 
 class CCloudStorageUpload
 {
+	// Negative GET_LOCK timeouts are rejected since MariaDB 11.4, so wait "forever" is a large positive value.
+	private const PROGRESS_LOCK_TIMEOUT = 1000000;
+
 	protected /*.string.*/ $_filePath = '';
 	protected /*.string.*/ $_ID = '';
 	protected /*.CCloudStorageBucket.*/ $obBucket;
@@ -286,8 +289,7 @@ class CCloudStorageUpload
 
 		$lockId = $this->getProgressLockName();
 		$connection = \Bitrix\Main\Application::getConnection();
-
-		if (!$connection->lock($lockId, -1))
+		if (!$connection->lock($lockId, self::PROGRESS_LOCK_TIMEOUT))
 		{
 			return false;
 		}
@@ -525,7 +527,7 @@ class CCloudStorageUpload
 		if ($bSuccess)
 		{
 			$lockId = $this->getProgressLockName();
-			if (!$connection->lock($lockId, -1))
+			if (!$connection->lock($lockId, self::PROGRESS_LOCK_TIMEOUT))
 			{
 				unset($this->_cache);
 

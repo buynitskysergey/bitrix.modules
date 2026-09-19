@@ -8,10 +8,13 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Request;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Sign\Access\ActionDictionary;
+use Bitrix\Sign\Access\DocumentAnnulPermission;
 use Bitrix\Sign\Attribute;
 use Bitrix\Sign\Attribute\ActionAccess;
 use Bitrix\Sign\Config\Storage;
 use Bitrix\Sign\Engine\Controller;
+use Bitrix\Sign\FeatureResolver;
+use Bitrix\Sign\Item;
 use Bitrix\Sign\Integration\Bitrix24\B2eTariff;
 use Bitrix\Sign\Item\Document\Template;
 use Bitrix\Sign\Operation;
@@ -1056,4 +1059,65 @@ class Document extends Controller
 		];
 	}
 
+	/**
+	 * Applies the annulment mark to every eligible signer member of one document,
+	 * addressing the document by uid (used by the CRM card).
+	 *
+	 * The server resolves the annullable members itself (SIGNER role, DONE
+	 * status), so `skipped` is 0 by construction and kept only for a uniform
+	 * response shape. Per-record statuses are not returned; the card reloads.
+	 *
+	 * @return array{changed: int, unchanged: int, forbidden: int, skipped: int}
+	 */
+	#[Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_ANNUL)]
+	public function annulByDocumentAction(string $uid, bool $annul): array
+	{
+		$counters = ['changed' => 0, 'unchanged' => 0, 'forbidden' => 0, 'skipped' => 0];
+
+		if (!FeatureResolver::instance()->released('kedoDocumentAnnul'))
+		{
+			$this->addError(new Error('Document annulment is not available'));
+
+			return $counters;
+		}
+
+		$container = Service\Container::instance();
+		$document = $container->getDocumentRepository()->getByUid($uid);
+		if ($document === null || $document->id === null)
+		{
+			$this->addError(new Error(Loc::getMessage('SIGN_CONTROLLER_DOCUMENT_NOT_FOUND')));
+
+			return $counters;
+		}
+
+		$userId = (int)CurrentUser::get()->getId();
+
+		// Owner-scoped guard on the document (IDOR), decided before a single member is
+		// read: a foreign document must not disclose through the counters how many of
+		// its signers have completed signing.
+		if (!$this->createAnnulPermission($userId)->canAnnulDocumentOwnedBy($document->createdById))
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_CONTROLLER_DOCUMENT_ANNUL_ACCESS_DENIED'),
+				'ACCESS_DENIED',
+			));
+
+			return $counters;
+		}
+
+		$result = (new Operation\AnnulDocumentMembers($document, $annul, $userId))->launch();
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return $counters;
+		}
+
+		return array_merge($counters, $result->getData());
+	}
+
+	protected function createAnnulPermission(int $userId): DocumentAnnulPermission
+	{
+		return DocumentAnnulPermission::forUser($userId);
+	}
 }

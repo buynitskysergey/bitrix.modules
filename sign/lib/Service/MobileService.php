@@ -6,17 +6,22 @@ use Bitrix\Main\Context;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Main\Web\Uri;
+use Bitrix\Sign\Item\Api\Batch\ItemResult;
 use Bitrix\Sign\Item\Api\Mobile\Confirmation\AcceptRequest;
 use Bitrix\Sign\Item\Api\Mobile\Confirmation\PostponeRequest;
 use Bitrix\Sign\Item\Api\Mobile\Signing\ExternalUrlRequest;
+use Bitrix\Sign\Item\Api\Mobile\Signing\RefuseBatchRequest;
 use Bitrix\Sign\Item\Api\Mobile\Signing\RefuseRequest;
+use Bitrix\Sign\Item\Api\Mobile\Signing\ReviewBatchRequest;
 use Bitrix\Sign\Item\Api\Mobile\Signing\ReviewRequest;
 use Bitrix\Sign\Item\Api\Mobile\Signing\SignRequest;
+use Bitrix\Sign\Item\Document;
 use Bitrix\Sign\Item\Member;
 use Bitrix\Sign\Item\Mobile\Link;
 use Bitrix\Sign\Main\Application;
 use Bitrix\Sign\Operation\ChangeMemberStatus;
 use Bitrix\Sign\Operation\SigningStop;
+use Bitrix\Sign\Operation\SigningStopBatch;
 use Bitrix\Sign\Operation\SyncMemberStatus;
 use Bitrix\Sign\Result\Service\ExternalSigningUrlResult;
 use Bitrix\Sign\Service\Result\Mobile\LinkResult;
@@ -28,6 +33,8 @@ use Bitrix\Sign\Type;
 
 class MobileService
 {
+	public const SUCCESSFUL_MEMBER_IDS = 'successfulMemberIds';
+
 	private bool $darkMode = false;
 	private readonly Sign\DocumentService $documentService;
 	private readonly Sign\MemberService $memberService;
@@ -273,6 +280,16 @@ class MobileService
 			return (new Result())->addError(new Error('unknown document id'));
 		}
 
+		return $this->acceptReviewByMember($member, $document);
+	}
+
+	public function acceptReviewByMember(Member $member, Document $document): Result
+	{
+		if ($member->role !== Role::REVIEWER)
+		{
+			return (new Result())->addError(new Error('wrong member role'));
+		}
+
 		if ($document->status !== Type\DocumentStatus::SIGNING || !MemberStatus::isReadyForSigning($member->status))
 		{
 			return (new Result())->addError(new Error('wrong document or member status'));
@@ -297,9 +314,43 @@ class MobileService
 		return $response->createResult();
 	}
 
+	/**
+	 * Accepts the review of a group of documents with a single service call; acceptReviewByMember stays
+	 * the way of a single action.
+	 *
+	 * @param list<array{member: Member, document: Document}> $items members come partially hydrated:
+	 *   `name` and `companyName` stay `null` even when the entity has a name, because the bulk caller reads
+	 *   them by `MemberRepository::listByIds($ids, loadEntityNames: false)`. No branch of this path may read
+	 *   those properties.
+	 * @return Result data holds `successfulMemberIds`: a member absent from it is a failure of this run
+	 */
+	public function acceptReviewBatchByMembers(array $items): Result
+	{
+		$groupItems = $this->filterBatchItems($items, $this->isReviewAcceptable(...));
+		if ($groupItems === [])
+		{
+			return $this->createBatchResult([]);
+		}
+
+		$response = $this->mobileService
+			->acceptReviewBatch(
+				new ReviewBatchRequest($this->createBatchRequestItems($groupItems)),
+			)
+		;
+
+		if (!$response->isSuccess())
+		{
+			return $this->createBatchResult([])->addErrors($response->getErrors());
+		}
+
+		return $this->createBatchResult(
+			$this->applyMemberOutcomes($groupItems, $response->results, MemberStatus::DONE),
+		);
+	}
+
 	public function rejectSigning(int $memberId): Result
 	{
-		$member = Container::instance()->getMemberService()->getById($memberId);
+		$member = $this->memberService->getById($memberId);
 		$resultWithRejectError = (new Result())->addError(new Error('reject error'));
 
 		if (!$member)
@@ -312,19 +363,45 @@ class MobileService
 			return $resultWithRejectError;
 		}
 
-		$document = Container::instance()->getDocumentService()->getById($member->documentId);
+		$document = $this->documentService->getById($member->documentId);
 
 		if (!$document)
 		{
 			return $resultWithRejectError;
 		}
 
-		if ($document->initiatedByType === Type\Document\InitiatedByType::EMPLOYEE || $member->role === Role::REVIEWER)
+		return $this->rejectSigningByMember($member, $document, $member->entityId);
+	}
+
+	/**
+	 * A stop writes its initiator into `stoppedById`, by which the service callback tells who stopped
+	 * the document, so the user id comes from the caller and from nowhere else: `$member->entityId`
+	 * holds the id of a CRM company for a member of the company side, not the id of a user.
+	 */
+	public function rejectSigningByMember(
+		Member $member,
+		Document $document,
+		?int $actorUserId,
+	): Result
+	{
+		$resultWithRejectError = (new Result())->addError(new Error('reject error'));
+
+		if ($member->role !== Role::SIGNER && $member->role !== Role::REVIEWER)
 		{
-			return (new SigningStop($document->uid, $member->entityId))->launch();
+			return $resultWithRejectError;
 		}
 
-		$response = Container::instance()->getApiMobileService()
+		if ($this->isRejectStoppingDocument($member, $document))
+		{
+			if ($actorUserId === null || $actorUserId < 1)
+			{
+				return $resultWithRejectError;
+			}
+
+			return SigningStop::createByDocument($document, $actorUserId)->launch();
+		}
+
+		$response = $this->mobileService
 			->refuseSigning(
 				new RefuseRequest(documentUid: $document->uid, memberUid: $member->uid),
 			)
@@ -341,6 +418,85 @@ class MobileService
 		}
 
 		return $response->createResult();
+	}
+
+	/**
+	 * A reject by a reviewer or an assignee, and any reject of a document initiated by an employee, stop
+	 * the whole document instead of refusing a single signing.
+	 */
+	public function isRejectStoppingDocument(Member $member, Document $document): bool
+	{
+		return $document->initiatedByType === Type\Document\InitiatedByType::EMPLOYEE
+			|| $member->role === Role::REVIEWER
+			|| $member->role === Role::ASSIGNEE
+		;
+	}
+
+	/**
+	 * Refuses the signing of a group of documents with a single service call; only a signer of a document
+	 * initiated by the company refuses it that way, the rest of the rejects stop the document.
+	 *
+	 * @param list<array{member: Member, document: Document}> $items members come partially hydrated:
+	 *   `name` and `companyName` stay `null` even when the entity has a name, because the bulk caller reads
+	 *   them by `MemberRepository::listByIds($ids, loadEntityNames: false)`. No branch of this path may read
+	 *   those properties.
+	 * @return Result data holds `successfulMemberIds`: a member absent from it is a failure of this run
+	 */
+	public function refuseSigningBatchByMembers(array $items): Result
+	{
+		$groupItems = $this->filterBatchItems($items, $this->isRefuseAcceptable(...));
+		if ($groupItems === [])
+		{
+			return $this->createBatchResult([]);
+		}
+
+		$response = $this->mobileService
+			->refuseSigningBatch(
+				new RefuseBatchRequest($this->createBatchRequestItems($groupItems)),
+			)
+		;
+
+		if (!$response->isSuccess())
+		{
+			return $this->createBatchResult([])->addErrors($response->getErrors());
+		}
+
+		return $this->createBatchResult(
+			$this->applyMemberOutcomes($groupItems, $response->results, MemberStatus::REFUSED),
+		);
+	}
+
+	/**
+	 * Stops the documents of a group with a single service call. Member statuses stay untouched here, the
+	 * same way a single reject by a reviewer or an assignee leaves them to the document stop.
+	 *
+	 * @param list<array{member: Member, document: Document}> $items members come partially hydrated:
+	 *   `name` and `companyName` stay `null` even when the entity has a name, because the bulk caller reads
+	 *   them by `MemberRepository::listByIds($ids, loadEntityNames: false)`. No branch of this path may read
+	 *   those properties.
+	 * @param int $actorUserId initiator of the stop
+	 * @return Result data holds `successfulMemberIds`: a member absent from it is a failure of this run
+	 */
+	public function stopSigningBatchByMembers(array $items, int $actorUserId): Result
+	{
+		if ($actorUserId < 1)
+		{
+			return $this->createBatchResult([])->addError(new Error('reject error'));
+		}
+
+		$groupItems = $this->filterBatchItems($items, $this->isStopAcceptable(...));
+		if ($groupItems === [])
+		{
+			return $this->createBatchResult([]);
+		}
+
+		$result = (new SigningStopBatch($this->collectBatchDocuments($groupItems), $actorUserId))->launch();
+		$successfulDocumentUids = $result->getData()[SigningStopBatch::SUCCESSFUL_DOCUMENT_UIDS] ?? [];
+
+		return $this
+			->createBatchResult($this->collectMemberIdsByDocumentUids($groupItems, $successfulDocumentUids))
+			->addErrors($result->getErrors())
+		;
 	}
 
 	public function acceptConfirmation(int $memberId): Result
@@ -465,5 +621,169 @@ class MobileService
 	private function getUrlForSigning(Result $result): ?string
 	{
 		return $result->getData()['uri'] ?? null;
+	}
+
+	private function isReviewAcceptable(Member $member, Document $document): bool
+	{
+		return $member->role === Role::REVIEWER
+			&& $document->status === Type\DocumentStatus::SIGNING
+			&& MemberStatus::isReadyForSigning($member->status)
+		;
+	}
+
+	private function isRefuseAcceptable(Member $member, Document $document): bool
+	{
+		return $member->role === Role::SIGNER && !$this->isRejectStoppingDocument($member, $document);
+	}
+
+	private function isStopAcceptable(Member $member, Document $document): bool
+	{
+		return in_array($member->role, [Role::SIGNER, Role::REVIEWER, Role::ASSIGNEE], true)
+			&& $this->isRejectStoppingDocument($member, $document)
+		;
+	}
+
+	/**
+	 * An item the service cannot address, or one the branch does not apply to, is left out of the group:
+	 * a batch route rejects the whole group over a single empty uid.
+	 *
+	 * @param list<array{member: Member, document: Document}> $items
+	 * @param callable(Member, Document): bool $isAcceptable
+	 * @return list<array{member: Member, document: Document}>
+	 */
+	private function filterBatchItems(array $items, callable $isAcceptable): array
+	{
+		$groupItems = [];
+		foreach ($items as $item)
+		{
+			$member = $item['member'];
+			$document = $item['document'];
+			if (
+				$member->id === null
+				|| $member->uid === null || $member->uid === ''
+				|| $document->uid === null || $document->uid === ''
+				|| !$isAcceptable($member, $document)
+			)
+			{
+				continue;
+			}
+
+			$groupItems[] = $item;
+		}
+
+		return $groupItems;
+	}
+
+	/**
+	 * @param list<array{member: Member, document: Document}> $items
+	 * @return list<array{documentId: string, memberId: string}>
+	 */
+	private function createBatchRequestItems(array $items): array
+	{
+		return array_map(
+			static fn (array $item): array => [
+				'documentId' => (string)$item['document']->uid,
+				'memberId' => (string)$item['member']->uid,
+			],
+			$items,
+		);
+	}
+
+	/**
+	 * @param list<array{member: Member, document: Document}> $items
+	 * @param ItemResult[] $results
+	 * @return list<int> ids of the members that reached the target state
+	 */
+	private function applyMemberOutcomes(array $items, array $results, string $status): array
+	{
+		$resultsByItem = [];
+		foreach ($results as $result)
+		{
+			$resultsByItem[$this->createBatchItemKey($result->documentUid, $result->memberUid)] = $result;
+		}
+
+		$successfulMemberIds = [];
+		foreach ($items as $item)
+		{
+			$member = $item['member'];
+			$result = $resultsByItem[
+				$this->createBatchItemKey((string)$item['document']->uid, (string)$member->uid)
+			] ?? null;
+
+			// the service said nothing about the member, so the outcome of the item is not a success either
+			if ($result === null || !$result->isSuccess())
+			{
+				continue;
+			}
+
+			// `already_done` means the service holds the member in the target status of the action, so the
+			// local status is brought to the same state as after a success. Leaving it to the callback of
+			// the earlier call is what keeps the row in progress forever once that callback is lost: a
+			// repeated run answers `already_done` again and would never move it either. A member already
+			// in the target status needs no change and is a success of the item as it is.
+			if (
+				$member->status !== $status
+				&& !(new ChangeMemberStatus($member, $item['document'], $status))->launch()->isSuccess()
+			)
+			{
+				continue;
+			}
+
+			$successfulMemberIds[] = (int)$member->id;
+		}
+
+		return $successfulMemberIds;
+	}
+
+	/**
+	 * An item of the contract is a document/member pair, so a result is only the answer about an
+	 * item when both uids match: a member uid alone would let an answer about another document
+	 * move the status of this one.
+	 */
+	private function createBatchItemKey(string $documentUid, ?string $memberUid): string
+	{
+		return $documentUid . "\0" . (string)$memberUid;
+	}
+
+	/**
+	 * @param list<array{member: Member, document: Document}> $items
+	 * @return list<Document> one entry per document: members of the same document share its stop
+	 */
+	private function collectBatchDocuments(array $items): array
+	{
+		$documentsByUid = [];
+		foreach ($items as $item)
+		{
+			$documentsByUid[(string)$item['document']->uid] = $item['document'];
+		}
+
+		return array_values($documentsByUid);
+	}
+
+	/**
+	 * @param list<array{member: Member, document: Document}> $items
+	 * @param list<string> $documentUids
+	 * @return list<int>
+	 */
+	private function collectMemberIdsByDocumentUids(array $items, array $documentUids): array
+	{
+		$successfulMemberIds = [];
+		foreach ($items as $item)
+		{
+			if (in_array((string)$item['document']->uid, $documentUids, true))
+			{
+				$successfulMemberIds[] = (int)$item['member']->id;
+			}
+		}
+
+		return $successfulMemberIds;
+	}
+
+	/**
+	 * @param list<int> $successfulMemberIds
+	 */
+	private function createBatchResult(array $successfulMemberIds): Result
+	{
+		return (new Result())->setData([self::SUCCESSFUL_MEMBER_IDS => $successfulMemberIds]);
 	}
 }

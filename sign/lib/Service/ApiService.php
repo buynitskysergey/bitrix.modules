@@ -5,6 +5,7 @@ namespace Bitrix\Sign\Service;
 use Bitrix\Main;
 use Bitrix\Sign\Config;
 use Bitrix\Sign\Debug;
+use Bitrix\Sign\Type;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -76,7 +77,9 @@ class ApiService
 
 		if ($this->isClientConnectionError($http))
 		{
-			return $result->addError($this->getDefaultErrorWithCode('SIGN_CLIENT_CONNECTION_ERROR'));
+			return $result->addError(
+				$this->getDefaultErrorWithCode(Type\Api\TransportErrorCode::CLIENT_CONNECTION_ERROR)
+			);
 		}
 
 		$data = $http->getResult();
@@ -87,7 +90,7 @@ class ApiService
 		}
 		catch (Main\ArgumentException $exception)
 		{
-			return $result->addError($this->getDefaultErrorWithCode('INCORRECT_JSON'));
+			return $result->addError($this->getDefaultErrorWithCode(Type\Api\TransportErrorCode::INCORRECT_JSON));
 		}
 
 		$this->getLogger()->debug('api raw response {' . Debug\SecretMaskingFormatter::PLACEHOLDER_DUMP . '}', [Debug\SecretMaskingFormatter::PLACEHOLDER_DUMP => $data]);
@@ -104,13 +107,15 @@ class ApiService
 
 		if ($http->getStatus() !== 200)
 		{
-			return $result->addError($this->getDefaultErrorWithCode('INCORRECT_HTTP_STATUS'));
+			return $result->addError(
+				$this->getDefaultErrorWithCode(Type\Api\TransportErrorCode::INCORRECT_HTTP_STATUS)
+			);
 		}
 
 		$data = $data['data'] ?? null;
 		if (!is_array($data))
 		{
-			return $result->addError($this->getDefaultErrorWithCode('INCORRECT_DATA'));
+			return $result->addError($this->getDefaultErrorWithCode(Type\Api\TransportErrorCode::INCORRECT_DATA));
 		}
 
 		return $result->setData($data);
@@ -128,7 +133,9 @@ class ApiService
 			$clientData = $result->getData();
 			if (empty($clientData['token']) || empty($clientData['id']))
 			{
-				return $result->addError($this->getDefaultErrorWithCode('INCORRECT_REGISTER_RESPONSE'));
+				return $result->addError(
+					$this->getDefaultErrorWithCode(Type\Api\TransportErrorCode::INCORRECT_REGISTER_RESPONSE)
+				);
 			}
 
 			Config\Storage::instance()
@@ -181,14 +188,14 @@ class ApiService
 	/**
 	 * Get error with default localized error message with code
 	 *
-	 * @param string $code Error code
+	 * @param Type\Api\TransportErrorCode $code Error code
 	 *
 	 * @return Main\Error
 	 */
-	private function getDefaultErrorWithCode(string $code): Main\Error
+	private function getDefaultErrorWithCode(Type\Api\TransportErrorCode $code): Main\Error
 	{
-		$message = (new ErrorHandler())->getDefaultError($code);
-		return new Main\Error($message, $code);
+		$message = (new ErrorHandler())->getDefaultError($code->value);
+		return new Main\Error($message, $code->value);
 	}
 
 	/**

@@ -7,6 +7,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Sign\Access\ActionDictionary;
+use Bitrix\Sign\Access\Service\SelectorSourceAccessService;
 use Bitrix\Sign\Attribute\ActionAccess;
 use Bitrix\Sign\Engine\Controller;
 use Bitrix\Sign\Operation;
@@ -79,6 +80,7 @@ class Signers extends Controller
 		array $members,
 		AccessService $accessService,
 		SignersListService $signersListService,
+		SelectorSourceAccessService $selectorSourceAccessService,
 		bool $excludeRejected = true,
 	): array
 	{
@@ -94,6 +96,16 @@ class Signers extends Controller
 		if (!$validationResult instanceof ValidateEntitySelectorMembersResult)
 		{
 			$this->addErrorsFromResult($validationResult);
+
+			return [];
+		}
+
+		// Expansion sources come from the request, so the right to read each source must be
+		// checked before its composition is revealed.
+		$sourceAccessResult = $selectorSourceAccessService->checkSelectorEntities($validationResult->entities);
+		if (!$sourceAccessResult->isSuccess())
+		{
+			$this->addAccessDeniedError();
 
 			return [];
 		}
@@ -254,16 +266,6 @@ class Signers extends Controller
 
 		return [];
 	}
-
-	private function addAccessDeniedError(): void
-	{
-		\Bitrix\Main\Context::getCurrent()->getResponse()->setStatus(401);
-		$this->addError(new \Bitrix\Main\Error(
-			Loc::getMessage('SIGN_CONTROLLERS_V1_B2E_SIGNERS_ERROR_ACCESS_DENIED'),
-			'invalid_authentication',
-		));
-	}
-
 
 	public function pinListAction(
 		int $listId,

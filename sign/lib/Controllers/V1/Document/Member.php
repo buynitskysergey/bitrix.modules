@@ -9,16 +9,22 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Request;
 use Bitrix\Sign\Access\ActionDictionary;
+use Bitrix\Sign\Access\DocumentAnnulPermission;
+use Bitrix\Sign\Access\Service\SelectorSourceAccessService;
 use Bitrix\Sign\Attribute;
 use Bitrix\Sign\Debug\Logger;
+use Bitrix\Sign\FeatureResolver;
+use Bitrix\Sign\Item;
 use Bitrix\Sign\Item\Hr\EntitySelector\EntityCollection;
 use Bitrix\Sign\Item\Hr\NodeSync;
+use Bitrix\Sign\Operation;
 use Bitrix\Sign\Operation\Member\GetMembersFromUserPartyEntities;
 use Bitrix\Sign\Operation\Member\SyncDepartmentsPage;
 use Bitrix\Sign\Operation\Member\Validation\ValidateEntitySelectorMembers;
 use Bitrix\Sign\Result\Operation\Member\ValidateEntitySelectorMembersResult;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Type\Access\AccessibleItemType;
+use Bitrix\Sign\Type\DocumentScenario;
 use Bitrix\Sign\Type\Member\EntityType;
 use Bitrix\Sign\Type\Member\Role;
 use Bitrix\Sign\Type\MemberStatus;
@@ -26,6 +32,12 @@ use Bitrix\Sign\Ui\Member\Stage;
 
 class Member extends \Bitrix\Sign\Engine\Controller
 {
+	/**
+	 * Server-side cap on the number of member records a single batch annulment
+	 * call may touch. Guards against unbounded "select all" grid mass actions.
+	 */
+	private const MAX_ANNUL_BATCH_COUNT = 100;
+
 	private Service\Sign\MemberService $memberService;
 	private Service\Sign\DocumentService $documentService;
 
@@ -355,6 +367,7 @@ class Member extends \Bitrix\Sign\Engine\Controller
 	public function getUniqSignersCountAction(
 		array $members,
 		Logger $logger,
+		SelectorSourceAccessService $selectorSourceAccessService,
 		bool $excludeRejected = true,
 	): array
 	{
@@ -374,6 +387,16 @@ class Member extends \Bitrix\Sign\Engine\Controller
 					entityType: $member['entityType'],
 				),
 			);
+		}
+
+		// Expansion sources come from the request, so the right to read each source must be
+		// checked before its composition is counted.
+		$sourceAccessResult = $selectorSourceAccessService->checkEntityCollection($entityCollection);
+		if (!$sourceAccessResult->isSuccess())
+		{
+			$this->addAccessDeniedError();
+
+			return [];
 		}
 
 		$result = $this->memberService->getUniqueSignersCount($entityCollection, $excludeRejected);
@@ -503,6 +526,7 @@ class Member extends \Bitrix\Sign\Engine\Controller
 		string $documentUid,
 		int $representativeId,
 		array $members,
+		SelectorSourceAccessService $selectorSourceAccessService,
 		bool $excludeRejected = true,
 	): array
 	{
@@ -528,6 +552,16 @@ class Member extends \Bitrix\Sign\Engine\Controller
 		if (!$result instanceof ValidateEntitySelectorMembersResult)
 		{
 			$this->addErrorsFromResult($result);
+
+			return [];
+		}
+
+		// Expansion sources come from the request, so the right to read each source must be
+		// checked before its composition is revealed.
+		$sourceAccessResult = $selectorSourceAccessService->checkSelectorEntities($result->entities);
+		if (!$sourceAccessResult->isSuccess())
+		{
+			$this->addAccessDeniedError();
 
 			return [];
 		}
@@ -768,6 +802,329 @@ class Member extends \Bitrix\Sign\Engine\Controller
 			'id' => $member->id,
 			'uid' => $member->uid,
 			'status' => MemberStatus::toPresentedView($member->status),
+		];
+	}
+
+	/**
+	 * Toggles the reversible annulment mark on a completed signer member,
+	 * addressing it by its uid.
+	 *
+	 * `changed` reports whether this call performed the transition: a repeated
+	 * request for an already applied state succeeds and returns the state with
+	 * changed = false, so the caller can tell it apart from a real change.
+	 *
+	 * @return array{uid: string|null, isAnnulled: bool, canAnnul: bool, status: string, changed: bool}|array{}
+	 */
+	#[Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_ANNUL)]
+	public function annulAction(string $uid, bool $annul): array
+	{
+		if (!FeatureResolver::instance()->released('kedoDocumentAnnul'))
+		{
+			$this->addError(new Error('Document annulment is not available'));
+
+			return [];
+		}
+
+		$container = Service\Container::instance();
+		$member = $container->getMemberRepository()->getByUid($uid);
+		if ($member === null || $member->documentId === null)
+		{
+			$this->addError(new Error('Member not found'));
+
+			return [];
+		}
+
+		$document = $container->getDocumentRepository()->getById($member->documentId);
+		if ($document === null)
+		{
+			$this->addError(new Error('Member not found'));
+
+			return [];
+		}
+
+		// The annulment mark is a B2E/KEDO-only feature; reject non-B2E documents.
+		if (!DocumentScenario::isB2EScenario($document->scenario))
+		{
+			$this->addError(new Error('Only b2e documents can be annulled'));
+
+			return [];
+		}
+
+		$userId = (int)CurrentUser::get()->getId();
+
+		// There is no accessible item type for a member record, so the annul owner
+		// scope is guarded manually here against the document that owns the member
+		// (IDOR), mirroring the manual guard used by getAction/checkAccessToMember.
+		$canAnnul = $this->createAnnulPermission($userId)->canAnnulDocumentOwnedBy($document->createdById);
+		if (!$canAnnul)
+		{
+			$this->addError(new Error('Access denied', 'ACCESS_DENIED'));
+
+			return [];
+		}
+
+		$result = (new Operation\AnnulDocument($member, $annul, $userId))->launch();
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return [];
+		}
+
+		$data = $result->getData();
+
+		return $this->buildAnnulMemberData(
+			$member->uid,
+			(bool)$data['isAnnulled'],
+			$canAnnul,
+			(bool)$data['changed'],
+		);
+	}
+
+	/**
+	 * Applies the annulment mark to many member records at once, addressing them
+	 * by uid.
+	 *
+	 * The annul permission scope is resolved once and reused for every row (owner
+	 * scope of the SIGN_DOCUMENT_ANNUL right). Each requested uid falls into exactly
+	 * one counter, a uid with no record behind it included; per-record statuses are
+	 * not returned, the grid reloads afterwards.
+	 *
+	 * @param list<string> $uids
+	 *
+	 * @return array{changed: int, unchanged: int, forbidden: int, skipped: int}
+	 */
+	#[Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_ANNUL)]
+	public function annulBatchAction(array $uids, bool $annul): array
+	{
+		$counters = ['changed' => 0, 'unchanged' => 0, 'forbidden' => 0, 'skipped' => 0];
+
+		if (!FeatureResolver::instance()->released('kedoDocumentAnnul'))
+		{
+			$this->addError(new Error('Document annulment is not available'));
+
+			return $counters;
+		}
+
+		$uids = array_values(array_unique(array_filter(
+			array_map(static fn(mixed $uid): string => (string)$uid, $uids),
+			static fn(string $uid): bool => $uid !== '',
+		)));
+		if ($uids === [])
+		{
+			return $counters;
+		}
+
+		if (count($uids) > self::MAX_ANNUL_BATCH_COUNT)
+		{
+			$this->addError(new Error(
+				'Too many members for batch annulment',
+				'SIGN_ANNUL_BATCH_LIMIT_EXCEEDED',
+				['limit' => self::MAX_ANNUL_BATCH_COUNT],
+			));
+
+			return $counters;
+		}
+
+		$userId = (int)CurrentUser::get()->getId();
+		$annulPermission = $this->createAnnulPermission($userId);
+
+		$container = Service\Container::instance();
+		$members = $container->getMemberRepository()->listByUids($uids);
+
+		// A uid with no record of its own (deleted or stale) is never iterated below,
+		// so it is counted here to keep the counters covering the whole input.
+		$counters['skipped'] += count($uids) - $members->count();
+
+		$documentIds = [];
+		foreach ($members as $member)
+		{
+			if ($member->documentId !== null)
+			{
+				$documentIds[$member->documentId] = true;
+			}
+		}
+
+		$documents = $documentIds === []
+			? []
+			: $container->getDocumentRepository()->listByIds(array_keys($documentIds))->getArrayByIds()
+		;
+
+		// Records actually changed by this call, grouped by their document: the side
+		// effects are emitted per document, not per record.
+		$changedByDocument = [];
+
+		foreach ($members as $member)
+		{
+			$document = $member->documentId !== null ? ($documents[$member->documentId] ?? null) : null;
+			if ($document === null)
+			{
+				$counters['skipped']++;
+
+				continue;
+			}
+
+			if (!$annulPermission->canAnnulDocumentOwnedBy($document->createdById))
+			{
+				$counters['forbidden']++;
+
+				continue;
+			}
+
+			// B2E/KEDO-only feature: non-B2E members are ineligible.
+			if (!DocumentScenario::isB2EScenario($document->scenario))
+			{
+				$counters['skipped']++;
+
+				continue;
+			}
+
+			// Predicate on the persisted role and status of the member record.
+			if ($member->role !== Role::SIGNER || $member->status !== MemberStatus::DONE)
+			{
+				$counters['skipped']++;
+
+				continue;
+			}
+
+			// Cheap pre-check: skip the operation when the snapshot is already at
+			// the target. The operation re-reads the member fresh and is the real
+			// source of truth on whether a state transition happened.
+			if ($member->annulled === $annul)
+			{
+				$counters['unchanged']++;
+
+				continue;
+			}
+
+			// The batch owns the side effects of the whole action, so the operation
+			// emits none of its own per record.
+			$result = (new Operation\AnnulDocument($member, $annul, $userId, withSideEffects: false))->launch();
+			if (!$result->isSuccess())
+			{
+				$counters['skipped']++;
+
+				continue;
+			}
+
+			// Gate changed/side effects on the operation's real transition, not on the
+			// controller's pre-fetch snapshot: on a race the operation no-ops (a
+			// concurrent request already reached the target) and reports changed
+			// === false, which must count as unchanged and notify nobody.
+			if ($result->getData()['changed'] ?? false)
+			{
+				$counters['changed']++;
+				$changedByDocument[(int)$member->documentId][] = $member;
+			}
+			else
+			{
+				$counters['unchanged']++;
+			}
+		}
+
+		foreach ($changedByDocument as $documentId => $changedMembers)
+		{
+			$this->emitAnnulmentSideEffects($documents[$documentId], $changedMembers, $annul, $userId);
+		}
+
+		return $counters;
+	}
+
+	/**
+	 * Side effects of the batch action for one document: a single timeline event for
+	 * the whole action, plus the HR-bot cards deferred to a background job of this
+	 * request.
+	 *
+	 * One event per document, not per record: the records share a CRM item, so
+	 * per-record events would reload it and push the same activity N times over. The
+	 * event still names the employee when the action changed exactly one record of
+	 * the document - there is nothing to aggregate then; above one record it reports
+	 * how many signings changed, so the entry is not read as a whole document being
+	 * annulled.
+	 *
+	 * Both side effects are best-effort: the persisted mark is the source of truth
+	 * and a failure here never rolls it back.
+	 *
+	 * @param list<Item\Member> $changedMembers Records actually changed.
+	 */
+	private function emitAnnulmentSideEffects(
+		Item\Document $document,
+		array $changedMembers,
+		bool $annul,
+		int $userId,
+	): void
+	{
+		$changedCount = count($changedMembers);
+
+		try
+		{
+			if (Loader::includeModule('crm'))
+			{
+				$this->container->getEventHandlerService()->handleDocumentAnnulled(
+					$document,
+					$userId,
+					$annul,
+					$changedCount === 1 ? $changedMembers[0] : null,
+					$changedCount,
+				);
+			}
+		}
+		catch (\Throwable $e)
+		{
+			$this->container->getLogger('Controller')->error(
+				'Failed to emit annulment timeline event for document {documentId}: {errorsText}',
+				[
+					'documentId' => $document->id,
+					'errorsText' => $e->getMessage(),
+				],
+			);
+		}
+
+		try
+		{
+			$this->container->getHrBotMessageService()->scheduleMembersAnnulled(
+				$document,
+				$changedMembers,
+				$annul,
+				$userId,
+			);
+		}
+		catch (\Throwable $e)
+		{
+			// A failure to schedule the fan-out must not abort the remaining
+			// documents of the batch: their marks are written and their own side
+			// effects are still due.
+			$this->container->getLogger('Controller')->error(
+				'Failed to schedule annulment cards for document {documentId}: {errorsText}',
+				[
+					'documentId' => $document->id,
+					'errorsText' => $e->getMessage(),
+				],
+			);
+		}
+	}
+
+	protected function createAnnulPermission(int $userId): DocumentAnnulPermission
+	{
+		return DocumentAnnulPermission::forUser($userId);
+	}
+
+	/**
+	 * @return array{uid: string|null, isAnnulled: bool, canAnnul: bool, status: string, changed: bool}
+	 */
+	private function buildAnnulMemberData(
+		?string $uid,
+		bool $isAnnulled,
+		bool $canAnnul,
+		bool $changed,
+	): array
+	{
+		return [
+			'uid' => $uid,
+			'isAnnulled' => $isAnnulled,
+			'canAnnul' => $canAnnul,
+			'status' => $isAnnulled ? 'annulled' : 'signed',
+			'changed' => $changed,
 		];
 	}
 

@@ -24,6 +24,7 @@ use Bitrix\Sign\Service\Integration\Crm\EventHandlerService;
 use Bitrix\Sign\Service\PullService;
 use Bitrix\Sign\Type\Integration\Rest\EventType;
 use Bitrix\Sign\Type\Integration\Rest\RestDocumentStatus;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 final class ChangeMemberStatus implements Contract\Operation
@@ -40,12 +41,14 @@ final class ChangeMemberStatus implements Contract\Operation
 	private readonly MyDocumentsGrid\EventService $myDocumentGridService;
 	private readonly AnalyticService $analyticService;
 	private readonly HcmLinkService $hcmLinkService;
+	private readonly LoggerInterface $logger;
 
 	public function __construct(
 		private readonly Item\Member $member,
 		private readonly Item\Document $document,
 		private readonly string $status,
 		?ProviderCodeService $providerService = null,
+		?LoggerInterface $logger = null,
 	)
 	{
 		$this->eventHandlerService = Container::instance()->getEventHandlerService();
@@ -58,6 +61,7 @@ final class ChangeMemberStatus implements Contract\Operation
 		$this->myDocumentGridService = Container::instance()->getMyDocumentGridEventService();
 		$this->analyticService = Container::instance()->getAnalyticService();
 		$this->hcmLinkService = Container::instance()->getHcmLinkService();
+		$this->logger = $logger ?? Container::instance()->getLogger('Operation');
 	}
 
 	public function setMessage(MemberStatusChanged $message): self
@@ -152,6 +156,20 @@ final class ChangeMemberStatus implements Contract\Operation
 				$this->onStatusChangedMessageTimelineEvent();
 			}
 
+			// The code itself says the preparation failed: it is minted by one operation on the safe side
+			// and always arrives with the member sent back to waiting. Matching an exact status here
+			// would instead depend on how the safe computes the web status of a member, which is its
+			// own business and can change without a word. A member who already finished signing is
+			// the one case worth skipping: the callback queue delivers with a delay of minutes, and by
+			// then a repeated attempt could have carried the member past this failure.
+			if (
+				Type\B2eErrorCode::isDocumentPreparationFailure($this->message->getErrorCode())
+				&& !Type\MemberStatus::isFinishForSigning($this->member->status)
+			)
+			{
+				$this->notifyDocumentPreparationFailed();
+			}
+
 			$this->pullService->sendMemberStatusChanged($this->document, $this->member);
 		}
 
@@ -164,6 +182,29 @@ final class ChangeMemberStatus implements Contract\Operation
 		$this->saveAnalytics();
 
 		return $result;
+	}
+
+	/**
+	 * An undelivered notice must not fail the callback: the service redelivers it on failure,
+	 * and a repeated callback duplicates the legal log record and the timeline event.
+	 */
+	private function notifyDocumentPreparationFailed(): void
+	{
+		$notifyResult = $this->hrBotMessageService->notifyDocumentPreparationFailed($this->document);
+
+		if ($notifyResult->isSuccess())
+		{
+			return;
+		}
+
+		$this->logger->error(
+			'Failed to notify about document preparation failure for member {memberUid}: {errorsText}',
+			[
+				'memberUid' => $this->member->uid,
+				'documentUid' => $this->document->uid,
+				'errorsText' => implode('; ', $notifyResult->getErrorMessages()),
+			],
+		);
 	}
 
 	private function onStatusChangedMessageTimelineEvent(): void

@@ -2,10 +2,16 @@
 
 namespace Bitrix\Sign\Controller\Internal;
 
+use Bitrix\Main;
+use Bitrix\Sign\Access\AccessController;
+use Bitrix\Sign\Access\ActionDictionary;
 use Bitrix\Sign\Document as DocumentCore;
+use Bitrix\Sign\Helper\IterationHelper;
+use Bitrix\Sign\Item;
 use Bitrix\Sign\Item\Api\Document\Signing\SendInviteRequest;
 use Bitrix\Sign\Proxy;
 use Bitrix\Sign\Service;
+use Bitrix\Sign\Type\DocumentScenario;
 
 class Document extends \Bitrix\Sign\Controller\Controller
 {
@@ -26,6 +32,17 @@ class Document extends \Bitrix\Sign\Controller\Controller
 	 */
 	public function resendFileAction(string $documentId, ?string $memberHash = null)
 	{
+		$documentItem = Service\Container::instance()->getDocumentRepository()->getById((int)$documentId);
+		if ($documentItem === null || !$this->canCurrentUserResendDocument($documentItem))
+		{
+			$this->addError(new Main\Error(
+				Main\Localization\Loc::getMessage('SIGN_CONTROLLER_INTERNAL_DOCUMENT_ERROR_ACCESS_DENIED'),
+				'ACCESS_DENIED',
+			));
+
+			return;
+		}
+
 		$document = DocumentCore::getById($documentId);
 		if ($document)
 		{
@@ -55,5 +72,26 @@ class Document extends \Bitrix\Sign\Controller\Controller
                 }
             }
 		}
+	}
+
+	protected function getAccessController(): AccessController
+	{
+		return new AccessController((int)$this->getCurrentUser()?->getId());
+	}
+
+	/** Resending a file is available to whoever may read the document as well as to whoever may edit it. */
+	private function canCurrentUserResendDocument(Item\Document $document): bool
+	{
+		$accessActions = DocumentScenario::isB2EScenario($document->scenario)
+			? [ActionDictionary::ACTION_B2E_DOCUMENT_READ, ActionDictionary::ACTION_B2E_DOCUMENT_EDIT]
+			: [ActionDictionary::ACTION_DOCUMENT_READ, ActionDictionary::ACTION_DOCUMENT_EDIT]
+		;
+
+		$accessController = $this->getAccessController();
+
+		return IterationHelper::any(
+			$accessActions,
+			static fn(string $action): bool => $accessController->checkByItem($action, $document),
+		);
 	}
 }

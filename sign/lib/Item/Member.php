@@ -44,6 +44,9 @@ class Member implements Contract\Item, Contract\Item\TrackableItem
 		public ?DateTime $dateStatusChanged = null,
 		public ?int $folderId = null,
 		public ?int $createdById = null,
+		public bool $annulled = false,
+		public ?int $annulledById = null,
+		public ?DateTime $dateAnnulled = null,
 	)
 	{
 		$this->reminder = $reminder ?? new Reminder(
@@ -62,6 +65,7 @@ class Member implements Contract\Item, Contract\Item\TrackableItem
 		$this->dateCreated = CloneHelper::cloneIfNotNull($this->dateCreated);
 		$this->dateSend = CloneHelper::cloneIfNotNull($this->dateSend);
 		$this->dateStatusChanged = CloneHelper::cloneIfNotNull($this->dateStatusChanged);
+		$this->dateAnnulled = CloneHelper::cloneIfNotNull($this->dateAnnulled);
 		$this->reminder = clone $this->reminder;
 		$this->reminder->lastSendDate = CloneHelper::cloneIfNotNull($this->reminder->lastSendDate);
 		$this->reminder->plannedNextSendDate = CloneHelper::cloneIfNotNull($this->reminder->plannedNextSendDate);

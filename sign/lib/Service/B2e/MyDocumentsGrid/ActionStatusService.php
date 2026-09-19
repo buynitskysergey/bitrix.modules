@@ -11,6 +11,7 @@ use Bitrix\Sign\Type\DocumentStatus;
 use Bitrix\Sign\Type\Member\Role;
 use Bitrix\Sign\Type\MemberStatus;
 use Bitrix\Sign\Type\MyDocumentsGrid\Action;
+use Bitrix\Sign\Type\MyDocumentsGrid\BulkAction;
 
 class ActionStatusService
 {
@@ -42,6 +43,24 @@ class ActionStatusService
 		}
 
 		return Action::DOWNLOAD;
+	}
+
+	/**
+	 * @return list<BulkAction>
+	 */
+	public function getAvailableBulkActions(?Action $action, ?string $documentStatus = null): array
+	{
+		if ($documentStatus === DocumentStatus::STOPPED)
+		{
+			return [];
+		}
+
+		return match ($action)
+		{
+			Action::APPROVE => [BulkAction::APPROVE, BulkAction::REJECT],
+			Action::SIGN => [BulkAction::REJECT],
+			default => [],
+		};
 	}
 
 	private function isNotSignerAndFromCompany(

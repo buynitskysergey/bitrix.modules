@@ -27,6 +27,7 @@ class ReinstallAccessPermissionsAgent
 		}
 
 		Access\Install\AccessInstaller::installMissingSafeFolderPermissions();
+		Access\Install\AccessInstaller::installMissingDocumentAnnulPermission();
 
 		return '';
 	}

@@ -7,9 +7,12 @@ use Bitrix\Main;
 use Bitrix\Sign\Contract;
 use Bitrix\Sign\Item;
 use Bitrix\Sign\Service;
+use Bitrix\Sign\Trait\Api\BatchRequestTrait;
 
 class SigningService
 {
+	use BatchRequestTrait;
+
 	private Service\ApiService $api;
 	private Contract\Serializer $serializer;
 
@@ -97,6 +100,18 @@ class SigningService
 		return $response;
 	}
 
+	public function stopBatch(
+		Item\Api\Document\Signing\StopBatchRequest $request
+	): Item\Api\Document\Signing\StopBatchResponse
+	{
+		$result = $this->requestBatch('v1/document.signing.stop.batch', $request);
+
+		$response = new Item\Api\Document\Signing\StopBatchResponse($result->getData()['results'] ?? []);
+		$response->addErrors($result->getErrors());
+
+		return $response;
+	}
+
 	public function sendInvite(Item\Api\Document\Signing\SendInviteRequest $request): Item\Api\Document\Signing\SendInviteResponse
 	{
 		$result = new Main\Result();
@@ -168,4 +183,5 @@ class SigningService
 
 		return $result;
 	}
+
 }

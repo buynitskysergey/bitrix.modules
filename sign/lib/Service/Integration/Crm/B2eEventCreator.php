@@ -169,6 +169,13 @@ final class B2eEventCreator
 				$crmController->onMemberSigningError($itemIdentifier, $documentData, $messageData);
 				$this->notifyActivityChange($crmController, $itemIdentifier);
 				break;
+			case EventData::TYPE_ON_ERROR_DOCUMENT_PREPARATION_FAILED:
+				if (method_exists($crmController, 'onMemberDocumentPreparationFailed'))
+				{
+					$crmController->onMemberDocumentPreparationFailed($itemIdentifier, $documentData, $messageData);
+				}
+				$this->notifyActivityChange($crmController, $itemIdentifier);
+				break;
 			case EventData::TYPE_ON_MEMBER_STOPPED_BY_ASSIGNEE:
 				if (method_exists($crmController, 'onMemberStoppedByAssignee'))
 				{
@@ -195,6 +202,20 @@ final class B2eEventCreator
 				{
 					$crmController->onSignedDocumentDelivered($itemIdentifier, $documentData);
 				}
+				break;
+			case EventData::TYPE_ON_ANNULLED:
+				if (method_exists($crmController, 'onAnnulled'))
+				{
+					$crmController->onAnnulled($itemIdentifier, $documentData);
+				}
+				$this->notifyActivityChange($crmController, $itemIdentifier);
+				break;
+			case EventData::TYPE_ON_ANNULMENT_CANCELED:
+				if (method_exists($crmController, 'onAnnulmentCanceled'))
+				{
+					$crmController->onAnnulmentCanceled($itemIdentifier, $documentData);
+				}
+				$this->notifyActivityChange($crmController, $itemIdentifier);
 				break;
 			case EventData::TYPE_ON_CONFIGURATION_ERROR:
 				if (method_exists($crmController, 'onSignConfigureError'))

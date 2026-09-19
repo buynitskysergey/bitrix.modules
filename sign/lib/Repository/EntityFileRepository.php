@@ -34,6 +34,27 @@ class EntityFileRepository
 	}
 
 	/**
+	 * @param list<int> $entityIds
+	 */
+	public function listByEntityIdsAndCode(int $entityTypeId, array $entityIds, int $code): Item\EntityFileCollection
+	{
+		if ($entityIds === [])
+		{
+			return new Item\EntityFileCollection();
+		}
+
+		$models = Internal\FileTable
+			::query()
+			->addSelect('*')
+			->where('ENTITY_TYPE_ID', $entityTypeId)
+			->whereIn('ENTITY_ID', $entityIds)
+			->where('CODE', $code)
+		;
+
+		return $this->extractItemCollectionFromModelCollection($models->fetchCollection());
+	}
+
+	/**
 	 * @param \Bitrix\Sign\Item\EntityFile $item
 	 *
 	 * @return \Bitrix\Main\Result

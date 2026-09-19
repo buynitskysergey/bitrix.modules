@@ -89,4 +89,16 @@ abstract class Message implements \Bitrix\Sign\Contract\Chat\Message
 
 		return Loc::getMessage($id, $replace, $lang);
 	}
+
+	protected function getLocalizedFallbackMessagePlural(
+		string $id,
+		int $value,
+		?array $replace = null,
+		?string $lang = null,
+	): ?string
+	{
+		$lang = $lang ?? $this->lang;
+
+		return Loc::getMessagePlural($id, $value, $replace, $lang);
+	}
 }

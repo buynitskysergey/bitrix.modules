@@ -39,7 +39,7 @@ class Event
 		{
 			if (!Config::isJsonRpcUsed() && (isset($parameters['user_params']) || isset($parameters['dictionary'])))
 			{
-				self::generateEventsForUsers($recipient, $parameters, $channelType);
+				$result = self::generateEventsForUsers($recipient, $parameters, $channelType);
 			}
 			else
 			{
@@ -175,7 +175,9 @@ class Event
 		{
 			$recipients = [$recipients];
 		}
-		if (is_array($parameters['dictionary']))
+
+		$parameters['params'] = is_array($parameters['params'] ?? null) ? $parameters['params'] : [];
+		if (is_array($parameters['dictionary'] ?? null))
 		{
 			$dictionary = $parameters['dictionary'];
 			unset($parameters['dictionary']);
@@ -183,7 +185,9 @@ class Event
 		}
 
 		$processed = [];
-		if (is_array($parameters['user_params']))
+		$result = true;
+		$hasResults = false;
+		if (is_array($parameters['user_params'] ?? null))
 		{
 			$params = $parameters['params'];
 			$paramsByUser = $parameters['user_params'];
@@ -195,7 +199,9 @@ class Event
 				{
 					$userParams = $parameters;
 					$userParams['params'] = array_merge($params, $paramsByUser[$recipient]);
-					self::addEvent($recipient, $userParams, $channelType);
+					$callResult = self::addEvent($recipient, $userParams, $channelType);
+					$result = $callResult && $result;
+					$hasResults = true;
 
 					$processed[] = $recipient;
 				}
@@ -204,8 +210,12 @@ class Event
 		$left = array_diff($recipients, $processed);
 		if (!empty($left))
 		{
-			self::addEvent($left, $parameters, $channelType);
+			$callResult = self::addEvent($left, $parameters, $channelType);
+			$result = $callResult && $result;
+			$hasResults = true;
 		}
+
+		return $hasResults && $result;
 	}
 
 	private static function addPush($users, $parameters)

@@ -56,6 +56,7 @@ class SectionDictionary
 				SignPermissionDictionary::SIGN_B2E_SIGNERS_LIST_EDIT,
 				SignPermissionDictionary::SIGN_B2E_SIGNERS_LIST_DELETE,
 				SignPermissionDictionary::SIGN_B2E_SIGNERS_LIST_REFUSED,
+				SignPermissionDictionary::SIGN_DOCUMENT_ANNUL,
 			],
 			self::ACCESS => [
 				SignPermissionDictionary::SIGN_ACCESS_RIGHTS,

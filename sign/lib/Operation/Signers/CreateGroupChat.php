@@ -70,7 +70,7 @@ class CreateGroupChat implements Contract\Operation
 				$user->isActive && \Bitrix\Sign\Config\User::instance()->canUserParticipateInSigning($user->id)
 		);
 
-		$activeIntranetUserIds = array_map(fn(\Bitrix\Sign\Item\User $user): int => $user->id, $activeIntranetUsers);
+		$activeIntranetUserIds = array_values(array_map(fn(\Bitrix\Sign\Item\User $user): int => $user->id, $activeIntranetUsers));
 
 		if (!in_array($this->chatOwnerId, $activeIntranetUserIds, true))
 		{

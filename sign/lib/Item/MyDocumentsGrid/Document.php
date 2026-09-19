@@ -23,6 +23,8 @@ class Document implements Contract\Item
 		public InitiatedByType $initiatedByType,
 		public ?int $stoppedById,
 		public ?bool $someoneSigned = null,
+		public bool $isAnnulled = false,
+		public bool $canAnnul = false,
 	)
 	{}
 

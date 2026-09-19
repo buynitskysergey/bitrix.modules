@@ -102,6 +102,18 @@ class Controller extends \Bitrix\Main\Engine\Controller
 		return $this;
 	}
 
+	protected function addAccessDeniedError(): void
+	{
+		// The main phrase says the user must sign in, which misleads on a permission denial:
+		// the user is authenticated. Same wording as Engine\ActionFilter\AccessCheck, so the
+		// answer reads the same whether the denial comes from the filter or the action body.
+		Main\Context::getCurrent()->getResponse()->setStatus(401);
+		$this->addError(new Main\Error(
+			Main\Localization\Loc::getMessage('SIGN_ENGINE_CONTROLLER_ERROR_ACCESS_DENIED'),
+			Main\Engine\ActionFilter\Authentication::ERROR_INVALID_AUTHENTICATION,
+		));
+	}
+
 	protected function addB2eTariffRestrictedError(): static
 	{
 		$this->addError(B2eTariff::instance()->getCommonAccessError());

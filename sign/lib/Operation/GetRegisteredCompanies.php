@@ -4,6 +4,7 @@ namespace Bitrix\Sign\Operation;
 
 use Bitrix\Main;
 use Bitrix\Sign\Contract\Operation as OperationContract;
+use Bitrix\Sign\Integration\Bitrix24\B2eTariff;
 use Bitrix\Sign\Item\Integration\Crm\MyCompanyCollection;
 use Bitrix\Sign\Service\B2e\CompanyService;
 use Bitrix\Sign\Service\Container;
@@ -33,7 +34,7 @@ class GetRegisteredCompanies implements OperationContract
 
 		$result = $this->companyService->getCompanies(
 			taxIds: $taxIds,
-			supportedProviders: ProviderCode::getAllFormattedCodes(),
+			supportedProviders: $this->getSupportedProviderCodes(),
 			useProvidersWhereSignerSignFirst: $this->forDocumentInitiatedByType->isEmployee(),
 		);
 
@@ -59,5 +60,27 @@ class GetRegisteredCompanies implements OperationContract
 	public function getResultData(): array
 	{
 		return $this->resultData;
+	}
+
+	/**
+	 * The codes declared here drive the registration page of the signing service: a provider absent
+	 * from them is neither offered on that page nor accepted by the registration itself. A plan that
+	 * does not include lite goskey must not declare it, otherwise the page connects it past the gate.
+	 *
+	 * @return array<string>
+	 */
+	private function getSupportedProviderCodes(): array
+	{
+		$codes = ProviderCode::getAllFormattedCodes();
+		if (!B2eTariff::instance()->isGoskeyLiteRestrictedInCurrentTariff())
+		{
+			return $codes;
+		}
+
+		$restrictedCode = ProviderCode::toRepresentativeString(ProviderCode::GOS_KEY_LITE);
+
+		return array_values(
+			array_filter($codes, static fn(string $code): bool => $code !== $restrictedCode),
+		);
 	}
 }

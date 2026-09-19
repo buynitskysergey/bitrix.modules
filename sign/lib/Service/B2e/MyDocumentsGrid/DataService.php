@@ -2,13 +2,13 @@
 
 namespace Bitrix\Sign\Service\B2e\MyDocumentsGrid;
 
+use Bitrix\Sign\Access\DocumentAnnulPermission;
+use Bitrix\Sign\FeatureResolver;
 use Bitrix\Sign\Item\Member;
 use Bitrix\Sign\Item\Document;
 use Bitrix\Main\Type\DateTime;
-use Bitrix\Sign\Type\EntityType;
 use Bitrix\Sign\Service\Container;
 use Bitrix\Sign\Type\Member\Role;
-use Bitrix\Sign\Type\EntityFileCode;
 use Bitrix\Sign\Type\MemberStatus;
 use Bitrix\Sign\Service\UserService;
 use Bitrix\Sign\Type\DocumentStatus;
@@ -18,7 +18,6 @@ use Bitrix\Sign\Service\Sign\MemberService;
 use Bitrix\Sign\Repository\MemberRepository;
 use Bitrix\Sign\Repository\DocumentRepository;
 use Bitrix\Sign\Type\Document\InitiatedByType;
-use Bitrix\Sign\Operation\GetSignedB2eFileUrl;
 use Bitrix\Sign\Service\Sign\DocumentService;
 use Bitrix\Sign\Item\MyDocumentsGrid\Row;
 use Bitrix\Sign\Item\MyDocumentsGrid\File;
@@ -36,6 +35,7 @@ class DataService
 	private readonly DocumentService $documentService;
 	private readonly ActionStatusService $actionStatusService;
 	private readonly UserService $userService;
+	private readonly SignedFileService $signedFileService;
 
 	public function __construct()
 	{
@@ -45,6 +45,7 @@ class DataService
 		$this->documentService = Container::instance()->getDocumentService();
 		$this->actionStatusService = Container::instance()->getActionStatusService();
 		$this->userService = Container::instance()->getUserService();
+		$this->signedFileService = Container::instance()->getMyDocumentsGridSignedFileService();
 	}
 
 	public function getGridData(
@@ -56,6 +57,13 @@ class DataService
 	{
 		$userIds = [];
 		$rows = new RowCollection();
+		// Resolve the annul owner scope once per grid render and reuse per row,
+		// but only when the feature is on; otherwise canAnnul stays the DTO
+		// default (false) and no permission/department queries are issued.
+		$annulPermission = FeatureResolver::instance()->released('kedoDocumentAnnul')
+			? DocumentAnnulPermission::forUser($userId)
+			: null
+		;
 		$members = $this->getMembersForCurrentUser(
 			$userId,
 			$limit,
@@ -64,24 +72,29 @@ class DataService
 		);
 		$documents = $this->getDocuments($members);
 		$secondSideMembersMap = $this->getSecondSideMembersForEmployeeMap($members, $documents, $userId);
+		$fromEmployeeRoleMembersMap = $this->getFromEmployeeRoleMembersMap(
+			$members,
+			$documents,
+			$secondSideMembersMap,
+			$userId,
+		);
+		$signedFiles = $this->signedFileService->listByMemberIds(
+			$this->collectSignedFileMemberIds($members, $secondSideMembersMap, $fromEmployeeRoleMembersMap),
+		);
+		$userPresentations = $this->loadUserPresentations(
+			$this->collectPageUserIds($members, $documents, $secondSideMembersMap, $userId),
+		);
+		$documentIdsWithSuccessfulSigners = $this->loadDocumentIdsWithSuccessfulSigners($members, $documents);
 
-		foreach ($members as $member)
+		foreach ($members as $myMemberInProcess)
 		{
-			$myMemberInProcess = $member;
-			$document = $documents->getById((int)$member->documentId);
+			$document = $documents->getById((int)$myMemberInProcess->documentId);
 			if (!$document)
 			{
 				continue;
 			}
 
-			if ($this->isSecondSideMemberForEmployee($member, $document, $userId))
-			{
-				$secondSideMember = $secondSideMembersMap[$document->id] ?? null;
-				if ($secondSideMember != null)
-				{
-					$member = $secondSideMember[0];
-				}
-			}
+			$member = $this->resolveDisplayedMember($myMemberInProcess, $document, $secondSideMembersMap, $userId);
 
 			$fileData = null;
 			if ($document->isInitiatedByEmployee() && DocumentStatus::isFinalByDocument($document))
@@ -90,6 +103,8 @@ class DataService
 					$document,
 					$myMemberInProcess,
 					$member,
+					$signedFiles,
+					$fromEmployeeRoleMembersMap,
 				);
 			}
 			else
@@ -98,7 +113,7 @@ class DataService
 					? $member
 					: $myMemberInProcess
 				;
-				$fileData = $this->getFileData($relevantMember);
+				$fileData = $this->getFileData($relevantMember, $signedFiles);
 			}
 
 			$dateSend = $member->dateSend ?? $myMemberInProcess->dateSend;
@@ -106,19 +121,20 @@ class DataService
 				$document,
 				$member,
 				$userId,
+				$userPresentations,
 				true,
 			);
 
-			$memberData = $this->buildMemberData($document, $member, $userId);
+			$memberData = $this->buildMemberData($document, $member, $userId, $userPresentations);
 			if ($this->isDocumentStoppedForEmployee($myMemberInProcess, $document))
 			{
-				$stoppedUser = $this->userService->getUserById($document->stoppedById);
+				$stoppedUserPresentation = $this->getUserPresentation($userPresentations, $document->stoppedById);
 				$memberData = new \Bitrix\Sign\Item\MyDocumentsGrid\Member(
 					isCurrentUser: $document->stoppedById === $userId,
 					isStopped: true,
 					userId: $document->stoppedById,
-					fullName: $this->userService->getUserName($stoppedUser),
-					icon: $this->userService->getUserAvatar($stoppedUser),
+					fullName: $stoppedUserPresentation['fullName'],
+					icon: $stoppedUserPresentation['icon'],
 				);
 			}
 
@@ -133,7 +149,7 @@ class DataService
 			}
 
 			$isDocumentHasSuccessfulSigners = $document->status === DocumentStatus::STOPPED
-				? $this->memberService->isDocumentHasSuccessfulSigners($document->id)
+				? isset($documentIdsWithSuccessfulSigners[$document->id])
 				: null
 			;
 			$rowDocument = new \Bitrix\Sign\Item\MyDocumentsGrid\Document(
@@ -149,7 +165,9 @@ class DataService
 				$initiatorData,
 				$document->initiatedByType,
 				$document->stoppedById,
-				$isDocumentHasSuccessfulSigners
+				$isDocumentHasSuccessfulSigners,
+				isAnnulled: $myMemberInProcess->annulled,
+				canAnnul: $annulPermission?->canAnnulDocumentOwnedBy($document->createdById) ?? false,
 			);
 
 			$rows->add(
@@ -161,6 +179,7 @@ class DataService
 						$document,
 						$myMemberInProcess,
 						$userId,
+						$userPresentations,
 					),
 					$fileData,
 					$this->actionStatusService->getActionStatus(
@@ -179,59 +198,218 @@ class DataService
 		);
 	}
 
-	private function getFileData(?Member $member): ?File
+	/**
+	 * @param array<int, ?File> $signedFiles
+	 */
+	private function getFileData(?Member $member, array $signedFiles): ?File
 	{
-		if ($member === null)
+		if ($member?->id === null)
 		{
 			return null;
 		}
 
-		$entityFileCode = EntityFileCode::SIGNED;
+		return $signedFiles[$member->id] ?? null;
+	}
 
-		$operation = new GetSignedB2eFileUrl(
-			EntityType::MEMBER,
-			$member->id,
-			$entityFileCode,
-		);
-
-		$result = $operation->launch();
-		if (!$result->isSuccess())
+	/**
+	 * @psalm-param array<int, array<int, Member>> $secondSideMembersMap
+	 * @psalm-param array<int, array<string, Member>> $fromEmployeeRoleMembersMap
+	 * @return list<int>
+	 */
+	private function collectSignedFileMemberIds(
+		MemberCollection $members,
+		array $secondSideMembersMap,
+		array $fromEmployeeRoleMembersMap,
+	): array
+	{
+		$memberIds = [];
+		foreach ($members as $member)
 		{
-			return null;
+			if ($member->id !== null)
+			{
+				$memberIds[$member->id] = $member->id;
+			}
 		}
 
-		$data = [
-			'entityFileCode' => $entityFileCode,
-			...$result->getData()
-		];
+		foreach ($secondSideMembersMap as $secondSideMembers)
+		{
+			foreach ($secondSideMembers as $secondSideMember)
+			{
+				if ($secondSideMember->id !== null)
+				{
+					$memberIds[$secondSideMember->id] = $secondSideMember->id;
+				}
+			}
+		}
 
-		return new File(
-			$data['entityFileCode'],
-			$data['ext'],
-			$data['url'],
+		foreach ($fromEmployeeRoleMembersMap as $roleMembers)
+		{
+			foreach ($roleMembers as $roleMember)
+			{
+				if ($roleMember->id !== null)
+				{
+					$memberIds[$roleMember->id] = $roleMember->id;
+				}
+			}
+		}
+
+		return array_values($memberIds);
+	}
+
+	/**
+	 * @psalm-param array<int, array<int, Member>> $secondSideMembersMap
+	 */
+	private function resolveDisplayedMember(
+		Member $myMemberInProcess,
+		Document $document,
+		array $secondSideMembersMap,
+		int $userId,
+	): Member
+	{
+		if ($this->isSecondSideMemberForEmployee($myMemberInProcess, $document, $userId))
+		{
+			$secondSideMember = $secondSideMembersMap[$document->id] ?? null;
+			if ($secondSideMember != null)
+			{
+				return $secondSideMember[0];
+			}
+		}
+
+		return $myMemberInProcess;
+	}
+
+	/**
+	 * Collects every user shown on the page, so that they are read in a single query.
+	 *
+	 * @psalm-param array<int, array<int, Member>> $secondSideMembersMap
+	 * @return list<int>
+	 */
+	private function collectPageUserIds(
+		MemberCollection $members,
+		DocumentCollection $documents,
+		array $secondSideMembersMap,
+		int $userId,
+	): array
+	{
+		$userIds = [];
+		foreach ($members as $myMemberInProcess)
+		{
+			$document = $documents->getById((int)$myMemberInProcess->documentId);
+			if (!$document)
+			{
+				continue;
+			}
+
+			$member = $this->resolveDisplayedMember($myMemberInProcess, $document, $secondSideMembersMap, $userId);
+			$rowUserIds = [
+				$document->createdById,
+				$this->memberService->getUserIdForMember($member, $document),
+				$this->memberService->getUserIdForMember($myMemberInProcess, $document),
+			];
+			if ($this->isDocumentStoppedForEmployee($myMemberInProcess, $document))
+			{
+				$rowUserIds[] = $document->stoppedById;
+			}
+
+			foreach ($rowUserIds as $rowUserId)
+			{
+				if ($rowUserId !== null && $rowUserId > 0)
+				{
+					$userIds[$rowUserId] = $rowUserId;
+				}
+			}
+		}
+
+		return array_values($userIds);
+	}
+
+	/**
+	 * Reads in a single query which stopped documents of the page already have a successful signer.
+	 *
+	 * @return array<int, true> set of document ids, keyed for lookup by row
+	 */
+	private function loadDocumentIdsWithSuccessfulSigners(
+		MemberCollection $members,
+		DocumentCollection $documents,
+	): array
+	{
+		$documentIds = [];
+		foreach ($members as $member)
+		{
+			$document = $documents->getById((int)$member->documentId);
+			if ($document?->status === DocumentStatus::STOPPED)
+			{
+				$documentIds[$document->id] = $document->id;
+			}
+		}
+
+		return array_fill_keys(
+			$this->memberService->listDocumentIdsWithSuccessfulSigners(array_values($documentIds)),
+			true,
 		);
 	}
 
+	/**
+	 * @param list<int> $userIds
+	 * @return array<int, array{fullName: string, icon: ?string}>
+	 */
+	private function loadUserPresentations(array $userIds): array
+	{
+		if ($userIds === [])
+		{
+			return [];
+		}
 
+		$presentations = [];
+		foreach ($this->userService->listByIds($userIds) as $user)
+		{
+			if ($user->id === null)
+			{
+				continue;
+			}
+
+			$presentations[$user->id] = [
+				'fullName' => $this->userService->getUserName($user),
+				'icon' => $this->userService->getUserAvatar($user),
+			];
+		}
+
+		return $presentations;
+	}
+
+	/**
+	 * @param array<int, array{fullName: string, icon: ?string}> $userPresentations
+	 * @return array{fullName: string, icon: ?string}
+	 */
+	private function getUserPresentation(array $userPresentations, ?int $userId): array
+	{
+		$presentation = $userId === null ? null : ($userPresentations[$userId] ?? null);
+
+		return $presentation ?? ['fullName' => '', 'icon' => ''];
+	}
+
+	/**
+	 * @param array<int, array{fullName: string, icon: ?string}> $userPresentations
+	 */
 	private function buildMemberData(
 		Document $document,
 		Member $member,
 		int $currentUserId,
+		array $userPresentations,
 		bool $isInitiator = false,
 	): ?\Bitrix\Sign\Item\MyDocumentsGrid\Member
 	{
 		$userIdForMember = $this->memberService->getUserIdForMember($member, $document);
-		$user = $isInitiator
-			? $this->userService->getUserById($document->createdById)
-			: $this->userService->getUserById($userIdForMember);
+		$shownUserId = $isInitiator ? $document->createdById : $userIdForMember;
+		$presentation = $this->getUserPresentation($userPresentations, $shownUserId);
 		$isCurrentUser = $userIdForMember === $currentUserId;
 
 		return new \Bitrix\Sign\Item\MyDocumentsGrid\Member(
 			isCurrentUser: $isCurrentUser,
 			isStopped: $isInitiator ? null : false,
-			userId: $isInitiator ? $document->createdById : $userIdForMember,
-			fullName: $user ? $this->userService->getUserName($user) : '',
-			icon: $user ? $this->userService->getUserAvatar($user) : '',
+			userId: $shownUserId,
+			fullName: $presentation['fullName'],
+			icon: $presentation['icon'],
 			id: $isInitiator ? null : $member->id,
 			role: $isInitiator ? 'initiator' : $member->role,
 			status: $isInitiator ? null : $member->status,
@@ -352,23 +530,116 @@ class DataService
 		return $this->getTotalCountMembers($userId, $filter);
 	}
 
+	/**
+	 * Reads the assignee and the signer of the from-employee documents whose row looks into the map, in a
+	 * single query, keeping the first member by id per role, as the per-document read did.
+	 *
+	 * @psalm-param array<int, array<int, Member>> $secondSideMembersMap
+	 * @psalm-return array<int, array<string, Member>>
+	 */
+	private function getFromEmployeeRoleMembersMap(
+		MemberCollection $members,
+		DocumentCollection $documents,
+		array $secondSideMembersMap,
+		int $userId,
+	): array
+	{
+		$documentIds = [];
+		foreach ($members as $member)
+		{
+			$document = $documents->getById((int)$member->documentId);
+			if (!$document?->isInitiatedByEmployee() || !DocumentStatus::isFinalByDocument($document))
+			{
+				continue;
+			}
+
+			if ($this->readsFromEmployeeRoleMembers($member, $document, $secondSideMembersMap, $userId))
+			{
+				$documentIds[$document->id] = $document->id;
+			}
+		}
+
+		if ($documentIds === [])
+		{
+			return [];
+		}
+
+		$roleMembers = $this->memberRepository->listByDocumentIdListAndRoles(
+			array_values($documentIds),
+			[Role::ASSIGNEE, Role::SIGNER],
+			loadEntityNames: false,
+		);
+
+		$map = [];
+		foreach ($roleMembers as $roleMember)
+		{
+			if ($roleMember->documentId === null || $roleMember->role === null)
+			{
+				continue;
+			}
+
+			$known = $map[$roleMember->documentId][$roleMember->role] ?? null;
+			if ($known === null || (int)$roleMember->id < (int)$known->id)
+			{
+				$map[$roleMember->documentId][$roleMember->role] = $roleMember;
+			}
+		}
+
+		return $map;
+	}
+
+	/**
+	 * The branches of getFromEmployeeFileLink that look into the role members map. A row outside them takes
+	 * no file from the map, so its document does not belong to the query.
+	 *
+	 * @psalm-param array<int, array<int, Member>> $secondSideMembersMap
+	 */
+	private function readsFromEmployeeRoleMembers(
+		Member $myMemberInProcess,
+		Document $document,
+		array $secondSideMembersMap,
+		int $userId,
+	): bool
+	{
+		if ($myMemberInProcess->role === Role::SIGNER)
+		{
+			return true;
+		}
+
+		$displayedMember = $this->resolveDisplayedMember(
+			$myMemberInProcess,
+			$document,
+			$secondSideMembersMap,
+			$userId,
+		);
+
+		return $displayedMember->status === MemberStatus::STOPPED && $document->status === DocumentStatus::STOPPED;
+	}
+
+	/**
+	 * @param array<int, ?File> $signedFiles
+	 * @psalm-param array<int, array<string, Member>> $fromEmployeeRoleMembersMap
+	 */
 	private function getFromEmployeeFileLink(
 		Document $document,
 		Member $initiator,
 		Member $myMemberInProcess,
+		array $signedFiles,
+		array $fromEmployeeRoleMembersMap,
 	): ?File
 	{
 		$documentStatusIsFinal = DocumentStatus::isFinalByDocument($document);
 
 		if ($document->initiatedByType == InitiatedByType::EMPLOYEE && $documentStatusIsFinal)
 		{
+			$roleMembers = $fromEmployeeRoleMembersMap[$document->id] ?? [];
 			if ($initiator->role === Role::SIGNER)
 			{
-				$resultFile = $this->getFileData($this->memberService->getAssignee($document));
+				$resultFile = $this->getFileData($roleMembers[Role::ASSIGNEE] ?? null, $signedFiles);
 
 				if ($resultFile === null)
 				{
-					return $this->getFileData($this->memberService->getSigner($document));
+					return $this->getFileData($roleMembers[Role::SIGNER] ?? null, $signedFiles);
 				}
 
 				return $resultFile;
@@ -376,7 +647,7 @@ class DataService
 
 			if ($myMemberInProcess->status === MemberStatus::STOPPED && $document->status === DocumentStatus::STOPPED)
 			{
-				return $this->getFileData($this->memberService->getSigner($document));
+				return $this->getFileData($roleMembers[Role::SIGNER] ?? null, $signedFiles);
 			}
 
 			if ($myMemberInProcess->role === Role::ASSIGNEE)

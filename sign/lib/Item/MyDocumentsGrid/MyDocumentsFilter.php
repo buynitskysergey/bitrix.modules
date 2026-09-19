@@ -91,5 +91,4 @@ class MyDocumentsFilter
 			&& ($this->statuses[0] ?? null) === FilterStatus::NEED_ACTION
 			;
 	}
-
 }

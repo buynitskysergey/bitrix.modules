@@ -7,9 +7,12 @@ use Bitrix\Main;
 use Bitrix\Sign\Contract;
 use Bitrix\Sign\Item;
 use Bitrix\Sign\Service;
+use Bitrix\Sign\Trait\Api\BatchRequestTrait;
 
 class MobileService
 {
+	use BatchRequestTrait;
+
 	private Service\ApiService $api;
 	private Contract\Serializer $serializer;
 
@@ -78,6 +81,23 @@ class MobileService
 		return $response;
 	}
 
+	public function acceptReviewBatch(
+		Item\Api\Mobile\Signing\ReviewBatchRequest $request
+	): Item\Api\Mobile\Signing\ReviewBatchResponse
+	{
+		$result = $this->validateBatchItems($request->items);
+
+		if ($result->isSuccess())
+		{
+			$result = $this->requestBatch('v1/b2e.document.reviewer.accept.batch', $request);
+		}
+
+		$response = new Item\Api\Mobile\Signing\ReviewBatchResponse($result->getData()['results'] ?? []);
+		$response->addErrors($result->getErrors());
+
+		return $response;
+	}
+
 	public function refuseSigning(Item\Api\Mobile\Signing\RefuseRequest $request): Item\Api\Mobile\Signing\RefuseResponse
 	{
 		$result = new Main\Result();
@@ -101,6 +121,23 @@ class MobileService
 		}
 
 		$response = new Item\Api\Mobile\Signing\RefuseResponse();
+		$response->addErrors($result->getErrors());
+
+		return $response;
+	}
+
+	public function refuseSigningBatch(
+		Item\Api\Mobile\Signing\RefuseBatchRequest $request
+	): Item\Api\Mobile\Signing\RefuseBatchResponse
+	{
+		$result = $this->validateBatchItems($request->items);
+
+		if ($result->isSuccess())
+		{
+			$result = $this->requestBatch('v1/b2e.document.signing.refuse.batch', $request);
+		}
+
+		$response = new Item\Api\Mobile\Signing\RefuseBatchResponse($result->getData()['results'] ?? []);
 		$response->addErrors($result->getErrors());
 
 		return $response;
@@ -202,4 +239,31 @@ class MobileService
 
 		return $response;
 	}
+
+	/**
+	 * The group size limit and the empty group belong to the service, the portal only passes the
+	 * group on; here only an item the service could not address at all is rejected.
+	 *
+	 * @param list<array{documentId: string, memberId: string}> $items
+	 */
+	private function validateBatchItems(array $items): Main\Result
+	{
+		$result = new Main\Result();
+
+		foreach ($items as $index => $item)
+		{
+			if (empty($item['documentId']))
+			{
+				$result->addError(new Main\Error("Request: items[$index]: field `documentId` is empty"));
+			}
+
+			if (empty($item['memberId']))
+			{
+				$result->addError(new Main\Error("Request: items[$index]: field `memberId` is empty"));
+			}
+		}
+
+		return $result;
+	}
+
 }

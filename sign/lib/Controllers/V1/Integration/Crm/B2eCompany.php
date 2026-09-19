@@ -18,6 +18,7 @@ use Bitrix\Sign\Item\Integration\Crm\MyCompanyCollection;
 use Bitrix\Sign\Operation\GetRegisteredCompanies;
 use Bitrix\Sign\Item\Company;
 use Bitrix\Sign\Type\Document\InitiatedByType;
+use Bitrix\Sign\Type\ProviderCode;
 
 class B2eCompany extends Controller
 {
@@ -133,6 +134,8 @@ class B2eCompany extends Controller
 	): CompanyCollection
 	{
 		$providerVisibilityService = $this->container->getProviderVisibilityService();
+		// One answer for the whole list: the tariff is the same for every company of the user.
+		$goskeyLiteRestricted = B2eTariff::instance()->isGoskeyLiteRestrictedInCurrentTariff();
 
 		$registeredCompaniesOperation = new GetRegisteredCompanies(
 			myCompanies: $myCompanies,
@@ -163,7 +166,9 @@ class B2eCompany extends Controller
 			}
 
 			$registeredByTaxId = $registeredCompanies[$company->rqInn] ?? [];
-			$company->goskeyLiteAvailable = (bool)($registeredByTaxId['goskey_lite_available'] ?? false);
+			$company->goskeyLiteAvailable = !$goskeyLiteRestricted
+				&& (bool)($registeredByTaxId['goskey_lite_available'] ?? false)
+			;
 			if (!empty($registeredByTaxId['register_url']) && is_string($registeredByTaxId['register_url']))
 			{
 				$company->registerUrl = $registeredByTaxId['register_url'];
@@ -225,6 +230,17 @@ class B2eCompany extends Controller
 		string $externalProviderId = '',
 	): array
 	{
+		// The hidden button is not the only entrance: a direct request has to be refused too.
+		if (
+			ProviderCode::createFromProviderLikeString($providerCode) === ProviderCode::GOS_KEY_LITE
+			&& B2eTariff::instance()->isGoskeyLiteRestrictedInCurrentTariff()
+		)
+		{
+			$this->addError(B2eTariff::instance()->getGoskeyLiteAccessError());
+
+			return [];
+		}
+
 		$companyName = $this->container->getCrmMyCompanyService()->getCompanyName($companyId);
 
 		if ($companyName === null)

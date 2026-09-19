@@ -36,6 +36,26 @@ final class ProviderCode
 	}
 
 	/**
+	 * Providers signed through the GosKey app.
+	 * Not for analytics: `p1` keeps GOS_KEY and GOS_KEY_LITE apart on purpose.
+	 *
+	 * @see self::toAnalyticString()
+	 * @return array<self::*>
+	 */
+	public static function getGoskeyProviders(): array
+	{
+		return [
+			self::GOS_KEY,
+			self::GOS_KEY_LITE,
+		];
+	}
+
+	public static function isGoskeyProvider(?string $providerCode): bool
+	{
+		return in_array($providerCode, self::getGoskeyProviders(), true);
+	}
+
+	/**
 	 * @return array<string>
 	 */
 	public static function getAllFormattedCodes(): array

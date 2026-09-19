@@ -13,6 +13,7 @@ final class FeatureResolver
 		'memberServiceCached',
 		'signUntilDate',
 		'repeatTestSigning',
+		'kedoDocumentAnnul',
 	];
 	private static self $instance;
 

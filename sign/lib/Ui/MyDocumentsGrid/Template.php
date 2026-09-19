@@ -15,6 +15,7 @@ class Template
 	public function __construct(
 		private readonly TextGenerator $textGenerator,
 		private readonly Row $row,
+		private readonly bool $isAnnulMarkEnabled = false,
 	)
 	{}
 
@@ -103,6 +104,7 @@ class Template
 			->create(
 				$this->row,
 				$textForActionColumn,
+				$this->isAnnulMarkEnabled,
 			)
 			->render()
 			;

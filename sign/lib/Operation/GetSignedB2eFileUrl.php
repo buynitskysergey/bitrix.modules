@@ -2,6 +2,7 @@
 
 namespace Bitrix\Sign\Operation;
 
+use Bitrix\Sign\Item;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Repository;
 use Bitrix\Sign\Contract;
@@ -19,6 +20,10 @@ class GetSignedB2eFileUrl implements Contract\Operation
 	protected Repository\DocumentRepository $documentRepository;
 	protected Repository\MemberRepository $memberRepository;
 
+	private bool $filePreloaded = false;
+	private ?Item\EntityFile $entityFile = null;
+	private ?Item\Fs\File $file = null;
+
 	public function __construct(
 		private int $entityTypeId,
 		private int $entityId,
@@ -32,16 +37,39 @@ class GetSignedB2eFileUrl implements Contract\Operation
 		$this->memberRepository = Service\Container::instance()->getMemberRepository();
 	}
 
+	/**
+	 * Skips both reads for callers that already have the entity file and the file loaded in a batch.
+	 * A null $entityFile or $file means the batch found nothing for this entity.
+	 */
+	public static function createByPreloadedFile(
+		int $entityTypeId,
+		int $entityId,
+		int $code,
+		?Item\EntityFile $entityFile,
+		?Item\Fs\File $file,
+	): self
+	{
+		$operation = new self($entityTypeId, $entityId, $code);
+		$operation->filePreloaded = true;
+		$operation->entityFile = $entityFile;
+		$operation->file = $file;
+
+		return $operation;
+	}
+
 	public function launch(): Main\Result
 	{
 		$data = [];
 		$result = new Main\Result();
 
-		$entity = $this->entityFileRepository->getOne(
-			$this->entityTypeId,
-			$this->entityId,
-			$this->code
-		);
+		$entity = $this->filePreloaded
+			? $this->entityFile
+			: $this->entityFileRepository->getOne(
+				$this->entityTypeId,
+				$this->entityId,
+				$this->code
+			)
+		;
 
 		if (!$entity)
 		{
@@ -50,7 +78,12 @@ class GetSignedB2eFileUrl implements Contract\Operation
 
 		if ($entity->fileId > 0)
 		{
-			$file = Service\Container::instance()->getFileRepository()->getById($entity->fileId);
+			$file = $this->filePreloaded ? $this->file : $this->fileRepository->getById($entity->fileId);
+			if (!$file)
+			{
+				return $result->addError(new Main\Error('File not found'));
+			}
+
 			$data['ext'] = $file->type === 'application/zip' ? 'zip' : 'pdf';
 			$signer = new Main\Security\Sign\Signer();
 			$sign= $signer->sign("$this->entityTypeId$this->entityId", self::B2eFileSalt);

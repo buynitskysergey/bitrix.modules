@@ -27,6 +27,17 @@ class B2eTariff
 		;
 	}
 
+	/**
+	 * Lite goskey is a paid provider: the demo and the free cloud plans must not offer it.
+	 * On self-hosted installations there is no bitrix24 module, so nothing is restricted.
+	 */
+	public function isGoskeyLiteRestrictedInCurrentTariff(): bool
+	{
+		return Loader::includeModule('bitrix24')
+			&& (\CBitrix24::IsDemoLicense() || \CBitrix24::isFreeLicense())
+		;
+	}
+
 	public function isB2eSignersCountRestricted(int $signersCount): bool
 	{
 		return $signersCount > $this->getB2eSignersCountLimit()
@@ -59,7 +70,7 @@ class B2eTariff
 	public function getCommonAccessError(): Error
 	{
 		return new Error(
-			Loc::getMessage('SIGN_B2E_RESTRICTED_ON_TARIFF_ERROR'),
+			Loc::getMessage('SIGN_INTEGRATION_BITRIX24_RESTRICTED_ON_TARIFF_ERROR'),
 			'B2E_RESTRICTED_ON_TARIFF',
 		);
 	}
@@ -71,6 +82,14 @@ class B2eTariff
 				'#SIGNERS_COUNT#' => $this->getB2eSignersCountLimit(),
 			]),
 			'B2E_SIGNERS_LIMIT_REACHED_ON_TARIFF',
+		);
+	}
+
+	public function getGoskeyLiteAccessError(): Error
+	{
+		return new Error(
+			Loc::getMessage('SIGN_INTEGRATION_BITRIX24_GOSKEY_LITE_RESTRICTED_ON_TARIFF_ERROR'),
+			'GOSKEY_LITE_RESTRICTED_ON_TARIFF',
 		);
 	}
 }

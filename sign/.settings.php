@@ -2,6 +2,7 @@
 
 use Bitrix\Sign\Access\Model\UserModelRepository;
 use Bitrix\Sign\Access\Service\AccessService;
+use Bitrix\Sign\Access\Service\SelectorSourceAccessService;
 use Bitrix\Sign\Serializer\ItemPropertyJsonSerializer;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Config;
@@ -608,6 +609,18 @@ return [
 					];
 				},
 			],
+			SelectorSourceAccessService::class => [
+				'className' => SelectorSourceAccessService::class,
+				'constructorParams' => static function() {
+					$container = Service\Container::instance();
+					return [
+						'signersListAccessService' => $container->getSignersListAccessService(),
+						'documentRepository' => $container->getDocumentRepository(),
+						'accessControllerFactory' => $container->getAccessControllerFactory(),
+						'feature' => Config\Feature::instance(),
+					];
+				},
+			],
 			'sign.service.onboarding' => [
 				'className' => Service\OnboardingService::class,
 			],
@@ -673,6 +686,9 @@ return [
 			],
 			'sign.service.b2e.myDocumentsGrid.actionStatus' => [
 				'className' => Service\B2e\MyDocumentsGrid\ActionStatusService::class,
+			],
+			'sign.service.b2e.myDocumentsGrid.signedFile' => [
+				'className' => Service\B2e\MyDocumentsGrid\SignedFileService::class,
 			],
 			'sign.service.preset.templates' => [
 				'className' => Service\Sign\PresetTemplatesService::class,

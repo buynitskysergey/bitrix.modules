@@ -1175,6 +1175,15 @@ class MemberService
 		)->isEmpty();
 	}
 
+	/**
+	 * @param list<int> $documentIds
+	 * @return list<int> ids of documents having at least one signer in DONE status
+	 */
+	public function listDocumentIdsWithSuccessfulSigners(array $documentIds): array
+	{
+		return $this->memberRepository->listDocumentIdsWithSuccessfulSigners($documentIds);
+	}
+
 	public function getByDocumentIdWithRole(int $documentId, string $role): ?Item\Member
 	{
 		return $this->memberRepository->getByDocumentIdWithRole($documentId, $role);

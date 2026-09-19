@@ -2,9 +2,10 @@
 
 namespace Bitrix\Sign\Controllers\V1\Document;
 
-use Bitrix\Main\Type\DateTime;
+use Bitrix\Sign\Access\AccessController;
 use Bitrix\Sign\Access\ActionDictionary;
 use Bitrix\Sign\Attribute;
+use Bitrix\Sign\Helper\IterationHelper;
 use Bitrix\Sign\Item\Api\Document\Signing\ResendMessageRequest;
 use Bitrix\Sign\Item\Document;
 use Bitrix\Sign\Item\Member;
@@ -13,17 +14,25 @@ use Bitrix\Sign\Item\MemberCollection;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Type\DocumentScenario;
 use Bitrix\Sign\Type\DocumentStatus;
-use Bitrix\Sign\Type\Member\Role;
 use Bitrix\Sign\Type\MemberStatus;
 
 class Send extends \Bitrix\Sign\Engine\Controller
 {
+	/** Resending a message is available to whoever may read the document as well as to whoever may edit it. */
+	private const RESEND_ACCESS_ACTIONS = [
+		ActionDictionary::ACTION_DOCUMENT_READ,
+		ActionDictionary::ACTION_DOCUMENT_EDIT,
+	];
+
 	public function getMembersForResendAction(array $memberIds): array
 	{
-		if (
-			count($memberIds) === 0
-			|| !$this->getAccessController()->check(ActionDictionary::ACTION_DOCUMENT_EDIT)
-		)
+		if (count($memberIds) === 0)
+		{
+			return ['readyMembers' => []];
+		}
+
+		$accessController = $this->getAccessController();
+		if (!$accessController->checkAny(self::RESEND_ACCESS_ACTIONS))
 		{
 			return ['readyMembers' => []];
 		}
@@ -43,16 +52,22 @@ class Send extends \Bitrix\Sign\Engine\Controller
 			$documentIds[$member->documentId] = true;
 		}
 
-		$documents = Service\Container::instance()
-			->getDocumentRepository()
-			->listByIds(array_keys($documentIds));
+		$documents = self::filterDocumentsAvailableForResend(
+			$accessController,
+			Service\Container::instance()
+				->getDocumentRepository()
+				->listByIds(array_keys($documentIds)),
+		);
 
 		return [
 			'readyMembers' => self::getReadyForResendMembers($members, $documents),
 		];
 	}
 
-	#[Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT)]
+	#[Attribute\Access\LogicOr(
+		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_READ),
+		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT),
+	)]
 	public function resendMessageAction(array $memberIds): array
 	{
 		if (count($memberIds) === 0)
@@ -70,9 +85,13 @@ class Send extends \Bitrix\Sign\Engine\Controller
 			$documentIds[$member->documentId] = true;
 		}
 
-		$documents = Service\Container::instance()
-			->getDocumentRepository()
-			->listByIds(array_keys($documentIds));
+		$accessController = $this->getAccessController();
+		$documents = self::filterDocumentsAvailableForResend(
+			$accessController,
+			Service\Container::instance()
+				->getDocumentRepository()
+				->listByIds(array_keys($documentIds)),
+		);
 
 		$readyMembers = self::getReadyForResendMembers($members, $documents);
 
@@ -102,6 +121,23 @@ class Send extends \Bitrix\Sign\Engine\Controller
 		}
 
 		return [];
+	}
+
+	/**
+	 * The request references documents indirectly, by member ids, so the coarse permission gate proves
+	 * nothing about them: every document needs an item-aware check.
+	 */
+	private static function filterDocumentsAvailableForResend(
+		AccessController $accessController,
+		DocumentCollection $documents,
+	): DocumentCollection
+	{
+		return $documents->filter(
+			static fn(Document $document): bool => IterationHelper::any(
+				self::RESEND_ACCESS_ACTIONS,
+				static fn(string $action): bool => $accessController->checkByItem($action, $document),
+			),
+		);
 	}
 
 	/**

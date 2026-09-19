@@ -16,6 +16,7 @@ enum FilterStatus: string
 	case MY_EDITED = 'MYEDITED';
 	case MY_STOPPED = 'MYSTOPPED';
 	case STOPPED = 'STOPPED';
+	case ANNULLED = 'ANNULLED';
 	/**
 	 * @deprecated only used in mobile app
 	 */

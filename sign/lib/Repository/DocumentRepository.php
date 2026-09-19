@@ -623,6 +623,10 @@ class DocumentRepository
 					'ENTITY_ID',
 					'CREATED_BY_ID',
 					'REPRESENTATIVE_ID',
+					// Without it in the selection the type silently reads as COMPANY, and the
+					// export never recognises an employee-initiated document the way the screen
+					// does - see Service\B2e\AnnulmentTargetService.
+					'INITIATED_BY_TYPE',
 				])
 				->whereIn('ID', $batchIds)
 				->fetchAll()
@@ -642,6 +646,8 @@ class DocumentRepository
 					createdById: $row['CREATED_BY_ID'] === null ? null : (int)$row['CREATED_BY_ID'],
 					representativeId: $row['REPRESENTATIVE_ID'] === null ? null : (int)$row['REPRESENTATIVE_ID'],
 					externalId: $row['EXTERNAL_ID'],
+					initiatedByType: InitiatedByType::tryFromInt((int)$row['INITIATED_BY_TYPE'])
+						?? InitiatedByType::COMPANY,
 				);
 			}
 		}
@@ -700,6 +706,59 @@ class DocumentRepository
 		}
 
 		return Internal\DocumentTable::updateMulti($documentIds, ['PROVIDER_CODE' => $providerCode]);
+	}
+
+	/**
+	 * Writes the stop initiator only while the document has none. Two stops of the same document
+	 * race before the service call, and the trace decides who the callback names in the legal log,
+	 * so the trace of the first initiator must survive the second attempt.
+	 *
+	 * @return bool true only when this very call wrote the trace
+	 */
+	public function setStoppedByIdIfEmpty(int $documentId, int $userId): bool
+	{
+		if ($documentId <= 0 || $userId <= 0)
+		{
+			return false;
+		}
+
+		$connection = Main\Application::getConnection();
+		$sqlHelper = $connection->getSqlHelper();
+		$table = $sqlHelper->quote(Internal\DocumentTable::getTableName());
+		$column = $sqlHelper->quote('STOPPED_BY_ID');
+
+		$connection->queryExecute(
+			"UPDATE {$table} SET {$column} = {$userId}"
+			. " WHERE " . $sqlHelper->quote('ID') . " = {$documentId} AND {$column} IS NULL"
+		);
+
+		return $connection->getAffectedRowsCount() > 0;
+	}
+
+	/**
+	 * Takes the stop initiator back only while the trace is still the expected one. The rollback is
+	 * as conditional as the write: an initiator that belongs to someone else is never cleared.
+	 *
+	 * @return bool true only when this very call cleared the trace
+	 */
+	public function resetStoppedById(int $documentId, int $expectedUserId): bool
+	{
+		if ($documentId <= 0 || $expectedUserId <= 0)
+		{
+			return false;
+		}
+
+		$connection = Main\Application::getConnection();
+		$sqlHelper = $connection->getSqlHelper();
+		$table = $sqlHelper->quote(Internal\DocumentTable::getTableName());
+		$column = $sqlHelper->quote('STOPPED_BY_ID');
+
+		$connection->queryExecute(
+			"UPDATE {$table} SET {$column} = NULL"
+			. " WHERE " . $sqlHelper->quote('ID') . " = {$documentId} AND {$column} = {$expectedUserId}"
+		);
+
+		return $connection->getAffectedRowsCount() > 0;
 	}
 
 	/**

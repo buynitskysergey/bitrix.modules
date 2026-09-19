@@ -20,16 +20,46 @@ class AccessInstaller
 			return;
 		}
 
-		$defaultValueByRoleCode = [
-			SignRolePermissionService::DEFAULT_ROLE_EMPLOYEE_CODE => UserPermissions::PERMISSION_SELF,
-			SignRolePermissionService::DEFAULT_ROLE_CHIEF_CODE => UserPermissions::PERMISSION_SUBDEPARTMENT,
-		];
-		$permissionIds = [
-			SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_CREATE,
-			SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_READ,
-			SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_WRITE,
-			SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_DELETE,
-		];
+		self::installMissingPermissions(
+			[
+				SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_CREATE,
+				SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_READ,
+				SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_WRITE,
+				SignPermissionDictionary::SIGN_B2E_MY_SAFE_FOLDER_DELETE,
+			],
+			[
+				SignRolePermissionService::DEFAULT_ROLE_EMPLOYEE_CODE => UserPermissions::PERMISSION_SELF,
+				SignRolePermissionService::DEFAULT_ROLE_CHIEF_CODE => UserPermissions::PERMISSION_SUBDEPARTMENT,
+			],
+		);
+	}
+
+	public static function installMissingDocumentAnnulPermission(): void
+	{
+		if (!Loader::includeModule('crm'))
+		{
+			return;
+		}
+
+		self::installMissingPermissions(
+			[SignPermissionDictionary::SIGN_DOCUMENT_ANNUL],
+			[
+				SignRolePermissionService::DEFAULT_ROLE_EMPLOYEE_CODE => UserPermissions::PERMISSION_NONE,
+				SignRolePermissionService::DEFAULT_ROLE_CHIEF_CODE => UserPermissions::PERMISSION_SUBDEPARTMENT,
+			],
+		);
+	}
+
+	/**
+	 * Adds to the default roles only the permission rows they are missing, so values already stored
+	 * (including ones an administrator has changed) stay untouched and a repeated run changes nothing.
+	 * Requires the crm module to be loaded.
+	 *
+	 * @param list<int> $permissionIds
+	 * @param array<string, string> $defaultValueByRoleCode
+	 */
+	private static function installMissingPermissions(array $permissionIds, array $defaultValueByRoleCode): void
+	{
 		$roles = CCrmRole::GetList(
 			['ID' => 'DESC'],
 			['=GROUP_CODE' => RolePermissionService::ROLE_GROUP_CODE],
@@ -38,7 +68,9 @@ class AccessInstaller
 		while ($role = $roles->Fetch())
 		{
 			$value = $defaultValueByRoleCode[$role['CODE']] ?? null;
-			if ($value === null)
+			// PERMISSION_NONE is an empty value: RolePermissionService never stores such a row either,
+			// and a missing row already reads as "no permission".
+			if ($value === null || $value === UserPermissions::PERMISSION_NONE)
 			{
 				continue;
 			}
@@ -75,7 +107,7 @@ class AccessInstaller
 				return '';
 			}
 		}
-		catch (LoaderException $e)
+		catch (LoaderException)
 		{
 			return '';
 		}
@@ -169,6 +201,10 @@ class AccessInstaller
 							'id' => SignPermissionDictionary::SIGN_B2E_SIGNERS_LIST_REFUSED,
 							'value' => 1,
 						],
+						[
+							'id' => SignPermissionDictionary::SIGN_DOCUMENT_ANNUL,
+							'value' => UserPermissions::PERMISSION_NONE,
+						],
 					],
 				],
 			],
@@ -254,6 +290,10 @@ class AccessInstaller
 						[
 							'id' => SignPermissionDictionary::SIGN_B2E_SIGNERS_LIST_REFUSED,
 							'value' => 1,
+						],
+						[
+							'id' => SignPermissionDictionary::SIGN_DOCUMENT_ANNUL,
+							'value' => UserPermissions::PERMISSION_SUBDEPARTMENT,
 						],
 					],
 				],

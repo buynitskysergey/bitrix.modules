@@ -65,7 +65,7 @@ class Link implements Item
 
 	public function isGoskey(): bool
 	{
-		return $this->providerCode === ProviderCode::GOS_KEY;
+		return ProviderCode::isGoskeyProvider($this->providerCode);
 	}
 
 	public function isExternal(): bool

@@ -49,6 +49,8 @@ class SignPermissionDictionary extends \Bitrix\Main\Access\Permission\Permission
 	public const SIGN_B2E_MY_SAFE_FOLDER_WRITE = 25;
 	public const SIGN_B2E_MY_SAFE_FOLDER_DELETE = 26;
 
+	public const SIGN_DOCUMENT_ANNUL = 27;
+
 	public static function isValid(string|int $permission): bool
 	{
 		return IterationHelper::any(self::getList(), fn($value, $id) => $permission === $id);
@@ -68,6 +70,7 @@ class SignPermissionDictionary extends \Bitrix\Main\Access\Permission\Permission
 			self::SIGN_B2E_SIGNERS_LIST_READ,
 			self::SIGN_B2E_SIGNERS_LIST_DELETE,
 			self::SIGN_B2E_SIGNERS_LIST_EDIT,
+			self::SIGN_DOCUMENT_ANNUL,
 			self::SIGN_B2E_MY_SAFE_FOLDER_READ,
 			self::SIGN_B2E_MY_SAFE_FOLDER_CREATE,
 			self::SIGN_B2E_MY_SAFE_FOLDER_WRITE,
@@ -184,6 +187,7 @@ class SignPermissionDictionary extends \Bitrix\Main\Access\Permission\Permission
 			self::SIGN_B2E_SIGNERS_LIST_EDIT => 'SIGN_B2E_SIGNERS_LIST_EDIT',
 			self::SIGN_B2E_SIGNERS_LIST_DELETE => 'SIGN_B2E_SIGNERS_LIST_DELETE',
 			self::SIGN_B2E_SIGNERS_LIST_REFUSED => 'SIGN_B2E_SIGNERS_LIST_REFUSED',
+			self::SIGN_DOCUMENT_ANNUL => 'SIGN_DOCUMENT_ANNUL',
 			self::SIGN_B2E_MY_SAFE_FOLDER_READ => 'SIGN_B2E_MY_SAFE_FOLDER_READ',
 			self::SIGN_B2E_MY_SAFE_FOLDER_CREATE => 'SIGN_B2E_MY_SAFE_FOLDER_CREATE',
 			self::SIGN_B2E_MY_SAFE_FOLDER_WRITE => 'SIGN_B2E_MY_SAFE_FOLDER_WRITE',

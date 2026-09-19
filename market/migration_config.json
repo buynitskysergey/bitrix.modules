@@ -1,0 +1,11 @@
+{
+    "defaultTableName": "b_market_tag",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js",
+        "install/images": "images/market"
+    },
+    "publicDirectoriesMapping": {
+        "install/public": ""
+    }
+}

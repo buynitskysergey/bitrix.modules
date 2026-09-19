@@ -6,6 +6,7 @@ use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Chat\CollabChat;
 use Bitrix\Main;
 use Bitrix\Sign\Contract\Chat\GroupChatMessage;
+use Bitrix\Sign\Contract\Chat\Message\HasAnnulledCount;
 use Bitrix\Sign\Contract\Chat\Message\HasInitiator;
 use Bitrix\Sign\Contract\Chat\Message\HasRecipient;
 use Bitrix\Sign\Contract\Chat\Message;
@@ -237,6 +238,11 @@ class ImService
 		if ($message instanceof HasInitiator)
 		{
 			$params['COMPONENT_PARAMS']['INITIATOR'] = $this->buildInitiatorContext($message);
+		}
+
+		if ($message instanceof HasAnnulledCount && $message->getAnnulledCount() !== null)
+		{
+			$params['COMPONENT_PARAMS']['ANNULLED_COUNT'] = $message->getAnnulledCount();
 		}
 
 		if ($helpId = $message->getHelpId())

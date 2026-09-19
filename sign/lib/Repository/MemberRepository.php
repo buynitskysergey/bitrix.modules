@@ -15,9 +15,11 @@ use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Sign\FeatureResolver;
 use Bitrix\Sign\Internal;
 use Bitrix\Sign\Item;
 use Bitrix\Sign\Model\ItemBinder\MemberBinder;
+use Bitrix\Sign\Result\Repository\Member\AnnulmentSwitchResult;
 use Bitrix\Sign\Service\Cache\Memory\Sign\UserCache;
 use Bitrix\Sign\Type;
 use Bitrix\Sign\Type\DocumentStatus;
@@ -32,6 +34,10 @@ class MemberRepository
 	private const SAFE_FOLDER_PARENT_COLUMN = 'SAFE_FOLDER_RELATION.PARENT_ID';
 
 	private const TEMPLATE_USER_RELATION_BATCH_SIZE = 300;
+
+	// Same batch as DocumentRepository::listForSafeExportByIds(): both run over the very
+	// same set of documents, and the safe export feeds up to SAFE_EXPORT_LIMIT of them.
+	private const SIGNERS_BY_DOCUMENTS_BATCH_SIZE = 300;
 
 	// lower bound of an "empty" signing date: SQL NULL or dates below this
 	// threshold (e.g. the zero seed date) are treated as an unset signing date.
@@ -141,22 +147,29 @@ class MemberRepository
 	 *
 	 * @return \Bitrix\Sign\Item\Member
 	 */
-	private function extractItemFromModel(?Internal\Member $model, ?Main\EO_User $user = null): Item\Member
+	private function extractItemFromModel(
+		?Internal\Member $model,
+		?Main\EO_User $user = null,
+		bool $loadEntityNames = true,
+	): Item\Member
 	{
 		if (!$model)
 		{
 			return new Item\Member();
 		}
 
-		$name = match ($model->getEntityType())
-		{
-			EntityType::CONTACT => self::getCrmContactName($model->getEntityId()),
-			EntityType::USER => self::getNameForUser($model->getEntityId(), $user),
-			default => null,
-		};
+		$name = $loadEntityNames
+			? match ($model->getEntityType())
+			{
+				EntityType::CONTACT => self::getCrmContactName($model->getEntityId()),
+				EntityType::USER => self::getNameForUser($model->getEntityId(), $user),
+				default => null,
+			}
+			: null
+		;
 
 		// b2e assignee or b2b first party
-		$companyName = $model->getEntityType() === EntityType::COMPANY
+		$companyName = $loadEntityNames && $model->getEntityType() === EntityType::COMPANY
 			? self::getCrmCompanyName($model->getEntityId())
 			: null
 		;
@@ -204,6 +217,9 @@ class MemberRepository
 			dateStatusChanged: $model->getDateStatusChanged(),
 			folderId: $model->collectValues()['FOLDER_ID'] ?? null,
 			createdById: $model->getCreatedById(),
+			annulled: (bool)$model->getAnnulled(),
+			annulledById: $model->getAnnulledById(),
+			dateAnnulled: $model->getDateAnnulled(),
 		);
 	}
 
@@ -222,16 +238,26 @@ class MemberRepository
 	 *
 	 * @return \Bitrix\Sign\Item\MemberCollection
 	 */
-	private function extractItemCollectionFromModelCollection(Internal\MemberCollection $modelCollection): Item\MemberCollection
+	private function extractItemCollectionFromModelCollection(
+		Internal\MemberCollection $modelCollection,
+		bool $loadEntityNames = true,
+	): Item\MemberCollection
 	{
 		$models = $modelCollection->getAll();
 
-		$users = $this->getUserModels($modelCollection);
-		$this->userCache?->setCache($users);
-		$this->userCache?->setCachedFields(self::USER_CACHE_FIELDS);
+		$users = $loadEntityNames ? $this->getUserModels($modelCollection) : [];
+		if ($loadEntityNames)
+		{
+			$this->userCache?->setCache($users);
+			$this->userCache?->setCachedFields(self::USER_CACHE_FIELDS);
+		}
 
 		$items = array_map(
-			fn(Internal\Member $member) => $this->extractItemFromModel($member,$users[$member->getEntityId()] ?? null),
+			fn(Internal\Member $member) => $this->extractItemFromModel(
+				$member,
+				$users[$member->getEntityId()] ?? null,
+				$loadEntityNames,
+			),
 			$models,
 		);
 
@@ -704,7 +730,20 @@ class MemberRepository
 		return !!$model->fetch();
 	}
 
-	public function listByDocumentIdListAndRoles(array $documentIds, array $roles): Item\MemberCollection
+	/**
+	 * @param array<int> $documentIds
+	 * @param array<string> $roles
+	 * @param bool $loadEntityNames Load names from user and CRM entities. With `false` the members come back
+	 *   partially hydrated: `name` and `companyName` stay `null` even when the entity has a name, because
+	 *   the per-member reads of the user and CRM entities are skipped. Callers that display those properties
+	 *   must not pass `false`.
+	 * @return Item\MemberCollection
+	 */
+	public function listByDocumentIdListAndRoles(
+		array $documentIds,
+		array $roles,
+		bool $loadEntityNames = true,
+	): Item\MemberCollection
 	{
 		if (empty($documentIds) || empty($roles))
 		{
@@ -719,7 +758,7 @@ class MemberRepository
 			->whereIn('ROLE', $roleIds)
 		;
 
-		return $this->extractItemCollectionFromModelCollection($models->fetchCollection());
+		return $this->extractItemCollectionFromModelCollection($models->fetchCollection(), $loadEntityNames);
 	}
 
 	public function getByDocumentIdWithParty(int $documentId, int $party, string $entityType, int $entityId): Item\Member
@@ -1317,6 +1356,7 @@ class MemberRepository
 				'DATE_SIGN',
 				'ROLE',
 				'FOLDER_ID',
+				'ANNULLED',
 			])
 			->setLimit($limit)
 		;
@@ -1342,6 +1382,7 @@ class MemberRepository
 				entityId: $row['ENTITY_ID'] === null ? null : (int)$row['ENTITY_ID'],
 				role: $role,
 				folderId: $folderId > 0 ? $folderId : null,
+				annulled: (bool)$row['ANNULLED'],
 			);
 		}
 
@@ -1781,9 +1822,13 @@ class MemberRepository
 
 	/**
 	 * @param array<int> $ids
+	 * @param bool $loadEntityNames Load names from user and CRM entities. With `false` the members come back
+	 *   partially hydrated: `name` and `companyName` stay `null` even when the entity has a name, because
+	 *   the per-member reads of the user and CRM entities are skipped. Callers that display those properties
+	 *   must not pass `false`.
 	 * @return Item\MemberCollection
 	 */
-	public function listByIds(array $ids): Item\MemberCollection
+	public function listByIds(array $ids, bool $loadEntityNames = true): Item\MemberCollection
 	{
 		$models = Internal\MemberTable::query()
 			->addSelect('*')
@@ -1791,7 +1836,7 @@ class MemberRepository
 			->fetchCollection()
 		;
 
-		return $this->extractItemCollectionFromModelCollection($models);
+		return $this->extractItemCollectionFromModelCollection($models, $loadEntityNames);
 	}
 
 	public function getById(int $id): ?Item\Member
@@ -2185,6 +2230,22 @@ class MemberRepository
 			$query->whereLike('DOCUMENT.TITLE', "%$filter->text%");
 		}
 
+		// Annulled member records are excluded by default (empty filter / "signed"
+		// mode) and only surface when the ANNULLED status is explicitly requested.
+		// The mark lives on the member record (base table), so filtering is done on
+		// ANNULLED directly rather than on the document.
+		//
+		// The exclusion itself is gated by the feature flag: the ANNULLED filter value
+		// and its preset are offered only while the feature is on, so filtering without
+		// the flag would hide already-marked records from the employee with no way to
+		// bring them back. Switching the feature off must restore the pre-feature view.
+		$wantsAnnulled = $filter !== null
+			&& in_array(Type\MyDocumentsGrid\FilterStatus::ANNULLED, $filter->statuses, true);
+		if (!$wantsAnnulled && FeatureResolver::instance()->released('kedoDocumentAnnul'))
+		{
+			$query->where('ANNULLED', false);
+		}
+
 		return $query;
 	}
 
@@ -2231,8 +2292,14 @@ class MemberRepository
 			Type\MyDocumentsGrid\FilterStatus::MY_EDITED => $this->appendMyEditedStatusCondition($statusesFilter),
 			Type\MyDocumentsGrid\FilterStatus::MY_STOPPED => $this->appendMyStoppedStatusCondition($statusesFilter, $userId),
 			Type\MyDocumentsGrid\FilterStatus::STOPPED => $this->appendStoppedStatusCondition($statusesFilter),
+			Type\MyDocumentsGrid\FilterStatus::ANNULLED => $this->appendAnnulledStatusCondition($statusesFilter),
 			Type\MyDocumentsGrid\FilterStatus::MY_ACTION_DONE => $this->appendMyActionDoneStatusCondition($statusesFilter),
 		};
+	}
+
+	private function appendAnnulledStatusCondition(ConditionTree $statusesFilter): void
+	{
+		$statusesFilter->where('ANNULLED', true);
 	}
 
 	private function appendSignedStatusCondition(ConditionTree $statusesFilter): void
@@ -2836,6 +2903,341 @@ class MemberRepository
 		return $model !== null;
 	}
 
+	public function existsByDocumentIdWithRoleStatusAndAnnulled(
+		int $documentId,
+		string $role,
+		string $status,
+		bool $annulled,
+	): bool
+	{
+		$model = Internal\MemberTable::query()
+			->addSelect('ID')
+			->where('DOCUMENT_ID', $documentId)
+			->where('ROLE', $this->convertRoleToInt($role))
+			->where('SIGNED', $status)
+			->where('ANNULLED', $annulled)
+			->setLimit(1)
+			->fetchObject()
+		;
+
+		return $model !== null;
+	}
+
+	/**
+	 * Records of the document the annulment switches: the given role and status, with
+	 * the mark still opposite to the target state.
+	 *
+	 * Only the fields the caller needs are selected, and the items are built from those
+	 * fields alone instead of going through the full extraction: a document can hold
+	 * thousands of signers and the collection outlives the request in the deferred card
+	 * fan-out, so neither the whole record nor the name resolution of every member is
+	 * worth fetching here. The id is among them because this very set is what the write
+	 * updates - see annulByIds().
+	 *
+	 * @see \Bitrix\Sign\Service\Sign\MemberService::getUserIdForMember() the only
+	 *      reader of the recipient fields - it needs entityType, entityId and documentId.
+	 */
+	public function listAnnulmentNotificationTargets(
+		int $documentId,
+		string $role,
+		string $status,
+		bool $annulled,
+	): Item\MemberCollection
+	{
+		$rows = Internal\MemberTable::query()
+			->setSelect(['ID', 'DOCUMENT_ID', 'ENTITY_TYPE', 'ENTITY_ID'])
+			->where('DOCUMENT_ID', $documentId)
+			->where('ROLE', $this->convertRoleToInt($role))
+			->where('SIGNED', $status)
+			->where('ANNULLED', $annulled)
+			->fetchAll()
+		;
+
+		$items = array_map(
+			static fn(array $row): Item\Member => new Item\Member(
+				documentId: (int)$row['DOCUMENT_ID'],
+				id: (int)$row['ID'],
+				entityType: $row['ENTITY_TYPE'],
+				entityId: $row['ENTITY_ID'] === null ? null : (int)$row['ENTITY_ID'],
+			),
+			$rows,
+		);
+
+		return new Item\MemberCollection(...$items);
+	}
+
+	/**
+	 * Signer records of the given documents, carrying the fields a grid row needs to
+	 * point at the signing it speaks about: the annul endpoints address the uid, and
+	 * the eligibility predicate reads the status.
+	 *
+	 * Narrow on purpose, like listAnnulmentNotificationTargets(): the items are built
+	 * from the selected fields alone, with no user name or CRM lookup, because that
+	 * cost is exactly what a per-page resolve must avoid. The status is passed
+	 * explicitly - Item\Member defaults it to WAIT, and a dropped value would read as
+	 * "no completed signer" for every document.
+	 *
+	 * The status is not filtered in the query: the completeness predicate belongs to
+	 * the resolver, so it stays in one place and matches the server-side checks.
+	 *
+	 * @param list<int> $documentIds
+	 */
+	public function listSignersByDocumentIds(array $documentIds): Item\MemberCollection
+	{
+		$ids = array_values(array_unique(array_filter(
+			array_map('intval', $documentIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+		if ($ids === [])
+		{
+			return new Item\MemberCollection();
+		}
+
+		$signerRole = $this->convertRoleToInt(Role::SIGNER);
+		$members = [];
+		foreach (array_chunk($ids, self::SIGNERS_BY_DOCUMENTS_BATCH_SIZE) as $batchIds)
+		{
+			$rows = Internal\MemberTable::query()
+				->setSelect(['ID', 'DOCUMENT_ID', 'UID', 'SIGNED', 'ANNULLED'])
+				->whereIn('DOCUMENT_ID', $batchIds)
+				->where('ROLE', $signerRole)
+				->fetchAll()
+			;
+
+			foreach ($rows as $row)
+			{
+				$members[] = new Item\Member(
+					documentId: (int)$row['DOCUMENT_ID'],
+					id: (int)$row['ID'],
+					uid: $row['UID'],
+					status: (string)$row['SIGNED'],
+					role: Role::SIGNER,
+					annulled: (bool)$row['ANNULLED'],
+				);
+			}
+		}
+
+		return new Item\MemberCollection(...$members);
+	}
+
+	/**
+	 * Switches the annulment mark on the given members, recording who switched it and
+	 * when - see buildAnnulmentFields().
+	 *
+	 * Addressed by id instead of by a filter over the document: a filter would resolve
+	 * the set a second time and could reach records the caller never resolved. Of that
+	 * set, the ones this call really switched are named back - see
+	 * switchAnnulmentMark().
+	 *
+	 * @param list<int|null> $memberIds
+	 *
+	 * @return Main\Result|AnnulmentSwitchResult Records this very call switched, or the
+	 *         failure of the write itself. An empty set is nothing to switch, not a
+	 *         failure.
+	 */
+	public function annulByIds(array $memberIds, bool $annul, ?int $userId): Main\Result|AnnulmentSwitchResult
+	{
+		$ids = array_values(array_filter(array_map('intval', $memberIds)));
+		if (empty($ids))
+		{
+			return new AnnulmentSwitchResult([]);
+		}
+
+		return $this->switchAnnulmentMark($ids, $annul, $userId);
+	}
+
+	/**
+	 * Switches the annulment mark on one member, recording who switched it and when -
+	 * see buildAnnulmentFields().
+	 *
+	 * Written straight by id: the caller knows the four fields to store, while the
+	 * item write path would re-read the whole record first - once per member on the
+	 * batch path.
+	 *
+	 * @return Main\Result|AnnulmentSwitchResult The one record when this very call
+	 *         switched the mark, none when the record already held the target state, or
+	 *         the failure of the write itself.
+	 */
+	public function annulById(int $memberId, bool $annul, ?int $userId): Main\Result|AnnulmentSwitchResult
+	{
+		// No such record can exist, so nothing was even attempted: that is a failure of
+		// the call rather than a record left in the state it already held.
+		if ($memberId <= 0)
+		{
+			return (new Main\Result())->addError(new Main\Error('Member id is invalid'));
+		}
+
+		return $this->switchAnnulmentMark([$memberId], $annul, $userId);
+	}
+
+	/**
+	 * Names the records it switched, not just how many: the read resolves the ones
+	 * still holding the state the mark is switched away from and locks them, and the
+	 * write switches exactly those. Both statements run in one transaction, so nothing
+	 * can switch a locked record in between and the returned set is what the caller
+	 * addresses its side effects by.
+	 *
+	 * Reading the state without the lock and then updating by id alone would let two
+	 * requests going the same way both write the columns, and the one that arrived
+	 * second would name its own author and moment for a switch that had already
+	 * happened - and would announce it to the recipients of the first one. Counting the
+	 * rows a conditional update affected closes that gap for the number but still
+	 * cannot name the rows, and an update that returns them is PostgreSQL-only; a
+	 * locking read is portable.
+	 *
+	 * The transaction covers two statements addressed by primary key and nothing else,
+	 * so the locks are held for the write alone. Failures come back as errors of the
+	 * result rather than as exceptions, preparation of the statements included: the
+	 * caller tells a failed write from a record nobody had to switch by the same result
+	 * it reads the set from.
+	 *
+	 * @param list<int> $ids
+	 */
+	private function switchAnnulmentMark(array $ids, bool $annul, ?int $userId): Main\Result|AnnulmentSwitchResult
+	{
+		$connection = Internal\MemberTable::getEntity()->getConnection();
+		$transactionStarted = false;
+		$switchedIds = [];
+
+		try
+		{
+			$connection->startTransaction();
+			$transactionStarted = true;
+
+			$switchedIds = $this->lockSwitchableMembers($connection, $ids, $annul);
+			if ($switchedIds !== [])
+			{
+				$this->writeAnnulmentMark($connection, $switchedIds, $annul, $userId);
+			}
+
+			$connection->commitTransaction();
+		}
+		catch (\Throwable $e)
+		{
+			if ($transactionStarted)
+			{
+				$this->rollbackAnnulmentTransaction($connection);
+			}
+
+			return (new Main\Result())->addError(new Main\Error($e->getMessage()));
+		}
+
+		if ($switchedIds !== [])
+		{
+			// The ORM does this itself on its own write paths, and getByUid() reads
+			// members through an hour-long query cache: without it an annulled member
+			// would keep reading back as untouched.
+			Internal\MemberTable::cleanCache();
+		}
+
+		return new AnnulmentSwitchResult($switchedIds);
+	}
+
+	/**
+	 * Records of the given set that still hold the state the mark is switched away
+	 * from, locked until the transaction ends. A record already in the target state is
+	 * left alone and not returned, so the caller of the repository never announces a
+	 * switch another request performed and attributed to itself.
+	 *
+	 * Raw SQL because the ORM has no locking read. Identifiers go through the sqlHelper
+	 * and the condition through the ORM filter builder, so nothing is concatenated by
+	 * hand, and both databases understand `FOR UPDATE`. Rows are locked in id order,
+	 * like the folder relations are, so requests over overlapping sets queue up instead
+	 * of deadlocking.
+	 *
+	 * @param list<int> $ids
+	 *
+	 * @return list<int>
+	 */
+	private function lockSwitchableMembers(Main\DB\Connection $connection, array $ids, bool $annul): array
+	{
+		$entity = Internal\MemberTable::getEntity();
+		$sqlHelper = $connection->getSqlHelper();
+		$idColumn = $sqlHelper->quote('ID');
+
+		$where = Query::buildFilterSql(
+			$entity,
+			(new ConditionTree())
+				->whereIn('ID', $ids)
+				->where('ANNULLED', !$annul)
+			,
+		);
+
+		$rows = $connection->query(
+			'SELECT ' . $idColumn
+			. ' FROM ' . $sqlHelper->quote(Internal\MemberTable::getTableName())
+			. " WHERE {$where} ORDER BY {$idColumn} FOR UPDATE"
+		)->fetchAll();
+
+		return array_map(static fn(array $row): int => (int)$row['ID'], $rows);
+	}
+
+	/**
+	 * Writes the mark and its attribution - see buildAnnulmentFields().
+	 *
+	 * Addressed by id alone: the records are locked by lockSwitchableMembers(), so the
+	 * state they are switched away from can no longer change and repeating it as a
+	 * condition would guard nothing.
+	 *
+	 * Raw SQL because the ORM addresses rows one primary key at a time - update() and
+	 * updateMulti() would take a statement per record - while the whole set shares the
+	 * four values written.
+	 *
+	 * @param list<int> $ids
+	 */
+	private function writeAnnulmentMark(Main\DB\Connection $connection, array $ids, bool $annul, ?int $userId): void
+	{
+		$entity = Internal\MemberTable::getEntity();
+		$sqlHelper = $connection->getSqlHelper();
+		$tableName = Internal\MemberTable::getTableName();
+
+		[$update, $binds] = $sqlHelper->prepareUpdate(
+			$tableName,
+			$this->buildAnnulmentFields($annul, $userId),
+		);
+		$where = Query::buildFilterSql($entity, (new ConditionTree())->whereIn('ID', $ids));
+
+		$connection->queryExecute(
+			'UPDATE ' . $sqlHelper->quote($tableName) . " SET {$update} WHERE {$where}",
+			$binds,
+		);
+	}
+
+	private function rollbackAnnulmentTransaction(Main\DB\Connection $connection): void
+	{
+		try
+		{
+			$connection->rollbackTransaction();
+		}
+		catch (Main\DB\TransactionException)
+		{
+			// MySQL rolls back to the savepoint and then reports that nested rollbacks
+			// are unsupported: this switch is undone, and the transaction around it stays
+			// the caller's to decide on.
+		}
+	}
+
+	/**
+	 * The three annulment columns describe the last switch of the mark in either
+	 * direction: ANNULLED is the state it was switched to, ANNULLED_BY_ID and
+	 * DATE_ANNULLED name the author and the moment of that very switch. Removing the
+	 * mark is therefore attributed the same way setting it is, and the pair is read
+	 * together with the flag: annulled by someone, or un-annulled by someone.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function buildAnnulmentFields(bool $annul, ?int $userId): array
+	{
+		$now = new DateTime();
+
+		return [
+			'ANNULLED' => $annul,
+			'ANNULLED_BY_ID' => $userId,
+			'DATE_ANNULLED' => $now,
+			'DATE_MODIFY' => $now,
+		];
+	}
+
 	public function existsByDocumentIdWithReminderTypeNotEqual(int $documentId, ReminderType $reminderType): bool
 	{
 		$model = Internal\MemberTable::query()
@@ -3090,5 +3492,28 @@ class MemberRepository
 			->fetchAll();
 
 		return array_map(fn($item): int => (int) $item['DOCUMENT_ID'], $raws);
+	}
+
+	/**
+	 * @param list<int> $documentIds
+	 * @return list<int> ids of documents having at least one signer in DONE status
+	 */
+	public function listDocumentIdsWithSuccessfulSigners(array $documentIds): array
+	{
+		if ($documentIds === [])
+		{
+			return [];
+		}
+
+		$raws = Internal\MemberTable
+			::query()
+			->addSelect('DOCUMENT_ID')
+			->whereIn('DOCUMENT_ID', $documentIds)
+			->where('ROLE', $this->convertRoleToInt(Role::SIGNER))
+			->where('SIGNED', MemberStatus::DONE)
+			->setDistinct()
+			->fetchAll();
+
+		return array_map(static fn(array $item): int => (int)$item['DOCUMENT_ID'], $raws);
 	}
 }

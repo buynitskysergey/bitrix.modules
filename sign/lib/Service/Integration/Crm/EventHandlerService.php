@@ -106,6 +106,49 @@ class EventHandlerService
 		$this->createTimelineEvent($eventData);
 	}
 
+	/**
+	 * Annulment is a reversible mark on a completed signer member, on top of the
+	 * `done` status, not a DocumentStatus transition, so it is a separate entry
+	 * point rather than part of handleCurrentDocumentStatus().
+	 *
+	 * The annulled member is optional: when provided it is threaded to the timeline
+	 * (via EventData::setMemberItem, which surfaces the member on the log entry so
+	 * the rendered event can point to the employee whose signing was annulled). When
+	 * omitted the event stays document-level, preserving the legacy behaviour.
+	 *
+	 * A mass action reports how many signings it changed instead of a member, so
+	 * that one entry per document still tells a partial annulment from a complete
+	 * one. Both arguments are optional and independent: an event without either
+	 * renders exactly as it did before they existed.
+	 */
+	public function handleDocumentAnnulled(
+		Sign\Item\Document $document,
+		int $initiatorUserId,
+		bool $annul,
+		?Sign\Item\Member $member = null,
+		?int $annulledMembersCount = null,
+	): void
+	{
+		$eventType = $annul
+			? EventData::TYPE_ON_ANNULLED
+			: EventData::TYPE_ON_ANNULMENT_CANCELED
+		;
+
+		$eventData = new EventData();
+		$eventData->setEventType($eventType)
+			->setDocumentItem($document)
+			->setMemberItem($member)
+			->addDataValue(EventData::DATA_KEY_INITIATOR, $initiatorUserId)
+		;
+
+		if ($annulledMembersCount !== null)
+		{
+			$eventData->addDataValue(EventData::DATA_KEY_ANNULLED_MEMBERS_COUNT, $annulledMembersCount);
+		}
+
+		$this->createTimelineEvent($eventData);
+	}
+
 	public function handleCurrentMemberStatus(
 		Sign\Item\Document $document,
 		Sign\Item\Member $member,
@@ -250,6 +293,7 @@ class EventHandlerService
 			'bindings' => $bindings,
 			'initiatorUserId' => $eventData->getInitiatorUserId(),
 			'initiatedByType' => $document->initiatedByType->value,
+			'annulledMembersCount' => $eventData->getData()[EventData::DATA_KEY_ANNULLED_MEMBERS_COUNT] ?? null,
 		]);
 
 		if ($member?->channelValue)
@@ -341,7 +385,7 @@ class EventHandlerService
 		$event = match ($member->role)
 		{
 			Role::SIGNER => $this->getEventTypeForSigner($member, $initiatorUid, $errorCode),
-			Role::ASSIGNEE => $this->getEventTypeForAssignee($member),
+			Role::ASSIGNEE => $this->getEventTypeForAssignee($member, $errorCode),
 			Role::REVIEWER => $this->getEventTypeForReviewer($document, $member),
 			Role::EDITOR => $this->getEventTypeForEditor($member),
 			default => null,
@@ -380,14 +424,26 @@ class EventHandlerService
 		return $this->getEventTypeForMember($document, $member, $initiatorUid, $errorCode);
 	}
 
-	private function getEventTypeForAssignee(Sign\Item\Member $member): ?string
+	private function getEventTypeForAssignee(Sign\Item\Member $member, string $errorCode = ''): ?string
 	{
 		return match ($member->status)
 		{
 			Sign\Type\MemberStatus::STOPPED => EventData::TYPE_ON_CANCELED_BY_RESPONSIBILITY_PERSON,
 			Sign\Type\MemberStatus::DONE => EventData::TYPE_ON_ASSIGNEE_DONE,
+			Sign\Type\MemberStatus::WAIT => $this->getAssigneeWaitEvent($errorCode),
 			default => null,
 		};
+	}
+
+	/**
+	 * Unlike the signer branch, other wait reasons stay eventless for the assignee: they had no event before.
+	 */
+	private function getAssigneeWaitEvent(string $errorCode): ?string
+	{
+		return Sign\Type\B2eErrorCode::isDocumentPreparationFailure($errorCode)
+			? EventData::TYPE_ON_ERROR_DOCUMENT_PREPARATION_FAILED
+			: null
+		;
 	}
 
 	private function getEventTypeForSigner(Sign\Item\Member $member, string $initiatorUid = '', string $errorCode = ''): ?string
@@ -398,7 +454,7 @@ class EventHandlerService
 			Sign\Type\MemberStatus::STOPPABLE_READY,
 			Sign\Type\MemberStatus::READY => EventData::TYPE_ON_SIGNED_BY_RESPONSIBILITY_PERSON,
 			Sign\Type\MemberStatus::DONE => EventData::TYPE_ON_SIGNED_BY_EMPLOYEE,
-			/** Wait status now only for delayed goskey provider errors  */
+			/** Wait status for delayed goskey provider errors and for document preparation failures */
 			Sign\Type\MemberStatus::WAIT => $this->getSignerWaitEvent($errorCode),
 			Sign\Type\MemberStatus::STOPPED => $this->getSignerStoppedEvent($member, $initiatorUid),
 			default => null,
@@ -425,6 +481,11 @@ class EventHandlerService
 
 	private function getSignerWaitEvent(string $errorCode): string
 	{
+		if (Sign\Type\B2eErrorCode::isDocumentPreparationFailure($errorCode))
+		{
+			return EventData::TYPE_ON_ERROR_DOCUMENT_PREPARATION_FAILED;
+		}
+
 		return match ($errorCode)
 		{
 			Sign\Type\B2eErrorCode::EXPIRED => EventData::TYPE_ON_ERROR_SIGNING_EXPIRED,

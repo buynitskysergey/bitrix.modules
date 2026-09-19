@@ -29,7 +29,7 @@ class Member extends Controller
 			|| empty(Storage::instance()->getClientToken())
 		)
 		{
-			$this->addAccessDeniedError();
+			$this->addAvatarAccessDeniedError();
 			return [];
 		}
 
@@ -41,13 +41,13 @@ class Member extends Controller
 			;
 			if ($unsignedUid !== $uid)
 			{
-				$this->addAccessDeniedError();
+				$this->addAvatarAccessDeniedError();
 				return [];
 			}
 		}
 		catch (Main\Security\Sign\BadSignatureException $e)
 		{
-			$this->addAccessDeniedError();
+			$this->addAvatarAccessDeniedError();
 			return [];
 		}
 
@@ -73,7 +73,11 @@ class Member extends Controller
 		];
 	}
 
-	private function addAccessDeniedError(): void
+	/**
+	 * Deliberately not the inherited addAccessDeniedError(): this endpoint is anonymous
+	 * (token-based, CORS only) and consumed by the sign service, so it must stay on HTTP 200.
+	 */
+	private function addAvatarAccessDeniedError(): void
 	{
 		$this->addError(new Main\Error('Access denied.'));
 	}

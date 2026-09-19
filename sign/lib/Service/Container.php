@@ -501,6 +501,11 @@ class Container
 		return static::getService('sign.service.b2e.myDocumentsGrid.actionStatus');
 	}
 
+	public function getMyDocumentsGridSignedFileService(): Service\B2e\MyDocumentsGrid\SignedFileService
+	{
+		return static::getService('sign.service.b2e.myDocumentsGrid.signedFile');
+	}
+
 	public function getAnalyticService(): Service\Analytic\AnalyticService
 	{
 		return static::getService('sign.service.analytic.analytic');

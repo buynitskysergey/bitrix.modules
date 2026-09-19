@@ -44,4 +44,12 @@ class Member implements Contract\Item
 	{
 		return $this->role === Role::SIGNER;
 	}
+
+	// Signer and assignee are the roles whose completion is presented as
+	// "signed" in the action cell, unlike reviewer/editor which read as
+	// "approved"/"edited".
+	public function isSigningRole(): bool
+	{
+		return $this->role === Role::SIGNER || $this->role === Role::ASSIGNEE;
+	}
 }

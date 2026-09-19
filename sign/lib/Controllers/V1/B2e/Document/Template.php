@@ -10,6 +10,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 use Bitrix\Sign\Access\ActionDictionary;
+use Bitrix\Sign\Access\Service\SelectorSourceAccessService;
 use Bitrix\Sign\Attribute\Access\LogicAnd;
 use Bitrix\Sign\Attribute\ActionAccess;
 use Bitrix\Sign\Config\Feature;
@@ -698,6 +699,7 @@ class Template extends Controller
 	public function setupSignersAction(
 		array $documentIds,
 		array $signers,
+		SelectorSourceAccessService $selectorSourceAccessService,
 		bool $excludeRejected = true,
 	): array
 	{
@@ -712,6 +714,16 @@ class Template extends Controller
 		if (!$entitiesResult instanceof ValidateEntitySelectorMembersResult)
 		{
 			$this->addErrorsFromResult($entitiesResult);
+
+			return [];
+		}
+
+		// Expansion sources come from the request, so the right to read each source must be
+		// checked before its composition is revealed.
+		$sourceAccessResult = $selectorSourceAccessService->checkSelectorEntities($entitiesResult->entities);
+		if (!$sourceAccessResult->isSuccess())
+		{
+			$this->addAccessDeniedError();
 
 			return [];
 		}

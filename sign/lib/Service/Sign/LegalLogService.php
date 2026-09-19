@@ -8,6 +8,7 @@ use Bitrix\Sign\Repository\MemberRepository;
 use Bitrix\Sign\Service\Container;
 use Bitrix\Sign\Repository\LegalLogRepository;
 use Bitrix\Sign\Service\UserService;
+use Bitrix\Sign\Type\B2eErrorCode;
 use Bitrix\Sign\Type\Document\InitiatedByType;
 use Bitrix\Sign\Type\DocumentScenario;
 use Bitrix\Sign\Type\DocumentStatus;
@@ -48,9 +49,25 @@ class LegalLogService
 		$this->register(LegalLogCode::DOCUMENT_START, $document, null, $additionalInfo);
 	}
 
-	public function registerDocumentStop(Document $document, ?Member $member = null): void
+	/**
+	 * @param bool $initiatorIsUnknown the stop happened outside this run - the other party or the signing
+	 *   service did it - so nobody here is its initiator and the trace is empty. The record then stays
+	 *   without a user instead of naming whoever triggered the local status change.
+	 */
+	public function registerDocumentStop(
+		Document $document,
+		?Member $member = null,
+		bool $initiatorIsUnknown = false,
+	): void
 	{
-		$this->register(LegalLogCode::DOCUMENT_STOP, $document, $member, null, $document->stoppedById);
+		$this->register(
+			LegalLogCode::DOCUMENT_STOP,
+			$document,
+			$member,
+			null,
+			$document->stoppedById,
+			substituteCurrentUser: !$initiatorIsUnknown,
+		);
 	}
 
 	protected function registerDocumentDone(Document $document): void
@@ -58,12 +75,16 @@ class LegalLogService
 		$this->register(LegalLogCode::DOCUMENT_DONE, $document);
 	}
 
-	public function registerDocumentChangedStatus(Document $document, ?Member $member = null): void
+	public function registerDocumentChangedStatus(
+		Document $document,
+		?Member $member = null,
+		bool $initiatorIsUnknown = false,
+	): void
 	{
 		match ($document->status)
 		{
 			DocumentStatus::SIGNING => $this->registerDocumentStart($document),
-			DocumentStatus::STOPPED => $this->registerDocumentStop($document, $member),
+			DocumentStatus::STOPPED => $this->registerDocumentStop($document, $member, $initiatorIsUnknown),
 			DocumentStatus::DONE => $this->registerDocumentDone($document),
 			default => null,
 		};
@@ -95,7 +116,7 @@ class LegalLogService
 			Role::SIGNER => $this->registerSignerChangedStatus($document, $member, $message),
 			Role::REVIEWER => $this->registerReviewerChangedStatus($document, $member),
 			Role::EDITOR => $this->registerEditorChangedStatus($document, $member),
-			Role::ASSIGNEE => $this->registerAssigneeChangedStatus($document, $member),
+			Role::ASSIGNEE => $this->registerAssigneeChangedStatus($document, $member, $message),
 			default => null,
 		};
 	}
@@ -222,12 +243,18 @@ class LegalLogService
 		$this->register(LegalLogCode::EDITOR_ACCEPT, $document, $member);
 	}
 
+	/**
+	 * @param bool $substituteCurrentUser the current user stands in for an unresolved initiator, which is
+	 *   right only while the action is performed by that very user. A record about an action performed
+	 *   elsewhere stays without an initiator instead of naming a bystander.
+	 */
 	protected function register(
 		string $code,
 		Document $document,
 		?Member $member = null,
 		?string $additionalInfo = null,
 		?int $userId = null,
+		bool $substituteCurrentUser = true,
 	): void
 	{
 		if ($member)
@@ -235,7 +262,7 @@ class LegalLogService
 			$userId ??= $this->memberService->getUserIdForMember($member, $document);
 		}
 
-		if (empty($userId))
+		if (empty($userId) && $substituteCurrentUser)
 		{
 			$userId = CurrentUser::get()->getId();
 		}
@@ -311,13 +338,35 @@ class LegalLogService
 		$this->register(LegalLogCode::SIGNER_PROCESSING, $document, $member);
 	}
 
-	private function registerAssigneeChangedStatus(Document $document, Member $member): void
+	private function registerAssigneeChangedStatus(
+		Document $document,
+		Member $member,
+		MemberStatusChanged $message,
+	): void
 	{
 		match ($member->status)
 		{
 			MemberStatus::DONE => $this->registerAssigneeDone($document),
+			MemberStatus::WAIT => $this->registerAssigneeSignError($document, $member, $message),
 			default => null,
 		};
+	}
+
+	/**
+	 * Unlike the signer branch, other wait reasons stay unlogged for the assignee: they had no record before.
+	 */
+	private function registerAssigneeSignError(
+		Document $document,
+		Member $member,
+		MemberStatusChanged $message,
+	): void
+	{
+		if (!B2eErrorCode::isDocumentPreparationFailure($message->getErrorCode()))
+		{
+			return;
+		}
+
+		$this->registerSignError($document, $member, $message);
 	}
 
 	private function registerAssigneeDone(Document $document): void

@@ -7,7 +7,7 @@
         "MODULE_DESCRIPTION"       => "Модуль для управления миграциями бд, создание, установка, откат миграций",
         "PARTNER_NAME"             => "Андрей Рябин",
         "PARTNER_URI"              => "https://packagist.org/packages/andreyryabin/sprint.migration",
-        "DEVELOPER_NAME"           => "Разработчик: #VALUE#",
+        "DEVELOPER_NAME"           => "Разработчик: [label:yellow]#VALUE#[/]",
         "DEVELOPER_URI"            => "#VALUE#",
         "DEVELOPER_LABEL"          => "[label:yellow]Community[/]",
         "ACCESS_DENIED"            => "Доступ запрещен",
@@ -109,6 +109,7 @@
         "CONFIG_version_timestamp_format"    => "Формат даты для создания файла миграции",
         "CONFIG_version_timestamp_pattern"   => "Регулярное выражение для поиска миграций по формату даты",
         "CONFIG_migration_hash_algo"         => "Алгоритм подсчета хеша для проверки изменений в файле миграции",
+        "CONFIG_logger"                      => "Класс для логирования",
     ]
 );
 \Sprint\Migration\Locale::loadLocale(

@@ -175,6 +175,10 @@ final class UpdateDefaultPermissionsAgent
 					'id' => SignPermissionDictionary::SIGN_B2E_MY_SAFE_FIRED,
 					'value' => UserPermissions::PERMISSION_NONE,
 				],
+				[
+					'id' => SignPermissionDictionary::SIGN_DOCUMENT_ANNUL,
+					'value' => UserPermissions::PERMISSION_NONE,
+				],
 			];
 			$existedChiefPermissions = $settings[$employeeRoleId];
 			$b2eUpdatedPermissionIds = array_column($employeeAccessRights, 'id');
@@ -225,6 +229,10 @@ final class UpdateDefaultPermissionsAgent
 				[
 					'id' => SignPermissionDictionary::SIGN_B2E_MY_SAFE_FIRED,
 					'value' => UserPermissions::PERMISSION_NONE,
+				],
+				[
+					'id' => SignPermissionDictionary::SIGN_DOCUMENT_ANNUL,
+					'value' => UserPermissions::PERMISSION_SUBDEPARTMENT,
 				],
 			];
 

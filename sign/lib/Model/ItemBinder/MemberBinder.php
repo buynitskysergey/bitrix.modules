@@ -50,6 +50,9 @@ class MemberBinder extends BaseItemToModelBinder
 		return match ($itemProperty)
 		{
 			'folderId' => '',
+			// The annulment mark and its attribution travel only through
+			// MemberRepository::annulById(), which stores all three together.
+			'annulled', 'annulledById', 'dateAnnulled' => '',
 			'party' => 'PART',
 			'status' => 'SIGNED',
 			'channelType' => 'COMMUNICATION_TYPE',
