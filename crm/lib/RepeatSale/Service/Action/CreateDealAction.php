@@ -128,18 +128,13 @@ final class CreateDealAction implements ActionInterface
 		;
 	}
 
-	private function getP5BySegmentCode(string $segmentCode): ?string
+	private function getP5BySegmentCode(?string $segmentCode): string
 	{
-		return match ($segmentCode)
-		{
-			SegmentCode::SLEEPING_CLIENT->value => 'segment_deal-activity-less-12m',
-			SegmentCode::LOST_CLIENT->value => 'segment_deal-lost-more-12m',
-			SegmentCode::DEAL_EVERY_YEAR->value => 'segment_deal-annual',
-			SegmentCode::DEAL_EVERY_HALF_YEAR->value => 'segment_deal-semiannual',
-			SegmentCode::DEAL_EVERY_MONTH->value => 'segment_deal-month-yr',
-			SegmentCode::AI_SCREENING->value => 'segment_deal-ai-screening',
-			SegmentCode::AI_APPROVE->value => 'segment_deal-ai-approve',
-			default => '',
-		};
+		$alias = $segmentCode !== null
+			? SegmentCode::tryFrom($segmentCode)?->toAnalyticsAlias()
+			: null
+		;
+
+		return $alias !== null ? 'segment_' . $alias : '';
 	}
 }

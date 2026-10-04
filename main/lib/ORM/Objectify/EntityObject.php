@@ -1,9 +1,9 @@
 <?php
 /**
  * Bitrix Framework
- * @package    bitrix
+ * @package bitrix
  * @subpackage main
- * @copyright  2001-2018 Bitrix
+ * @copyright 2001-2026 Bitrix
  */
 
 namespace Bitrix\Main\ORM\Objectify;
@@ -15,7 +15,6 @@ use Bitrix\Main\ORM\Data\AddResult;
 use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\ORM\Data\UpdateResult;
 use Bitrix\Main\ORM\Entity;
-use Bitrix\Main\ORM\EntityError;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\IReadable;
 use Bitrix\Main\ORM\Fields\ObjectField;
@@ -38,7 +37,7 @@ use Bitrix\Main\Web\Json;
 /**
  * Entity object
  *
- * @property-read \Bitrix\Main\ORM\Entity $entity
+ * @property-read Entity $entity
  * @property-read array $primary
  * @property-read string $primaryAsString
  * @property-read int $state @see State
@@ -432,6 +431,14 @@ abstract class EntityObject implements ArrayAccess
 
 					foreach ($collection as $object)
 					{
+						if ($object->sysGetState() === State::DELETED)
+						{
+							continue;
+						}
+						if (!$object->sysHasPrimary())
+						{
+							continue;
+						}
 						$object->delete();
 					}
 				}
@@ -494,7 +501,6 @@ abstract class EntityObject implements ArrayAccess
 		/** @var static $objectClass */
 		$objectClass = get_called_class();
 
-		/** @var \Bitrix\Main\ORM\Data\DataManager $dataClass */
 		$dataClass = static::$dataClass;
 
 		$entity = $dataClass::getEntity();
@@ -668,7 +674,7 @@ abstract class EntityObject implements ArrayAccess
 			}
 		}
 
-		// return field value it it was only one
+		// return field value if it was only one
 		if (is_array($fields) && count($fields) == 1 && $this->entity->hasField(current($fields)))
 		{
 			return $this->sysGetValue(current($fields));
@@ -1098,7 +1104,7 @@ abstract class EntityObject implements ArrayAccess
 			if ($this->entity->hasField($fieldName))
 			{
 				$this->sysAddToCollection($fieldName, $value);
-				return;
+				return null;
 			}
 		}
 
@@ -1191,7 +1197,7 @@ abstract class EntityObject implements ArrayAccess
 			if ($this->entity->hasField($fieldName))
 			{
 				$this->sysRemoveAllFromCollection($fieldName);
-				return;
+				return null;
 			}
 		}
 
@@ -1223,7 +1229,7 @@ abstract class EntityObject implements ArrayAccess
 			if ($this->entity->hasField($fieldName))
 			{
 				$this->sysRemoveFromCollection($fieldName, $value);
-				return;
+				return null;
 			}
 		}
 
@@ -1371,14 +1377,13 @@ abstract class EntityObject implements ArrayAccess
 
 	/**
 	 * @return Entity
-	 * @throws \Bitrix\Main\ArgumentException
-	 * @throws \Bitrix\Main\SystemException
+	 * @throws ArgumentException
+	 * @throws SystemException
 	 */
 	public function sysGetEntity()
 	{
 		if ($this->_entity === null)
 		{
-			/** @var \Bitrix\Main\ORM\Data\DataManager $dataClass */
 			$dataClass = static::$dataClass;
 			$this->_entity = $dataClass::getEntity();
 		}
@@ -1871,7 +1876,7 @@ abstract class EntityObject implements ArrayAccess
 			{
 				$primaryValues[$primaryName] = $this->sysGetValue($primaryName, true);
 			}
-			catch (SystemException $e)
+			catch (SystemException)
 			{
 				throw new SystemException(sprintf(
 					'Primary `%s` value is required for further operations', $primaryName

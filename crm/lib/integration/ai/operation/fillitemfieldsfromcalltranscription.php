@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Integration\AI\Operation;
 
 use Bitrix\AI\Engine;
 use Bitrix\AI\Quality;
+use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Badge;
 use Bitrix\Crm\Dto\Dto;
 use Bitrix\Crm\Entity\FieldDataProvider;
@@ -13,6 +14,7 @@ use Bitrix\Crm\Integration\AI\Dto\FillItemFieldsFromCallTranscriptionPayload;
 use Bitrix\Crm\Integration\AI\Dto\MultipleFieldFillPayload;
 use Bitrix\Crm\Integration\AI\Dto\SingleFieldFillPayload;
 use Bitrix\Crm\Integration\AI\ErrorCode;
+use Bitrix\Crm\Integration\AI\Field\MultipleValueMerger;
 use Bitrix\Crm\Integration\AI\JobRepository;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
@@ -71,7 +73,7 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 
 	public static function isSuitableTarget(ItemIdentifier $target): bool
 	{
-		return in_array($target->getEntityTypeId(), self::SUPPORTED_TARGET_ENTITY_TYPE_IDS, true);
+		return AIManager::isEntityTypeSupported($target->getEntityTypeId());
 	}
 
 	protected static function checkPreviousJobs(ItemIdentifier $target, int $parentId): Main\Result
@@ -335,6 +337,7 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 			}
 		}
 
+		$multipleValueMerger = new MultipleValueMerger();
 		foreach ($payload->multipleFields as $multipleField)
 		{
 			if (
@@ -343,12 +346,29 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 				&& $item->hasField($multipleField->name)
 			)
 			{
-				$previousValue = $item->get($multipleField->name) ?? [];
-				if (is_array($previousValue))
+				$field = $factory->getFieldsCollection()->getField($multipleField->name);
+				if ($field === null)
 				{
-					$item->set($multipleField->name, array_merge($previousValue, $multipleField->aiValues));
-					$multipleField->isApplied = true;
+					continue;
 				}
+
+				$previousValue = $item->get($multipleField->name);
+				$previousValues = $multipleValueMerger->merge(
+					$field,
+					$previousValue,
+					[],
+				);
+				$newValue = $multipleValueMerger->merge(
+					$field,
+					$previousValue,
+					$multipleField->aiValues,
+				);
+				if (count($newValue) > count($previousValues))
+				{
+					$item->set($multipleField->name, $newValue);
+				}
+
+				$multipleField->isApplied = true;
 			}
 		}
 
@@ -383,6 +403,13 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 			}
 
 			$activityId = self::getParentActivityId($result);
+
+			// Per-entity chat baseline (AC-013): record the message volume consumed by THIS fill against
+			// the filled entity ($result->getTarget()), so the next "enough new information" check for
+			// this entity counts only messages that arrived since its own last fill. No-op for calls —
+			// OpenLine::saveLastMessagesVolumeForCopilot self-guards on the chat provider.
+			OpenLine::saveLastMessagesVolumeForCopilot($activityId, $result->getTarget());
+
 			// send 'main scenario ended' event
 			self::sendCallParsingAnalyticsEvent(
 				$result,
@@ -493,7 +520,7 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 				? Badge\Type\AiCallFieldsFillingResult::CONFLICT_FIELDS_VALUE
 				: Badge\Type\AiCallFieldsFillingResult::SUCCESS_FIELDS_VALUE
 			;
-			self::syncBadges($activityId, $badgeType);
+			self::syncBadges($activityId, $badgeType, $result->getTarget());
 			self::notifyTimelinesAboutActivityUpdate($activityId);
 		}
 	}
@@ -501,7 +528,8 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 	protected static function notifyAboutJobError(
 		Result $result,
 		bool $withSyncBadges = true,
-		bool $withSendAnalytics = true
+		bool $withSendAnalytics = true,
+		?ItemIdentifier $target = null
 	): void
 	{
 		$activityId = self::getParentActivityId($result);
@@ -524,7 +552,8 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 					$activityId,
 					self::$engineId === 0
 						? Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_VALUE
-						: Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_THIRDPARTY_VALUE
+						: Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_THIRDPARTY_VALUE,
+					$result->getTarget()
 				);
 			}
 
@@ -545,8 +574,8 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 		$activityId = self::getParentActivityId($result);
 		if ($activityId > 0)
 		{
-			static::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::ERROR_LIMIT_EXCEEDED);
-			static::notifyTimelinesAboutAutomationLaunchError($result, $activityId);
+			static::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::ERROR_LIMIT_EXCEEDED, $result->getTarget());
+			static::notifyTimelinesAboutAutomationLaunchError($result, $activityId, $result->getTarget());
 		}
 	}
 
@@ -638,7 +667,7 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 		$activityId = self::getParentActivityId($result);
 		if ($activityId)
 		{
-			self::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::SUCCESS_FIELDS_VALUE);
+			self::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::SUCCESS_FIELDS_VALUE, $result->getTarget());
 			self::notifyTimelinesAboutActivityUpdate($activityId, true);
 		}
 	}
@@ -648,7 +677,7 @@ class FillItemFieldsFromCallTranscription extends AbstractOperation
 		$activityId = self::getParentActivityId($result);
 		if ($activityId)
 		{
-			self::syncBadges($activityId);
+			self::syncBadges($activityId, '', $result->getTarget());
 			self::notifyTimelinesAboutActivityUpdate($activityId, true);
 		}
 	}

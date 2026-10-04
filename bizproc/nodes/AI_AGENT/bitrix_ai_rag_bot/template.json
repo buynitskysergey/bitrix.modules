@@ -8,46 +8,11 @@
             "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_2###",
             "Description": "",
             "Type": "string",
-            "Required": 0,
+            "Required": 1,
             "Multiple": 0,
             "Options": null,
-            "Default": ""
-        },
-        "SetupTemplateActivity_BTXo5PtF6w": {
-            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_3###",
-            "Description": "",
-            "Type": "user",
-            "Required": 0,
-            "Multiple": 1,
-            "Options": null,
-            "Default": ""
-		},
-        "SetupTemplateActivity_Z15YXPjTOs": {
-            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_4###",
-            "Description": "###BIZPROC_AI_AGENT_RAGCHATBOT_DESCRIPTION_2###",
-            "Type": "rag_knowledge_base",
-            "Required": 0,
-            "Multiple": 0,
-            "Options": null,
-            "Default": ""
-        },
-        "SetupTemplateActivity_T76SEQ8ol9": {
-            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_5###",
-            "Description": "",
-            "Type": "text",
-            "Required": 0,
-            "Multiple": 0,
-            "Options": null,
-            "Default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_1###"
-        },
-        "SetupTemplateActivity_YxMBdDhXHd": {
-            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_6###",
-            "Description": "",
-            "Type": "text",
-            "Required": 0,
-            "Multiple": 0,
-            "Options": null,
-            "Default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_2###"
+            "Default": "",
+            "Source": "SetupTemplateActivity"
         },
         "SetupTemplateActivity_rgrHChbMKt": {
             "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_7###",
@@ -56,7 +21,48 @@
             "Required": 0,
             "Multiple": 0,
             "Options": null,
-            "Default": ""
+            "Default": "",
+            "Source": "SetupTemplateActivity"
+        },
+        "SetupTemplateActivity_BTXo5PtF6w": {
+            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_3###",
+            "Description": "",
+            "Type": "user",
+            "Required": 1,
+            "Multiple": 1,
+            "Options": null,
+            "Default": "",
+            "Source": "SetupTemplateActivity"
+        },
+        "SetupTemplateActivity_Z15YXPjTOs": {
+            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_4###",
+            "Description": "###BIZPROC_AI_AGENT_RAGCHATBOT_DESCRIPTION_2###",
+            "Type": "rag_knowledge_base",
+            "Required": 1,
+            "Multiple": 0,
+            "Options": null,
+            "Default": "",
+            "Source": "SetupTemplateActivity"
+        },
+        "SetupTemplateActivity_T76SEQ8ol9": {
+            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_5###",
+            "Description": "",
+            "Type": "text",
+            "Required": 0,
+            "Multiple": 0,
+            "Options": null,
+            "Default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_1###",
+            "Source": "SetupTemplateActivity"
+        },
+        "SetupTemplateActivity_YxMBdDhXHd": {
+            "Name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_6###",
+            "Description": "",
+            "Type": "text",
+            "Required": 0,
+            "Multiple": 0,
+            "Options": null,
+            "Default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_2###",
+            "Source": "SetupTemplateActivity"
         }
     },
     "TEMPLATE": [
@@ -67,185 +73,127 @@
                 "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_1###",
                 "Links": [
                     [
-                        "A7649_2965_8496_3775:o0",
-                        "A7426_4464_6102_9845:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A6799_3346_2347_2123:o0",
-                        "A5172_6770_9062_4959:i0",
-                        1770969356280
-                    ],
-                    [
                         "A4791_5036_6881_3286:o0",
-                        "A7649_2965_8496_3775:i0",
-                        1770969356280
+                        "A7649_2965_8496_3775:i0"
                     ],
                     [
-                        "A9700_4393_6634_9720:o0",
-                        "A6799_3346_2347_2123:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A6799_3346_2347_2123:a0",
-                        "A9610_6597_9992_4868:t0",
-                        1770969356280
-                    ],
-                    [
-                        "A5172_6770_9062_4959:o0",
-                        "A8106_3093_8889_3355:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A4889_7438_8206_9038:o0",
-                        "A4632_2501_2036_1473:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A3922_7992_6256_9512:o0",
-                        "A8939_8471_4950_3897:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A3922_7992_6256_9512:o0",
-                        "A4460_4773_5285_8053:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A4460_4773_5285_8053:o1",
-                        "A6818_8593_1799_2521:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A6799_3346_2347_2123:o0",
-                        "A6833_3320_3842_9837:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A6833_3320_3842_9837:o0",
-                        "A3922_7992_6256_9512:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A4460_4773_5285_8053:o1",
-                        "A7868_4961_2315_7261:i0",
-                        1770969356280
+                        "A7649_2965_8496_3775:o0",
+                        "A7426_4464_6102_9845:i0"
                     ],
                     [
                         "A7426_4464_6102_9845:o0",
-                        "A4889_7438_8206_9038:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A2532_3871_3620_3427:o0",
-                        "A9737_6776_3554_8777:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A9737_6776_3554_8777:o1",
-                        "A9988_4968_1175_9417:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A7868_4961_2315_7261:o0",
-                        "A7443_4094_7448_4833:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A7443_4094_7448_4833:o0",
-                        "A2637_1165_8843_2682:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A2637_1165_8843_2682:o0",
-                        "A7930_3492_4440_1410:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A4460_4773_5285_8053:o0",
-                        "A7930_3492_4440_1410:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A6833_3320_3842_9837:o1",
-                        "A3712_2922_5544_6850:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A6833_3320_3842_9837:o0",
-                        "A1908_2854_9166_1869:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A4460_4773_5285_8053:o1",
-                        "A2577_2609_9029_7391:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A4460_4773_5285_8053:o0",
-                        "A7645_2085_3700_8707:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A7868_4961_2315_7261:o0",
-                        "A8483_2519_9624_3890:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A3922_7992_6256_9512:o0",
-                        "A8681_6811_9133_2178:i0",
-                        1770969356280
+                        "A4889_7438_8206_9038:i0"
                     ],
                     [
                         "A4889_7438_8206_9038:o0",
-                        "A7445_3035_2369_4564:i0",
-                        1770969356280
+                        "A4632_2501_2036_1473:i0"
                     ],
                     [
                         "A4632_2501_2036_1473:o0",
-                        "A2479_5231_1058_7910:i0",
-                        1770969356280
+                        "A2532_3871_3620_3427:i0"
                     ],
                     [
-                        "A4632_2501_2036_1473:o0",
-                        "A2532_3871_3620_3427:i0",
-                        1770969356280
+                        "A2532_3871_3620_3427:o0",
+                        "A9737_6776_3554_8777:i0"
                     ],
                     [
-                        "A7868_4961_2315_7261:o0",
-                        "A2637_1165_8843_2682:i0",
-                        1770969356280
-                    ],
-                    [
-                        "A9700_4393_6634_9720:o0",
-                        "A6081_2196_2229_4903:i0",
-                        1778851549105
-                    ],
-                    [
-                        "A6081_2196_2229_4903:o1",
-                        "A6833_3320_3842_9837:i0",
-                        1778851551205
-                    ],
-                    [
-                        "A6081_2196_2229_4903:o1",
-                        "A5172_6770_9062_4959:i0",
-                        1778851553005
+                        "A9737_6776_3554_8777:o1",
+                        "A9988_4968_1175_9417:i0"
                     ],
                     [
                         "A6081_2196_2229_4903:a0",
-                        "A9610_6597_9992_4868:t0",
-                        1778851558322
+                        "A9610_6597_9992_4868:t0"
+                    ],
+                    [
+                        "A9700_4393_6634_9720:o0",
+                        "A6081_2196_2229_4903:i0"
+                    ],
+                    [
+                        "A6081_2196_2229_4903:o1",
+                        "A5172_6770_9062_4959:i0"
+                    ],
+                    [
+                        "A5172_6770_9062_4959:o0",
+                        "A6833_3320_3842_9837:i0"
+                    ],
+                    [
+                        "A6833_3320_3842_9837:o0",
+                        "A3922_7992_6256_9512:i0"
+                    ],
+                    [
+                        "A3922_7992_6256_9512:o0",
+                        "A4460_4773_5285_8053:i0"
+                    ],
+                    [
+                        "A4460_4773_5285_8053:o1",
+                        "A7868_4961_2315_7261:i0"
+                    ],
+                    [
+                        "A7868_4961_2315_7261:o0",
+                        "A2637_1165_8843_2682:i0"
+                    ],
+                    [
+                        "A4460_4773_5285_8053:o0",
+                        "A7930_3492_4440_1410:i0"
+                    ],
+                    [
+                        "A2637_1165_8843_2682:o0",
+                        "A7930_3492_4440_1410:i0"
+                    ],
+                    [
+                        "A3184_5027_6613_4790:o0",
+                        "A8215_3960_7448_2051:i0"
+                    ],
+                    [
+                        "A8215_3960_7448_2051:o0",
+                        "A2704_8153_9265_3814:i0"
                     ]
                 ]
             },
             "Children": [
                 {
+                    "Name": "A4791_5036_6881_3286",
+                    "Type": "AiAgentStartTrigger",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_6###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A4791_5036_6881_3286",
+                        "type": "trigger",
+                        "position": {
+                            "x": 100,
+                            "y": 200
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "trigger",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_6###",
+                            "colorIndex": 0,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "AI_ROBOT"
+                        }
+                    }
+                },
+                {
                     "Name": "A7649_2965_8496_3775",
                     "Type": "SetupTemplateActivity",
                     "Activated": "Y",
                     "Properties": {
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_3###",
                         "user": "{=A4791_5036_6881_3286:startedBy}",
-                        "description": "",
                         "blocks": [
                             {
                                 "items": [
@@ -266,6 +214,7 @@
                                         "multiple": false,
                                         "required": true,
                                         "options": [],
+                                        "settings": [],
                                         "default": ""
                                     },
                                     {
@@ -277,6 +226,7 @@
                                         "multiple": false,
                                         "required": false,
                                         "options": [],
+                                        "settings": [],
                                         "default": ""
                                     },
                                     {
@@ -288,12 +238,9 @@
                                         "multiple": true,
                                         "required": true,
                                         "options": [],
+                                        "settings": [],
                                         "default": ""
-                                    }
-                                ]
-                            },
-                            {
-                                "items": [
+                                    },
                                     {
                                         "itemType": "constant",
                                         "id": "SetupTemplateActivity_Z15YXPjTOs",
@@ -303,6 +250,7 @@
                                         "multiple": false,
                                         "required": true,
                                         "options": [],
+                                        "settings": [],
                                         "default": ""
                                     }
                                 ]
@@ -318,18 +266,6 @@
                                         "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_3###"
                                     },
                                     {
-                                        "itemType": "delimiter",
-                                        "delimiterType": "line"
-                                    },
-                                    {
-                                        "itemType": "title",
-                                        "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_4###"
-                                    },
-                                    {
-                                        "itemType": "description",
-                                        "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_5###"
-                                    },
-                                    {
                                         "itemType": "constant",
                                         "id": "SetupTemplateActivity_T76SEQ8ol9",
                                         "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_5###",
@@ -338,6 +274,7 @@
                                         "multiple": false,
                                         "required": false,
                                         "options": [],
+                                        "settings": [],
                                         "default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_1###"
                                     },
                                     {
@@ -349,38 +286,33 @@
                                         "multiple": false,
                                         "required": false,
                                         "options": [],
+                                        "settings": [],
                                         "default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_2###"
                                     }
                                 ]
                             }
-                        ],
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_3###",
-                        "EditorComment": ""
+                        ]
                     },
                     "Document": null,
                     "Node": {
                         "id": "A7649_2965_8496_3775",
                         "type": "simple",
                         "position": {
-                            "x": 587,
-                            "y": 234
+                            "x": 500,
+                            "y": 200
                         },
                         "dimensions": {
-                            "width": null,
-                            "height": null
+                            "width": 200,
+                            "height": 48
                         },
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -390,11 +322,7 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "SETTINGS",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": -1
+                            "icon": "SETTINGS"
                         }
                     }
                 },
@@ -407,33 +335,28 @@
                         "workPosition": "",
                         "avatar": "{=Constant:SetupTemplateActivity_rgrHChbMKt}",
                         "botCode": "{=Workflow:TemplateId}",
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_4###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_4###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A7426_4464_6102_9845",
                         "type": "simple",
                         "position": {
-                            "x": 971,
-                            "y": 234
+                            "x": 900,
+                            "y": 200
                         },
                         "dimensions": {
-                            "width": null,
-                            "height": null
+                            "width": 200,
+                            "height": 48
                         },
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -443,260 +366,7 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "MESSENGER",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A9988_4968_1175_9417",
-                    "Type": "ImBotMessageActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "botId": "{=A7426_4464_6102_9845:botId}",
-                        "botCode": "",
-                        "recipient": [
-                            "{=Constant:SetupTemplateActivity_BTXo5PtF6w}"
-                        ],
-                        "chatId": null,
-                        "message": "###BIZPROC_AI_AGENT_RAGCHATBOT_MESSAGE_1###",
-                        "asError": "N",
-                        "aiWarning": "N",
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A9988_4968_1175_9417",
-                        "type": "simple",
-                        "position": {
-                            "x": 2805,
-                            "y": 258
-                        },
-                        "dimensions": {
-                            "width": null,
-                            "height": null
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
-                            "colorIndex": 2,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "GO_TO_MESSAGE",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A5172_6770_9062_4959",
-                    "Type": "ImBotMessageActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "botId": "{=A9700_4393_6634_9720:ActualBotId}",
-                        "botCode": "",
-                        "recipient": [
-                            "{=A9700_4393_6634_9720:SenderId}"
-                        ],
-                        "chatId": "{=A9700_4393_6634_9720:chatId}",
-                        "message": "{{=if(strlen({=A9427_8490_1947_9553:chatAnswer}) > 0, {=A9427_8490_1947_9553:chatAnswer}, {=A9427_8490_1947_9553:errorMessage})}}",
-                        "asError": "{{=if(strlen({=A9427_8490_1947_9553:aiResult}) > 0, 'N', 'Y')}}",
-                        "aiWarning": "Y",
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A5172_6770_9062_4959",
-                        "type": "simple",
-                        "position": {
-                            "x": 1125,
-                            "y": 473
-                        },
-                        "dimensions": {
-                            "width": null,
-                            "height": null
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
-                            "colorIndex": 2,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "GO_TO_MESSAGE",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A4791_5036_6881_3286",
-                    "Type": "AiAgentStartTrigger",
-                    "Properties": {
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_6###"
-                    },
-                    "Activated": "Y",
-                    "Node": {
-                        "id": "A4791_5036_6881_3286",
-                        "type": "trigger",
-                        "position": {
-                            "x": 178,
-                            "y": 234
-                        },
-                        "dimensions": {
-                            "width": null,
-                            "height": null
-                        },
-                        "ports": [
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "trigger",
-                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_6###",
-                            "colorIndex": 0,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "AI_ROBOT",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A9700_4393_6634_9720",
-                    "Type": "ImBotNewMessageTrigger",
-                    "Activated": "Y",
-                    "Properties": {
-                        "BotId": null,
-                        "BotCode": "{=Workflow:TemplateId}",
-                        "SenderIds": [
-                            "{=Constant:SetupTemplateActivity_BTXo5PtF6w}"
-                        ],
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_7###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A9700_4393_6634_9720",
-                        "type": "trigger",
-                        "position": {
-                            "x": 181,
-                            "y": 474
-                        },
-                        "dimensions": {
-                            "width": null,
-                            "height": null
-                        },
-                        "ports": [
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "trigger",
-                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_7###",
-                            "colorIndex": 2,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "MESSAGE",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A9610_6597_9992_4868",
-                    "Type": "RagKnowledgeBaseNode",
-                    "Activated": "Y",
-                    "Properties": {
-                        "Rag": "{=Constant:SetupTemplateActivity_Z15YXPjTOs}",
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_8###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A9610_6597_9992_4868",
-                        "type": "tool",
-                        "position": {
-                            "x": 599,
-                            "y": 806
-                        },
-                        "dimensions": {
-                            "width": null,
-                            "height": null
-                        },
-                        "ports": [
-                            {
-                                "id": "t0",
-                                "title": "",
-                                "type": "topAux",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "tool",
-                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_8###",
-                            "colorIndex": 0,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "DATABASE",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "MESSENGER"
                         }
                     }
                 },
@@ -789,33 +459,28 @@
                                 "settings": null
                             }
                         ],
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_1###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_1###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A4889_7438_8206_9038",
                         "type": "simple",
                         "position": {
-                            "x": 1362,
-                            "y": 236
+                            "x": 1300,
+                            "y": 200
                         },
                         "dimensions": {
-                            "width": 207.0500030517578,
+                            "width": 200,
                             "height": 48
                         },
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -825,87 +490,7 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DATABASE",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A2532_3871_3620_3427",
-                    "Type": "WriteDataStorageActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "FieldValue": {
-                            "startUser": "{=A4791_5036_6881_3286:startedBy}",
-                            "missingGroupChatId": "{=A4632_2501_2036_1473:missingGroupChatId}",
-                            "bot": "{=A7426_4464_6102_9845:botId > user}"
-                        },
-                        "Author": "{=A4791_5036_6881_3286:startedBy}",
-                        "StorageId": null,
-                        "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
-                        "RewriteMode": "newItem",
-                        "IsExpanded": "Y",
-                        "Fields": {
-                            "startUser": {
-                                "Value": "{=A4791_5036_6881_3286:startedBy}",
-                                "FieldName": "startUser"
-                            },
-                            "missingGroupChatId": {
-                                "Value": "{=A4632_2501_2036_1473:missingGroupChatId}",
-                                "FieldName": "missingGroupChatId"
-                            },
-                            "bot": {
-                                "Value": "{=A7426_4464_6102_9845:botId > user}",
-                                "FieldName": "bot"
-                            }
-                        },
-                        "DynamicFilterFields": {
-                            "items": []
-                        },
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###",
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A2532_3871_3620_3427",
-                        "type": "simple",
-                        "position": {
-                            "x": 2128,
-                            "y": 237
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 48
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###",
-                            "colorIndex": 5,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "PLUS_M",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "DATABASE"
                         }
                     }
                 },
@@ -956,20 +541,135 @@
                                 "Type": "string"
                             }
                         },
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A4632_2501_2036_1473",
                         "type": "simple",
                         "position": {
-                            "x": 1745,
-                            "y": 234
+                            "x": 1700,
+                            "y": 200
                         },
                         "dimensions": {
                             "width": 200,
                             "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###",
+                            "colorIndex": 5,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "DATA_READING"
+                        }
+                    }
+                },
+                {
+                    "Name": "A2532_3871_3620_3427",
+                    "Type": "WriteDataStorageActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "FieldValue": {
+                            "startUser": "{=A4791_5036_6881_3286:startedBy}",
+                            "missingGroupChatId": "{=A4632_2501_2036_1473:missingGroupChatId}",
+                            "bot": "{=A7426_4464_6102_9845:botId > user}"
+                        },
+                        "Author": "{=A4791_5036_6881_3286:startedBy}",
+                        "StorageId": null,
+                        "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
+                        "RewriteMode": "newItem",
+                        "IsExpanded": "Y",
+                        "Fields": {
+                            "startUser": {
+                                "Value": "{=A4791_5036_6881_3286:startedBy}",
+                                "FieldName": "startUser"
+                            },
+                            "missingGroupChatId": {
+                                "Value": "{=A4632_2501_2036_1473:missingGroupChatId}",
+                                "FieldName": "missingGroupChatId"
+                            },
+                            "bot": {
+                                "Value": "{=A7426_4464_6102_9845:botId > user}",
+                                "FieldName": "bot"
+                            }
+                        },
+                        "DynamicFilterFields": {
+                            "items": []
+                        },
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A2532_3871_3620_3427",
+                        "type": "simple",
+                        "position": {
+                            "x": 2100,
+                            "y": 200
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###",
+                            "colorIndex": 5,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "EDIT_L"
+                        }
+                    }
+                },
+                {
+                    "Name": "A9737_6776_3554_8777",
+                    "Type": "IfElseBranchActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                        "mixedcondition": [
+                            {
+                                "field": "bot",
+                                "operator": "!empty",
+                                "value": "",
+                                "joiner": 0,
+                                "object": "A4632_2501_2036_1473"
+                            }
+                        ]
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A9737_6776_3554_8777",
+                        "type": "operators",
+                        "position": {
+                            "x": 2500,
+                            "y": 200
+                        },
+                        "dimensions": {
+                            "width": 230,
+                            "height": 46
                         },
                         "ports": [
                             {
@@ -980,23 +680,547 @@
                             },
                             {
                                 "id": "o0",
-                                "title": "",
+                                "title": "true",
+                                "type": "output",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o1",
+                                "title": "false",
                                 "type": "output",
                                 "isActive": true
                             }
                         ],
                         "node": {
-                            "type": "simple",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###",
-                            "colorIndex": 5,
+                            "type": "operators",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                            "colorIndex": 3,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DATA_READING",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "CONDITION"
+                        }
+                    }
+                },
+                {
+                    "Name": "A9988_4968_1175_9417",
+                    "Type": "ImBotMessageActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "botId": "{=A7426_4464_6102_9845:botId}",
+                        "botCode": "",
+                        "recipient": [
+                            "{=Constant:SetupTemplateActivity_BTXo5PtF6w}"
+                        ],
+                        "chatId": null,
+                        "message": "###BIZPROC_AI_AGENT_RAGCHATBOT_MESSAGE_1###",
+                        "asError": "N",
+                        "aiWarning": "N",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A9988_4968_1175_9417",
+                        "type": "simple",
+                        "position": {
+                            "x": 2900,
+                            "y": 400
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "GO_TO_MESSAGE"
+                        }
+                    }
+                },
+                {
+                    "Name": "A9700_4393_6634_9720",
+                    "Type": "ImBotNewMessageTrigger",
+                    "Activated": "Y",
+                    "Properties": {
+                        "BotId": null,
+                        "BotCode": "{=Workflow:TemplateId}",
+                        "SenderIds": [
+                            "{=Constant:SetupTemplateActivity_BTXo5PtF6w}"
+                        ],
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_7###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A9700_4393_6634_9720",
+                        "type": "trigger",
+                        "position": {
+                            "x": 100,
+                            "y": 700
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "trigger",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_7###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "MESSAGE"
+                        }
+                    }
+                },
+                {
+                    "Name": "A6081_2196_2229_4903",
+                    "Type": "AiAssistantAgentComplexActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_TITLE###",
+                        "EditorComment": "",
+                        "Rules": {
+                            "i0": {
+                                "portId": "i0",
+                                "ruleCards": [
+                                    {
+                                        "id": "A6081_2196_2229_8001",
+                                        "constructions": [
+                                            {
+                                                "id": "A6081_2196_2229_8002",
+                                                "type": "action",
+                                                "expression": {
+                                                    "actionId": "AiAssistantAgentActivity",
+                                                    "rawActivityData": null,
+                                                    "activityData": {
+                                                        "Name": "A9427_8490_1947_9553",
+                                                        "Type": "AiAssistantAgentActivity",
+                                                        "Activated": "Y",
+                                                        "Properties": {
+                                                            "mcpUser": "{=A9700_4393_6634_9720:SenderId}",
+                                                            "query": "{=A9700_4393_6634_9720:Message}",
+                                                            "systemPrompt": "###BIZPROC_AI_AGENT_RAGCHATBOT_SYSTEMPROMPT_1###",
+                                                            "returnType": "json",
+                                                            "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"chatAnswer\": {\n      \"type\": \"string\",\n      \"description\": \"Human readeable answer\"\n    },\n    \"isKnowledgeBaseHasAnswer\": {\n      \"type\": \"boolean\",\n      \"description\": \"Is knowledge base has information for user request?\"\n    }\n  },\n  \"required\": [\n    \"chatAnswer\",\"isKnowledgeBaseHasAnswer\"\n  ]\n}",
+                                                            "jsonPath": {
+                                                                "chatAnswer": {
+                                                                    "Id": "chatAnswer",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:chatAnswer",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "isKnowledgeBaseHasAnswer": {
+                                                                    "Id": "isKnowledgeBaseHasAnswer",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:isKnowledgeBaseHasAnswer",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                }
+                                                            },
+                                                            "usePseudonymizer": "Y",
+                                                            "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
+                                                            "EditorComment": "",
+                                                            "auxPort": "a0"
+                                                        },
+                                                        "ReturnProperties": [
+                                                            {
+                                                                "Id": "aiResult",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_AI_RESULT###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "errorMessage",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_ERROR_MESSAGE###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "toolsUsed",
+                                                                "Type": "bool",
+                                                                "BaseType": null,
+                                                                "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_TOOLS_USED###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "sources",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_SOURCES###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            }
+                                                        ],
+                                                        "Document": null
+                                                    },
+                                                    "document": null,
+                                                    "auxPortId": "a0",
+                                                    "auxPortTitle": "T1"
+                                                }
+                                            },
+                                            {
+                                                "id": "A6081_2196_2229_8003",
+                                                "type": "output",
+                                                "expression": {
+                                                    "portId": "o1",
+                                                    "title": "E1"
+                                                }
+                                            }
+                                        ],
+                                        "isFilled": true
+                                    }
+                                ]
+                            }
+                        },
+                        "InputNames": [
+                            "A9427_8490_1947_9553:i0"
+                        ],
+                        "OutputNames": {
+                            "A9427_8490_1947_9553:o0": 1
+                        },
+                        "Links": []
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A6081_2196_2229_4903",
+                        "type": "complex",
+                        "position": {
+                            "x": 500,
+                            "y": 700
+                        },
+                        "dimensions": {
+                            "width": 260,
+                            "height": 291
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "G1",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o1",
+                                "title": "E1",
+                                "type": "output",
+                                "isActive": true
+                            },
+                            {
+                                "id": "a0",
+                                "title": "T1",
+                                "type": "aux",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "complex",
+                            "title": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_TITLE###",
+                            "colorIndex": 0,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "AI_ROBOT"
+                        }
+                    },
+                    "Children": [
+                        {
+                            "Name": "A9427_8490_1947_9553",
+                            "Type": "AiAssistantAgentActivity",
+                            "Activated": "Y",
+                            "Properties": {
+                                "mcpUser": "{=A9700_4393_6634_9720:SenderId}",
+                                "query": "{=A9700_4393_6634_9720:Message}",
+                                "systemPrompt": "###BIZPROC_AI_AGENT_RAGCHATBOT_SYSTEMPROMPT_1###",
+                                "returnType": "json",
+                                "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"chatAnswer\": {\n      \"type\": \"string\",\n      \"description\": \"Human readeable answer\"\n    },\n    \"isKnowledgeBaseHasAnswer\": {\n      \"type\": \"boolean\",\n      \"description\": \"Is knowledge base has information for user request?\"\n    }\n  },\n  \"required\": [\n    \"chatAnswer\",\"isKnowledgeBaseHasAnswer\"\n  ]\n}",
+                                "jsonPath": {
+                                    "chatAnswer": {
+                                        "Id": "chatAnswer",
+                                        "Type": "json",
+                                        "BaseType": "string",
+                                        "Name": "JSON:chatAnswer",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    },
+                                    "isKnowledgeBaseHasAnswer": {
+                                        "Id": "isKnowledgeBaseHasAnswer",
+                                        "Type": "json",
+                                        "BaseType": "bool",
+                                        "Name": "JSON:isKnowledgeBaseHasAnswer",
+                                        "Description": null,
+                                        "Multiple": false,
+                                        "Required": false,
+                                        "Options": null,
+                                        "Settings": null,
+                                        "Default": null
+                                    }
+                                },
+                                "usePseudonymizer": "Y",
+                                "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
+                                "EditorComment": "",
+                                "auxPort": "a0"
+                            },
+                            "ReturnProperties": [
+                                {
+                                    "Id": "aiResult",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_AI_RESULT###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "errorMessage",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_ERROR_MESSAGE###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "toolsUsed",
+                                    "Type": "bool",
+                                    "BaseType": null,
+                                    "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_TOOLS_USED###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                },
+                                {
+                                    "Id": "sources",
+                                    "Type": "string",
+                                    "BaseType": null,
+                                    "Name": "###BITRIX_AI_RAG_BOT_AIASSISTANTAGENTCOMPLEXACTIVITY_RETURN_SOURCES###",
+                                    "Description": null,
+                                    "Multiple": false,
+                                    "Required": false,
+                                    "Options": null,
+                                    "Settings": null,
+                                    "Default": null
+                                }
+                            ],
+                            "Document": null
+                        }
+                    ]
+                },
+                {
+                    "Name": "A9610_6597_9992_4868",
+                    "Type": "RagKnowledgeBaseNode",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Rag": "{=Constant:SetupTemplateActivity_Z15YXPjTOs}",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_8###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A9610_6597_9992_4868",
+                        "type": "tool",
+                        "position": {
+                            "x": 500,
+                            "y": 1100
+                        },
+                        "dimensions": {
+                            "width": null,
+                            "height": null
+                        },
+                        "ports": [
+                            {
+                                "id": "t0",
+                                "title": "",
+                                "type": "topAux",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "tool",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_8###",
+                            "colorIndex": 0,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "DATABASE"
+                        }
+                    }
+                },
+                {
+                    "Name": "A5172_6770_9062_4959",
+                    "Type": "ImBotMessageActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "botId": "{=A9700_4393_6634_9720:ActualBotId}",
+                        "botCode": "",
+                        "recipient": [
+                            "{=A9700_4393_6634_9720:SenderId}"
+                        ],
+                        "chatId": "{=A9700_4393_6634_9720:chatId}",
+                        "message": "{{=if(strlen({=A9427_8490_1947_9553:chatAnswer}) > 0, {=A9427_8490_1947_9553:chatAnswer}, {=A9427_8490_1947_9553:errorMessage})}}",
+                        "asError": "{{=if(strlen({=A9427_8490_1947_9553:aiResult}) > 0, 'N', 'Y')}}",
+                        "aiWarning": "Y",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A5172_6770_9062_4959",
+                        "type": "simple",
+                        "position": {
+                            "x": 900,
+                            "y": 700
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "GO_TO_MESSAGE"
+                        }
+                    }
+                },
+                {
+                    "Name": "A6833_3320_3842_9837",
+                    "Type": "IfElseBranchActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                        "mixedcondition": [
+                            {
+                                "field": "isKnowledgeBaseHasAnswer",
+                                "operator": "=",
+                                "value": "",
+                                "joiner": 0,
+                                "object": "A9427_8490_1947_9553"
+                            },
+                            {
+                                "field": "toolsUsed",
+                                "operator": "=",
+                                "value": "Y",
+                                "joiner": 0,
+                                "object": "A9427_8490_1947_9553"
+                            }
+                        ]
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A6833_3320_3842_9837",
+                        "type": "operators",
+                        "position": {
+                            "x": 1300,
+                            "y": 700
+                        },
+                        "dimensions": {
+                            "width": 230,
+                            "height": 46
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o0",
+                                "title": "true",
+                                "type": "output",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o1",
+                                "title": "false",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "operators",
+                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                            "colorIndex": 3,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "CONDITION"
                         }
                     }
                 },
@@ -1045,16 +1269,15 @@
                                 "Type": "string"
                             }
                         },
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A3922_7992_6256_9512",
                         "type": "simple",
                         "position": {
-                            "x": 1454,
-                            "y": 679
+                            "x": 1700,
+                            "y": 700
                         },
                         "dimensions": {
                             "width": 200,
@@ -1063,15 +1286,11 @@
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -1081,11 +1300,7 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DATA_READING",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "DATA_READING"
                         }
                     }
                 },
@@ -1097,97 +1312,25 @@
                         "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
                         "mixedcondition": [
                             {
-                                "object": "A3922_7992_6256_9512",
                                 "field": "missingGroupChatId",
                                 "operator": "!empty",
                                 "value": "",
-                                "joiner": 0
-                            }
-                        ],
-                        "EditorComment": ""
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A4460_4773_5285_8053",
-                        "type": "complex",
-                        "position": {
-                            "x": 1847,
-                            "y": 614
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 120
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "true",
-                                "type": "output",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o1",
-                                "title": "false",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "complex",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
-                            "colorIndex": 3,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "CONDITION",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A6833_3320_3842_9837",
-                    "Type": "IfElseBranchActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
-                        "EditorComment": "",
-                        "mixedcondition": [
-                            {
-                                "object": "A9427_8490_1947_9553",
-                                "field": "isKnowledgeBaseHasAnswer",
-                                "operator": "=",
-                                "value": "",
-                                "joiner": 0
-                            },
-                            {
-                                "object": "A9427_8490_1947_9553",
-                                "field": "toolsUsed",
-                                "operator": "=",
-                                "value": "Y",
-                                "joiner": 0
+                                "joiner": 0,
+                                "object": "A3922_7992_6256_9512"
                             }
                         ]
                     },
                     "Document": null,
                     "Node": {
-                        "id": "A6833_3320_3842_9837",
-                        "type": "complex",
+                        "id": "A4460_4773_5285_8053",
+                        "type": "operators",
                         "position": {
-                            "x": 1148,
-                            "y": 618
+                            "x": 2100,
+                            "y": 700
                         },
                         "dimensions": {
-                            "width": 200,
-                            "height": 120
+                            "width": 230,
+                            "height": 46
                         },
                         "ports": [
                             {
@@ -1210,17 +1353,13 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
                             "colorIndex": 3,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "CONDITION",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "CONDITION"
                         }
                     }
                 },
@@ -1231,35 +1370,30 @@
                     "Properties": {
                         "ChatName": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_CHATNAME_1###",
                         "Members": [
-                            "{{=merge({=A3922_7992_6256_9512:startUser},{=A3922_7992_6256_9512:bot})}}"
+                            "{{=merge({=A3922_7992_6256_9512:startUser},{=A9700_4393_6634_9720:ActualBotId > user})}}"
                         ],
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_6###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_6###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A7868_4961_2315_7261",
                         "type": "simple",
                         "position": {
-                            "x": 2183,
-                            "y": 807
+                            "x": 2500,
+                            "y": 900
                         },
                         "dimensions": {
-                            "width": 216.10000610351562,
+                            "width": 200,
                             "height": 48
                         },
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -1269,75 +1403,7 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "CHATS",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
-                        }
-                    }
-                },
-                {
-                    "Name": "A9737_6776_3554_8777",
-                    "Type": "IfElseBranchActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
-                        "EditorComment": "",
-                        "mixedcondition": [
-                            {
-                                "object": "A4632_2501_2036_1473",
-                                "field": "bot",
-                                "operator": "!empty",
-                                "value": "",
-                                "joiner": 0
-                            }
-                        ]
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A9737_6776_3554_8777",
-                        "type": "complex",
-                        "position": {
-                            "x": 2522,
-                            "y": 175
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 120
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o0",
-                                "title": "true",
-                                "type": "output",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o1",
-                                "title": "false",
-                                "type": "output",
-                                "isActive": true
-                            }
-                        ],
-                        "node": {
-                            "type": "complex",
-                            "title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
-                            "colorIndex": 3,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "CONDITION",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "CHATS"
                         }
                     }
                 },
@@ -1373,16 +1439,15 @@
                         "DynamicFilterFields": {
                             "items": []
                         },
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A2637_1165_8843_2682",
                         "type": "simple",
                         "position": {
-                            "x": 2583,
-                            "y": 808
+                            "x": 2900,
+                            "y": 900
                         },
                         "dimensions": {
                             "width": 200,
@@ -1391,15 +1456,11 @@
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -1409,11 +1470,7 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "PLUS_M",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "EDIT_L"
                         }
                     }
                 },
@@ -1429,33 +1486,28 @@
                         "message": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_MESSAGE_1###",
                         "asError": "N",
                         "aiWarning": "Y",
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###",
-                        "EditorComment": ""
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###"
                     },
                     "Document": null,
                     "Node": {
                         "id": "A7930_3492_4440_1410",
                         "type": "simple",
                         "position": {
-                            "x": 2971,
-                            "y": 678
+                            "x": 3300,
+                            "y": 700
                         },
                         "dimensions": {
-                            "width": 292.1166687011719,
+                            "width": 200,
                             "height": 48
                         },
                         "ports": [
                             {
                                 "id": "i0",
-                                "title": "",
-                                "type": "input",
-                                "isActive": true
+                                "type": "input"
                             },
                             {
                                 "id": "o0",
-                                "title": "",
-                                "type": "output",
-                                "isActive": true
+                                "type": "output"
                             }
                         ],
                         "node": {
@@ -1465,316 +1517,226 @@
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "GO_TO_MESSAGE",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": false,
-                            "contentBlockColor": null
+                            "icon": "GO_TO_MESSAGE"
                         }
                     }
                 },
                 {
-                    "Name": "A6081_2196_2229_4903",
-                    "Type": "AiAssistantAgentComplexActivity",
+                    "Name": "A3184_5027_6613_4790",
+                    "Type": "AiAgentRestartTrigger",
                     "Activated": "Y",
                     "Properties": {
-                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
-                        "Rules": {
-                            "i0": {
-                                "portId": "i0",
-                                "ruleCards": [
-                                    {
-                                        "id": "A6975_9302_9279_9593",
-                                        "constructions": [
-                                            {
-                                                "id": "A2854_8671_6446_8189",
-                                                "type": "action",
-                                                "expression": {
-                                                    "actionId": "AiAssistantAgentActivity",
-                                                    "rawActivityData": null,
-                                                    "activityData": {
-                                                        "Name": "A9427_8490_1947_9553",
-                                                        "Type": "AiAssistantAgentActivity",
-                                                        "Activated": "Y",
-                                                        "Properties": {
-                                                            "mcpUser": "{=A9700_4393_6634_9720:SenderId}",
-                                                            "query": "{=A9700_4393_6634_9720:Message}",
-                                                            "systemPrompt": "###BIZPROC_AI_AGENT_RAGCHATBOT_SYSTEMPROMPT_1###",
-                                                            "returnType": "json",
-                                                            "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"chatAnswer\": {\n      \"type\": \"string\",\n      \"description\": \"Human readeable answer\"\n    },\n    \"isKnowledgeBaseHasAnswer\": {\n      \"type\": \"boolean\",\n      \"description\": \"Is knowledge base has information for user request?\"\n    }\n  },\n  \"required\": [\n    \"chatAnswer\",\"isKnowledgeBaseHasAnswer\"\n  ]\n}",
-                                                            "jsonPath": {
-                                                                "chatAnswer": {
-                                                                    "Id": "chatAnswer",
-                                                                    "Type": "json",
-                                                                    "BaseType": "string",
-                                                                    "Name": "JSON:chatAnswer",
-                                                                    "Description": null,
-                                                                    "Multiple": false,
-                                                                    "Required": false,
-                                                                    "Options": null,
-                                                                    "Settings": null,
-                                                                    "Default": null
-                                                                },
-                                                                "isKnowledgeBaseHasAnswer": {
-                                                                    "Id": "isKnowledgeBaseHasAnswer",
-                                                                    "Type": "json",
-                                                                    "BaseType": "bool",
-                                                                    "Name": "JSON:isKnowledgeBaseHasAnswer",
-                                                                    "Description": null,
-                                                                    "Multiple": false,
-                                                                    "Required": false,
-                                                                    "Options": null,
-                                                                    "Settings": null,
-                                                                    "Default": null
-                                                                }
-                                                            },
-                                                            "usePseudonymizer": "Y",
-                                                            "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
-                                                            "EditorComment": ""
-                                                        },
-                                                        "ReturnProperties": [
-                                                            {
-                                                                "Id": "aiResult",
-                                                                "Type": "string",
-                                                                "BaseType": null,
-                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_1###",
-                                                                "Description": null,
-                                                                "Multiple": false,
-                                                                "Required": false,
-                                                                "Options": null,
-                                                                "Settings": null,
-                                                                "Default": null
-                                                            },
-                                                            {
-                                                                "Id": "errorMessage",
-                                                                "Type": "string",
-                                                                "BaseType": null,
-                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_8###",
-                                                                "Description": null,
-                                                                "Multiple": false,
-                                                                "Required": false,
-                                                                "Options": null,
-                                                                "Settings": null,
-                                                                "Default": null
-                                                            },
-                                                            {
-                                                                "Id": "toolsUsed",
-                                                                "Type": "bool",
-                                                                "BaseType": null,
-                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_9###",
-                                                                "Description": null,
-                                                                "Multiple": false,
-                                                                "Required": false,
-                                                                "Options": null,
-                                                                "Settings": null,
-                                                                "Default": null
-                                                            },
-                                                            {
-                                                                "Id": "chatAnswer",
-                                                                "Type": "json",
-                                                                "BaseType": "string",
-                                                                "Name": "JSON:chatAnswer",
-                                                                "Description": "",
-                                                                "Multiple": false,
-                                                                "Required": false,
-                                                                "Options": "",
-                                                                "Settings": null,
-                                                                "Default": null
-                                                            },
-                                                            {
-                                                                "Id": "isKnowledgeBaseHasAnswer",
-                                                                "Type": "json",
-                                                                "BaseType": "bool",
-                                                                "Name": "JSON:isKnowledgeBaseHasAnswer",
-                                                                "Description": "",
-                                                                "Multiple": false,
-                                                                "Required": false,
-                                                                "Options": "",
-                                                                "Settings": null,
-                                                                "Default": null
-                                                            }
-                                                        ],
-                                                        "Document": null
-                                                    },
-                                                    "document": null,
-                                                    "auxPortId": "a0",
-                                                    "auxPortTitle": "T1"
-                                                }
-                                            },
-                                            {
-                                                "id": "A8820_1772_8868_3991",
-                                                "type": "output",
-                                                "expression": {
-                                                    "portId": "o1",
-                                                    "title": "E1"
-                                                }
-                                            }
-                                        ]
-                                    }
-                                ],
-                                "isFilled": true
-                            }
-                        },
-                        "EditorComment": "",
-                        "InputNames": [
-                            "A9427_8490_1947_9553:i0"
-                        ],
-                        "OutputNames": {
-                            "A9427_8490_1947_9553:o0": 1
-                        },
-                        "Links": []
+                        "Title": "###BITRIX_AI_RAG_BOT_AIAGENTRESTARTTRIGGER_TITLE###"
                     },
                     "Document": null,
-                    "Children": [
-                        {
-                            "Name": "A9427_8490_1947_9553",
-                            "Type": "AiAssistantAgentActivity",
-                            "Activated": "Y",
-                            "Properties": {
-                                "mcpUser": "{=A9700_4393_6634_9720:SenderId}",
-                                "query": "{=A9700_4393_6634_9720:Message}",
-                                "systemPrompt": "###BIZPROC_AI_AGENT_RAGCHATBOT_SYSTEMPROMPT_1###",
-                                "returnType": "json",
-                                "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"chatAnswer\": {\n      \"type\": \"string\",\n      \"description\": \"Human readeable answer\"\n    },\n    \"isKnowledgeBaseHasAnswer\": {\n      \"type\": \"boolean\",\n      \"description\": \"Is knowledge base has information for user request?\"\n    }\n  },\n  \"required\": [\n    \"chatAnswer\",\"isKnowledgeBaseHasAnswer\"\n  ]\n}",
-                                "jsonPath": {
-                                    "chatAnswer": {
-                                        "Id": "chatAnswer",
-                                        "Type": "json",
-                                        "BaseType": "string",
-                                        "Name": "JSON:chatAnswer",
-                                        "Description": null,
-                                        "Multiple": false,
-                                        "Required": false,
-                                        "Options": null,
-                                        "Settings": null,
-                                        "Default": null
-                                    },
-                                    "isKnowledgeBaseHasAnswer": {
-                                        "Id": "isKnowledgeBaseHasAnswer",
-                                        "Type": "json",
-                                        "BaseType": "bool",
-                                        "Name": "JSON:isKnowledgeBaseHasAnswer",
-                                        "Description": null,
-                                        "Multiple": false,
-                                        "Required": false,
-                                        "Options": null,
-                                        "Settings": null,
-                                        "Default": null
-                                    }
-                                },
-                                "usePseudonymizer": "Y",
-                                "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
-                                "EditorComment": "",
-                                "auxPort": "a0"
-                            },
-                            "ReturnProperties": [
-                                {
-                                    "Id": "aiResult",
-                                    "Type": "string",
-                                    "BaseType": null,
-                                    "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_1###",
-                                    "Description": null,
-                                    "Multiple": false,
-                                    "Required": false,
-                                    "Options": null,
-                                    "Settings": null,
-                                    "Default": null
-                                },
-                                {
-                                    "Id": "errorMessage",
-                                    "Type": "string",
-                                    "BaseType": null,
-                                    "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_8###",
-                                    "Description": null,
-                                    "Multiple": false,
-                                    "Required": false,
-                                    "Options": null,
-                                    "Settings": null,
-                                    "Default": null
-                                },
-                                {
-                                    "Id": "toolsUsed",
-                                    "Type": "bool",
-                                    "BaseType": null,
-                                    "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_9###",
-                                    "Description": null,
-                                    "Multiple": false,
-                                    "Required": false,
-                                    "Options": null,
-                                    "Settings": null,
-                                    "Default": null
-                                },
-                                {
-                                    "Id": "chatAnswer",
-                                    "Type": "json",
-                                    "BaseType": "string",
-                                    "Name": "JSON:chatAnswer",
-                                    "Description": "",
-                                    "Multiple": false,
-                                    "Required": false,
-                                    "Options": "",
-                                    "Settings": null,
-                                    "Default": null
-                                },
-                                {
-                                    "Id": "isKnowledgeBaseHasAnswer",
-                                    "Type": "json",
-                                    "BaseType": "bool",
-                                    "Name": "JSON:isKnowledgeBaseHasAnswer",
-                                    "Description": "",
-                                    "Multiple": false,
-                                    "Required": false,
-                                    "Options": "",
-                                    "Settings": null,
-                                    "Default": null
-                                }
-                            ],
-                            "Document": null
-                        }
-                    ],
                     "Node": {
-                        "id": "A6081_2196_2229_4903",
-                        "type": "complex",
+                        "id": "A3184_5027_6613_4790",
+                        "type": "trigger",
                         "position": {
-                            "x": 623,
-                            "y": 412
+                            "x": 100,
+                            "y": 1300
                         },
                         "dimensions": {
-                            "width": 260.00000000000006,
-                            "height": 291.0000038146973
+                            "width": 200,
+                            "height": 48
                         },
                         "ports": [
                             {
-                                "id": "i0",
-                                "title": "G1",
-                                "type": "input",
-                                "isActive": true
-                            },
-                            {
-                                "id": "o1",
-                                "title": "E1",
-                                "type": "output",
-                                "isActive": true
-                            },
-                            {
-                                "id": "a0",
-                                "title": "T1",
-                                "type": "aux",
-                                "isActive": true
+                                "id": "o0",
+                                "type": "output"
                             }
                         ],
                         "node": {
-                            "type": "complex",
-                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
+                            "type": "trigger",
+                            "title": "###BITRIX_AI_RAG_BOT_AIAGENTRESTARTTRIGGER_TITLE###",
                             "colorIndex": 0,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "AI_ROBOT",
-                            "updated": 1778854087451,
-                            "published": 1778854087451,
-                            "shouldShowAuxPorts": true,
-                            "contentBlockColor": null
+                            "icon": "AI_ROBOT"
+                        }
+                    }
+                },
+                {
+                    "Name": "A8215_3960_7448_2051",
+                    "Type": "SetupTemplateActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_3###",
+                        "user": "{=A3184_5027_6613_4790:startedBy}",
+                        "blocks": [
+                            {
+                                "items": [
+                                    {
+                                        "itemType": "title",
+                                        "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_1###"
+                                    },
+                                    {
+                                        "itemType": "description",
+                                        "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_1###"
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "SetupTemplateActivity_62HyznTvdU",
+                                        "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_2###",
+                                        "constantType": "string",
+                                        "description": "",
+                                        "multiple": false,
+                                        "required": true,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": ""
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "SetupTemplateActivity_rgrHChbMKt",
+                                        "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_7###",
+                                        "constantType": "file",
+                                        "description": "",
+                                        "multiple": false,
+                                        "required": false,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": ""
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "SetupTemplateActivity_BTXo5PtF6w",
+                                        "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_3###",
+                                        "constantType": "user",
+                                        "description": "",
+                                        "multiple": true,
+                                        "required": true,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": ""
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "SetupTemplateActivity_Z15YXPjTOs",
+                                        "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_4###",
+                                        "constantType": "rag_knowledge_base",
+                                        "description": "###BIZPROC_AI_AGENT_RAGCHATBOT_DESCRIPTION_2###",
+                                        "multiple": false,
+                                        "required": true,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": ""
+                                    }
+                                ]
+                            },
+                            {
+                                "items": [
+                                    {
+                                        "itemType": "title",
+                                        "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_2###"
+                                    },
+                                    {
+                                        "itemType": "description",
+                                        "text": "###BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_3###"
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "SetupTemplateActivity_T76SEQ8ol9",
+                                        "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_5###",
+                                        "constantType": "text",
+                                        "description": "",
+                                        "multiple": false,
+                                        "required": false,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_1###"
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "SetupTemplateActivity_YxMBdDhXHd",
+                                        "name": "###BIZPROC_AI_AGENT_RAGCHATBOT_NAME_6###",
+                                        "constantType": "text",
+                                        "description": "",
+                                        "multiple": false,
+                                        "required": false,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_2###"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A8215_3960_7448_2051",
+                        "type": "simple",
+                        "position": {
+                            "x": 500,
+                            "y": 1300
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_3###",
+                            "colorIndex": 8,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "SETTINGS"
+                        }
+                    }
+                },
+                {
+                    "Name": "A2704_8153_9265_3814",
+                    "Type": "ImBotCreateBotActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "botName": "{=Constant:SetupTemplateActivity_62HyznTvdU}",
+                        "workPosition": "",
+                        "avatar": "{=Constant:SetupTemplateActivity_rgrHChbMKt}",
+                        "botCode": "{=Workflow:TemplateId}",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_4###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A2704_8153_9265_3814",
+                        "type": "simple",
+                        "position": {
+                            "x": 900,
+                            "y": 1300
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_4###",
+                            "colorIndex": 1,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "MESSENGER"
                         }
                     }
                 }

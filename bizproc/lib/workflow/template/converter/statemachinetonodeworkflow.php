@@ -2,11 +2,20 @@
 
 namespace Bitrix\Bizproc\Workflow\Template\Converter;
 
+use Bitrix\Bizproc\Activity\Enum\ActivityNodeType;
+use Bitrix\Bizproc\Internal\Helper\Activity\ActivityHelper;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasFragment;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasContainer;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasContainerLayoutAdapter;
+
 /** @noinspection AutoloadingIssuesInspection */
 final class StateMachineToNodeWorkflow extends SequentialToNodeWorkflow
 {
-	protected ?bool $shiftStatePos = null;
+	private const STATE_CHILD_FRAME_GAP = 1;
+	private const STATE_CHILD_COLUMN_OFFSET = 3;
+
 	protected array $stateNames;
+	private float $stateChildFrameTopRow = 4;
 
 	/** @noinspection PhpMissingParentConstructorInspection */
 	public function __construct(array $template)
@@ -23,73 +32,122 @@ final class StateMachineToNodeWorkflow extends SequentialToNodeWorkflow
 		$this->setStartTrigger('ManualStartTrigger');
 	}
 
-	protected function convertChild(string $outputName, array $child): array
+	protected function buildLayout(): Layout\LayoutResult
 	{
-		if ($child['Type'] === 'StateActivity')
+		[$startName, $layout] = $this->createTriggers();
+
+		$startPoint = $layout->calculateNodeBounds()->getRightBottomPoint()->moveBy(1, 1);
+
+		foreach ($this->rootActivity['Children'] as $i => $state)
 		{
-			return $this->convertStateActivity($outputName, $child);
+			$state['Type'] = 'StateNode';
+			$stateContainer = CanvasContainer::create();
+			$stateContainer->appendNode($this->createCanvasNode($state));
+
+			$statesLayout = (new CanvasContainerLayoutAdapter($this->getCanvasLayoutAdapter()))->convertContainerToLayout(
+				$stateContainer,
+				'',
+				$startPoint->moveBy($i, ($i % 2))
+			);
+			$layout->appendLayout($statesLayout);
+
+			//$this->createStateChildLinks($state, $state['Name'], $layout);
 		}
 
-		return parent::convertChild($outputName, $child);
+		foreach ($this->rootActivity['Children'] as $state)
+		{
+			$layout->appendLayout(
+				$this->convertStateChildren(
+					$state,
+					$layout->findAnchor($state['Name'])
+				)
+			);
+		}
+
+		[$layout->links, $layout->children] = $this->optimizeChildren(
+			$layout->links,
+			$layout->children
+		);
+
+		return $layout;
 	}
 
-	private function convertStateActivity(string $outputName, array $activity): array
+	protected function createTriggers(): array
 	{
-		$isFirstState = $this->shiftStatePos === null;
-		$this->shiftStatePos ??= false;
+		[$startName, $layout] = parent::createTriggers();
 
-		$this->setChildPositionNextRow($outputName, $activity['Name']);
-		if (!$isFirstState)
+		$startStateName = $this->rootActivity['Children'][0]['Name'] ?? null;
+		if ($startStateName)
 		{
-			$this->setChildPositionNextColumn($outputName, $activity['Name']);
+			$activityDescription = \CBPRuntime::getRuntime()->getActivityDescription('SetStateNode');
+			$name = ActivityHelper::generateName();
+
+			$layout->appendLayout(Layout\LayoutResult::createFromNode(
+				[
+					'Name' => $name,
+					'Type' => $activityDescription['CLASS'],
+					'Properties' => [
+						'TargetStateName' => $startStateName,
+						'Title' => $activityDescription['NAME'] ?? null
+					],
+				],
+				$layout->calculateNodeBounds()->getRightBottomPoint()
+			));
+
+			$layout->addLink($startName, $name);
 		}
 
-		[$links, $children] = $this->convertStateChildren($activity);
-		array_unshift($children, $activity);
-
-		if ($isFirstState)
-		{
-			array_unshift($links, $this->createLink($outputName, $activity['Name']));
-		}
-
-		return [
-			$activity['Name'],
-			$links,
-			$children,
-		];
+		return [$startName, $layout];
 	}
 
-	private function convertStateChildren(array $state): array
+	private function convertStateChildren(array $state, Layout\GridPoint $statePoint): Layout\LayoutResult
 	{
-		$links = [];
-		$children = [];
-
-		$parentRow = $state['Name'];
+		$result = Layout\LayoutResult::createFromAnchor($state['Name'], $statePoint);
+		$innerLayouts = [];
 
 		foreach ($state['Children'] as $stateChild)
 		{
-			[$childLinks, $child] = $this->convertStateChild($stateChild);
-			$this->setChildPositionNextRow($parentRow, $child['Name']);
-
-			array_push($links, ...$childLinks);
-			$links[] = $this->createLink($state['Name'] . ':a0', $child['Name'] . ':t0');
-			$children[] = $child;
-
-			$parentRow = $child['Name'];
+			['activity' => $child, 'innerLayout' => $childInnerLayout] = $this->convertStateChild($stateChild);
+			if ($childInnerLayout)
+			{
+				$innerLayouts[] = [$child, $childInnerLayout];
+			}
 		}
 
+		foreach ($innerLayouts as [$child, $childInnerLayout, $stateChild])
+		{
+			$result->appendLayout($this->moveStateChildLayoutToCanvas($child, $childInnerLayout));
 
-		return [$links, $children];
+			if (isset($child['Children'][0]['Children'][0]['Name']))
+			{
+				$outPortName = match ($child['Type'])
+				{
+					'StateInitializationActivity' => ':o0',
+					'StateFinalizationActivity' => ':o1',
+					default => ':o2',
+				};
+
+				$result->addLink($state['Name'] . $outPortName, $child['Children'][0]['Children'][0]['Name'] . ':i0');
+			}
+		}
+
+		$frame = CanvasFragment::createFromActivities($result->children)->wrapInFrame(
+			$state['Name'] . '_frame',
+			$state['Properties']['Title'] ?? $state['Name']
+		);
+		$this->getCanvasLayoutAdapter()->appendFrameToLayout($result, $frame);
+
+		return $result;
 	}
 
 	private function convertStateChild(array $child): array
 	{
-		if ($child['Type'] === 'EventDrivenActivity')
-		{
-			$isDelay = ($child['Children'][0]['Type'] ?? '') === 'DelayActivity';
-			$child['PresetId'] = $isDelay ? 'DELAY' : 'CMD';
-			$child['Properties']['Title'] = $child['Children'][0]['Properties']['Title'];
-		}
+		//if ($child['Type'] === 'EventDrivenActivity')
+		//{
+		//	$isDelay = ($child['Children'][0]['Type'] ?? '') === 'DelayActivity';
+		//	$child['PresetId'] = $isDelay ? 'DELAY' : 'CMD';
+		//	$child['Properties']['Title'] = $child['Children'][0]['Properties']['Title'];
+		//}
 
 		if (
 			$child['Type'] === 'StateInitializationActivity'
@@ -97,18 +155,20 @@ final class StateMachineToNodeWorkflow extends SequentialToNodeWorkflow
 			|| $child['Type'] === 'EventDrivenActivity'
 		)
 		{
-			$links = $this->createStateChildLinks($child, $child['Name']);
+			$converter = new StateChildToNodeWorkflow($child);
+			$conversion = $converter->convertAndExtractLayout();
+			$child['Children'] = $conversion['template'];
 
-			//todo: proto
-			$child['Children'] = (new StateChildToNodeWorkflow($child))->convert();
-
-			return [$links, $child];
+			return [
+				'activity' => $child,
+				'innerLayout' => $this->extractStateChildInnerLayout($child, $conversion['layout']),
+			];
 		}
 
 		throw new \CBPArgumentException('unexpected child activity type in StateActivity: ' . $child['Type']);
 	}
 
-	private function createStateChildLinks(array $child, string $outputName): array
+	private function createStateChildLinks(array $child, string $outputName, Layout\LayoutResult $layout): array
 	{
 		$links = [];
 		foreach ($this->walkChildren($child) as $activity)
@@ -118,7 +178,7 @@ final class StateMachineToNodeWorkflow extends SequentialToNodeWorkflow
 				$targetState = $activity['Properties']['TargetStateName'] ?? null;
 				if ($targetState && in_array($targetState, $this->stateNames, true))
 				{
-					$links[] = $this->createLink($outputName, $targetState);
+					$layout->addLink($outputName, $targetState);
 				}
 			}
 		}
@@ -142,30 +202,80 @@ final class StateMachineToNodeWorkflow extends SequentialToNodeWorkflow
 		}
 	}
 
+	private function extractStateChildInnerLayout(array $child, Layout\LayoutResult $layout): ?Layout\LayoutResult
+	{
+		$children = array_values(
+			$layout->children,
+		);
+
+		if (empty($children))
+		{
+			return null;
+		}
+
+		$childNames = array_column($children, 'Name');
+		$allowedNames = $childNames;
+		$links = array_values(array_filter(
+			$layout->links,
+			fn(array $link) => $this->isStateChildInnerLink($link, $allowedNames)
+		));
+		$bounds = $layout->calculateNodeBoundsByNames($childNames);
+		$result = new Layout\LayoutResult($child['Name'], $bounds);
+		$result->children = $children;
+		$result->links = $links;
+
+		foreach ($childNames as $childName)
+		{
+			if (isset($layout->anchors[$childName]))
+			{
+				$result->anchors[$childName] = $layout->anchors[$childName];
+			}
+
+			$frame = $layout->findNodeFrame($childName);
+			if ($frame)
+			{
+				$result->nodeFrames[$childName] = $frame;
+			}
+		}
+
+		return $result;
+	}
+
+	private function isStateChildInnerLink(array $link, array $allowedNames): bool
+	{
+		[$sourceName, $targetName] = array_map(
+			[$this, 'extractNodeNameFromLink'],
+			array_slice($link, 0, 2)
+		);
+
+		return in_array($sourceName, $allowedNames, true) && in_array($targetName, $allowedNames, true);
+	}
+
+	private function extractNodeNameFromLink(string $nodeId): string
+	{
+		return explode(':', $nodeId, 2)[0];
+	}
+
+	private function moveStateChildLayoutToCanvas(array $child, Layout\LayoutResult $layout): Layout\LayoutResult
+	{
+		$childNames = array_column($layout->children, 'Name');
+		$bounds = $layout->calculateNodeBoundsByNames($childNames);
+		$layout->moveBy(
+			$this->stateChildFrameTopRow - $bounds->top,
+			self::STATE_CHILD_COLUMN_OFFSET
+		);
+
+		$this->stateChildFrameTopRow += $bounds->calculateHeight() + self::STATE_CHILD_FRAME_GAP;
+
+		return $layout;
+	}
+
 	protected function makeNodeSettings(array $activity): array
 	{
 		$settings = parent::makeNodeSettings($activity);
-		if ($activity['Type'] === 'StateActivity')
+		if ($activity['Type'] === 'StateNode')
 		{
-			$settings['ports'] = [
-				'input' => [['id' => 'i0']],
-				'aux' => [['id' => 'a0']],
-			];
-			$settings['dimensions'] = [
-				'width' => 240,
-				'height' => null,
-			];
-		}
-		if (
-			$activity['Type'] === 'StateInitializationActivity'
-			|| $activity['Type'] === 'StateFinalizationActivity'
-			|| $activity['Type'] === 'EventDrivenActivity'
-		)
-		{
-			$settings['ports'] = [
-				'output' => [['id' => 'o0']],
-				'topAux' => [['id' => 't0']],
-			];
+			$settings['ports'] = \CBPRuntime::getRuntime()->getActivityDescription($activity['Type'])['NODE_SETTINGS']['ports'];
 		}
 
 		return $settings;

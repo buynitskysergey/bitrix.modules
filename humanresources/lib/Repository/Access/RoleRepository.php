@@ -7,9 +7,9 @@ use Bitrix\HumanResources\Model\Access\AccessRoleTable;
 use Bitrix\HumanResources\Model\Access\EO_AccessRole;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Entity\DeleteResult;
-use Bitrix\Main\Entity\UpdateResult;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\ORM\Data\AddResult;
+use Bitrix\Main\ORM\Data\UpdateResult;
 use Bitrix\Main\SystemException;
 
 class RoleRepository
@@ -23,10 +23,54 @@ class RoleRepository
 		if ($category)
 		{
 			$parameters['filter'] =  [
-					'=CATEGORY' => $category->value,
+				'=CATEGORY' => $category->value,
 			];
 		}
+
 		return AccessRoleTable::getList($parameters)->fetchAll();
+	}
+
+	/**
+	 * @param array<int> $roleIds
+	 */
+	public function getRolesByIds(array $roleIds, RoleCategory $category): array
+	{
+		if (empty($roleIds))
+		{
+			return [];
+		}
+
+		$roles = [];
+		foreach (array_chunk(array_values(array_unique($roleIds)), 300) as $roleIdsChunk)
+		{
+			$result = AccessRoleTable::getList([
+				'select' => ['ID', 'NAME', 'CATEGORY'],
+				'filter' => [
+					'@ID' => $roleIdsChunk,
+					'=CATEGORY' => $category->value,
+				],
+			]);
+			while ($role = $result->fetch())
+			{
+				$roles[] = $role;
+			}
+		}
+
+		return $roles;
+	}
+
+	public function getRoleById(int $roleId, RoleCategory $category): ?array
+	{
+		$role = AccessRoleTable::getList([
+			'select' => ['ID', 'NAME', 'CATEGORY'],
+			'filter' => [
+				'=ID' => $roleId,
+				'=CATEGORY' => $category->value,
+			],
+			'limit' => 1,
+		])->fetch();
+
+		return $role ?: null;
 	}
 
 	public function create(string $roleName, RoleCategory $category = RoleCategory::Department): AddResult
@@ -35,6 +79,11 @@ class RoleRepository
 			'NAME' => $roleName,
 			'CATEGORY' => $category->value,
 		]);
+	}
+
+	public function updateName(int $roleId, string $roleName): UpdateResult
+	{
+		return AccessRoleTable::update($roleId, ['NAME' => $roleName]);
 	}
 
 	public function delete(int $roleId): DeleteResult

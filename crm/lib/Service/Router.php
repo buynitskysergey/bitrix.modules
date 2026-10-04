@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\Crm\Service;
 
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Decorator\JsonSerializable\ClearNullValues;
 use Bitrix\Crm\Integration\Im\Chat;
 use Bitrix\Crm\Integration\Intranet\SystemPageProvider\ActivityPage;
@@ -811,6 +812,59 @@ class Router
 	public function getActivityDetailsShareableUrl(int $activityId, int $chatId): ?Uri
 	{
 		$userId = (int)CurrentUser::get()->getId();
+
+		// Shares the read-permission check and base URL resolution with getActivityDetailsUrl().
+		if ($this->getActivityDetailsUrl($activityId, $userId) === null)
+		{
+			return null;
+		}
+
+		if (!Loader::includeModule('im') || Chat::getUserRelationToChat($chatId, $userId) === null)
+		{
+			return null;
+		}
+
+		$token = PermissionToken::createViewActivityToken($activityId, $chatId);
+
+		return new Uri('/crm/activity/details/' . $activityId . '/?act=' . urlencode($token));
+	}
+
+	/**
+	 * Returns the details Uri of an email activity signed with a task-scoped read token.
+	 *
+	 * Intentionally does not check CRM permissions of the current user: the token grants read access
+	 * by task access instead. Only the email provider is accepted, so no other activity kind can be
+	 * opened this way. The binding between the activity and the task must be proven by the caller:
+	 * the source table belongs to the mail module and must not be read from crm.
+	 *
+	 * @internal Written for the CRM email source of a task; the only caller is
+	 *   {@see \Bitrix\Mail\Integration\Crm\Activity::getTaskScopedDetailsUrl()}.
+	 */
+	public function getActivityDetailsUrlWithTaskAccess(int $activityId, int $taskId): ?Uri
+	{
+		if ($activityId <= 0 || $taskId <= 0)
+		{
+			return null;
+		}
+
+		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
+		if (!$activity)
+		{
+			return null;
+		}
+
+		if (($activity['PROVIDER_ID'] ?? null) !== Email::getId())
+		{
+			return null;
+		}
+
+		$token = PermissionToken::createViewActivityTokenForTask($activityId, $taskId);
+
+		return new Uri('/crm/activity/details/' . $activityId . '/?act=' . urlencode($token));
+	}
+
+	public function getActivityDetailsUrl(int $activityId, int $userId): ?Uri
+	{
 		if ($userId <= 0)
 		{
 			return null;
@@ -828,14 +882,7 @@ class Router
 			return null;
 		}
 
-		if (!Loader::includeModule('im') || Chat::getUserRelationToChat($chatId, $userId) === null)
-		{
-			return null;
-		}
-
-		$token = PermissionToken::createViewActivityToken($activityId, $chatId);
-
-		return new Uri('/crm/activity/details/' . $activityId . '/?act=' . urlencode($token));
+		return new Uri('/crm/activity/details/' . $activityId . '/');
 	}
 
 	public function getDeadlinesUrl(int $entityTypeId, int $categoryId = null): ?Uri

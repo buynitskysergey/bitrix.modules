@@ -13,6 +13,7 @@ use Bitrix\Crm\Automation;
 use Bitrix\Crm\EntityAddress;
 use Bitrix\Crm\EntityAddressType;
 use Bitrix\Crm\EntityManageFacility;
+use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Crm\Integration\BizProc\Starter\CrmStarter;
 use Bitrix\Crm\Integration\BizProc\Starter\Dto\DocumentDto;
 use Bitrix\Crm\Integration\BizProc\Starter\Dto\RunDataDto;
@@ -735,9 +736,13 @@ class ResultEntity
 				{
 					$dynamicItem->setProductRowsFromArrays($productRows);
 				}
+				$context = (new Crm\Service\Context())
+					->setUserId($this->assignedById ?: 1)
+					->setAnalytics(['c_section' => Dictionary::SECTION_CRM_FORM])
+				;
 				$dynamicOperation = $dynamicFactory->getAddOperation(
 					$dynamicItem,
-					(new Crm\Service\Context())->setUserId($this->assignedById ?: 1)
+					$context
 				);
 				$dynamicResult = $dynamicOperation
 					->disableCheckAccess()
@@ -760,6 +765,9 @@ class ResultEntity
 				/** @var \CCrmLead $entityInstance */
 				$entityInstance = new $entityClassName(false);
 				$entityFields['WEBFORM_ID'] = $this->formId;
+				$addOptions['ANALYTICS'] = [
+					'c_section' => Dictionary::SECTION_CRM_FORM,
+				];
 				if($isEntityLead)
 				{
 					$this->debugLogger->addAdditionalContext('LEAD:EntityFields', $entityFields);
@@ -1926,16 +1934,19 @@ class ResultEntity
 			);
 		}
 
+		$triggerData = array(
+			'WEBFORM_ID' => $this->formId,
+			'WEBFORM_NAME' => (string)($this->formData['NAME'] ?? ''),
+			'WEBFORM_RESULT_ID' => (int)$this->resultId,
+			'WEBFORM_SOURCE_URL' => (string)($this->getTrace()->getUrl() ?? ''),
+		);
+
 		if ($this->isCallback)
 		{
-			Automation\Trigger\CallBackTrigger::execute($bindings, array(
-				'WEBFORM_ID' => $this->formId
-			));
+			Automation\Trigger\CallBackTrigger::execute($bindings, $triggerData);
 		}
 
-		Automation\Trigger\WebFormTrigger::execute($bindings, array(
-			'WEBFORM_ID' => $this->formId
-		));
+		Automation\Trigger\WebFormTrigger::execute($bindings, $triggerData);
 	}
 
 	protected function prepareFields($fields)

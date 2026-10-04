@@ -22,6 +22,16 @@ final class FullReportAiGenerator
 				FullReportReadyTrigger::FIELD_USER_ID => $userId,
 			];
 
+			// Resolve the report recipient from the single source of truth — the most direct manager —
+			// via the same V2 service the sent flow uses (FullReportUserService::getManagerIds wraps
+			// CTimeMan::getUserManagers and filters out self/invalid ids), and carry it into the workflow
+			// so the template addresses it instead of recomputing the recipient itself.
+			$managerIds = Container::getInstance()->getFullReportUserService()->getManagerIds($userId);
+			if (!empty($managerIds))
+			{
+				$fields[FullReportReadyTrigger::FIELD_MANAGER_ID] = $managerIds[0];
+			}
+
 			Starter::getByScenario(Scenario::onEvent)
 				->setContext(new ContextDto('timeman'))
 				->addEvent('FullReportReadyTrigger', [], $fields)

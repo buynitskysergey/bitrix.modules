@@ -1,0 +1,7 @@
+{
+    "defaultTableName": "b_messageservice_message",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js"
+    }
+}

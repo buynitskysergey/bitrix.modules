@@ -8,6 +8,8 @@ use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\RepeatSale\Log\Entity\RepeatSaleLog;
 use Bitrix\Crm\RepeatSale\Log\Entity\RepeatSaleLogTable;
 use Bitrix\Crm\RepeatSale\Log\LogItem;
+use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
+use Bitrix\Crm\RepeatSale\Segment\SegmentCode;
 use Bitrix\Crm\Traits\Singleton;
 use Bitrix\Main\Analytics\AnalyticsEvent;
 use Bitrix\Main\Application;
@@ -53,10 +55,10 @@ class RepeatSaleLogController
 		$repeatSaleLogItem->setUpdatedAt(new DateTime());
 		$repeatSaleLogItem->save();
 
-		$this->sendAnalytics($stageSemanticId);
+		$this->sendAnalytics($stageSemanticId, $repeatSaleLogItem->getSegmentId());
 	}
 
-	private function sendAnalytics(string $stageSemanticId): void
+	private function sendAnalytics(string $stageSemanticId, int $segmentId): void
 	{
 		$availableIds = [PhaseSemantics::SUCCESS, PhaseSemantics::FAILURE];
 		if (!in_array($stageSemanticId, $availableIds, true))
@@ -72,15 +74,36 @@ class RepeatSaleLogController
 
 		try
 		{
-			$event
-				->setElement($stageSemanticId === PhaseSemantics::SUCCESS ? 'won' : 'lose')
-				->send()
-			;
+			$event->setElement($stageSemanticId === PhaseSemantics::SUCCESS ? 'won' : 'lose');
+
+			$segmentAlias = $this->getSegmentAnalyticsAlias($segmentId);
+			if ($segmentAlias !== null)
+			{
+				$event->setP5('segment_' . $segmentAlias);
+			}
+
+			$event->send();
 		}
 		catch (\Exception $e)
 		{
 
 		}
+	}
+
+	private function getSegmentAnalyticsAlias(int $segmentId): ?string
+	{
+		if ($segmentId <= 0)
+		{
+			return null;
+		}
+
+		$code = RepeatSaleSegmentController::getInstance()->getById($segmentId)?->getCode();
+		if ($code === null || $code === '')
+		{
+			return null;
+		}
+
+		return SegmentCode::tryFrom($code)?->toAnalyticsAlias();
 	}
 
 	private function getFields(LogItem $logItem): array

@@ -65,23 +65,64 @@ class Update extends Operation
 
 	public function isItemChanged(): bool
 	{
+		return $this->hasChangesOutside([]);
+	}
+
+	protected function areOnlyServiceFieldsChanged(): bool
+	{
+		return !$this->hasChangesOutside($this->getServiceFieldNames());
+	}
+
+	/**
+	 * Whitelist for the "only service fields changed" check used together with
+	 * Operation::markAsSystemUpdate(). The modification stamp fields come from
+	 * the same source as the reset list in Operation::preSaveChecks(): the
+	 * UpdatedBy/UpdatedTime field-level processors set them on every update
+	 * (see Bitrix\Crm\Field\UpdatedBy::processLogic), so a system update must
+	 * ignore that auto-fill.
+	 */
+	private function getServiceFieldNames(): array
+	{
+		return array_merge(
+			[
+				Item::FIELD_NAME_LAST_ACTIVITY_TIME,
+				Item::FIELD_NAME_LAST_ACTIVITY_BY,
+			],
+			$this->getModificationStampFieldNames(),
+		);
+	}
+
+	/**
+	 * Returns true when the item has changes in fields other than the ignored
+	 * ones. Single traversal shared by isItemChanged() (nothing ignored) and
+	 * areOnlyServiceFieldsChanged() (service fields ignored).
+	 */
+	private function hasChangesOutside(array $ignoredFieldNames): bool
+	{
 		foreach ($this->fieldsCollection as $field)
 		{
-			if ($this->item->isFieldDisabled($field->getName()))
+			$name = $field->getName();
+			if (in_array($name, $ignoredFieldNames, true))
 			{
 				continue;
 			}
-
-			if ($field->isValueCanBeChanged() && $this->item->isChanged($field->getName()))
+			if ($this->item->isFieldDisabled($name))
+			{
+				continue;
+			}
+			if ($field->isValueCanBeChanged() && $this->item->isChanged($name))
 			{
 				return true;
 			}
 		}
 
 		$additionalFields = [Item::FIELD_NAME_PRODUCTS, Item::FIELD_NAME_FM, Item::FIELD_NAME_LAST_ACTIVITY_TIME];
-
 		foreach ($additionalFields as $fieldName)
 		{
+			if (in_array($fieldName, $ignoredFieldNames, true))
+			{
+				continue;
+			}
 			if (
 				$this->item->hasField($fieldName)
 				&& $this->item->isChanged($fieldName)

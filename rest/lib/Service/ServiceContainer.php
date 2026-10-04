@@ -8,6 +8,7 @@ use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\ObjectNotFoundException;
 use Bitrix\Rest\Repository\AppRepository;
 use Bitrix\Rest\Repository\IntegrationRepository;
+use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
 use Bitrix\Rest\Contract;
@@ -69,5 +70,10 @@ class ServiceContainer implements ContainerInterface
 	public function getAPAuthPermissionService(): Contract\Service\APAuth\PermissionService
 	{
 		return $this->get('apauth.permission');
+	}
+
+	public function getVibePlusTariffAccessService(): TariffAccessService
+	{
+		return $this->get('vibe_plus.tariff_access');
 	}
 }

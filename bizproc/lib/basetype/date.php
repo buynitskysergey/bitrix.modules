@@ -511,6 +511,14 @@ class Date extends Base
 
 	public static function getZones()
 	{
+		static $zones = [];
+
+		$language = Loc::getCurrentLang();
+		if (isset($zones[$language]))
+		{
+			return $zones[$language];
+		}
+
 		$serverOffset = (new \DateTime())->getOffset();
 
 		$timezones = [];
@@ -550,7 +558,9 @@ class Date extends Base
 			];
 		}
 
-		return $result;
+		$zones[$language] = $result;
+
+		return $zones[$language];
 	}
 
 	public static function compareValues($valueA, $valueB)

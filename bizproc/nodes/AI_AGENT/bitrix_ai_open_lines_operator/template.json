@@ -12,6 +12,7 @@
             "Multiple": 0,
             "Options": [],
             "Default": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_DEFAULT_1###",
+            "Source": "SetupTemplateActivity",
             "Settings": []
         },
         "openLineList": {
@@ -22,6 +23,7 @@
             "Multiple": 1,
             "Options": [],
             "Default": [],
+            "Source": "SetupTemplateActivity",
             "Settings": {
                 "selectorId": "imopenlines-queue-provider",
                 "selector": {
@@ -47,6 +49,7 @@
             "Multiple": 0,
             "Options": [],
             "Default": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_DEFAULT_2###",
+            "Source": "SetupTemplateActivity",
             "Settings": []
         },
         "communicationRules": {
@@ -57,6 +60,7 @@
             "Multiple": 0,
             "Options": [],
             "Default": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_DEFAULT_3###",
+            "Source": "SetupTemplateActivity",
             "Settings": []
         },
         "additionalContext": {
@@ -67,6 +71,7 @@
             "Multiple": 0,
             "Options": [],
             "Default": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_DEFAULT_4###",
+            "Source": "SetupTemplateActivity",
             "Settings": []
         },
         "rag": {
@@ -77,6 +82,7 @@
             "Multiple": 0,
             "Options": [],
             "Default": "",
+            "Source": "SetupTemplateActivity",
             "Settings": []
         },
         "isCrmEnabled": {
@@ -90,6 +96,7 @@
                 "Нет": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_Нет_1###"
             },
             "Default": "###BIZPROC_NODES_BITRIX_AI_OPEN_LINES_OPERATOR_Нет_1###",
+            "Source": "SetupTemplateActivity",
             "Settings": []
         }
     },

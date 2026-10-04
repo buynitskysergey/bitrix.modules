@@ -35,7 +35,12 @@ final class Parameters
 			$this->fillValuesWithTemplateId($templateId, $templateParameters);
 		}
 
-		return $this->values[$templateId];
+		$values = $this->values[$templateId];
+
+		// service-only key: the client must never choose the workflow instance id
+		unset($values[\CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID]);
+
+		return $values;
 	}
 
 	protected function fillValuesWithTemplateId(int $templateId, array $templateParameters): void

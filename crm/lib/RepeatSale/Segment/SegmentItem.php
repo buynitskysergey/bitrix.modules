@@ -5,6 +5,7 @@ namespace Bitrix\Crm\RepeatSale\Segment;
 use Bitrix\Crm\Format\PlaceholderFormatter;
 use Bitrix\Crm\RepeatSale\Segment\Entity\RepeatSaleSegment;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\UserTable;
 use CCrmOwnerType;
 
 final class SegmentItem
@@ -13,6 +14,7 @@ final class SegmentItem
 	private string $title;
 	private string $prompt;
 	private bool $isEnabled = true;
+	private bool $isAutoDisabled = false;
 	private bool $isSystem = false;
 	private ?string $code = null;
 	private ?string $baseSegmentCode = null;
@@ -36,6 +38,7 @@ final class SegmentItem
 		$instance->title = $segmentItem->getTitle();
 		$instance->prompt = $segmentItem->getPrompt();
 		$instance->isEnabled = $segmentItem->getIsEnabled();
+		$instance->isAutoDisabled = $segmentItem->getIsAutoDisabled();
 		$instance->isSystem = $segmentItem->getIsSystem();
 		$instance->code = $segmentItem->getCode();
 		$instance->baseSegmentCode = $segmentItem->getBaseSegmentCode();
@@ -50,12 +53,41 @@ final class SegmentItem
 		$instance->clientCoverage = $segmentItem->getClientCoverage();
 		$instance->minimumDaysAfterLastClosedEntity = $segmentItem->getMinimumDaysAfterLastClosedEntity();
 
+		$userIds = [];
 		foreach ($segmentItem->getAssignmentUsers() as $assignmentUser)
 		{
-			$instance->assignmentUserIds[] = $assignmentUser->getUserId();
+			$userIds[] = $assignmentUser->getUserId();
 		}
 
+		$instance->assignmentUserIds = self::filterActiveUserIds($userIds);
+
 		return $instance;
+	}
+
+	private static function filterActiveUserIds(array $userIds): array
+	{
+		if (empty($userIds))
+		{
+			return [];
+		}
+
+		$activeIds = [];
+		$rows = UserTable::getList([
+			'select' => ['ID'],
+			'filter' => [
+				'@ID' => $userIds,
+				'=ACTIVE' => 'Y',
+			],
+		]);
+		foreach ($rows as $row)
+		{
+			$activeIds[(int)$row['ID']] = true;
+		}
+
+		return array_values(array_filter(
+			$userIds,
+			static fn($userId) => isset($activeIds[(int)$userId]),
+		));
 	}
 
 	public static function createFromArray(array $data): self
@@ -66,6 +98,7 @@ final class SegmentItem
 		$instance->title = $data['title'] ?? '';
 		$instance->prompt = $data['prompt'] ?? '';
 		$instance->isEnabled = $data['isEnabled'] ?? true;
+		$instance->isAutoDisabled = $data['isAutoDisabled'] ?? false;
 		$instance->isSystem = $data['isSystem'] ?? false;
 		$instance->code = $data['code'] ?? null;
 		$instance->baseSegmentCode = $data['baseSegmentCode'] ?? null;
@@ -92,6 +125,7 @@ final class SegmentItem
 			'prompt' => $this->prompt,
 			'description' => $this->getDescription(),
 			'isEnabled' => $this->isEnabled,
+			'isAutoDisabled' => $this->isAutoDisabled,
 			'code' => $this->code,
 			'entityTypeId' => $this->entityTypeId,
 			'entityCategoryId' => $this->entityCategoryId,
@@ -151,6 +185,18 @@ final class SegmentItem
 	public function setIsEnabled(bool $isEnabled): self
 	{
 		$this->isEnabled = $isEnabled;
+
+		return $this;
+	}
+
+	public function isAutoDisabled(): bool
+	{
+		return $this->isAutoDisabled;
+	}
+
+	public function setIsAutoDisabled(bool $isAutoDisabled): self
+	{
+		$this->isAutoDisabled = $isAutoDisabled;
 
 		return $this;
 	}

@@ -10191,3 +10191,489 @@ namespace Bitrix\Bizproc\Service\Entity {
 	 */
 	class EO_Tracking_Entity extends \Bitrix\Main\ORM\Entity {}
 }
+/* ORMENTITYANNOTATION:Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentInstanceTable:bizproc/lib/Internal/Model/AiAgent/ManagedAgentInstanceTable.php */
+namespace Bitrix\Bizproc\Internal\Model\AiAgent {
+	/**
+	 * EO_ManagedAgentInstance
+	 * @see \Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentInstanceTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \string getIdentityHash()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setIdentityHash(\string|\Bitrix\Main\DB\SqlExpression $identityHash)
+	 * @method bool hasIdentityHash()
+	 * @method bool isIdentityHashFilled()
+	 * @method bool isIdentityHashChanged()
+	 * @method \string remindActualIdentityHash()
+	 * @method \string requireIdentityHash()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetIdentityHash()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetIdentityHash()
+	 * @method \string fillIdentityHash()
+	 * @method \string getSystemCode()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setSystemCode(\string|\Bitrix\Main\DB\SqlExpression $systemCode)
+	 * @method bool hasSystemCode()
+	 * @method bool isSystemCodeFilled()
+	 * @method bool isSystemCodeChanged()
+	 * @method \string remindActualSystemCode()
+	 * @method \string requireSystemCode()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetSystemCode()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetSystemCode()
+	 * @method \string fillSystemCode()
+	 * @method \string getContextNamespace()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setContextNamespace(\string|\Bitrix\Main\DB\SqlExpression $contextNamespace)
+	 * @method bool hasContextNamespace()
+	 * @method bool isContextNamespaceFilled()
+	 * @method bool isContextNamespaceChanged()
+	 * @method \string remindActualContextNamespace()
+	 * @method \string requireContextNamespace()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetContextNamespace()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetContextNamespace()
+	 * @method \string fillContextNamespace()
+	 * @method \string getContextType()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setContextType(\string|\Bitrix\Main\DB\SqlExpression $contextType)
+	 * @method bool hasContextType()
+	 * @method bool isContextTypeFilled()
+	 * @method bool isContextTypeChanged()
+	 * @method \string remindActualContextType()
+	 * @method \string requireContextType()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetContextType()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetContextType()
+	 * @method \string fillContextType()
+	 * @method \string getContextId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setContextId(\string|\Bitrix\Main\DB\SqlExpression $contextId)
+	 * @method bool hasContextId()
+	 * @method bool isContextIdFilled()
+	 * @method bool isContextIdChanged()
+	 * @method \string remindActualContextId()
+	 * @method \string requireContextId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetContextId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetContextId()
+	 * @method \string fillContextId()
+	 * @method \int getUserId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setUserId(\int|\Bitrix\Main\DB\SqlExpression $userId)
+	 * @method bool hasUserId()
+	 * @method bool isUserIdFilled()
+	 * @method bool isUserIdChanged()
+	 * @method \int remindActualUserId()
+	 * @method \int requireUserId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetUserId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetUserId()
+	 * @method \int fillUserId()
+	 * @method null|\int getTemplateId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setTemplateId(null|\int|\Bitrix\Main\DB\SqlExpression $templateId)
+	 * @method bool hasTemplateId()
+	 * @method bool isTemplateIdFilled()
+	 * @method bool isTemplateIdChanged()
+	 * @method null|\int remindActualTemplateId()
+	 * @method null|\int requireTemplateId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetTemplateId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetTemplateId()
+	 * @method null|\int fillTemplateId()
+	 * @method \string getState()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setState(\string|\Bitrix\Main\DB\SqlExpression $state)
+	 * @method bool hasState()
+	 * @method bool isStateFilled()
+	 * @method bool isStateChanged()
+	 * @method \string remindActualState()
+	 * @method \string requireState()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetState()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetState()
+	 * @method \string fillState()
+	 * @method \string getConfigFingerprint()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setConfigFingerprint(\string|\Bitrix\Main\DB\SqlExpression $configFingerprint)
+	 * @method bool hasConfigFingerprint()
+	 * @method bool isConfigFingerprintFilled()
+	 * @method bool isConfigFingerprintChanged()
+	 * @method \string remindActualConfigFingerprint()
+	 * @method \string requireConfigFingerprint()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetConfigFingerprint()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetConfigFingerprint()
+	 * @method \string fillConfigFingerprint()
+	 * @method \int getRetryCount()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setRetryCount(\int|\Bitrix\Main\DB\SqlExpression $retryCount)
+	 * @method bool hasRetryCount()
+	 * @method bool isRetryCountFilled()
+	 * @method bool isRetryCountChanged()
+	 * @method \int remindActualRetryCount()
+	 * @method \int requireRetryCount()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetRetryCount()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetRetryCount()
+	 * @method \int fillRetryCount()
+	 * @method null|\Bitrix\Main\Type\DateTime getNextRetryAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setNextRetryAt(null|\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $nextRetryAt)
+	 * @method bool hasNextRetryAt()
+	 * @method bool isNextRetryAtFilled()
+	 * @method bool isNextRetryAtChanged()
+	 * @method null|\Bitrix\Main\Type\DateTime remindActualNextRetryAt()
+	 * @method null|\Bitrix\Main\Type\DateTime requireNextRetryAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetNextRetryAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetNextRetryAt()
+	 * @method null|\Bitrix\Main\Type\DateTime fillNextRetryAt()
+	 * @method null|\string getLastErrorCode()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setLastErrorCode(null|\string|\Bitrix\Main\DB\SqlExpression $lastErrorCode)
+	 * @method bool hasLastErrorCode()
+	 * @method bool isLastErrorCodeFilled()
+	 * @method bool isLastErrorCodeChanged()
+	 * @method null|\string remindActualLastErrorCode()
+	 * @method null|\string requireLastErrorCode()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetLastErrorCode()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetLastErrorCode()
+	 * @method null|\string fillLastErrorCode()
+	 * @method \Bitrix\Main\Type\DateTime getCreatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setCreatedAt(\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $createdAt)
+	 * @method bool hasCreatedAt()
+	 * @method bool isCreatedAtFilled()
+	 * @method bool isCreatedAtChanged()
+	 * @method \Bitrix\Main\Type\DateTime remindActualCreatedAt()
+	 * @method \Bitrix\Main\Type\DateTime requireCreatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetCreatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetCreatedAt()
+	 * @method \Bitrix\Main\Type\DateTime fillCreatedAt()
+	 * @method \Bitrix\Main\Type\DateTime getUpdatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance setUpdatedAt(\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $updatedAt)
+	 * @method bool hasUpdatedAt()
+	 * @method bool isUpdatedAtFilled()
+	 * @method bool isUpdatedAtChanged()
+	 * @method \Bitrix\Main\Type\DateTime remindActualUpdatedAt()
+	 * @method \Bitrix\Main\Type\DateTime requireUpdatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance resetUpdatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unsetUpdatedAt()
+	 * @method \Bitrix\Main\Type\DateTime fillUpdatedAt()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance set($fieldName, $value)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance reset($fieldName)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method mixed fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance wakeUp($data)
+	 */
+	class EO_ManagedAgentInstance extends \Bitrix\Main\ORM\Objectify\EntityObject {
+		/* @var \Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentInstanceTable */
+		static public $dataClass = '\Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentInstanceTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\Bizproc\Internal\Model\AiAgent {
+	/**
+	 * EO_ManagedAgentInstance_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \string[] getIdentityHashList()
+	 * @method \string[] fillIdentityHash()
+	 * @method \string[] getSystemCodeList()
+	 * @method \string[] fillSystemCode()
+	 * @method \string[] getContextNamespaceList()
+	 * @method \string[] fillContextNamespace()
+	 * @method \string[] getContextTypeList()
+	 * @method \string[] fillContextType()
+	 * @method \string[] getContextIdList()
+	 * @method \string[] fillContextId()
+	 * @method \int[] getUserIdList()
+	 * @method \int[] fillUserId()
+	 * @method null|\int[] getTemplateIdList()
+	 * @method null|\int[] fillTemplateId()
+	 * @method \string[] getStateList()
+	 * @method \string[] fillState()
+	 * @method \string[] getConfigFingerprintList()
+	 * @method \string[] fillConfigFingerprint()
+	 * @method \int[] getRetryCountList()
+	 * @method \int[] fillRetryCount()
+	 * @method null|\Bitrix\Main\Type\DateTime[] getNextRetryAtList()
+	 * @method null|\Bitrix\Main\Type\DateTime[] fillNextRetryAt()
+	 * @method null|\string[] getLastErrorCodeList()
+	 * @method null|\string[] fillLastErrorCode()
+	 * @method \Bitrix\Main\Type\DateTime[] getCreatedAtList()
+	 * @method \Bitrix\Main\Type\DateTime[] fillCreatedAt()
+	 * @method \Bitrix\Main\Type\DateTime[] getUpdatedAtList()
+	 * @method \Bitrix\Main\Type\DateTime[] fillUpdatedAt()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance $object)
+	 * @method bool has(\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance getByPrimary($primary)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance[] getAll()
+	 * @method bool remove(\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance $object)
+	 * @method void removeByPrimary($primary)
+	 * @method array|\Bitrix\Main\ORM\Objectify\Collection|null fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection merge(?\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection $collection)
+	 * @method bool isEmpty()
+	 * @method array collectValues(int $valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, int $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL, bool $recursive = false)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance|null find(callable $callback)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection filter(callable $callback)
+	 */
+	class EO_ManagedAgentInstance_Collection extends \Bitrix\Main\ORM\Objectify\Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentInstanceTable */
+		static public $dataClass = '\Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentInstanceTable';
+	}
+}
+namespace Bitrix\Bizproc\Internal\Model\AiAgent {
+	/**
+	 * @method static EO_ManagedAgentInstance_Query query()
+	 * @method static EO_ManagedAgentInstance_Result getByPrimary($primary, array $parameters = [])
+	 * @method static EO_ManagedAgentInstance_Result getById($id)
+	 * @method static EO_ManagedAgentInstance_Result getList(array $parameters = [])
+	 * @method static EO_ManagedAgentInstance_Entity getEntity()
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance createObject($setDefaultValues = true)
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection createCollection()
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance wakeUpObject($row)
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection wakeUpCollection($rows)
+	 */
+	class ManagedAgentInstanceTable extends \Bitrix\Main\ORM\Data\DataManager {}
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_ManagedAgentInstance_Result exec()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance fetchObject()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection fetchCollection()
+	 */
+	class EO_ManagedAgentInstance_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance fetchObject()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection fetchCollection()
+	 */
+	class EO_ManagedAgentInstance_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance createObject($setDefaultValues = true)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection createCollection()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance wakeUpObject($row)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentInstance_Collection wakeUpCollection($rows)
+	 */
+	class EO_ManagedAgentInstance_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentResourceTable:bizproc/lib/Internal/Model/AiAgent/ManagedAgentResourceTable.php */
+namespace Bitrix\Bizproc\Internal\Model\AiAgent {
+	/**
+	 * EO_ManagedAgentResource
+	 * @see \Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentResourceTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource setId(\int|\Bitrix\Main\DB\SqlExpression $id)
+	 * @method bool hasId()
+	 * @method bool isIdFilled()
+	 * @method bool isIdChanged()
+	 * @method \int getInstanceId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource setInstanceId(\int|\Bitrix\Main\DB\SqlExpression $instanceId)
+	 * @method bool hasInstanceId()
+	 * @method bool isInstanceIdFilled()
+	 * @method bool isInstanceIdChanged()
+	 * @method \int remindActualInstanceId()
+	 * @method \int requireInstanceId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource resetInstanceId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource unsetInstanceId()
+	 * @method \int fillInstanceId()
+	 * @method \string getType()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource setType(\string|\Bitrix\Main\DB\SqlExpression $type)
+	 * @method bool hasType()
+	 * @method bool isTypeFilled()
+	 * @method bool isTypeChanged()
+	 * @method \string remindActualType()
+	 * @method \string requireType()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource resetType()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource unsetType()
+	 * @method \string fillType()
+	 * @method \string getResourceId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource setResourceId(\string|\Bitrix\Main\DB\SqlExpression $resourceId)
+	 * @method bool hasResourceId()
+	 * @method bool isResourceIdFilled()
+	 * @method bool isResourceIdChanged()
+	 * @method \string remindActualResourceId()
+	 * @method \string requireResourceId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource resetResourceId()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource unsetResourceId()
+	 * @method \string fillResourceId()
+	 * @method null|\string getData()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource setData(null|\string|\Bitrix\Main\DB\SqlExpression $data)
+	 * @method bool hasData()
+	 * @method bool isDataFilled()
+	 * @method bool isDataChanged()
+	 * @method null|\string remindActualData()
+	 * @method null|\string requireData()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource resetData()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource unsetData()
+	 * @method null|\string fillData()
+	 * @method \Bitrix\Main\Type\DateTime getCreatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource setCreatedAt(\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $createdAt)
+	 * @method bool hasCreatedAt()
+	 * @method bool isCreatedAtFilled()
+	 * @method bool isCreatedAtChanged()
+	 * @method \Bitrix\Main\Type\DateTime remindActualCreatedAt()
+	 * @method \Bitrix\Main\Type\DateTime requireCreatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource resetCreatedAt()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource unsetCreatedAt()
+	 * @method \Bitrix\Main\Type\DateTime fillCreatedAt()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource set($fieldName, $value)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource reset($fieldName)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method mixed fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource wakeUp($data)
+	 */
+	class EO_ManagedAgentResource extends \Bitrix\Main\ORM\Objectify\EntityObject {
+		/* @var \Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentResourceTable */
+		static public $dataClass = '\Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentResourceTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\Bizproc\Internal\Model\AiAgent {
+	/**
+	 * EO_ManagedAgentResource_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getIdList()
+	 * @method \int[] getInstanceIdList()
+	 * @method \int[] fillInstanceId()
+	 * @method \string[] getTypeList()
+	 * @method \string[] fillType()
+	 * @method \string[] getResourceIdList()
+	 * @method \string[] fillResourceId()
+	 * @method null|\string[] getDataList()
+	 * @method null|\string[] fillData()
+	 * @method \Bitrix\Main\Type\DateTime[] getCreatedAtList()
+	 * @method \Bitrix\Main\Type\DateTime[] fillCreatedAt()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource $object)
+	 * @method bool has(\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource getByPrimary($primary)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource[] getAll()
+	 * @method bool remove(\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource $object)
+	 * @method void removeByPrimary($primary)
+	 * @method array|\Bitrix\Main\ORM\Objectify\Collection|null fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection merge(?\Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection $collection)
+	 * @method bool isEmpty()
+	 * @method array collectValues(int $valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, int $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL, bool $recursive = false)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource|null find(callable $callback)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection filter(callable $callback)
+	 */
+	class EO_ManagedAgentResource_Collection extends \Bitrix\Main\ORM\Objectify\Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentResourceTable */
+		static public $dataClass = '\Bitrix\Bizproc\Internal\Model\AiAgent\ManagedAgentResourceTable';
+	}
+}
+namespace Bitrix\Bizproc\Internal\Model\AiAgent {
+	/**
+	 * @method static EO_ManagedAgentResource_Query query()
+	 * @method static EO_ManagedAgentResource_Result getByPrimary($primary, array $parameters = [])
+	 * @method static EO_ManagedAgentResource_Result getById($id)
+	 * @method static EO_ManagedAgentResource_Result getList(array $parameters = [])
+	 * @method static EO_ManagedAgentResource_Entity getEntity()
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource createObject($setDefaultValues = true)
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection createCollection()
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource wakeUpObject($row)
+	 * @method static \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection wakeUpCollection($rows)
+	 */
+	class ManagedAgentResourceTable extends \Bitrix\Main\ORM\Data\DataManager {}
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_ManagedAgentResource_Result exec()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource fetchObject()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection fetchCollection()
+	 */
+	class EO_ManagedAgentResource_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource fetchObject()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection fetchCollection()
+	 */
+	class EO_ManagedAgentResource_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource createObject($setDefaultValues = true)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection createCollection()
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource wakeUpObject($row)
+	 * @method \Bitrix\Bizproc\Internal\Model\AiAgent\EO_ManagedAgentResource_Collection wakeUpCollection($rows)
+	 */
+	class EO_ManagedAgentResource_Entity extends \Bitrix\Main\ORM\Entity {}
+}

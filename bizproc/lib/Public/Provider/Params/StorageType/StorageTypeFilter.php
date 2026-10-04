@@ -30,6 +30,15 @@ class StorageTypeFilter implements FilterInterface
 			}
 		}
 
+		if (isset($this->filter['!ID']))
+		{
+			$excludedIds = array_map('intval', (array)$this->filter['!ID']);
+			if ($excludedIds !== [])
+			{
+				$result->whereNotIn('ID', $excludedIds);
+			}
+		}
+
 		if (isset($this->filter['CODE']))
 		{
 			$code = (string)$this->filter['CODE'];

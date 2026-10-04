@@ -1,7 +1,7 @@
 <?php
 namespace Bitrix\Crm\Recurring\Entity\ParameterMapper;
 
-use \Bitrix\Crm\Recurring\DateType,
+use Bitrix\Crm\Recurring\DateType,
 	\Bitrix\Crm\Recurring\Calculator,
 	\Bitrix\Main\Type\Date;
 

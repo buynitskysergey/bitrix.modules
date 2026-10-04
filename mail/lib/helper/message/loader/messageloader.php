@@ -20,6 +20,7 @@ use Bitrix\Main\Mail\Address;
 class MessageLoader
 {
 	private const STACK_ICONS_LIMIT = 2;
+	private const NO_LIVE_ATTACHMENTS_STACK = ['count' => 0, 'icons' => []];
 
 	/**
 	 * @param MessageFilter $filter
@@ -142,6 +143,10 @@ class MessageLoader
 		return array_values($messageList);
 	}
 
+	/**
+	 * Null stack means the attachments of the message are not stored yet, so the summary is still on its
+	 * way; a stack of zero files means it did arrive and none of the stored files is alive any more.
+	 */
 	private static function prepareAttachments(array $items): array
 	{
 		foreach ($items as $index => $item)
@@ -155,22 +160,44 @@ class MessageLoader
 			return $items;
 		}
 
-		$rows = self::discardRowsWithoutFile(self::fetchAttachmentRows($messageIds));
-		$counts = self::countRowsByMessageId($rows);
-		$iconRows = self::groupIconRowsByMessageId($rows);
+		$rows = self::fetchAttachmentRows($messageIds);
+		if ($rows === [])
+		{
+			return $items;
+		}
+
+		$fileRows = self::fetchFileRows(self::collectRowFileIds($rows));
+		$liveRows = self::filterRowsByExistingFiles($rows, array_fill_keys(array_keys($fileRows), true));
+
+		$storedCounts = self::countRowsByMessageId($rows);
+		$counts = self::countRowsByMessageId($liveRows);
+		$iconRowsByMessageId = self::groupIconRowsByMessageId($liveRows);
+		$diskObjects = $iconRowsByMessageId === []
+			? []
+			: Storage::getObjectsByFileIds(
+				self::collectRowFileIds(array_merge(...array_values($iconRowsByMessageId))),
+			)
+		;
 
 		foreach ($items as $index => $item)
 		{
 			$messageId = (int)$item['MESSAGE_ID'];
+			if (($storedCounts[$messageId] ?? 0) <= 0)
+			{
+				continue;
+			}
+
 			$count = $counts[$messageId] ?? 0;
 			if ($count <= 0)
 			{
+				$items[$index]['__attachments_stack'] = self::NO_LIVE_ATTACHMENTS_STACK;
+
 				continue;
 			}
 
 			$items[$index]['__attachments_stack'] = self::buildAttachmentStack(
 				$count,
-				$iconRows[$messageId] ?? [],
+				self::buildStackIcons($iconRowsByMessageId[$messageId] ?? [], $messageId, $fileRows, $diskObjects),
 			);
 		}
 
@@ -179,12 +206,12 @@ class MessageLoader
 
 	/**
 	 * @param int[] $messageIds
-	 * @return array Live attachment rows (MESSAGE_ID, FILE_ID, FILE_NAME) ordered within each message
+	 * @return array Attachment rows (MESSAGE_ID, FILE_ID, FILE_NAME, FILE_SIZE) ordered within each message
 	 */
 	private static function fetchAttachmentRows(array $messageIds): array
 	{
 		return MailMessageAttachmentTable::query()
-			->setSelect(['MESSAGE_ID', 'FILE_ID', 'FILE_NAME'])
+			->setSelect(['MESSAGE_ID', 'FILE_ID', 'FILE_NAME', 'FILE_SIZE'])
 			->whereIn('MESSAGE_ID', $messageIds)
 			->where('FILE_ID', '>', 0)
 			->setOrder(['MESSAGE_ID' => 'ASC', 'ID' => 'ASC'])
@@ -192,15 +219,23 @@ class MessageLoader
 		;
 	}
 
-	private static function discardRowsWithoutFile(array $rows): array
+	/**
+	 * @internal
+	 * @return int[]
+	 */
+	public static function collectRowFileIds(array $rows): array
 	{
 		$fileIds = [];
 		foreach ($rows as $row)
 		{
-			$fileIds[(int)($row['FILE_ID'] ?? 0)] = true;
+			$fileId = (int)($row['FILE_ID'] ?? 0);
+			if ($fileId > 0)
+			{
+				$fileIds[$fileId] = true;
+			}
 		}
 
-		return self::filterRowsByExistingFiles($rows, self::fetchExistingFileIds(array_keys($fileIds)));
+		return array_keys($fileIds);
 	}
 
 	/**
@@ -219,15 +254,6 @@ class MessageLoader
 		}
 
 		return $liveRows;
-	}
-
-	/**
-	 * @param int[] $fileIds
-	 * @return array<int, true>
-	 */
-	private static function fetchExistingFileIds(array $fileIds): array
-	{
-		return array_fill_keys(array_keys(self::fetchFileRows($fileIds)), true);
 	}
 
 	/**
@@ -291,24 +317,52 @@ class MessageLoader
 	}
 
 	/** @internal */
-	public static function buildAttachmentStack(int $count, array $iconRows): ?array
+	public static function buildAttachmentStack(int $count, array $icons): ?array
 	{
 		if ($count <= 0)
 		{
 			return null;
 		}
 
+		return ['count' => $count, 'icons' => $icons];
+	}
+
+	/**
+	 * Builds the same element shape the attachments popup returns, reusing rows read earlier:
+	 * b_file rows come from the dead-attachment filtering step, so no file is read twice.
+	 *
+	 * @internal
+	 * @param array $iconRows Attachment rows of a single message
+	 * @param array<int, array> $fileRowsByFileId b_file rows by file id
+	 * @param array $diskObjectsByFileId Disk objects by file id
+	 */
+	public static function buildStackIcons(
+		array $iconRows,
+		int $messageId,
+		array $fileRowsByFileId,
+		array $diskObjectsByFileId,
+	): array
+	{
 		$icons = [];
 		foreach (array_slice($iconRows, 0, self::STACK_ICONS_LIMIT) as $row)
 		{
 			$name = (string)($row['FILE_NAME'] ?? '');
+			$fileId = (int)($row['FILE_ID'] ?? 0);
+			$fileRow = $fileRowsByFileId[$fileId] ?? null;
+			$url = self::resolveAttachmentUrl($diskObjectsByFileId[$fileId] ?? null, $fileRow);
+
 			$icons[] = [
 				'name' => $name,
 				'extension' => self::extractExtension($name),
+				'size' => (string)\CFile::formatSize((int)($row['FILE_SIZE'] ?? 0)),
+				'url' => $url,
+				'viewerAttrs' => $url === null
+					? null
+					: self::buildViewerAttributes($fileRow, $url, $name, $messageId),
 			];
 		}
 
-		return ['count' => $count, 'icons' => $icons];
+		return $icons;
 	}
 
 	/** @internal */

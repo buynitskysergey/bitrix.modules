@@ -114,8 +114,21 @@ class CDavResponse
 
 		static::sendStatus($status);
 
+		// Only WWW-Authenticate may appear multiple times (Basic + Digest challenge):
+		// its repeats are appended (replace=false). Every other header overwrites as
+		// before, so paths that intentionally re-set a single header (e.g. Content-Type
+		// on multipart byte-range GET) keep their last value. See ADR Risk 1.
+		$sentWwwAuth = false;
 		foreach ($this->arHeaders as $header)
-			static::sendHeader($header);
+		{
+			$colonPos = mb_strpos($header, ':');
+			$name = mb_strtolower($colonPos === false ? $header : mb_substr($header, 0, $colonPos));
+			$isWwwAuth = ($name === 'www-authenticate');
+			$replace = !($isWwwAuth && $sentWwwAuth);
+			static::sendHeader($header, $replace);
+			if ($isWwwAuth)
+				$sentWwwAuth = true;
+		}
 
 		static::sendStatus($status);
 
@@ -133,9 +146,9 @@ class CDavResponse
 		static::sendHeader('X-WebDAV-Status: ' . $status, true);
 	}
 
-	private static function sendHeader($str, $force = true) // safe from response splitting
+	private static function sendHeader($str, $replace = true) // safe from response splitting
 	{
-		header(str_replace(array("\r", "\n"), "", $str), $force);
+		header(str_replace(array("\r", "\n"), "", $str), $replace);
 	}
 
 	public function Encode($text)

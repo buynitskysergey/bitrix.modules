@@ -6,13 +6,15 @@ use Bitrix\Main\Composite\Internals\Locker;
 use Bitrix\Main\Localization\LocalizableMessage;
 use Bitrix\Main\SystemException;
 use Bitrix\Rest\V3\Attribute\Description;
+use Bitrix\Rest\V3\Attribute\NotIdempotent;
 use Bitrix\Rest\V3\Attribute\Scope;
 use Bitrix\Rest\V3\Attribute\Title;
+use Bitrix\Rest\V3\CacheManager;
 use Bitrix\Rest\V3\Controller\RestController;
 use Bitrix\Rest\V3\DefaultLanguage;
 use Bitrix\Rest\V3\Documentation\DocumentationManager;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumRegistry;
 use Bitrix\Rest\V3\Interaction\Response\ArrayResponse;
-use Bitrix\Rest\V3\CacheManager;
 
 final class Documentation extends RestController
 {
@@ -21,6 +23,7 @@ final class Documentation extends RestController
 	#[Scope(\CRestUtil::GLOBAL_SCOPE)]
 	#[Title(new LocalizableMessage(code: 'REST_V3_REALISATION_CONTROLLER_DOCUMENTATION_DOCUMENTATION_ACTION_TITLE', phraseSrcFile: __FILE__))]
 	#[Description(new LocalizableMessage(code: 'REST_V3_REALISATION_CONTROLLER_DOCUMENTATION_DOCUMENTATION_ACTION_DESCRIPTION', phraseSrcFile: __FILE__))]
+	#[NotIdempotent]
 	public function openApiAction(): ArrayResponse
 	{
 		if (!Locker::lock(self::DOCUMENTATION_CACHE_KEY))
@@ -28,14 +31,23 @@ final class Documentation extends RestController
 			throw new SystemException('Generation in progress.');
 		}
 
+		$generation = DynamicEnumRegistry::getGeneration();
 		$cacheKey = self::DOCUMENTATION_CACHE_KEY . '.' . $this->responseLanguage;
+		$cached = CacheManager::get($cacheKey);
+		$result = is_array($cached)
+			&& ($cached['dynamicEnumGeneration'] ?? null) === $generation
+			&& isset($cached['openApi'])
+				? $cached['openApi']
+				: null;
 
-		$result = CacheManager::get($cacheKey);
 		if ($result === null)
 		{
 			$manager = new DocumentationManager($this->responseLanguage ?: DefaultLanguage::get());
 			$result = $manager->generateDataForJson();
-			CacheManager::set($cacheKey, $result, CacheManager::ONE_HOUR_TTL);
+			CacheManager::set($cacheKey, [
+				'dynamicEnumGeneration' => $generation,
+				'openApi' => $result,
+			], CacheManager::ONE_HOUR_TTL);
 		}
 
 		return (new ArrayResponse($result))->setShowDebugInfo(false)->setShowRawData(true);

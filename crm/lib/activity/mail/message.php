@@ -6,9 +6,12 @@ use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\ActivityTable;
 use Bitrix\Crm\Integration\UI\EntitySelector\MailRecipientProvider;
 use Bitrix\Crm\Item;
+use Bitrix\Crm\Security\PermissionToken;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Mail\Internals\UserSignatureTable;
+use Bitrix\Mail\Service\SharedSignature\AssignmentResolver;
+use Bitrix\Mail\Service\Signature\SignatureTemplateResolver;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
@@ -52,7 +55,7 @@ class Message
 		$uriView->addParams([
 			'site_id' => SITE_ID,
 			'sessid' => bitrix_sessid_get(),
-			'ajax_action' => 'ACTIVITY_VIEW',
+			'action' => 'view',
 			'activity_id' => $id
 		]);
 
@@ -146,7 +149,13 @@ class Message
 		return $result;
 	}
 
-	protected static function checkActivityPermission(int $permission = self::PERMISSION_READ, array $activities = []): Main\Result
+	protected static function checkActivityPermission(
+		int $permission = self::PERMISSION_READ,
+		array $activities = [],
+		?string $permissionToken = null,
+		bool $useActivityProviderPermissions = false,
+		?int $userId = null,
+	): Main\Result
 	{
 		$result = new Main\Result();
 		if (count($activities) === 0)
@@ -163,12 +172,40 @@ class Message
 			return $result;
 		}
 
-		$ownerTypeId = $activity['OWNER_TYPE_ID'];
-		$ownerId = $activity['OWNER_ID'];
-
 		if ($permission === self::PERMISSION_READ)
 		{
-			if (\CCrmActivity::CheckReadPermission($ownerTypeId, $ownerId))
+			$ownerTypeId = $activity['OWNER_TYPE_ID'];
+			$ownerId = $activity['OWNER_ID'];
+			$userPermissions = $userId === null
+				? null
+				: Container::getInstance()->getUserPermissions($userId)->getCrmPermissions()
+			;
+			$permissionUserId = $userId ?? \CCrmSecurityHelper::getCurrentUserId();
+
+			if (\CCrmActivity::CheckReadPermission($ownerTypeId, $ownerId, $userPermissions))
+			{
+				return $result;
+			}
+
+			$provider = \CCrmActivity::getActivityProvider($activity);
+			if (
+				$useActivityProviderPermissions
+				&& $provider
+				&& $provider::checkReadPermission($activity, $permissionUserId)
+			)
+			{
+				return $result;
+			}
+
+			if (
+				$permissionToken !== null
+				&& $permissionToken !== ''
+				&& PermissionToken::canViewActivity(
+					$permissionToken,
+					(int)($activity['ID'] ?? 0),
+					$permissionUserId,
+				)
+			)
 			{
 				return $result;
 			}
@@ -253,7 +290,7 @@ class Message
 
 		if (isset($signatureList[0]['SIGNATURE']))
 		{
-			return $signatureList[0]['SIGNATURE'];
+			$signature = $signatureList[0]['SIGNATURE'];
 		}
 		else
 		{
@@ -269,13 +306,22 @@ class Message
 			])->fetchAll();
 		}
 
-		return $signatureList[0]['SIGNATURE'] ?? self::getGeneralSignature();
+		$signature ??= $signatureList[0]['SIGNATURE'] ?? self::getGeneralSignature();
+
+		return self::resolveSignatureTemplate(
+			(string)$signature,
+			(int)$userId,
+			trim((string)$email),
+			trim((string)$name),
+		);
 	}
 
 	public static function getSenderList(): array
 	{
 		$mailboxes = Sender::prepareUserMailboxes();
 		$senders = [];
+		$userId = (int)CurrentUser::get()->getId();
+		$signatureMap = self::loadSignatureMap($userId);
 
 		foreach ($mailboxes as $sender)
 		{
@@ -285,7 +331,18 @@ class Message
 				'id' => $sender['userId'] ?? 0,
 				'isUser' => true,
 			]);
-			$builtContact['signature'] = Converter::htmlToText(self::getSignature($sender['email'], $sender['name']));
+			$signature = self::resolveSignature(
+				$signatureMap,
+				(string)($sender['email'] ?? ''),
+				(string)($sender['name'] ?? ''),
+			);
+			$signature = self::resolveSignatureTemplate(
+				$signature,
+				$userId,
+				trim((string)($sender['email'] ?? '')),
+				trim((string)($sender['name'] ?? '')),
+			);
+			$builtContact['signature'] = Converter::htmlToText($signature);
 
 			$senders[] = $builtContact;
 		}
@@ -294,6 +351,72 @@ class Message
 			todo: Choosing a preferred email based on the history of correspondence
 		*/
 		return $senders;
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	protected static function loadSignatureMap(int $userId): array
+	{
+		$map = [];
+		$signatureList = UserSignatureTable::getList([
+			'select' => ['SENDER', 'SIGNATURE'],
+			'order' => ['ID' => 'desc'],
+			'filter' => ['=USER_ID' => $userId],
+		]);
+		while ($signature = $signatureList->fetch())
+		{
+			$key = AssignmentResolver::normalizeSenderKey((string)($signature['SENDER'] ?? ''));
+			if (!array_key_exists($key, $map))
+			{
+				$map[$key] = (string)($signature['SIGNATURE'] ?? '');
+			}
+		}
+
+		return $map;
+	}
+
+	/**
+	 * @param array<string, string> $signatureMap
+	 */
+	protected static function resolveSignature(array $signatureMap, string $email, string $name): string
+	{
+		$email = trim($email);
+		$name = trim($name);
+		if ($name !== '' && $email !== '')
+		{
+			$key = AssignmentResolver::normalizeSenderKey($name . ' <' . $email . '>');
+			if (array_key_exists($key, $signatureMap))
+			{
+				return $signatureMap[$key];
+			}
+		}
+
+		$key = AssignmentResolver::normalizeSenderKey($email);
+		if (array_key_exists($key, $signatureMap))
+		{
+			return $signatureMap[$key];
+		}
+
+		return $signatureMap[''] ?? '';
+	}
+
+	protected static function resolveSignatureTemplate(
+		string $signature,
+		int $userId,
+		string $email,
+		string $name,
+	): string
+	{
+		if (!class_exists(SignatureTemplateResolver::class))
+		{
+			return $signature;
+		}
+
+		static $templateResolver;
+		$templateResolver ??= new SignatureTemplateResolver();
+
+		return $templateResolver->resolve($signature, $userId, $email, $name);
 	}
 
 	/**
@@ -985,7 +1108,13 @@ class Message
 		return $result;
 	}
 
-	public static function getHeader(array $activity, $showPortalContactNames = true): Main\Result
+	public static function getHeader(
+		array $activity,
+		$showPortalContactNames = true,
+		?string $permissionToken = null,
+		bool $useActivityProviderPermissions = false,
+		?int $userId = null,
+	): Main\Result
 	{
 		$header = [];
 		$headerResult = new Main\Result();
@@ -999,7 +1128,13 @@ class Message
 			return $headerResult;
 		}
 
-		$checkActivityPermissionResult = self::checkActivityPermission(self::PERMISSION_READ, [$activity]);
+		$checkActivityPermissionResult = self::checkActivityPermission(
+			self::PERMISSION_READ,
+			[$activity],
+			$permissionToken,
+			$useActivityProviderPermissions,
+			$userId,
+		);
 		$headerResult->addErrors($checkActivityPermissionResult->getErrors());
 
 		if(!$headerResult->isSuccess())
@@ -1157,7 +1292,7 @@ class Message
 		return $headerResult;
 	}
 
-	public static function getMessageBody($id): Main\Result
+	public static function getMessageBody($id, ?int $userId = null): Main\Result
 	{
 		$checkModules = self::checkModules();
 		if (!$checkModules->isSuccess())
@@ -1181,7 +1316,11 @@ class Message
 			],
 		);
 
-		$checkActivities = self::checkActivityPermission(self::PERMISSION_READ, $activities);
+		$checkActivities = self::checkActivityPermission(
+			self::PERMISSION_READ,
+			$activities,
+			userId: $userId,
+		);
 		if (!$checkActivities->isSuccess())
 		{
 			return (new Main\Result())->addErrors($checkActivities->getErrors());

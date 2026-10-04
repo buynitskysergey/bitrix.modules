@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\Copilot\Pipeline;
 
+use Bitrix\Crm\ItemIdentifier;
+
 final readonly class StepContext
 {
 	public function __construct(
@@ -12,6 +14,13 @@ final readonly class StepContext
 		private string $scenarioName,
 		private bool $isManualLaunch,
 		private ?string $activityProvider = null,
+		/**
+		 * Explicit fill target for the manual launch path: the entity from whose timeline the user
+		 * clicked the CoPilot button. When set (manual launch only), FillItemFields fills exactly this
+		 * entity and the pipeline does NOT re-resolve the target via TargetResolver (ALG-01, single-target).
+		 * Null for the auto path, where TargetResolver picks the priority Deal/Lead as before.
+		 */
+		private ?ItemIdentifier $manualTarget = null,
 		/**
 		 * Additional context for step creation.
 		 * Currently only `assessmentSettingsId` is set in production (from CallQualityAssessment controller).
@@ -48,6 +57,34 @@ final readonly class StepContext
 		return $this->activityProvider;
 	}
 
+	/**
+	 * The entity clicked in the timeline for a manual launch, or null for the auto path.
+	 * @see self::$manualTarget
+	 */
+	public function getManualTarget(): ?ItemIdentifier
+	{
+		return $this->manualTarget;
+	}
+
+	/**
+	 * Single source of truth for the FillItemFields target (ALG-01, single-target).
+	 * Manual launch: the clicked entity carried in the context — no re-resolve.
+	 * Auto path (or manual without an explicit clicked target — defensive): the priority
+	 * Deal/Lead resolved via TargetResolver, unchanged.
+	 *
+	 * Shared by StepFactory (operation creation) and StepResultResolver (reuse/short-circuit lookup)
+	 * so both key on exactly the same target.
+	 */
+	public function resolveFillTarget(TargetResolver $targetResolver): ?ItemIdentifier
+	{
+		if ($this->isManualLaunch && $this->manualTarget !== null)
+		{
+			return $this->manualTarget;
+		}
+
+		return $targetResolver->findTarget($this->activityId);
+	}
+
 	public function getExtra(string $key, mixed $default = null): mixed
 	{
 		return $this->extra[$key] ?? $default;
@@ -61,6 +98,7 @@ final readonly class StepContext
 			$name,
 			$this->isManualLaunch,
 			$this->activityProvider,
+			$this->manualTarget,
 			$this->extra,
 		);
 	}
@@ -73,6 +111,20 @@ final readonly class StepContext
 			$this->scenarioName,
 			$this->isManualLaunch,
 			$provider,
+			$this->manualTarget,
+			$this->extra,
+		);
+	}
+
+	public function withManualTarget(?ItemIdentifier $target): self
+	{
+		return new self(
+			$this->activityId,
+			$this->userId,
+			$this->scenarioName,
+			$this->isManualLaunch,
+			$this->activityProvider,
+			$target,
 			$this->extra,
 		);
 	}
@@ -88,6 +140,7 @@ final readonly class StepContext
 			$this->scenarioName,
 			$this->isManualLaunch,
 			$this->activityProvider,
+			$this->manualTarget,
 			$extra,
 		);
 	}

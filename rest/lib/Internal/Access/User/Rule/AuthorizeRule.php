@@ -8,6 +8,7 @@ use Bitrix\Main\Access\AccessibleItem;
 use Bitrix\Main\Access\Rule\AbstractRule;
 use Bitrix\Main\UserTable;
 use Bitrix\Rest\Internal\Access\User\Model\RestUserModel;
+use Bitrix\Rest\Public\Contract\SystemUser\SystemUserAuth;
 
 class AuthorizeRule extends AbstractRule
 {
@@ -31,7 +32,7 @@ class AuthorizeRule extends AbstractRule
 		if (
 			!in_array($userData['EXTERNAL_AUTH_ID'], UserTable::getExternalUserTypes(), true)
 			&& (empty($userData['LAST_LOGIN']) || empty($userData['LAST_ACTIVITY_DATE']))
-			&& $userData['EXTERNAL_AUTH_ID'] !== 'rest_system'
+			&& $userData['EXTERNAL_AUTH_ID'] !== SystemUserAuth::EXTERNAL_AUTH_ID
 		)
 		{
 			return false;

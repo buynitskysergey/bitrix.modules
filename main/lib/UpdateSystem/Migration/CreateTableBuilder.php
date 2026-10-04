@@ -11,6 +11,16 @@ class CreateTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\CreateTableBuilder
 {
 	private bool $preliminaryExecutionDisabled = false;
 
+	public function __construct(
+		string $tableName,
+		?\Closure $tableExistsFilter = null,
+		?\Closure $addedIndexFilter = null,
+		private readonly ?IndexNameProcessor $indexNameProcessor = null,
+	)
+	{
+		parent::__construct($tableName, $tableExistsFilter, $addedIndexFilter);
+	}
+
 	public function disablePreliminaryExecution(): self
 	{
 		$this->preliminaryExecutionDisabled = true;
@@ -22,6 +32,14 @@ class CreateTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\CreateTableBuilder
 	{
 		/** @var CreateTableData */
 		return parent::toData();
+	}
+
+	/**
+	 * @param IndexColumn[] $columns
+	 */
+	protected function prepareIndexName(string $type, string $indexName, array $columns): string
+	{
+		return $this->indexNameProcessor?->process($type, $this->tableName, $indexName, $columns) ?? $indexName;
 	}
 
 	/**

@@ -7,4 +7,5 @@ namespace Bitrix\Vibecodeconnector\Internal\Entity\User;
 enum UserAttribute: string
 {
 	case FirstOpenedCatalog = 'CATALOG_FIRST_OPENED_AT';
+	case GroupEventSequence = 'GROUP_EVENT_SEQUENCE';
 }

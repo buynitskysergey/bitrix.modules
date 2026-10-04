@@ -10,6 +10,7 @@ use Bitrix\Main\SystemException;
 use Bitrix\Main\UI\PageNavigation;
 use Bitrix\Market\Application\Action;
 use Bitrix\Market\Application\License;
+use Bitrix\Market\Application\VibePlusApplicationLimit;
 use Bitrix\Market\Application\Versions;
 use Bitrix\Market\Rest\Actions;
 use Bitrix\Market\Rest\Transport;
@@ -75,11 +76,34 @@ class Installed extends BaseTemplate
 			$this->result['SELECTED_TAG'] = Installed::FILTER_UPDATES;
 		}
 
-		$filter = [
-			'!=STATUS' => AppTable::STATUS_LOCAL,
-			'=ACTIVE' => AppTable::ACTIVE,
-		];
-		if ((isset($this->filter['tag']) && $this->filter['tag'] == Installed::FILTER_UPDATES) || $isFilterUpdates) {
+		$isVibePlusLimitMode = $this->isVibePlusLimitMode();
+		if ($isVibePlusLimitMode) {
+			$countedApplicationCodes = (new VibePlusApplicationLimit())->getCountedApplicationCodes();
+			$filter = [
+				'!=STATUS' => AppTable::STATUS_LOCAL,
+				'=INSTALLED' => AppTable::INSTALLED,
+				'=CODE' => $countedApplicationCodes,
+			];
+			if (empty($countedApplicationCodes)) {
+				unset($filter['=CODE']);
+				$filter['=ID'] = 0;
+			}
+
+			$this->result['VIBE_PLUS_LIMIT_MODE'] = true;
+		} else {
+			$filter = [
+				'!=STATUS' => AppTable::STATUS_LOCAL,
+				'=ACTIVE' => AppTable::ACTIVE,
+			];
+		}
+
+		if (
+			!$isVibePlusLimitMode
+			&& (
+				(isset($this->filter['tag']) && $this->filter['tag'] == Installed::FILTER_UPDATES)
+				|| $isFilterUpdates
+			)
+		) {
 			$filter['=CODE'] = array_keys(Client::getAvailableUpdate());
 		}
 
@@ -216,5 +240,13 @@ class Installed extends BaseTemplate
 		]);
 
 		return $dbApps->getCount();
+	}
+
+	private function isVibePlusLimitMode(): bool
+	{
+		$request = Context::getCurrent()->getRequest();
+
+		return $request->get('vibe_plus_limit') === 'Y'
+			|| (($this->requestParams['vibe_plus_limit'] ?? null) === 'Y');
 	}
 }

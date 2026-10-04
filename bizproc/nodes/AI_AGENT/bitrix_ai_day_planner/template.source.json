@@ -4,6 +4,476 @@
     "description": "BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_DESC",
     "wizard_title": "BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_WIZARD_TITLE",
     "wizard_description": "BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_WIZARD_DESC",
+    "activity_descriptors": {
+        "AiAgentStartTrigger": {
+            "node_type": "trigger",
+            "icon": "AI_ROBOT",
+            "color_index": 0,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "AiAssistantAgentComplexActivity": {
+            "node_type": "complex",
+            "icon": "AI_ROBOT",
+            "color_index": 0,
+            "dimensions": {
+                "width": 260,
+                "height": 291
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "title": "G1",
+                    "type": "input",
+                    "isActive": true
+                },
+                {
+                    "id": "o1",
+                    "title": "E1",
+                    "type": "output",
+                    "isActive": true
+                },
+                {
+                    "id": "a0",
+                    "title": "T1",
+                    "type": "aux",
+                    "isActive": true
+                }
+            ]
+        },
+        "CalendarGetInform": {
+            "node_type": "simple",
+            "icon": "PLANNING_2",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "CreateStorageNode": {
+            "node_type": "simple",
+            "icon": "DATABASE",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "DeleteDataStorageActivity": {
+            "node_type": "simple",
+            "icon": "TRASHCAN",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "FillFullReportActivity": {
+            "node_type": "simple",
+            "icon": "FILE_WITH_CALENDAR",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ForEachActivity": {
+            "node_type": "operators",
+            "icon": "REPEAT",
+            "color_index": 3,
+            "dimensions": {
+                "width": 230,
+                "height": 46
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "title": "in",
+                    "type": "input",
+                    "isActive": true
+                },
+                {
+                    "id": "i1",
+                    "title": "->>",
+                    "type": "input",
+                    "isActive": true
+                },
+                {
+                    "id": "o1",
+                    "title": "out",
+                    "type": "output",
+                    "isActive": true
+                },
+                {
+                    "id": "o0",
+                    "title": "->>",
+                    "type": "output",
+                    "isActive": true
+                }
+            ]
+        },
+        "FullReportReadyTrigger": {
+            "node_type": "trigger",
+            "icon": "FILE_WITH_CLOCK",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "FullReportSentTrigger": {
+            "node_type": "trigger",
+            "icon": "FILE_WITH_CROWN",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "GetFullReportActivity": {
+            "node_type": "simple",
+            "icon": "FILE_WITH_PERSON",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "HumanResourcesGetAiReportUsersActivity": {
+            "node_type": "simple",
+            "icon": "PERSON_SEARCH",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "IMNotifyActivity": {
+            "node_type": "simple",
+            "icon": "NOTIFICATION",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "IfElseBranchActivity": {
+            "node_type": "operators",
+            "icon": "CONDITION",
+            "color_index": 3,
+            "dimensions": {
+                "width": 230,
+                "height": 46
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "title": "",
+                    "type": "input",
+                    "isActive": true
+                },
+                {
+                    "id": "o0",
+                    "title": "true",
+                    "type": "output",
+                    "isActive": true
+                },
+                {
+                    "id": "o1",
+                    "title": "false",
+                    "type": "output",
+                    "isActive": true
+                }
+            ]
+        },
+        "ImBotCreateBotActivity": {
+            "node_type": "simple",
+            "icon": "MESSENGER",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ImBotMessageActivity": {
+            "node_type": "simple",
+            "icon": "GO_TO_MESSAGE",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ReadDataStorageActivity": {
+            "node_type": "simple",
+            "icon": "DATA_READING",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "SaveDayPlanActivity": {
+            "node_type": "simple",
+            "icon": "MY_PLAN",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "SaveReportActivity": {
+            "node_type": "simple",
+            "icon": "TIMER",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ScheduledTrigger": {
+            "node_type": "trigger",
+            "icon": "CALENDAR_WITH_SLOTS",
+            "color_index": 3,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "SetupTemplateActivity": {
+            "node_type": "simple",
+            "icon": "SETTINGS",
+            "color_index": 8,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "StartWorkTimeTrigger": {
+            "node_type": "trigger",
+            "icon": "TIMER",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "StopWorkTimeTrigger": {
+            "node_type": "trigger",
+            "icon": "TIMER",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "TasksGetInfoActivity": {
+            "node_type": "simple",
+            "icon": "TASK",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "WriteDataStorageActivity": {
+            "node_type": "simple",
+            "icon": "EDIT_L",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        }
+    },
     "constants": {
         "BotName": {
             "label": "BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOT_NAME",
@@ -755,7 +1225,7 @@
                                     "chatId": null,
                                     "message": "###BITRIX_AI_DAY_PLANNER_DAY_PLAN_FROM_STORAGE_MESSAGE###",
                                     "asError": "N",
-                                    "aiWarning": "Y"
+                                    "aiWarning": "N"
                                 }
                             },
                             {
@@ -1021,7 +1491,7 @@
                                                                         "chatId": null,
                                                                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_PLAN_AI_MESSAGE###",
                                                                         "asError": "N",
-                                                                        "aiWarning": "Y"
+                                                                        "aiWarning": "N"
                                                                     }
                                                                 },
                                                                 {
@@ -1104,7 +1574,7 @@
                                                                         "chatId": null,
                                                                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_START_ERRORMESSAGE###",
                                                                         "asError": "Y",
-                                                                        "aiWarning": "Y"
+                                                                        "aiWarning": "N"
                                                                     }
                                                                 },
                                                                 {
@@ -1289,7 +1759,7 @@
                                                                         "chatId": null,
                                                                         "message": "###BITRIX_AI_DAY_PLANNER_USER_PLAN_DELIVERY_WDS###",
                                                                         "asError": "N",
-                                                                        "aiWarning": "Y"
+                                                                        "aiWarning": "N"
                                                                     }
                                                                 },
                                                                 {
@@ -1543,8 +2013,8 @@
                                 "CalendarGetInform": {
                                     "_id": "A6001_0001_0001_0006",
                                     "CalendarUser": "{=A6001_0001_0001_0001:USER}",
-                                    "CalendarFrom": "{=System:Date}",
-                                    "CalendarTo": "{{=dateadd({=System:Date}, \"1d\")}}",
+                                    "CalendarFrom": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), {=System:Date})}}",
+                                    "CalendarTo": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))}}",
                                     "EventField": [
                                         "url"
                                     ]
@@ -1752,7 +2222,7 @@
                                                             "chatId": null,
                                                             "message": "###BITRIX_AI_DAY_PLANNER_DAY_END_AI_MESSAGE###",
                                                             "asError": "N",
-                                                            "aiWarning": "Y"
+                                                            "aiWarning": "N"
                                                         }
                                                     },
                                                     {
@@ -1775,7 +2245,7 @@
                                                             "chatId": null,
                                                             "message": "###BITRIX_AI_DAY_PLANNER_DAY_END_ERRORMESSAGE###",
                                                             "asError": "Y",
-                                                            "aiWarning": "Y"
+                                                            "aiWarning": "N"
                                                         }
                                                     },
                                                     {
@@ -1833,8 +2303,8 @@
                                             "CalendarGetInform": {
                                                 "_id": "A6001_0001_0001_0025",
                                                 "CalendarUser": "{=A6001_0001_0001_0001:USER}",
-                                                "CalendarFrom": "{=System:Date}",
-                                                "CalendarTo": "{{=dateadd({=System:Date}, \"1d\")}}",
+                                                "CalendarFrom": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), {=System:Date})}}",
+                                                "CalendarTo": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))}}",
                                                 "EventField": [
                                                     "url"
                                                 ]
@@ -1865,7 +2335,16 @@
                                                                 "object": "Document",
                                                                 "field": "CREATED_DATE",
                                                                 "operator": ">",
-                                                                "value": "=settime({=System:Date}, 00, 00, 7200)"
+                                                                "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, {=A6001_0001_0001_0001:WORKDAY_START}, settime({=System:Date}, 00, 00, 7200))"
+                                                            },
+                                                            "AND"
+                                                        ],
+                                                        [
+                                                            {
+                                                                "object": "Document",
+                                                                "field": "CREATED_DATE",
+                                                                "operator": "<",
+                                                                "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))"
                                                             },
                                                             "AND"
                                                         ]
@@ -1898,7 +2377,16 @@
                                                                 "object": "Document",
                                                                 "field": "CLOSED_DATE",
                                                                 "operator": ">",
-                                                                "value": "=settime({=System:Date}, 00, 00, 7200)"
+                                                                "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, {=A6001_0001_0001_0001:WORKDAY_START}, settime({=System:Date}, 00, 00, 7200))"
+                                                            },
+                                                            "AND"
+                                                        ],
+                                                        [
+                                                            {
+                                                                "object": "Document",
+                                                                "field": "CLOSED_DATE",
+                                                                "operator": "<",
+                                                                "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))"
                                                             },
                                                             "AND"
                                                         ]
@@ -1932,7 +2420,16 @@
                                                                 "object": "Document",
                                                                 "field": "CLOSED_DATE",
                                                                 "operator": ">",
-                                                                "value": "=settime({=System:Date}, 00, 00, 7200)"
+                                                                "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, {=A6001_0001_0001_0001:WORKDAY_START}, settime({=System:Date}, 00, 00, 7200))"
+                                                            },
+                                                            "AND"
+                                                        ],
+                                                        [
+                                                            {
+                                                                "object": "Document",
+                                                                "field": "CLOSED_DATE",
+                                                                "operator": "<",
+                                                                "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))"
                                                             },
                                                             "AND"
                                                         ]
@@ -2023,7 +2520,7 @@
                                                             "chatId": null,
                                                             "message": "###BITRIX_AI_DAY_PLANNER_USER_ENDDAY_DELIVERY_FALLBACK###",
                                                             "asError": "N",
-                                                            "aiWarning": "Y"
+                                                            "aiWarning": "N"
                                                         }
                                                     },
                                                     {
@@ -2195,18 +2692,6 @@
                                                 ],
                                                 "false": [
                                                     {
-                                                        "GetUserActivity": {
-                                                            "_id": "A7001_0001_0001_0005",
-                                                            "UserType": "boss",
-                                                            "MaxLevel": "1",
-                                                            "UserParameter": [
-                                                                "{=A7001_0001_0001_0001:USER}"
-                                                            ],
-                                                            "SkipAbsent": "Y",
-                                                            "SkipTimeman": "N"
-                                                        }
-                                                    },
-                                                    {
                                                         "ReadDataStorageActivity": {
                                                             "_id": "A7001_0001_0001_0050",
                                                             "StorageCode": "DAY_PLANNER_WELCOMES_{=Workflow:TemplateId}",
@@ -2222,7 +2707,7 @@
                                                                             "object": "Document",
                                                                             "field": "UserId",
                                                                             "operator": "=",
-                                                                            "value": "{=A7001_0001_0001_0005:GetUser}"
+                                                                            "value": "{=A7001_0001_0001_0001:MANAGER}"
                                                                         },
                                                                         "AND"
                                                                     ],
@@ -2262,7 +2747,7 @@
                                                                         "botId": null,
                                                                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                                                                         "recipient": [
-                                                                            "{=A7001_0001_0001_0005:GetUser}"
+                                                                            "{=A7001_0001_0001_0001:MANAGER}"
                                                                         ],
                                                                         "chatId": null,
                                                                         "message": "###BITRIX_AI_DAY_PLANNER_BOSSWELCOMEMESSAGE###",
@@ -2276,15 +2761,15 @@
                                                                         "StorageCode": "DAY_PLANNER_WELCOMES_{=Workflow:TemplateId}",
                                                                         "RewriteMode": "newItem",
                                                                         "IsExpanded": "Y",
-                                                                        "Author": "{=A7001_0001_0001_0005:GetUser}",
+                                                                        "Author": "{=A7001_0001_0001_0001:MANAGER}",
                                                                         "FieldValue": {
-                                                                            "UserId": "{=A7001_0001_0001_0005:GetUser}",
+                                                                            "UserId": "{=A7001_0001_0001_0001:MANAGER}",
                                                                             "BotKind": "boss",
                                                                             "WelcomeSentAt": "{=System:Now}"
                                                                         },
                                                                         "Fields": {
                                                                             "UserId": {
-                                                                                "Value": "{=A7001_0001_0001_0005:GetUser}",
+                                                                                "Value": "{=A7001_0001_0001_0001:MANAGER}",
                                                                                 "FieldName": "UserId"
                                                                             },
                                                                             "BotKind": {
@@ -2303,7 +2788,7 @@
                                                                                         "object": "Document",
                                                                                         "field": "UserId",
                                                                                         "operator": "=",
-                                                                                        "value": "{=A7001_0001_0001_0005:GetUser}"
+                                                                                        "value": "{=A7001_0001_0001_0001:MANAGER}"
                                                                                     },
                                                                                     "AND"
                                                                                 ]
@@ -2320,12 +2805,12 @@
                                                             "botId": null,
                                                             "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                                                             "recipient": [
-                                                                "{=A7001_0001_0001_0005:GetUser}"
+                                                                "{=A7001_0001_0001_0001:MANAGER}"
                                                             ],
                                                             "chatId": null,
                                                             "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_ERRORMESSAGE###",
                                                             "asError": "Y",
-                                                            "aiWarning": "Y"
+                                                            "aiWarning": "N"
                                                         }
                                                     },
                                                     {
@@ -2395,18 +2880,6 @@
                         ],
                         "true": [
                             {
-                                "GetUserActivity": {
-                                    "_id": "A8001_0001_0001_0003",
-                                    "UserType": "boss",
-                                    "MaxLevel": "1",
-                                    "UserParameter": [
-                                        "{=A8001_0001_0001_0001:USER}"
-                                    ],
-                                    "SkipAbsent": "Y",
-                                    "SkipTimeman": "N"
-                                }
-                            },
-                            {
                                 "ReadDataStorageActivity": {
                                     "_id": "A8001_0001_0001_0050",
                                     "StorageCode": "DAY_PLANNER_WELCOMES_{=Workflow:TemplateId}",
@@ -2422,7 +2895,7 @@
                                                     "object": "Document",
                                                     "field": "UserId",
                                                     "operator": "=",
-                                                    "value": "{=A8001_0001_0001_0003:GetUser}"
+                                                    "value": "{=A8001_0001_0001_0001:MANAGER}"
                                                 },
                                                 "AND"
                                             ],
@@ -2462,7 +2935,7 @@
                                                 "botId": null,
                                                 "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                                                 "recipient": [
-                                                    "{=A8001_0001_0001_0003:GetUser}"
+                                                    "{=A8001_0001_0001_0001:MANAGER}"
                                                 ],
                                                 "chatId": null,
                                                 "message": "###BITRIX_AI_DAY_PLANNER_BOSSWELCOMEMESSAGE###",
@@ -2476,15 +2949,15 @@
                                                 "StorageCode": "DAY_PLANNER_WELCOMES_{=Workflow:TemplateId}",
                                                 "RewriteMode": "newItem",
                                                 "IsExpanded": "Y",
-                                                "Author": "{=A8001_0001_0001_0003:GetUser}",
+                                                "Author": "{=A8001_0001_0001_0001:MANAGER}",
                                                 "FieldValue": {
-                                                    "UserId": "{=A8001_0001_0001_0003:GetUser}",
+                                                    "UserId": "{=A8001_0001_0001_0001:MANAGER}",
                                                     "BotKind": "boss",
                                                     "WelcomeSentAt": "{=System:Now}"
                                                 },
                                                 "Fields": {
                                                     "UserId": {
-                                                        "Value": "{=A8001_0001_0001_0003:GetUser}",
+                                                        "Value": "{=A8001_0001_0001_0001:MANAGER}",
                                                         "FieldName": "UserId"
                                                     },
                                                     "BotKind": {
@@ -2503,7 +2976,7 @@
                                                                 "object": "Document",
                                                                 "field": "UserId",
                                                                 "operator": "=",
-                                                                "value": "{=A8001_0001_0001_0003:GetUser}"
+                                                                "value": "{=A8001_0001_0001_0001:MANAGER}"
                                                             },
                                                             "AND"
                                                         ]
@@ -2531,12 +3004,56 @@
                                                 "botId": null,
                                                 "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                                                 "recipient": [
-                                                    "{=A8001_0001_0001_0003:GetUser}"
+                                                    "{=A8001_0001_0001_0001:MANAGER}"
                                                 ],
                                                 "chatId": null,
                                                 "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_MESSAGE###",
                                                 "asError": "N",
-                                                "aiWarning": "Y"
+                                                "aiWarning": "N",
+                                                "buttons": [
+                                                    {
+                                                        "COMMAND": "discussReport",
+                                                        "COMMAND_PARAMS": "{=A8001_0001_0001_0001:REPORT_ID}",
+                                                        "TEXT": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_DISCUSS_BUTTON###",
+                                                        "CONTEXT": "ALL"
+                                                    }
+                                                ]
+                                            }
+                                        },
+                                        {
+                                            "Condition": {
+                                                "conditions": [
+                                                    {
+                                                        "object": "A8001_0001_0001_0001",
+                                                        "field": "REPORT",
+                                                        "operator": "!empty",
+                                                        "value": ""
+                                                    }
+                                                ],
+                                                "true": [
+                                                    {
+                                                        "ImBotMessageActivity": {
+                                                            "botId": null,
+                                                            "botCode": "BOSSBOT_{=Workflow:TemplateId}",
+                                                            "recipient": [
+                                                                "{=A8001_0001_0001_0001:MANAGER}"
+                                                            ],
+                                                            "chatId": null,
+                                                            "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_HANDWRITTEN_MESSAGE###",
+                                                            "asError": "N",
+                                                            "aiWarning": "N",
+                                                            "buttons": [
+                                                                {
+                                                                    "COMMAND": "discussReport",
+                                                                    "COMMAND_PARAMS": "{=A8001_0001_0001_0001:REPORT_ID}",
+                                                                    "TEXT": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_DISCUSS_BUTTON###",
+                                                                    "CONTEXT": "ALL"
+                                                                }
+                                                            ]
+                                                        }
+                                                    }
+                                                ],
+                                                "false": []
                                             }
                                         }
                                     ],
@@ -2557,12 +3074,20 @@
                                                             "botId": null,
                                                             "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                                                             "recipient": [
-                                                                "{=A8001_0001_0001_0003:GetUser}"
+                                                                "{=A8001_0001_0001_0001:MANAGER}"
                                                             ],
                                                             "chatId": null,
                                                             "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_BASIC_MESSAGE###",
                                                             "asError": "N",
-                                                            "aiWarning": "N"
+                                                            "aiWarning": "N",
+                                                            "buttons": [
+                                                                {
+                                                                    "COMMAND": "discussReport",
+                                                                    "COMMAND_PARAMS": "{=A8001_0001_0001_0001:REPORT_ID}",
+                                                                    "TEXT": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_DISCUSS_BUTTON###",
+                                                                    "CONTEXT": "ALL"
+                                                                }
+                                                            ]
                                                         }
                                                     }
                                                 ],
@@ -2572,7 +3097,7 @@
                                                             "botId": null,
                                                             "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                                                             "recipient": [
-                                                                "{=A8001_0001_0001_0003:GetUser}"
+                                                                "{=A8001_0001_0001_0001:MANAGER}"
                                                             ],
                                                             "chatId": null,
                                                             "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_SENT_EMPTY_MESSAGE###",

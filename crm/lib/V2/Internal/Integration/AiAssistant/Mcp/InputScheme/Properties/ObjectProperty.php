@@ -4,6 +4,10 @@ namespace Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\InputScheme\Propert
 
 final class ObjectProperty extends AbstractProperty
 {
+	use Validation\DependentRequiredValidationTrait;
+	use Validation\MaxPropertiesValidationTrait;
+	use Validation\MinPropertiesValidationTrait;
+
 	/** @var AbstractProperty[] */
 	private array $properties = [];
 	private bool $isAdditionalProperties = false;
@@ -17,14 +21,14 @@ final class ObjectProperty extends AbstractProperty
 	 * @param AbstractProperty[] $properties
 	 * @return $this
 	 */
-	public function setProperties(array $properties): self
+	public function setProperties(array $properties): static
 	{
 		$this->properties = $properties;
 
 		return $this;
 	}
 
-	public function setIsAdditionalProperties(bool $isAdditionalProperties): self
+	public function setIsAdditionalProperties(bool $isAdditionalProperties): static
 	{
 		$this->isAdditionalProperties = $isAdditionalProperties;
 
@@ -46,10 +50,14 @@ final class ObjectProperty extends AbstractProperty
 		}
 
 		return [
-			...parent::toArray(),
+			...$this->getBaseSchema(),
 			'properties' => $properties,
 			'required' => $required,
 			'additionalProperties' => $this->isAdditionalProperties,
+			...$this->getCommonValidationSchema(),
+			...$this->getMinPropertiesValidationSchema(),
+			...$this->getMaxPropertiesValidationSchema(),
+			...$this->getDependentRequiredValidationSchema(),
 		];
 	}
 }

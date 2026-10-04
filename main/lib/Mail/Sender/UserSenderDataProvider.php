@@ -4,6 +4,7 @@ namespace Bitrix\Main\Mail\Sender;
 
 use Bitrix\Main\Config\Configuration;
 use Bitrix\Main;
+use Bitrix\Main\Mail\Address;
 use Bitrix\Main\Mail\Internal\SenderTable;
 use Bitrix\Main\Mail\Sender;
 use Bitrix\Main\ORM\Query\Query;
@@ -21,7 +22,7 @@ final class UserSenderDataProvider
 	/**
 	 * Returns a list of available senders for a specific or current user
 	 */
-	public static function getUserAvailableSenders(?int $userId = null): array
+	public static function getUserAvailableSenders(?int $userId = null, bool $preserveIdentities = false): array
 	{
 		$isAdmin = false;
 		if (!($userId > 0))
@@ -56,6 +57,9 @@ final class UserSenderDataProvider
 		foreach ($sendersList as $sender)
 		{
 			$sender['USER_ID'] = (int)$sender['USER_ID'];
+			// the address is both compared against the other rows of this list and handed out to the
+			// consumers, so it enters the loop in the form it is stored and looked up in
+			$sender['EMAIL'] = Address::normalizeEmail($sender['EMAIL']);
 			if (in_array($sender['EMAIL'], $emailsWithoutSmtpSenders, true))
 			{
 				continue;
@@ -80,7 +84,6 @@ final class UserSenderDataProvider
 			}
 
 			$sender['NAME'] = self::getSenderNameBySender($sender, $userId);
-			$sender['EMAIL'] = mb_strtolower($sender['EMAIL']);
 
 			$senders[] = [
 				'id' => (int)$sender['ID'],
@@ -124,7 +127,15 @@ final class UserSenderDataProvider
 			$uniqueSenders[] = $senders[$key];
 		}
 
-		return $uniqueSenders;
+		return $preserveIdentities ? $senders : $uniqueSenders;
+	}
+
+	/**
+	 * Returns every available sender coordinate, including entries with the same display value.
+	 */
+	public static function getUserAvailableSenderIdentities(?int $userId = null): array
+	{
+		return self::getUserAvailableSenders($userId, preserveIdentities: true);
 	}
 
 	/**
@@ -132,6 +143,9 @@ final class UserSenderDataProvider
 	 */
 	public static function getUserAvailableSendersByEmail(string $email, ?int $userId = null): ?array
 	{
+		// the stored address is normalized, so a lookup by the address of the caller has to be too
+		$email = Address::normalizeEmail($email);
+
 		$isAdmin = false;
 		if (!$userId)
 		{
@@ -232,9 +246,11 @@ final class UserSenderDataProvider
 		$currentUserFormattedName = self::getUserFormattedName($userId);
 		foreach (MailboxTable::getUserMailboxes($userId) as $mailbox)
 		{
+			// two addresses are compared as values, so both sides come to one form: mail keeps the case
+			// of the mailbox address on purpose, and the address of the caller is of any form at all
 			if (
 				empty($mailbox['EMAIL'])
-				|| ($email && $email !== $mailbox['EMAIL'])
+				|| ($email && Address::normalizeEmail($email) !== Address::normalizeEmail($mailbox['EMAIL']))
 				|| in_array($mailbox['EMAIL'], $excludedEmails, true)
 			)
 			{
@@ -248,14 +264,7 @@ final class UserSenderDataProvider
 			$sender = null;
 			if (self::isSmtpAvailable())
 			{
-				$sender = SenderTable::query()
-					->setSelect(['*'])
-					->where('IS_CONFIRMED', true)
-					->where('PARENT_MODULE_ID', 'mail')
-					->where('PARENT_ID', $mailbox['ID'])
-					->setLimit(1)
-					->fetch()
-				;
+				$sender = self::getMailboxSender((int)$mailbox['ID']);
 			}
 
 			if (!$sender && !$getMailboxesWithoutSmtp)
@@ -463,14 +472,7 @@ final class UserSenderDataProvider
 
 	public static function getSenderInfoByMailboxId(int $mailboxId, bool $getSenderWithoutSmtp = false): ?array
 	{
-		$sender = SenderTable::query()
-			->setSelect(['*'])
-			->where('IS_CONFIRMED', true)
-			->where('PARENT_MODULE_ID', 'mail')
-			->where('PARENT_ID', $mailboxId)
-			->setLimit(1)
-			->fetchObject()
-		;
+		$sender = self::getMailboxSender($mailboxId);
 
 		if ($sender)
 		{
@@ -503,6 +505,18 @@ final class UserSenderDataProvider
 			'email' => $mailbox['EMAIL'],
 			'type' => self::MAILBOX_TYPE,
 		];
+	}
+
+	private static function getMailboxSender(int $mailboxId): ?array
+	{
+		if ($mailboxId <= 0)
+		{
+			return null;
+		}
+
+		$isAmbiguous = false;
+
+		return (new IdentityResolver())->resolve(Identity::fromMailbox($mailboxId), null, $isAmbiguous);
 	}
 
 	public static function getUserInfo(int $userId): ?array

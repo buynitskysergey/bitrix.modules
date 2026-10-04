@@ -24,10 +24,37 @@ class Number extends Field
 
 		if (!$item->isNew() && $this->isItemValueEmpty($item))
 		{
-			$item->set($this->getName(), $item->getId());
+			$generateResult = $this->generateNumber($item->getId());
+			if (!$generateResult->isSuccess())
+			{
+				return $generateResult;
+			}
+
+			$item->set($this->getName(), $generateResult->getData()['number']);
 		}
 
 		return $result;
+	}
+
+	protected function generateNumber(int $id): Result
+	{
+		$result = new Result();
+		$number = $this->getNumberByEvent($id);
+		if (!$number)
+		{
+			$number = $this->getNumberByNumerator($id);
+		}
+		if (!$number && $this->isValueUnique($id))
+		{
+			$number = $id;
+		}
+
+		if ($number)
+		{
+			return $result->setData(['number' => $number]);
+		}
+
+		return $result->addError(new Error('Could not generate new number'));
 	}
 
 	public function processAfterSave(Item $itemBeforeSave, Item $item, Context $context = null): FieldAfterSaveResult
@@ -36,26 +63,14 @@ class Number extends Field
 
 		if ($itemBeforeSave->isNew() && empty($item->get($this->getName())))
 		{
-			$number = $this->getNumberByEvent($item->getId());
-			if (!$number)
+			$generateResult = $this->generateNumber($item->getId());
+			if ($generateResult->isSuccess())
 			{
-				$number = $this->getNumberByNumerator($item->getId());
-			}
-			if (!$number)
-			{
-				$number = $item->getId();
-				if (!$this->isValueUnique($number))
-				{
-					$number = null;
-				}
-			}
-			if ($number)
-			{
-				$result->setNewValue($this->getName(), $number);
+				$result->setNewValue($this->getName(), $generateResult->getData()['number']);
 			}
 			else
 			{
-				$result->addError(new Error('Could not generate new number'));
+				$result->addErrors($generateResult->getErrors());
 			}
 		}
 

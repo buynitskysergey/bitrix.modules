@@ -1,0 +1,8 @@
+{
+    "defaultTableName": "b_catalog_iblock",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js",
+        "install/tools": "tools"
+    }
+}

@@ -30,14 +30,19 @@ class FileUploader extends \Bitrix\UI\Controller\FileUploader
 		return $configuration;
 	}
 
-	public function uploadAction(UploaderController $controller, Chunk $chunk, string $token = null): array
+	public function uploadAction(
+		UploaderController $controller,
+		Chunk $chunk,
+		?string $token = null,
+		?string $strategy = null,
+	): array
 	{
 		if ($this->getRequest()->getRequestMethod() === 'OPTIONS')
 		{
 			return [];
 		}
 
-		return parent::uploadAction($controller, $chunk, $token);
+		return parent::uploadAction($controller, $chunk, $token, $strategy);
 	}
 
 	protected function getAvailableControllers(): ?array

@@ -73,6 +73,7 @@ class Calendar implements Tabable
 			'imageName' => $this->getIconId(),
 			'sort' => 160,
 			'params' => [
+				'id' => 'calendar_tabs',
 				'onclick' => Utils::getComponentJSCode($this->getComponentParams()),
 				'counter' => $this->getId(),
 				'analytics' => Analytics::calendar(),

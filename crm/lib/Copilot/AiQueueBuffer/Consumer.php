@@ -10,6 +10,7 @@ use Bitrix\Crm\Copilot\Restriction\ExecutionDataManager;
 use Bitrix\Crm\Copilot\Restriction\LimitManager;
 use Bitrix\Crm\Integration\AI\ErrorCode;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
+use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 use Bitrix\Crm\Result;
 use Bitrix\Crm\Traits\Singleton;
 use Bitrix\Main\Error;
@@ -78,9 +79,15 @@ final class Consumer
 
 	private function isQueueHasManyPendingRecords(): bool
 	{
+		// Call transcription is a long-running (minutes) async job that a single buffer pass can
+		// enqueue in bulk (repeat-sale step I.5). Counting those PENDING rows here would let a night
+		// batch of transcriptions trip the throttle and stall the whole buffer - including items whose
+		// transcripts are already ready. Transcription volume is bounded by its own per-client limit,
+		// so it is excluded from the buffer back-pressure counter.
 		$count = (int)QueueTable::query()
 			->where('EXECUTION_STATUS', QueueTable::EXECUTION_STATUS_PENDING)
 			->where('CREATED_TIME', '>=', (new DateTime())->add('-1 day'))
+			->where('TYPE_ID', '!=', TranscribeCallRecording::TYPE_ID)
 			->queryCountTotal()
 		;
 
@@ -130,7 +137,12 @@ final class Consumer
 				continue;
 			}
 
-			$result = $provider->process($item->getProviderData());
+			// the last processing attempt before the item is dropped: providers that gate on a pending
+			// async prerequisite (repeat-sale transcription) must proceed with what is ready here
+			// instead of deferring forever (partial success)
+			$isFinalAttempt = $item->getRetryCount() >= self::MAX_RETRY_COUNT;
+
+			$result = $provider->process($item->getProviderData(), $isFinalAttempt);
 			if ($result->isSuccess())
 			{
 				$successCount++;

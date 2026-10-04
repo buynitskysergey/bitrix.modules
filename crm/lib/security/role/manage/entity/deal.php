@@ -11,12 +11,12 @@ class Deal implements PermissionEntity, FilterableByCategory
 {
 	use FilterableByCategoryTrait;
 
-	private function permissions(array $stages): array
+	private function permissions(array $stages, ?string $inheritDescription): array
 	{
 		return array_merge(
-			PermissionAttrPresets::crmEntityPresetAutomation(),
+			PermissionAttrPresets::crmEntityPresetAutomation(true, $inheritDescription),
 			PermissionAttrPresets::crmEntityKanbanHideSum(),
-			PermissionAttrPresets::crmStageTransition($stages)
+			PermissionAttrPresets::crmStageTransition($stages, $inheritDescription)
 		);
 	}
 
@@ -29,6 +29,9 @@ class Deal implements PermissionEntity, FilterableByCategory
 
 		$dealCategoryConfigs = $this->getDealCategoriesConfig();
 
+		// the funnel name is only meaningful when more than the default pipeline exists
+		$hasMultipleFunnels = DealCategory::getCount() > 1;
+
 		foreach($dealCategoryConfigs as $typeName => $config)
 		{
 			$name = \CCrmOwnerType::GetDescription(\CCrmOwnerType::Deal);
@@ -36,11 +39,17 @@ class Deal implements PermissionEntity, FilterableByCategory
 
 			$fields = $this->getStageFieldsFromConfig($config);
 
+			$inheritDescription = PermissionAttrPresets::stageInheritDescription(
+				\CCrmOwnerType::Deal,
+				null,
+				$hasMultipleFunnels ? $description : null,
+			);
+
 			$result[] = new EntityDTO(
 				$typeName,
 				$name,
 				$fields,
-				$this->permissions($fields['STAGE_ID']),
+				$this->permissions($fields['STAGE_ID'], $inheritDescription),
 				$description,
 				'deal',
 				'--ui-color-accent-purple',

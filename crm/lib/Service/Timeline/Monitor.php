@@ -129,14 +129,22 @@ final class Monitor
 
 			foreach ($itemIdentifiers as $singleIdentifier)
 			{
-				[$lastActivityTime, $lastActivityBy] = $this->calculateLastActivityInfo($singleIdentifier);
+				// $calculatedBy is the author of the suitable timeline/activity that bumped
+				// last-activity.
+				[$lastActivityTime, $calculatedBy] = $this->calculateLastActivityInfo($singleIdentifier);
 
 				$lastActivityTime ??= $this->getTimelineOwner($singleIdentifier)?->getCreatedTime();
-				$lastActivityBy ??= $this->getTimelineOwner($singleIdentifier)?->getCreatedBy();
+				// Fallback to the entity's createdBy when there is no suitable timeline/activity
+				// author. createdBy is fine as $lastActivityBy (it goes into LAST_ACTIVITY_BY).
+				$lastActivityBy = $calculatedBy ?? $this->getTimelineOwner($singleIdentifier)?->getCreatedBy();
 
 				if ($lastActivityTime !== null && $lastActivityBy !== null)
 				{
-					$lastActivityService->set($singleIdentifier, $lastActivityTime, $lastActivityBy);
+					$lastActivityService->set(
+						$singleIdentifier,
+						$lastActivityTime,
+						$lastActivityBy,
+					);
 				}
 			}
 		}

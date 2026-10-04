@@ -1,6 +1,11 @@
 <?
 class CSMTPServer
 {
+	const COMMAND_OPTION_ID = "smtpd_command";
+	const STOP_TOKEN_OPTION_ID = "smtpd_stop_token";
+	const ACTIVE_GENERATION_CACHE_ID = "smtpd_active_generation";
+	const COMMAND_TOKEN_ENVIRONMENT_VARIABLE = "BITRIX_SMTPD_COMMAND_TOKEN";
+
 	var $arServers = Array();
 
 	var $logFile;
@@ -9,6 +14,8 @@ class CSMTPServer
 	var $logMaxSize = 2000000;
 	var $startPeriodTimeTruncate;
 	var $startTime;
+	var $commandToken;
+	var $stopToken;
 
 	function WriteToLog($txt, $level)
 	{
@@ -77,18 +84,207 @@ class CSMTPServer
 			echo trim($txt)."\n---------------------------------\n";
 	}
 
-	public static function Run()
+	public static function SetCommand($action)
 	{
+		$currentCommand = self::GetCommand();
+		$stopToken = $currentCommand ? $currentCommand["stop_token"] : "";
+		if ($action === "stop")
+		{
+			$stopToken = uniqid("", true);
+			COption::SetOptionString("mail", self::STOP_TOKEN_OPTION_ID, $stopToken);
+		}
+
+		$command = Array(
+			"action" => $action,
+			"token" => uniqid("", true),
+			"stop_token" => $stopToken,
+		);
+
+		COption::SetOptionString(
+			"mail",
+			self::COMMAND_OPTION_ID,
+			$command["action"].":".$command["token"].":".$command["stop_token"]
+		);
+
+		return $command;
+	}
+
+	public static function GetCommand()
+	{
+		global $DB;
+
+		$DB->StartUsingMasterOnly();
+		try
+		{
+			$result = $DB->Query(
+				"SELECT NAME, VALUE FROM b_option WHERE MODULE_ID = 'mail'"
+				." AND NAME IN ('".self::COMMAND_OPTION_ID."', '".self::STOP_TOKEN_OPTION_ID."')"
+			);
+		}
+		finally
+		{
+			$DB->StopUsingMasterOnly();
+		}
+
+		$options = Array();
+		while ($row = $result->Fetch())
+			$options[$row["NAME"]] = $row["VALUE"];
+
+		if (!array_key_exists(self::COMMAND_OPTION_ID, $options))
+			return false;
+
+		$command = explode(":", $options[self::COMMAND_OPTION_ID], 3);
+		if (count($command) < 2)
+			return false;
+
+		$stopToken = array_key_exists(self::STOP_TOKEN_OPTION_ID, $options)
+			? $options[self::STOP_TOKEN_OPTION_ID]
+			: (isset($command[2]) ? $command[2] : "");
+
+		return Array(
+			"action" => $command[0],
+			"token" => $command[1],
+			"stop_token" => $stopToken,
+		);
+	}
+
+	private static function IsGenerationActive($stopToken)
+	{
+		global $CACHE_MANAGER;
+
+		return $CACHE_MANAGER->GetImmediate(3600000, self::ACTIVE_GENERATION_CACHE_ID) === $stopToken;
+	}
+
+	public static function Run($commandToken = false)
+	{
+		global $CACHE_MANAGER;
+
 		$var = new CSMTPServer();
-		$var->startTime = time();
-		$var->Start();
-		$var->Listen();
+		$var->startPeriodTimeTruncate = microtime(true);
+		if ($commandToken === false)
+		{
+			$command = self::SetCommand("start");
+			$commandToken = $command["token"];
+		}
+		$var->commandToken = $commandToken;
+
+		$lock = false;
+		$uploadDirectory = trim(COption::GetOptionString("main", "upload_dir", "upload"), "/\\");
+		if ($uploadDirectory === "")
+			$uploadDirectory = "upload";
+
+		$lockPath = $_SERVER["DOCUMENT_ROOT"]."/".$uploadDirectory."/.smtpd.lock";
+		if (CheckDirPath($lockPath))
+		{
+			$lock = @fopen($lockPath, "c+");
+			$lockPath = realpath($lockPath);
+		}
+
+		if (!$lockPath || !$lock)
+		{
+			if ($lock)
+				@fclose($lock);
+
+			$var->ReportStartupError("Cannot open SMTP server lock source file: ".$lockPath);
+			return;
+		}
+
+		clearstatcache(true, $lockPath);
+		$lockStat = @fstat($lock);
+		$lockPathStat = @stat($lockPath);
+		if (
+			!$lockStat
+			|| !$lockPathStat
+			|| ($lockStat["mode"] & 0170000) !== 0100000
+			|| $lockStat["dev"] !== $lockPathStat["dev"]
+			|| $lockStat["ino"] !== $lockPathStat["ino"]
+		)
+		{
+			@fclose($lock);
+			$var->ReportStartupError("Invalid SMTP server lock source file: ".$lockPath);
+			return;
+		}
+
+		$locked = @flock($lock, LOCK_EX | LOCK_NB);
+		if (!$locked)
+		{
+			$currentCommand = self::GetCommand();
+			if (
+				!$currentCommand
+				|| $currentCommand["token"] !== $var->commandToken
+				|| self::IsGenerationActive($currentCommand["stop_token"])
+			)
+			{
+				@fclose($lock);
+				return;
+			}
+
+			$waitUntil = time() + 60;
+			do
+			{
+				sleep(1);
+				$currentCommand = self::GetCommand();
+				if (
+					!$currentCommand
+					|| $currentCommand["token"] !== $var->commandToken
+					|| self::IsGenerationActive($currentCommand["stop_token"])
+				)
+				{
+					break;
+				}
+
+				$locked = @flock($lock, LOCK_EX | LOCK_NB);
+			}
+			while (!$locked && time() < $waitUntil);
+		}
+
+		if (!$locked)
+		{
+			@fclose($lock);
+			return;
+		}
+
+		$currentCommand = self::GetCommand();
+		if (
+			!$currentCommand
+			|| $currentCommand["action"] !== "start"
+			|| $currentCommand["token"] !== $var->commandToken
+		)
+		{
+			@flock($lock, LOCK_UN);
+			@fclose($lock);
+			return;
+		}
+		$var->stopToken = $currentCommand["stop_token"];
+		$CACHE_MANAGER->Clean(self::ACTIVE_GENERATION_CACHE_ID);
+		$CACHE_MANAGER->Read(3600000, self::ACTIVE_GENERATION_CACHE_ID);
+		$CACHE_MANAGER->SetImmediate(self::ACTIVE_GENERATION_CACHE_ID, $var->stopToken);
+
+		$CACHE_MANAGER->Clean("smtpd_stop");
+
+		try
+		{
+			$var->startTime = time();
+			if ($var->Start())
+				$var->Listen();
+			else
+				$var->ReportStartupError("No SMTP server sockets were started");
+		}
+		finally
+		{
+			$var->Stop();
+			$CACHE_MANAGER->Clean("smtpd_stats");
+			$CACHE_MANAGER->Clean(self::ACTIVE_GENERATION_CACHE_ID);
+			@flock($lock, LOCK_UN);
+			@fclose($lock);
+		}
+
+		exit;
 	}
 
 	function Start()
 	{
 		global $CACHE_MANAGER;
-		$CACHE_MANAGER->Clean("smtpd_stop");
 		$CACHE_MANAGER->Clean("smtpd_reload");
 
 		ini_set('max_execution_time', 0);
@@ -97,13 +293,21 @@ class CSMTPServer
 
 		while(@ob_end_clean());
 
+		$started = false;
+		$hasConfiguredServers = false;
 		$dbr = CMailBox::GetList(array(), array("ACTIVE"=>"Y", "SERVER_TYPE"=>"smtp"));
 		while($arr = $dbr->Fetch())
 		{
+			$hasConfiguredServers = true;
 			$server = new CSMTPServerHost($this, $arr);
-			$server->Start();
-			$this->arServers[] = $server;
+			if ($server->Start())
+			{
+				$this->arServers[] = $server;
+				$started = true;
+			}
 		}
+
+		return $started || !$hasConfiguredServers;
 	}
 
 	function ReloadServers()
@@ -135,8 +339,8 @@ class CSMTPServer
 			{
 				$server = new CSMTPServerHost($this, $arr);
 				$server->rnd = $rnd;
-				$server->Start();
-				$this->arServers[] = $server;
+				if ($server->Start())
+					$this->arServers[] = $server;
 			}
 		}
 
@@ -150,7 +354,7 @@ class CSMTPServer
 
 	function Listen()
 	{
-		global $DB, $CACHE_MANAGER;
+		global $CACHE_MANAGER;
 		$cnt = 100;
 		while (true)
 		{
@@ -187,16 +391,17 @@ class CSMTPServer
 					$this->ReloadServers();
 				$CACHE_MANAGER->Clean("smtpd_reload");
 
-				$bStop = $CACHE_MANAGER->Read(3600000, "smtpd_stop");
-				$CACHE_MANAGER->Clean("smtpd_stop");
-
-				if($bStop)
+				$currentCommand = self::GetCommand();
+				if (
+					$currentCommand
+					&& (
+						$currentCommand["action"] === "stop"
+						|| $currentCommand["stop_token"] !== $this->stopToken
+					)
+				)
 				{
-					$CACHE_MANAGER->Clean("smtpd_stats");
 					return;
 				}
-
-				$DB->Query("SELECT 'x' FROM b_user WHERE 1=0"); // nop
 			}
 
 			$arReadSockets = Array();
@@ -208,7 +413,9 @@ class CSMTPServer
 				sleep(1);
 			else
 			{
-				$n = @stream_select($arReadSockets, $w = null, $e = null, 3);
+				$w = null;
+				$e = null;
+				$n = @stream_select($arReadSockets, $w, $e, 3);
 				if($n > 0)
 				{
 					foreach($arReadSockets as $r)
@@ -255,8 +462,22 @@ class CSMTPServer
 
 	function Stop()
 	{
+		$arServers = $this->arServers;
+		foreach($arServers as $server)
+			$server->Shutdown();
+		$this->arServers = Array();
+
 		if ($this->logFile)
+		{
 			FClose($this->logFile);
+			$this->logFile = null;
+		}
+	}
+
+	function ReportStartupError($message)
+	{
+		$this->WriteToLog($message, 1);
+		trigger_error($message, E_USER_WARNING);
 	}
 
 	function RemoveHost($i)
@@ -374,10 +595,28 @@ class CSMTPServerHost
 		if($this->sockServer)
 		{
 			@FClose($this->sockServer);
+			$this->sockServer = false;
 			$this->WriteToLog("Server #".$this->arFields["ID"]." stopped: ".($this->arFields["SERVER"]=="*"?"0.0.0.0":$this->arFields["SERVER"]).":".$this->arFields["PORT"], 1);
 		}
 
 		$this->server->RemoveHost($this->num);
+	}
+
+	function Shutdown()
+	{
+		$arClients = $this->arClients;
+		foreach($arClients as $client)
+			$client->Disconnect();
+
+		if($this->sockServer)
+		{
+			@FClose($this->sockServer);
+			$this->sockServer = false;
+			$this->WriteToLog("Server #".$this->arFields["ID"]." stopped: ".($this->arFields["SERVER"]=="*"?"0.0.0.0":$this->arFields["SERVER"]).":".$this->arFields["PORT"], 1);
+		}
+
+		$this->arClients = array();
+		$this->arSockets = array();
 	}
 
 	function CheckTimeout($timeout)

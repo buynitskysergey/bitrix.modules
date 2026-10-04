@@ -23,6 +23,7 @@ use Bitrix\Vibecodeconnector\Internal\Model\Catalog\CatalogItemTable;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\HiddenTable;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\LastOpenedTable;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\PinTable;
+use Bitrix\Vibecodeconnector\Internal\Model\Catalog\ViewedTable;
 use Bitrix\Vibecodeconnector\Internal\Repository\Mapper\Catalog\CatalogItemMapper;
 
 final class CatalogItemRepository
@@ -36,6 +37,29 @@ final class CatalogItemRepository
 		$row = CatalogItemTable::getById($id)->fetch();
 
 		return $row === false ? null : $this->mapper->fromRow($row);
+	}
+
+	public static function supportsRowLocking(): bool
+	{
+		return in_array(Application::getConnection()->getType(), ['mysql', 'pgsql'], true);
+	}
+
+	public function lockById(int $id): void
+	{
+		if (!self::supportsRowLocking())
+		{
+			return;
+		}
+
+		$connection = Application::getConnection();
+		$helper = $connection->getSqlHelper();
+
+		$connection->queryExecute(
+			'SELECT ' . $helper->quote('ID')
+			. ' FROM ' . $helper->quote(CatalogItemTable::getTableName())
+			. ' WHERE ' . $helper->quote('ID') . ' = ' . $id
+			. ' FOR UPDATE'
+		);
 	}
 
 	public function getList(
@@ -205,6 +229,17 @@ final class CatalogItemRepository
 				)
 			);
 			$query->registerRuntimeField($this->isHiddenExpression());
+			$query->registerRuntimeField(
+				new Reference(
+					'USER_VIEWED',
+					ViewedTable::class,
+					[
+						'=this.ID' => 'ref.CATALOG_ITEM_ID',
+						'=ref.USER_ID' => new SqlExpression('?i', $userContextId),
+					],
+					['join_type' => Join::TYPE_LEFT],
+				)
+			);
 
 			$hiddenState = $filter->getHiddenState();
 			if ($hiddenState === true)
@@ -216,14 +251,14 @@ final class CatalogItemRepository
 				$query->whereNull('USER_HIDDEN.HIDDEN_AT');
 			}
 
-			$notOpenedByUser = $filter->getNotOpenedByUser();
-			if ($notOpenedByUser === true)
+			$notViewedByUser = $filter->getNotViewedByUser();
+			if ($notViewedByUser === true)
 			{
-				$query->whereNull('USER_LAST_OPENED.OPENED_AT');
+				$query->where($this->notViewedCondition($filter->getViewSession()));
 			}
-			elseif ($notOpenedByUser === false)
+			elseif ($notViewedByUser === false)
 			{
-				$query->whereNotNull('USER_LAST_OPENED.OPENED_AT');
+				$query->whereNotNull('USER_VIEWED.VIEWED_AT');
 			}
 		}
 
@@ -326,6 +361,26 @@ final class CatalogItemRepository
 		return $query;
 	}
 
+	/**
+	 * Not viewed yet, plus everything marked since the given view session started.
+	 * Marking happens right after a page is served, so without the session the served
+	 * page would drop out of the New state and the next offset would skip exactly as
+	 * many apps as were shown.
+	 */
+	private function notViewedCondition(?DateTime $viewSession): ConditionTree
+	{
+		$condition = Query::filter()
+			->logic('or')
+			->whereNull('USER_VIEWED.VIEWED_AT')
+		;
+		if ($viewSession !== null)
+		{
+			$condition->where('USER_VIEWED.VIEWED_AT', '>=', $viewSession);
+		}
+
+		return $condition;
+	}
+
 	private function isPinnedExpression(): ExpressionField
 	{
 		return new ExpressionField(
@@ -412,7 +467,7 @@ final class CatalogItemRepository
 			->accessibleToUser($userId, $userCodes)
 			->type(CatalogItemType::Application)
 			->ownerUserNotId($userId)
-			->notOpenedByUser(true)
+			->notViewedByUser(true)
 			->hiddenState(false)
 		;
 		$filter->userContext($userId);

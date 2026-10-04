@@ -1,0 +1,6 @@
+{
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/mobileapp": "mobileapp"
+    }
+}

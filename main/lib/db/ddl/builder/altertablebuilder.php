@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Main\DB\Ddl\Builder;
 
 use Bitrix\Main\DB\Ddl\Column\ColumnInterface;
+use Bitrix\Main\DB\Ddl\Column\ColumnState;
 use Bitrix\Main\DB\Ddl\IndexColumn;
 
 class AlterTableBuilder
@@ -22,6 +23,8 @@ class AlterTableBuilder
 
 	private ?AddColumnBuilder $addColumnBuilder = null;
 	private ?ModifyColumnBuilder $modifyColumnBuilder = null;
+	/** @var array<string, ColumnState> */
+	private array $columnStates = [];
 
 	/**
 	 * @param string $tableName
@@ -31,9 +34,11 @@ class AlterTableBuilder
 	 *    Return false to skip the index.
 	 * @param ?\Closure $currentPrimaryKeyResolver `fn(): string[]`. Returns the columns of the
 	 *    table's current primary key. When `dropPrimaryKey()` is combined with `addPrimaryKey/s(...)`
-	 * @param ?\Closure $dropIndexNameResolver `fn(string[] $columnNames): ?string`. Resolves the live
-	 *    index name for the given columns, or null when the live schema must not be touched. When null,
-	 *    or when `dropIndex()` was called without columns, the hint name is used as-is.
+	 * @param ?\Closure $dropIndexNameResolver `fn(string[] $columnNames, string $hintName): ?string`.
+	 *    Resolves the live index name for the given columns, or null to skip the drop operation.
+	 * @param ?\Closure $modifiedColumnFilter `fn(ColumnInterface $col): bool`. Return false to skip the column
+	 *    from MODIFY COLUMN rendering.
+	 * @param ?\Closure $columnStateFactory `fn(ColumnInterface[] $columns): array<string, ColumnState>`.
 	 */
 	public function __construct(
 		protected readonly string $tableName,
@@ -41,6 +46,8 @@ class AlterTableBuilder
 		private readonly ?\Closure $addedIndexFilter = null,
 		private readonly ?\Closure $currentPrimaryKeyResolver = null,
 		private readonly ?\Closure $dropIndexNameResolver = null,
+		private readonly ?\Closure $modifiedColumnFilter = null,
+		private readonly ?\Closure $columnStateFactory = null,
 	)
 	{
 	}
@@ -65,14 +72,14 @@ class AlterTableBuilder
 		return $this->modifyColumnBuilder;
 	}
 
-	public function dropIndex(string $name, array $columns = []): self
+	public function dropIndex(string $name, array $columns = []): static
 	{
 		$this->dropIndexHints[$name] = IndexColumn::normalizeList($columns);
 
 		return $this;
 	}
 
-	public function dropPrimaryKey(): self
+	public function dropPrimaryKey(): static
 	{
 		$this->dropPrimaryKey = true;
 
@@ -89,14 +96,14 @@ class AlterTableBuilder
 		$this->addPrimaryKey('ID');
 	}
 
-	public function dropColumn(string $columnName): self
+	public function dropColumn(string $columnName): static
 	{
 		$this->droppedColumns[] = $columnName;
 
 		return $this;
 	}
 
-	public function renameColumn(string $oldName, string $newName): self
+	public function renameColumn(string $oldName, string $newName): static
 	{
 		$this->renamedColumns[$oldName] = $newName;
 
@@ -107,14 +114,14 @@ class AlterTableBuilder
 	 * @param ColumnInterface[] $columns
 	 * @return ColumnInterface[]
 	 */
-	private function filterColumns(array $columns): array
+	private function filterColumns(array $columns, ?\Closure $filter): array
 	{
-		if ($this->columnFilter === null)
+		if ($filter === null)
 		{
 			return $columns;
 		}
 
-		return array_filter($columns, fn(ColumnInterface $col) => ($this->columnFilter)($col));
+		return array_filter($columns, static fn(ColumnInterface $col): bool => $filter($col));
 	}
 
 	/**
@@ -123,11 +130,20 @@ class AlterTableBuilder
 	public function toData(): AlterTableData
 	{
 		[$dropPrimaryKey, $primaryKeys] = $this->resolvePrimaryKeyState();
+		$modifiedColumns = $this->filterColumns(
+			$this->modifyColumnBuilder?->getColumns() ?? [],
+			$this->modifiedColumnFilter,
+		);
+		$this->columnStates = [];
+		if ($this->columnStateFactory !== null && !empty($modifiedColumns))
+		{
+			$this->columnStates = ($this->columnStateFactory)($modifiedColumns);
+		}
 
 		return $this->createData(
 			tableName: $this->tableName,
-			addedColumns: $this->filterColumns($this->addColumnBuilder?->getColumns() ?? []),
-			modifiedColumns: $this->modifyColumnBuilder?->getColumns() ?? [],
+			addedColumns: $this->filterColumns($this->addColumnBuilder?->getColumns() ?? [], $this->columnFilter),
+			modifiedColumns: $modifiedColumns,
 			dropIndexNames: $this->collectDropIndexNames(),
 			dropPrimaryKey: $dropPrimaryKey,
 			primaryKeys: $primaryKeys,
@@ -137,18 +153,28 @@ class AlterTableBuilder
 		);
 	}
 
+	/** @return array<string, ColumnState> */
+	protected function getColumnStatesForData(): array
+	{
+		return $this->columnStates;
+	}
+
 	protected function collectDropIndexNames(): array
 	{
 		$names = [];
 		foreach ($this->dropIndexHints as $hintName => $columns)
 		{
-			if (empty($columns) || $this->dropIndexNameResolver === null)
+			if ($this->dropIndexNameResolver === null)
 			{
 				$names[] = $hintName;
 				continue;
 			}
 			$columnNames = array_map(static fn(IndexColumn $col): string => $col->getName(), $columns);
-			$names[] = ($this->dropIndexNameResolver)($columnNames) ?? $hintName;
+			$resolvedName = ($this->dropIndexNameResolver)($columnNames, $hintName);
+			if ($resolvedName !== null)
+			{
+				$names[] = $resolvedName;
+			}
 		}
 
 		return $names;
@@ -250,6 +276,7 @@ class AlterTableBuilder
 			addedIndexes: $addedIndexes,
 			droppedColumns: $droppedColumns,
 			renamedColumns: $renamedColumns,
+			columnStates: $this->getColumnStatesForData(),
 		);
 	}
 }

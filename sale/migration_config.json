@@ -1,0 +1,11 @@
+{
+    "defaultTableName": "b_sale_auxiliary",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/gadgets": "gadgets",
+        "install/images": "images/sale",
+        "install/js": "js",
+        "install/tools": "tools",
+        "install/wizards": "wizards"
+    }
+}

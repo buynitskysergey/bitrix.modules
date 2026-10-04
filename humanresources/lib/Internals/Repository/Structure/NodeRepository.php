@@ -282,9 +282,13 @@ final class NodeRepository
 		array $nodeTypes = [NodeEntityType::DEPARTMENT],
 		?StructureAction $structureAction = null,
 		NodeActiveFilter $activeFilter = NodeActiveFilter::ONLY_GLOBAL_ACTIVE,
+		?int $viewerUserId = null,
 	): NodeCollection
 	{
-		$accessFilter = $structureAction ? new NodeAccessFilter($structureAction) : null;
+		$accessFilter = $structureAction
+			? new NodeAccessFilter($structureAction, userId: $viewerUserId)
+			: null
+		;
 
 		return (new NodeDataBuilder())
 			->addFilter(
@@ -402,6 +406,7 @@ final class NodeRepository
 					entityType: $memberEntityType,
 					nodeFilter: $nodeFilter ?? null,
 					active: null,
+					withVirtualUsers: true,
 				),
 			)
 			->getAll()

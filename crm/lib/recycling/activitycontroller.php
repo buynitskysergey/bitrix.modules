@@ -3,6 +3,8 @@ namespace Bitrix\Crm\Recycling;
 
 use Bitrix\Crm;
 use Bitrix\Crm\Badge\Badge;
+use Bitrix\Crm\Copilot\AiCallScriptSelection\Entity\AiCallScriptSelectionTable;
+use Bitrix\Crm\Copilot\AiCallSummary\Entity\AiCallSummaryTable;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Entity\AiQualityAssessmentTable;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Timeline\Monitor;
@@ -759,6 +761,8 @@ class ActivityController extends BaseController
 	protected function eraseSuspendedAiQualityAssessment(int $recyclingEntityId): void
 	{
 		AiQualityAssessmentTable::deleteByActivityId(AiQualityAssessmentTable::ACTIVITY_TYPE_CALL_SUSPENDED, $recyclingEntityId);
+		AiCallSummaryTable::deleteByActivityId($recyclingEntityId);
+		AiCallScriptSelectionTable::deleteByActivityId($recyclingEntityId);
 	}
 
 	protected function notifyTimelineMonitorAboutMoveToBin(array $bindings): void

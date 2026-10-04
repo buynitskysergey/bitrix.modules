@@ -42,6 +42,9 @@ class ToDo extends Item
 			'copilotSettings' => $this->getCopilotSettings(),
 			'colorSettings' => $this->getColorSettings(),
 			'calendarSettings' => $this->getCalendarSettings(),
+			// A brand-new To-Do has no bound event yet: creating a new event is gated by the
+			// provider, not by this flag (API-02, Mantis #223889).
+			'canChangeDeadline' => true,
 			'actionMenuSettings' => $this->getActionMenuSettings(),
 			'isTourViewed' => $isTourViewedInWeb || $isHideAllTours,
 		];

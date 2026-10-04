@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Internal\Service\Catalog\NewApps;
 
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Vibecodeconnector\Internal\Config\ModuleOptions;
 use Bitrix\Vibecodeconnector\Internal\Entity\User\UserAttribute;
 use Bitrix\Vibecodeconnector\Internal\Repository\User\UserAttributesRepository;
 
 final class BaselineSettings
 {
-	private const MODULE_ID = 'vibecodeconnector';
 	private const OPTION_GLOBAL_BASELINE_AT = 'catalog_new_apps_baseline_at';
 
 	private UserAttributesRepository $userAttributes;
@@ -19,19 +18,21 @@ final class BaselineSettings
 	/** @var array<int, ?DateTime> request-scoped memo so a single flow does not read the personal anchor twice */
 	private array $personalBaseline = [];
 
-	public function __construct(?UserAttributesRepository $userAttributes = null)
-	{
+	public function __construct(
+		?UserAttributesRepository $userAttributes = null,
+		private readonly ModuleOptions $options = new ModuleOptions(),
+	) {
 		$this->userAttributes = $userAttributes ?? new UserAttributesRepository();
 	}
 
 	public function getGlobalBaselineAt(): ?DateTime
 	{
-		return $this->timestampToDateTime((int)Option::get(self::MODULE_ID, self::OPTION_GLOBAL_BASELINE_AT, '0'));
+		return $this->timestampToDateTime((int)$this->options->get(self::OPTION_GLOBAL_BASELINE_AT, '0'));
 	}
 
 	public function setGlobalBaselineAt(DateTime $dateTime): void
 	{
-		Option::set(self::MODULE_ID, self::OPTION_GLOBAL_BASELINE_AT, (string)$dateTime->getTimestamp());
+		$this->options->set(self::OPTION_GLOBAL_BASELINE_AT, (string)$dateTime->getTimestamp());
 	}
 
 	public function getPersonalBaselineAt(int $userId): ?DateTime

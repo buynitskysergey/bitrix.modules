@@ -2,6 +2,7 @@
 
 use Bitrix\Mail\Helper\AttachmentHelper;
 use Bitrix\Mail\Helper\MailContact;
+use Bitrix\Mail\Internal\Service\Message\ClassifyPendingService;
 use Bitrix\Mail\Internals\MailEntityOptionsTable;
 use Bitrix\Mail\MailMessageTable;
 use Bitrix\Main\Application;
@@ -125,12 +126,21 @@ class CMail
 
 	public static function onUserDelete($id)
 	{
+		$connection = \Bitrix\Main\Application::getConnection();
+		if ($connection->isTableExists(\Bitrix\Mail\Internals\DraftTable::getTableName()))
+		{
+			(new \Bitrix\Mail\Internal\Service\Draft\DraftService())->deleteByUser((int)$id);
+		}
+
 		$selectResult = CMailbox::getList(array(), array('USER_ID' => intval($id)));
 		while ($mailbox = $selectResult->fetch())
 		{
-			CMailbox::delete($mailbox['ID']);
+			(new \Bitrix\Mail\Internal\Service\Mailbox\MailboxDeletionRequestService())->request(
+				(int)$mailbox['ID'],
+			);
 		}
 
+		(new \Bitrix\Mail\Internal\Service\Label\LabelService())->deleteByUser((int)$id);
 		\Bitrix\Mail\Internals\MailMessageMarkTable::deleteByFilter(['=USER_ID' => (int)$id]);
 
 		\Bitrix\Mail\Helper\Mailbox\MailboxConnectionRequestService::resetResponsibleAdminIfNeeded(
@@ -605,6 +615,9 @@ class CAllMailBox
 		{
 			\CAgent::addAgent(sprintf('Bitrix\Mail\Helper::syncMailboxAgent(%u);', $ID), 'mail', 'N', (int) $arFields['PERIOD_CHECK'] * 60);
 			\CAgent::addAgent(sprintf('Bitrix\Mail\Helper::cleanupMailboxAgent(%u);', $ID), 'mail', 'N', 3600 * 24);
+
+			// A new mailbox creates its first source generation right away
+			\Bitrix\Mail\Internal\Service\SourceGeneration\BackfillService::onMailboxAdded((int)$ID);
 		}
 
 		if ($arFields['SERVER_TYPE'] == 'pop3' && (int) $arFields['PERIOD_CHECK'] > 0)
@@ -722,21 +735,90 @@ class CAllMailBox
 		$ID = intval($ID);
 
 		Bitrix\Main\Loader::includeModule('mail');
+
+		/*
+			The agents go before any data: the walk over the letters below takes minutes on a large
+			mailbox, and a synchronization started meanwhile would write placements that nothing
+			sweeps afterwards - the mass deletion of them has already happened by then.
+		*/
+		\CAgent::removeAgent(sprintf('CMailbox::CheckMailAgent(%u);', $ID), 'mail');
+		\CAgent::removeAgent(sprintf('Bitrix\Mail\Helper::syncMailboxAgent(%u);', $ID), 'mail');
+		\CAgent::removeAgent(sprintf('Bitrix\Mail\Helper::cleanupMailboxAgent(%u);', $ID), 'mail');
+
+		/*
+			The same lock the synchronization takes, so an entry of another request keeps away from
+			the mailbox being deleted. Best effort and without asking whether it was free: the
+			deletion is not a job to abandon because someone else holds the lease, and the lease it
+			takes over expires on its own.
+		*/
+		$DB->query(sprintf('UPDATE b_mail_mailbox SET SYNC_LOCK = %u WHERE ID = %u', time(), $ID));
+
+		/*
+			A migration or a backfill of this mailbox holds a lock of its own, and the sync lock above
+			says nothing to it: it writes placements, logical letters and generation rows of its own,
+			and one already running would write them after the cleanup below. So the mailbox is taken
+			away from it - the operation is asked to stop and given a while to notice - and the
+			deletion goes on regardless of the answer, because a mailbox the user asked to delete may
+			not stay half deleted. The cleanups after the walk over the letters cover that case.
+		*/
+		$holdsOperationLock = \Bitrix\Mail\Internal\Service\SourceGeneration\MailboxDeletion::takeMailboxOver($ID, 30);
+
+		if (!$holdsOperationLock)
+		{
+			AddMessage2Log(
+				sprintf('Mailbox %u is being deleted while a source generation operation holds it', $ID),
+				'mail',
+				2,
+				false,
+			);
+		}
+
+		// Every way out of the deletion goes through it: the lock outlives the request otherwise
+		$release = static function ($answer) use ($ID, $holdsOperationLock)
+		{
+			if ($holdsOperationLock)
+			{
+				\Bitrix\Mail\Internal\Service\SourceGeneration\OperationLock::release($ID);
+			}
+
+			return $answer;
+		};
+
+		/*
+			The physical data of the mailbox goes first and as a whole: the placements of every
+			generation, the queues that address them and the matching data of the generations.
+			It has to happen before the walk over the letters, not after it, so that the walk
+			neither repeats this work per letter nor leaves a placement of a deleted letter
+			behind when it is interrupted - a letter without a placement is a state the module
+			expects and collects, a placement without a letter is not.
+		*/
+		if (!self::deletePhysicalData($ID))
+			return $release(false);
+
 		$db_msg = Bitrix\Mail\MailMessageTable::getList(array(
 			'select' => array('ID'),
 			'filter' => array('MAILBOX_ID' => $ID)
 		));
 		while($msg = $db_msg->Fetch())
 		{
-			if(!CMailMessage::Delete($msg["ID"]))
-				return false;
+			if(!CMailMessage::Delete($msg["ID"], entityOptionsClearedByCaller: true, withPlacements: false))
+				return $release(false);
 		}
+
+		/*
+			Once more, and for the same reason the agents were dropped first: whatever reached the
+			mailbox while the walk was running left placements of letters that are gone. The
+			statements are cheap and address the mailbox as a whole, so repeating them costs a
+			handful of queries. The window is not closed yet - see the last cleanup below.
+		*/
+		if (!self::deletePhysicalData($ID))
+			return $release(false);
 
 		$db_flt = CMailFilter::GetList(Array(), Array("MAILBOX_ID"=>$ID));
 		while($flt = $db_flt->Fetch())
 		{
 			if(!CMailFilter::Delete($flt["ID"]))
-				return false;
+				return $release(false);
 		}
 
 		$db_mbox = \CMailbox::getList(array('ID' => $ID, 'ACTIVE' => 'Y'));
@@ -750,26 +832,21 @@ class CAllMailBox
 			}
 		}
 
-		\CAgent::removeAgent(sprintf('CMailbox::CheckMailAgent(%u);', $ID), 'mail');
-		\CAgent::removeAgent(sprintf('Bitrix\Mail\Helper::syncMailboxAgent(%u);', $ID), 'mail');
-		\CAgent::removeAgent(sprintf('Bitrix\Mail\Helper::cleanupMailboxAgent(%u);', $ID), 'mail');
+		// The agents of the mailbox are already gone: they were dropped before the first deletion
 
 		$strSql = "DELETE FROM b_mail_log WHERE MAILBOX_ID=".$ID;
 		if(!$DB->Query($strSql, true))
-			return false;
-
-		$strSql = "DELETE FROM b_mail_message_uid WHERE MAILBOX_ID=".$ID;
-		if(!$DB->Query($strSql, true))
-			return false;
+			return $release(false);
 
 		// @TODO: make a log optional
 		//AddMessage2Log("The mailbox $ID was deleted");
 
 		$strSql = "DELETE FROM b_mail_blacklist WHERE MAILBOX_ID=".$ID;
 		if(!$DB->Query($strSql, true))
-			return false;
+			return $release(false);
 
 		\Bitrix\Mail\Internals\MailboxAccessTable::deleteByFilter(['=MAILBOX_ID' => $ID,]);
+		(new \Bitrix\Mail\Internal\Service\Label\LabelService())->deleteByMailbox($ID);
 		\Bitrix\Mail\Internals\MailMessageMarkTable::deleteByFilter(['=MAILBOX_ID' => $ID]);
 		\Bitrix\Mail\Internals\MailEntityDataTable::deleteList(['=MAILBOX_ID' => $ID]);
 		$DB->query(sprintf('DELETE FROM b_mail_mailbox_dir WHERE MAILBOX_ID = %u', $ID));
@@ -779,9 +856,46 @@ class CAllMailBox
 
 		CMailbox::SMTPReload();
 
-		\Bitrix\Mail\MailboxTable::delete($ID);
+		try
+		{
+			$mailboxDeleteResult = \Bitrix\Mail\MailboxTable::delete($ID);
+		}
+		catch (\Throwable $exception)
+		{
+			return $release(CMailError::SetError('MAIL_MAILBOX_DELETE_ERROR', $exception->getMessage()));
+		}
 
-		return new CDBResult();
+		if (!$mailboxDeleteResult->isSuccess())
+		{
+			return $release(CMailError::SetError(
+				'MAIL_MAILBOX_DELETE_ERROR',
+				implode('; ', $mailboxDeleteResult->getErrorMessages()),
+			));
+		}
+
+		/*
+			The third and last cleanup, and the only one nothing races: the first two run while the
+			mailbox row is still there, so a pass of a source generation operation that was asked to
+			stop but had not noticed yet could write a placement and a letter after either of them.
+			Without the row nothing starts writing again, and this one waits for the pass that was
+			still writing - see MailboxDeletion::sweepAfterTheMailboxRow().
+		*/
+		\Bitrix\Mail\Internal\Service\SourceGeneration\MailboxDeletion::sweepAfterTheMailboxRow(
+			$ID,
+			$holdsOperationLock,
+			30,
+		);
+
+		return $release(new CDBResult());
+	}
+
+	/**
+	 * The physical data of the mailbox as a whole. Idempotent and repeated by the deletion three
+	 * times - before the walk over the letters, after it, and once the mailbox row itself is gone.
+	 */
+	private static function deletePhysicalData(int $ID): bool
+	{
+		return \Bitrix\Mail\Internal\Service\SourceGeneration\MailboxDeletion::deletePhysicalData($ID);
 	}
 
 	public static function SMTPReload()
@@ -1405,7 +1519,28 @@ class CAllMailMessage
 					$arSqlSearch[] = GetFilterQuery("MS.FIELD_FROM", $val, "Y", array("@","_",".","-"));
 					break;
 				case "RECIPIENT":
-					$arSqlSearch[] = GetFilterQuery("MS.FIELD_TO, MS.FIELD_CC, MS.FIELD_BCC", $val, "Y", array("@","_",".","-"));
+					$recipientSearch = GetFilterQuery(
+						"MS.FIELD_TO, MS.FIELD_CC, MS.FIELD_BCC",
+						$val,
+						"Y",
+						array("@","_",".","-")
+					);
+					$originalRecipientSearch = (new CSQLWhere())->match(
+						"SEARCH_CONTENT",
+						\Bitrix\Mail\Helper\Message::prepareOriginalRecipientsSearchString($val),
+						true
+					);
+					if ($originalRecipientSearch !== '')
+					{
+						$originalRecipientSearch = sprintf(
+							'MS.ID IN (SELECT ID FROM %s WHERE %s)',
+							MailMessageTable::getTableName(),
+							$originalRecipientSearch,
+						);
+					}
+					$arSqlSearch[] = $originalRecipientSearch === ''
+						? $recipientSearch
+						: "(".$recipientSearch." OR ".$originalRecipientSearch.")";
 					break;
 				case "SPAM_RATING":
 					CMailFilter::RecalcSpamRating();
@@ -1765,7 +1900,7 @@ class CAllMailMessage
 			"FIELD_REPLY_TO" => $obHeader->GetHeader("REPLY-TO"),
 			"FIELD_TO" => $obHeader->GetHeader("TO"),
 			"FIELD_CC" => $obHeader->GetHeader("CC"),
-			"FIELD_BCC" => ($obHeader->GetHeader('X-Original-Rcpt-to')!=''?$obHeader->GetHeader('X-Original-Rcpt-to').($obHeader->GetHeader("BCC")!=''?', ':''):'').$obHeader->GetHeader("BCC"),
+			"FIELD_BCC" => \Bitrix\Mail\Helper\Message::getBccFromParsedHeader($obHeader),
 			"MSG_ID" => trim($obHeader->GetHeader("MESSAGE-ID"), " <>"),
 			"FIELD_PRIORITY" => intval($obHeader->GetHeader("X-PRIORITY")),
 			"MESSAGE_SIZE" => $params['size']?: mb_strlen($message),
@@ -1778,6 +1913,7 @@ class CAllMailMessage
 			),
 			MailMessageTable::FIELD_SANITIZE_ON_VIEW => (int)($params[MailMessageTable::FIELD_SANITIZE_ON_VIEW] ?? 0)
 		);
+		$originalRecipients = \Bitrix\Mail\Helper\Message::getOriginalRecipientsFromParsedHeader($obHeader);
 		if (array_key_exists('external_id', $params))
 		{
 			$arFields['EXTERNAL_ID'] = $params['external_id'];
@@ -1823,7 +1959,10 @@ class CAllMailMessage
 
 		// @TODO: MAX_ALLOWED_PACKET
 		$arFields['INDEX_VERSION'] = \Bitrix\Mail\Helper\MessageIndexStepper::INDEX_VERSION;
-		$arFields['SEARCH_CONTENT'] = \Bitrix\Mail\Helper\Message::prepareSearchContent($arFields);
+		$arFields['SEARCH_CONTENT'] = \Bitrix\Mail\Helper\Message::prepareSearchContent(
+			$arFields,
+			$originalRecipients,
+		);
 
 		if (isset($params['replaces']) && $params['replaces'] > 0)
 		{
@@ -1874,6 +2013,23 @@ class CAllMailMessage
 					self::makeMessageClosureChain($message_id, $mailboxId, (string)$arFields['IN_REPLY_TO']);
 				}
 
+				/*
+					The letters that already answer this one are linked to it here, and only on the
+					import of a migration. The chain is written forward - a letter takes the ancestors
+					it can see at its own save - so a parent arriving afterwards stays a stranger to its
+					own children forever. A migration brings the whole history the portal has never
+					seen, and it brings it in the order of the folders of the new source, so a parent
+					after its answer is the ordinary case there rather than an accident.
+
+					The delayed history load of the ordinary synchronization has the same gap, and
+					closing it for everyone belongs to the owner of that path: this call would then
+					lose its condition.
+				*/
+				if (!empty($params['migration_import']) && !empty($arFields['MSG_ID']))
+				{
+					self::makeMessageClosureChainOfDescendants($message_id, $mailboxId, (string)$arFields['MSG_ID']);
+				}
+
 				static $cachedMailboxes = [];
 
 				if (!array_key_exists($mailboxId, $cachedMailboxes))
@@ -1914,7 +2070,7 @@ class CAllMailMessage
 					$arMessageParts[$i]['ATTACHMENT-ID'] = \CMailMessage::addAttachment($attachFields);
 					if (!$arMessageParts[$i]['ATTACHMENT-ID'])
 					{
-						\CMailMessage::delete($message_id);
+						\CMailMessage::delete($message_id, $mailboxId);
 						return false;
 					}
 
@@ -1978,7 +2134,12 @@ class CAllMailMessage
 				self::addDefferedDownload($mailboxId, $message_id);
 			}
 
-			if (!(isset($params['replaces']) && $params['replaces'] > 0))
+			/*
+				A migration import copies a letter the mailbox already received through
+				another physical source, so it is not a delivery: filters, integrations
+				and notifications must not run a second time.
+			*/
+			if (!(isset($params['replaces']) && $params['replaces'] > 0) && empty($params['migration_import']))
 			{
 				$arFields['IS_OUTCOME'] = !empty($params['outcome']);
 				$arFields['IS_DRAFT'] = !empty($params['draft']);
@@ -2006,6 +2167,7 @@ class CAllMailMessage
 				);
 
 				$arFieldsForFilter = $arFields;
+				$arFieldsForFilter['FIELD_RCPT'] = $originalRecipients;
 
 				foreach (['BODY','BODY_BB','BODY_HTML','SUBJECT'] as $key)
 				{
@@ -2024,7 +2186,8 @@ class CAllMailMessage
 					'message' => $arFields,
 					'attachments' => $arMessageParts,
 					'userId' => isset($mailbox['USER_ID']) ? $mailbox['USER_ID'] : null,
-					'icalAccess' => $icalAccess
+					'icalAccess' => $icalAccess,
+					'isFreshArrival' => !empty($params['fresh_arrival']),
 				]);
 				$event->send();
 
@@ -2054,6 +2217,49 @@ class CAllMailMessage
 	 *
 	 * @return void
 	 */
+	/**
+	 * Links every letter that answers this one - and every letter answering those - to this letter
+	 * and to its own ancestors. The counterpart of {@see makeMessageClosureChain()}, which walks the
+	 * other way.
+	 *
+	 * A child is a descendant of itself and this letter is an ancestor of itself: both hold the self
+	 * pair every saved letter receives, so one statement covers the whole subtree. The condition
+	 * rests on the index of the mailbox over IN_REPLY_TO.
+	 */
+	private static function makeMessageClosureChainOfDescendants(int $messageId, int $mailboxId, string $msgId): void
+	{
+		if ($msgId === '')
+		{
+			return;
+		}
+
+		$helper = \Bitrix\Main\Application::getConnection()->getSqlHelper();
+		MessageClosureTable::insertIgnoreFromSelect(sprintf("SELECT DISTINCT D.MESSAGE_ID, A.PARENT_ID
+			FROM b_mail_message CH
+			INNER JOIN b_mail_message_closure D ON D.PARENT_ID = CH.ID
+			INNER JOIN b_mail_message_closure A ON A.MESSAGE_ID = %1\$u
+			WHERE CH.MAILBOX_ID = %2\$u AND CH.IN_REPLY_TO = '%3\$s' AND CH.ID <> %1\$u",
+			$messageId,
+			$mailboxId,
+			$helper->forSql($msgId)));
+	}
+
+	/**
+	 * Completes the chain of a letter the portal already had, from the headers another physical
+	 * source reports for it. A letter matched by a migration is not saved again, so nothing else
+	 * would read those headers - and the parent it names may have arrived only now, with the
+	 * history the migration brought.
+	 */
+	public static function completeClosureChain(int $messageId, int $mailboxId, string $inReplyTo): void
+	{
+		if ($messageId <= 0 || $mailboxId <= 0 || trim($inReplyTo) === '')
+		{
+			return;
+		}
+
+		self::makeMessageClosureChain($messageId, $mailboxId, trim($inReplyTo, " \t\r\n<>"));
+	}
+
 	private static function makeMessageClosureChain(int $messageId, int $mailboxId, string $inReply): void
 	{
 		$helper = \Bitrix\Main\Application::getConnection()->getSqlHelper();
@@ -2258,7 +2464,22 @@ class CAllMailMessage
 		return $fields;
 	}
 
-	public static function Delete($id)
+	/**
+	 * @param int|null $mailboxId Spares the lookup of the mailbox the classify pending flag is keyed by.
+	 * @param bool $entityOptionsClearedByCaller The caller has already wiped b_mail_entity_options of the
+	 * whole mailbox; wins over $mailboxId.
+	 * @param bool $withPlacements Pass false only when the caller removes the physical rows of
+	 *                             the whole mailbox by itself: the per-letter cleanup would
+	 *                             then repeat those statements for every letter of it. Last of the
+	 *                             parameters on purpose: every positional call of this method passes
+	 *                             the mailbox as the second argument.
+	 */
+	public static function Delete(
+		$id,
+		?int $mailboxId = null,
+		bool $entityOptionsClearedByCaller = false,
+		bool $withPlacements = true,
+	)
 	{
 		global $DB;
 		$id = intval($id);
@@ -2282,10 +2503,67 @@ class CAllMailMessage
 
 		\Bitrix\Mail\Internals\MailMessageMarkTable::deleteByFilter(['=MESSAGE_ID' => $id]);
 
+		/*
+			The letter is gone as a whole, so its physical placements go with it - in every
+			source generation, because the retention policy and the permanent deletion address
+			the logical message and not one of its physical sources.
+		*/
+		if ($withPlacements)
+		{
+			// The owning mailbox is read here and not above: the mass deletion never asks for it
+			$message = $DB->query('SELECT MAILBOX_ID FROM b_mail_message WHERE ID = '.$id)->fetch();
+
+			\Bitrix\Mail\Helper::deleteMessagePlacements($id, (int)($message['MAILBOX_ID'] ?? 0));
+		}
+
+		if (!$entityOptionsClearedByCaller)
+		{
+			self::clearClassifyPending($id, $mailboxId);
+		}
+
 		$strSql = "DELETE FROM b_mail_message WHERE ID=".$id;
 		$DB->Query($strSql);
 
 		return true;
+	}
+
+	/**
+	 * Dropped next to the marks and without asking whether the feature is on: process state of a letter that
+	 * no longer exists. Best effort: a broken cleanup must not break the deletion itself.
+	 */
+	private static function clearClassifyPending(int $messageId, ?int $mailboxId = null): void
+	{
+		try
+		{
+			if ($mailboxId === null)
+			{
+				$message = MailMessageTable::getList([
+					'select' => ['MAILBOX_ID'],
+					'filter' => ['=ID' => $messageId],
+					'limit' => 1,
+				])->fetch();
+
+				$mailboxId = (int)($message['MAILBOX_ID'] ?? 0);
+			}
+
+			if ($mailboxId > 0)
+			{
+				(new ClassifyPendingService())->clear($mailboxId, $messageId);
+			}
+		}
+		catch (\Throwable $exception)
+		{
+			AddMessage2Log(
+				sprintf(
+					'clearClassifyPending failed: messageId=%d, error=%s',
+					$messageId,
+					$exception->getMessage()
+				),
+				'mail',
+				2,
+				false
+			);
+		}
 	}
 
 	public static function MarkAsSpam($ID, $bIsSPAM = true, $arRow = false)
@@ -2349,23 +2627,19 @@ class CAllMailMessage
 	{
 		global $DB;
 
-		$arFields['FILE_NAME'] = trim($arFields['FILE_NAME']);
-
 		$strSql = "SELECT ID, MAILBOX_ID, ATTACHMENTS FROM b_mail_message WHERE ID=".intval($arFields["MESSAGE_ID"]);
 		$dbr = $DB->Query($strSql);
 		if(!($dbr_arr = $dbr->Fetch()))
 			return false;
 
 		$n = intval($dbr_arr["ATTACHMENTS"])+1;
-		if (empty($arFields['FILE_NAME']))
-		{
-			$arFields['FILE_NAME'] = AttachmentHelper::generateFileName(
-				$dbr_arr['MAILBOX_ID'],
-				$dbr_arr['ID'],
-				$n,
-				$arFields['CONTENT_TYPE'],
-			);
-		}
+		$arFields['FILE_NAME'] = \Bitrix\Mail\Internal\Service\Attachment\FileNameNormalizer::normalize(
+			(string)$arFields['FILE_NAME'],
+			(int)$dbr_arr['MAILBOX_ID'],
+			(int)$dbr_arr['ID'],
+			$n,
+			(string)($arFields['CONTENT_TYPE'] ?? ''),
+		);
 
 		if(is_set($arFields, "CONTENT_TYPE"))
 			$arFields["CONTENT_TYPE"] = mb_strtolower($arFields["CONTENT_TYPE"]);
@@ -3584,7 +3858,12 @@ class CMailFilter
 					if($type=="ALL")
 						$arFields[$type] = $arFields["HEADER"]."\r\n".$arFields["BODY"];
 					elseif($type=="RECIPIENT")
-						$arFields[$type] = $arFields["FIELD_CC"]."\r\n".$arFields["FIELD_TO"]."\r\n".$arFields["FIELD_BCC"];
+						$arFields[$type] =
+							$arFields["FIELD_CC"]."\r\n"
+							.$arFields["FIELD_TO"]."\r\n"
+							.$arFields["FIELD_BCC"]."\r\n"
+							.($arFields['FIELD_RCPT'] ?? '')
+						;
 					else
 						$arFields[$type] = $arFields["FIELD_FROM"]."\r\n".$arFields["FIELD_REPLY_TO"];
 				case "HEADER": case "FIELD_FROM": case "FIELD_REPLY_TO": case "FIELD_TO": case "FIELD_CC": case "SUBJECT": case "BODY":
@@ -3834,7 +4113,7 @@ class CMailFilter
 						"MESSAGE"=>""
 						)
 					);
-				CMailMessage::Delete($MESSAGE_ID);
+				CMailMessage::Delete($MESSAGE_ID, $MAILBOX_ID);
 			}
 
 			if($arFilterParams["ACTION_STOP_EXEC"]=="Y")
@@ -3861,7 +4140,16 @@ class CMailFilter
 	{
 		$res = CMailMessage::GetByID($message_id);
 		if($arFields = $res->Fetch())
+		{
+			if (empty($arFields['FIELD_RCPT']))
+			{
+				$arFields['FIELD_RCPT'] = \Bitrix\Mail\Helper\Message::getOriginalRecipientsFromHeader(
+					(string)($arFields['HEADER'] ?? '')
+				);
+			}
+
 			return CMailFilter::Filter($arFields, $event, $FILTER_ID);
+		}
 
 		return false;
 	}

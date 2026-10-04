@@ -241,6 +241,12 @@ return [
 			'humanresources.service.hcmlink.placement.salaryAndVacation' => [
 				'className' => \Bitrix\HumanResources\Service\HcmLink\Placement\SalaryVacationService::class,
 			],
+			'humanresources.service.hcmlink.salaryVacationApi' => [
+				'className' => \Bitrix\HumanResources\Service\HcmLink\SalaryVacationApiService::class,
+			],
+			'humanresources.service.hcmlink.pin' => [
+				'className' => \Bitrix\HumanResources\Service\HcmLink\PinService::class,
+			],
 			'humanresources.service.member.departmentUserSearchService' => [
 				'className' => \Bitrix\HumanResources\Service\Member\DepartmentUserSearchService::class,
 			],
@@ -382,11 +388,13 @@ return [
 				Bitrix\HumanResources\Integration\AiAssistant\Agents\DepartmentAgent::class,
 				Bitrix\HumanResources\Integration\AiAssistant\Agents\TeamAgent::class,
 				Bitrix\HumanResources\Integration\AiAssistant\Agents\CompanyStructureAgent::class,
+				Bitrix\HumanResources\Integration\AiAssistant\Agents\AccessAgent::class,
 			],
 			'toolSets' => [
 				Bitrix\HumanResources\Integration\AiAssistant\ToolSets\DepartmentToolSet::class,
 				Bitrix\HumanResources\Integration\AiAssistant\ToolSets\TeamToolSet::class,
 				Bitrix\HumanResources\Integration\AiAssistant\ToolSets\CompanyStructureToolSet::class,
+				Bitrix\HumanResources\Integration\AiAssistant\ToolSets\AccessToolSet::class,
 			],
 		],
 		'readonly' => true,

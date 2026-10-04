@@ -18,6 +18,7 @@ use Bitrix\Main;
 use Bitrix\Main\LoaderException;
 use Bitrix\Main\Localization\Loc;
 use CCrmActivity;
+use CCrmEntityHelper;
 use CCrmActivityNotifyType;
 use CCrmActivityType;
 use CCrmContentType;
@@ -31,6 +32,8 @@ class OpenLine extends Base implements EventRegistrarInterface
 	public const ACTIVITY_PROVIDER_ID = 'IMOPENLINES_SESSION';
 
 	public const CHAT_MESSAGE_COPILOT_PROCESSING_LIMIT = 1000;
+
+	private const LAST_MESSAGES_VOLUME_LOCK_TIMEOUT = 5;
 
 	public static $isActive;
 	public static int $activeLine = 0;
@@ -273,6 +276,7 @@ class OpenLine extends Base implements EventRegistrarInterface
 		$sessionId = is_numeric($activityFields['ASSOCIATED_ENTITY_ID'] ?? null) ? (int)$activityFields['ASSOCIATED_ENTITY_ID'] : null;
 		$userCode = $activityFields['PROVIDER_PARAMS']['USER_CODE'] ?? null;
 		$responsibleId = $activityFields['RESPONSIBLE_ID'] ?? null;
+		$isCompleted = ($activityFields['COMPLETED'] ?? null) === 'Y';
 
 		$sourceIdentifier = new Badge\SourceIdentifier(
 			Badge\SourceIdentifier::CRM_OWNER_TYPE_PROVIDER,
@@ -300,7 +304,7 @@ class OpenLine extends Base implements EventRegistrarInterface
 				$processedByAiAgentBadge->bind($itemIdentifier, $sourceIdentifier);
 			}
 		}
-		elseif (OpenLineManager::getChatUnReadMessagesCount($userCode, $responsibleId) > 0)
+		elseif (!$isCompleted && static::getChatUnReadMessagesCount($userCode, $responsibleId) > 0)
 		{
 			foreach ($bindings as $binding)
 			{
@@ -423,7 +427,12 @@ class OpenLine extends Base implements EventRegistrarInterface
 		return $messagesForCopilot[$cacheKey];
 	}
 
-	public static function isCopilotProcessingAvailable(int $activityId, string $messages = '', bool $checkLastVolume = true): bool
+	public static function isCopilotProcessingAvailable(
+		int $activityId,
+		string $messages = '',
+		bool $checkLastVolume = true,
+		?ItemIdentifier $target = null
+	): bool
 	{
 		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
 		if (!is_array($activity))
@@ -440,7 +449,7 @@ class OpenLine extends Base implements EventRegistrarInterface
 
 		if ($checkLastVolume)
 		{
-			$lastVolume = $activity['SETTINGS']['LAST_MESSAGES_VOLUME'] ?? 0;
+			$lastVolume = static::getLastMessagesVolume($activity, $target);
 
 			return $currentVolume >= $lastVolume + static::CHAT_MESSAGE_COPILOT_PROCESSING_LIMIT;
 		}
@@ -448,7 +457,7 @@ class OpenLine extends Base implements EventRegistrarInterface
 		return $currentVolume >= static::CHAT_MESSAGE_COPILOT_PROCESSING_LIMIT;
 	}
 
-	public static function saveLastMessagesVolumeForCopilot(int $activityId): void
+	public static function saveLastMessagesVolumeForCopilot(int $activityId, ?ItemIdentifier $target = null): void
 	{
 		if ($activityId <= 0)
 		{
@@ -461,13 +470,99 @@ class OpenLine extends Base implements EventRegistrarInterface
 			return;
 		}
 
-		$messages = static::getMessagesForCopilot($activityId);
+		$currentVolume = (int)mb_strlen(static::getMessagesForCopilot($activityId), 'UTF-8');
+
+		if ($target === null)
+		{
+			// Chat-global baseline is a single scalar written by summarize/analyze: last-writer-wins is
+			// harmless (concurrent writers store the same current chat volume).
+			$settings = is_array($activity['SETTINGS'] ?? null) ? $activity['SETTINGS'] : [];
+			$settings['LAST_MESSAGES_VOLUME'] = $currentVolume;
+			CCrmActivity::Update($activityId, ['SETTINGS' => $settings]);
+
+			return;
+		}
+
+		// Concurrent successful fills for different entities of the same chat merge different keys into
+		// the one serialized SETTINGS blob. Serialize the read-modify-write with a named lock and re-read
+		// the freshest SETTINGS under it, so no writer clobbers another entity's baseline (or other
+		// settings). See fill-fields-any-entity.
+		$connection = Main\Application::getInstance()->getConnection();
+		$lockName = self::buildLastMessagesVolumeLockName($activityId);
+		$isLocked = $connection->lock($lockName, self::LAST_MESSAGES_VOLUME_LOCK_TIMEOUT);
+		try
+		{
+			$settings = self::readFreshActivitySettings($activityId);
+			$map = is_array($settings['LAST_MESSAGES_VOLUME_MAP'] ?? null)
+				? $settings['LAST_MESSAGES_VOLUME_MAP']
+				: []
+			;
+			$map[static::buildLastMessagesVolumeKey($target)] = $currentVolume;
+			$settings['LAST_MESSAGES_VOLUME_MAP'] = $map;
+
+			CCrmActivity::Update($activityId, ['SETTINGS' => $settings]);
+		}
+		finally
+		{
+			if ($isLocked)
+			{
+				$connection->unlock($lockName);
+			}
+		}
+	}
+
+	private static function buildLastMessagesVolumeLockName(int $activityId): string
+	{
+		return 'crm_ai_last_messages_volume_' . $activityId;
+	}
+
+	/**
+	 * Reads the activity SETTINGS straight from the DB, bypassing the request cache, so the per-entity
+	 * baseline map is merged on top of the freshest committed state under the named lock.
+	 */
+	private static function readFreshActivitySettings(int $activityId): array
+	{
+		CCrmEntityHelper::RemoveCached(CCrmActivity::CACHE_NAME, $activityId);
+
+		$activity = CCrmActivity::GetByID($activityId, false);
+		$settings = $activity['SETTINGS'] ?? [];
+		if (is_string($settings))
+		{
+			$settings = unserialize($settings, ['allowed_classes' => false]);
+		}
+
+		return is_array($settings) ? $settings : [];
+	}
+
+	/**
+	 * Per-entity baseline for the "enough new information" chat check (AC-013).
+	 *
+	 * When a fill target is given, the baseline is read from a per-entity map stored in the activity
+	 * SETTINGS, so each linked entity tracks new messages since ITS OWN last fill. A missing entry
+	 * means the first run in that entity, which falls back to the plain total-volume check (baseline 0).
+	 * When no target is given, the legacy chat-global baseline (`LAST_MESSAGES_VOLUME`) is used
+	 * (summarize/analyze scenarios, auto path) — behaviour unchanged.
+	 */
+	private static function getLastMessagesVolume(array $activity, ?ItemIdentifier $target): int
+	{
 		$settings = is_array($activity['SETTINGS'] ?? null) ? $activity['SETTINGS'] : [];
 
-		CCrmActivity::Update($activityId, ['SETTINGS' => [
-			...$settings,
-			'LAST_MESSAGES_VOLUME' => (int)(mb_strlen($messages, 'UTF-8')),
-		]]);
+		if ($target !== null)
+		{
+			$map = is_array($settings['LAST_MESSAGES_VOLUME_MAP'] ?? null)
+				? $settings['LAST_MESSAGES_VOLUME_MAP']
+				: []
+			;
+
+			return (int)($map[static::buildLastMessagesVolumeKey($target)] ?? 0);
+		}
+
+		return (int)($activity['SETTINGS']['LAST_MESSAGES_VOLUME'] ?? 0);
+	}
+
+	private static function buildLastMessagesVolumeKey(ItemIdentifier $target): string
+	{
+		return $target->getEntityTypeId() . ':' . $target->getEntityId();
 	}
 
 	public static function getChatName(string $userCode): string
@@ -570,6 +665,11 @@ class OpenLine extends Base implements EventRegistrarInterface
 		}
 
 		return OpenLineManager::getSessionMessages($sessionId, $limit);
+	}
+
+	protected static function getChatUnReadMessagesCount(?string $userCode, ?int $userId): int
+	{
+		return OpenLineManager::getChatUnReadMessagesCount($userCode, $userId);
 	}
 
 	protected static function normalizeMessagesForCopilot(string $text): string

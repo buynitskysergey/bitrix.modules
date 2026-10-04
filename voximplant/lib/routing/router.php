@@ -2,6 +2,7 @@
 
 namespace Bitrix\Voximplant\Routing;
 
+use Bitrix\Main\Result;
 use Bitrix\Voximplant\Call;
 use Bitrix\Voximplant\Model\CallUserTable;
 use Bitrix\Voximplant\Model\IvrActionTable;
@@ -528,12 +529,13 @@ class Router
 
 			if(\CVoxImplantCrmHelper::shouldCreateLead($this->call))
 			{
-				\CVoxImplantCrmHelper::registerCallInCrm($this->call);
-				if(\CVoxImplantConfig::GetLeadWorkflowExecution() == \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE)
-				{
-					\CVoxImplantCrmHelper::StartCallTrigger($this->call, true);
-				}
+				$this->registerCallInCrmWithLeadLock($this->call, true);
 			}
 		}
+	}
+
+	protected function registerCallInCrmWithLeadLock(Call $call, bool $onlyCreated): Result
+	{
+		return \CVoxImplantCrmHelper::registerCallInCrmWithLeadLock($call, $onlyCreated);
 	}
 }

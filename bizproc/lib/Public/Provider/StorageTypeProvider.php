@@ -8,6 +8,7 @@ use Bitrix\Bizproc\Internal\Entity\StorageType\StorageTypeCollection;
 use Bitrix\Bizproc\Internal\Repository\StorageTypeRepository\StorageTypeRepositoryInterface;
 use Bitrix\Main\Provider\Params\FilterInterface;
 use Bitrix\Main\Provider\Params\GridParams;
+use Bitrix\Main\Provider\Params\SortInterface;
 
 class StorageTypeProvider
 {
@@ -47,6 +48,11 @@ class StorageTypeProvider
 			sort: $gridParams->getSort(),
 			select: $gridParams->getSelect(),
 		);
+	}
+
+	public function getPosition(int $id, ?FilterInterface $filter = null, ?SortInterface $sort = null): ?int
+	{
+		return $this->repository->getPosition($id, $filter, $sort?->prepareSort());
 	}
 
 	public function getAllForActivity(): StorageTypeCollection

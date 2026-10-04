@@ -11,6 +11,9 @@ namespace Bitrix\Main\Mail;
 use Bitrix\Main\Config as Config;
 use Bitrix\Main\IO\File;
 use Bitrix\Main\Application;
+use Bitrix\Main\Error;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Result;
 use Bitrix\Main\Web\Uri;
 
 class Mail
@@ -161,44 +164,72 @@ class Mail
 	 */
 	public static function send($mailParams)
 	{
-		$result = false;
+		return static::sendResult($mailParams)->isSuccess();
+	}
+
+	/**
+	 * Send email and preserve a controlled transport error for callers that need its code and text.
+	 */
+	public static function sendResult(array $mailParams): Result
+	{
+		$result = new Result();
+		$context = $mailParams['CONTEXT'] ?? null;
+		if ($context instanceof Context)
+		{
+			$context->setSendingError(null);
+		}
 
 		$event = new \Bitrix\Main\Event("main", "OnBeforeMailSend", array($mailParams));
 		$event->send();
 		foreach ($event->getResults() as $eventResult)
 		{
 			if($eventResult->getType() == \Bitrix\Main\EventResult::ERROR)
-				return false;
+			{
+				$parameters = $eventResult->getParameters();
+				$error = is_array($parameters) ? ($parameters['error'] ?? null) : null;
+				$result->addError(
+					$error instanceof Error
+						? $error
+						: new Error(Loc::getMessage('MAIN_MAIL_SEND_CANCELED'), 'MAIL_SEND_CANCELED'),
+				);
+
+				return $result;
+			}
 
 			$mailParams = array_merge($mailParams, $eventResult->getParameters());
 		}
 
 		if(defined("ONLY_EMAIL") && $mailParams['TO'] != ONLY_EMAIL)
 		{
-			$result = true;
+			return $result;
 		}
-		else
+
+		$mail = static::createInstance($mailParams);
+		if (!$mail->canSend())
 		{
-			$mail = static::createInstance($mailParams);
-			if ($mail->canSend())
-			{
-				$mailResult = bxmail(
-					$mail->getTo(),
-					$mail->getSubject(),
-					$mail->getBody(),
-					$mail->getHeaders(),
-					$mail->getAdditionalParameters(),
-					$mail->getContext()
-				);
-
-				if($mailResult)
-				{
-					$result = true;
-				}
-			}
+			return $result->addError(
+				new Error(Loc::getMessage('MAIN_MAIL_SEND_NOT_ALLOWED'), 'MAIL_SEND_NOT_ALLOWED'),
+			);
 		}
 
-		return $result;
+		$mailResult = bxmail(
+			$mail->getTo(),
+			$mail->getSubject(),
+			$mail->getBody(),
+			$mail->getHeaders(),
+			$mail->getAdditionalParameters(),
+			$mail->getContext(),
+		);
+		if ($mailResult)
+		{
+			return $result;
+		}
+
+		$sendingError = $mail->getContext()?->getSendingError();
+
+		return $result->addError(
+			$sendingError ?? new Error(Loc::getMessage('MAIN_MAIL_SEND_FAILED'), 'MAIL_SEND_FAILED'),
+		);
 	}
 
 	/**

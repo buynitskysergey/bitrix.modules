@@ -4,6 +4,7 @@ namespace Bitrix\Mail\Disk\ProxyType;
 
 use Bitrix\Main;
 use Bitrix\Disk;
+use Bitrix\Mail\Helper\Attachment\Storage;
 
 if (!Main\Loader::includeModule('disk'))
 {
@@ -43,7 +44,7 @@ class Mail extends Disk\ProxyType\Base
 	 */
 	public function getEntityTitle()
 	{
-		return 'mail';
+		return Storage::getName();
 	}
 
 	/**

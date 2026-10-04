@@ -24,6 +24,8 @@ use Bitrix\Main\Messenger\Internals\Storage\Db\Model\MessengerMessageTable;
  */
 class WorkflowResumeMessageTable extends MessengerMessageTable
 {
+	use \Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
+
 	#[\Override]
 	public static function getTableName(): string
 	{

@@ -7,6 +7,7 @@ use Bitrix\HumanResources\Contract\Repository\HcmLink\JobRepository;
 use Bitrix\HumanResources\Exception\UpdateFailedException;
 use Bitrix\HumanResources\Service\Container;
 use Bitrix\HumanResources\Type\HcmLink\JobStatus;
+use Bitrix\HumanResources\Type\HcmLink\JobType;
 use Bitrix\HumanResources\Item;
 use Bitrix\Main\Type\DateTime;
 use CAgent;
@@ -63,12 +64,21 @@ class JobKillerService
 			limit: self::LIMIT,
 		);
 
+		// PIN_REQUEST and SALARY_VACATION_REQUEST are not resent: both carry a one-time PIN,
+		// so resending the event would either make 1C issue an extra PIN or push a stale one.
+		// Such jobs are simply canceled once their TTL expires.
+		$nonResendableTypes = [JobType::PIN_REQUEST, JobType::SALARY_VACATION_REQUEST];
+
 		$jobsToResend = $jobCollection->filter(
-			static fn(Item\HcmLink\Job $job) => $job->eventCount < self::MAX_EVENT_COUNT_BEFORE_CANCEL,
+			static fn(Item\HcmLink\Job $job) =>
+				!in_array($job->type, $nonResendableTypes, true)
+				&& $job->eventCount < self::MAX_EVENT_COUNT_BEFORE_CANCEL,
 		);
 
 		$jobsToCancel = $jobCollection->filter(
-			static fn(Item\HcmLink\Job $job) => $job->eventCount >= self::MAX_EVENT_COUNT_BEFORE_CANCEL,
+			static fn(Item\HcmLink\Job $job) =>
+				in_array($job->type, $nonResendableTypes, true)
+				|| $job->eventCount >= self::MAX_EVENT_COUNT_BEFORE_CANCEL,
 		);
 
 		$jobIdsToCancel = $jobsToCancel->map(

@@ -17,7 +17,6 @@ use Bitrix\Crm\Kanban\Helper\FieldsPreparer;
 use Bitrix\Crm\Kanban\Sort;
 use Bitrix\Crm\Kanban\ViewMode;
 use Bitrix\Crm\Restriction\RestrictionManager;
-use Bitrix\Crm\Search\SearchEnvironment;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Display\Field\BooleanField;
 use Bitrix\Crm\Service\ParentFieldManager;
@@ -1394,6 +1393,8 @@ abstract class Kanban
 				$row = $this->mergeItemFieldsValues($row, $renderedRows[$rowId]);
 			}
 
+			// CONTACT_TYPE marks the entity that owns the card's default communication; the client must
+			// take its id from that same entity (invariant enforced in item.js).
 			if (isset($row['CONTACT_ID']) && $row['CONTACT_ID'] > 0)
 			{
 				$row['CONTACT_TYPE'] = 'CRM_CONTACT';

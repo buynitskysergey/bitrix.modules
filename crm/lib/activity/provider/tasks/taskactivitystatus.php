@@ -17,14 +17,16 @@ class TaskActivityStatus
 	public const STATUS_CONTROL_WAITING = 'CONTROLWAITING';
 	public const STATUS_FINISHED = 'FINISHED';
 
+	/**
+	 * @deprecated Status projections are synchronized directly from the current task state.
+	 */
 	public const STATUSES_MANAGER_CAN_UPDATE = [
 		self::STATUS_EXPIRED,
 		self::STATUS_FINISHED,
 		self::STATUS_WAITING,
 		self::STATUS_IN_PROGRESS,
-		self::STATUS_DEADLINE_CHANGED
+		self::STATUS_DEADLINE_CHANGED,
 	];
-
 
 	// STATUSES FROM c_tasks
 	const TASKS_STATE_PENDING = 2;    // Pending === Accepted
@@ -32,21 +34,53 @@ class TaskActivityStatus
 	const TASKS_STATE_SUPPOSEDLY_COMPLETED = 4;
 	const TASKS_STATE_COMPLETED = 5;
 
+	private const STATUS_BY_TASK_STATE = [
+		self::TASKS_STATE_PENDING => self::STATUS_WAITING,
+		self::TASKS_STATE_IN_PROGRESS => self::STATUS_IN_PROGRESS,
+		self::TASKS_STATE_SUPPOSEDLY_COMPLETED => self::STATUS_CONTROL_WAITING,
+		self::TASKS_STATE_COMPLETED => self::STATUS_FINISHED,
+	];
+
+	public function isCompletedTaskState(int $taskStatus): bool
+	{
+		return in_array(
+			$taskStatus,
+			[self::TASKS_STATE_SUPPOSEDLY_COMPLETED, self::TASKS_STATE_COMPLETED],
+			true,
+		);
+	}
+
 	public function onStatusChange(int $currStatus, bool $expired = false): string
 	{
-		switch ($currStatus)
+		if (
+			$expired === true
+			&& in_array($currStatus, [self::TASKS_STATE_PENDING, self::TASKS_STATE_IN_PROGRESS], true)
+		)
 		{
-			case self::TASKS_STATE_PENDING:
-				return ($expired === true) ? self::STATUS_EXPIRED : self::STATUS_WAITING;
-			case self::TASKS_STATE_COMPLETED:
-				return self::STATUS_FINISHED;
-			case self::TASKS_STATE_IN_PROGRESS:
-				return self::STATUS_IN_PROGRESS;
-			case self::TASKS_STATE_SUPPOSEDLY_COMPLETED:
-				return self::STATUS_CONTROL_WAITING;
+			return self::STATUS_EXPIRED;
 		}
 
-		return '';
+		return self::STATUS_BY_TASK_STATE[$currStatus] ?? '';
+	}
+
+	/**
+	 * A projection mirrors the state of the task itself, unlike a marker of a single task event
+	 * such as CREATED, VIEWED, UPDATED, RESULTADDED or DEADLINECHANGED.
+	 */
+	public function isTaskStatusProjection(string $status): bool
+	{
+		return in_array($status, $this->getTaskStatusProjections(), true);
+	}
+
+	/**
+	 * Every value onStatusChange() can produce.
+	 */
+	private function getTaskStatusProjections(): array
+	{
+		return [
+			...array_values(self::STATUS_BY_TASK_STATE),
+			self::STATUS_EXPIRED,
+		];
 	}
 
 	public function getStatusLocMessage(string $status): string

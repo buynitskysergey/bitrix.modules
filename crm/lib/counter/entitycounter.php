@@ -11,6 +11,7 @@ use Bitrix\Crm\Settings\CounterSettings;
 use Bitrix\Main;
 use Bitrix\Main\Application;
 use Bitrix\Main\Entity\Query;
+use Bitrix\Main\Web\Uri;
 
 class EntityCounter extends CounterBase
 {
@@ -568,7 +569,7 @@ class EntityCounter extends CounterBase
 		{
 			$url = $this->getEntityListPath();
 		}
-		return \CHTTP::urlAddParams($url, $urlParams);
+		return (string)(new Uri($url))->addParams($urlParams);
 	}
 	public static function externalizeExtras(array $extras, array &$params)
 	{

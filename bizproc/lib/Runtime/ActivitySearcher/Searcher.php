@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Bitrix\Bizproc\Runtime\ActivitySearcher;
 
 use Bitrix\Bizproc\Activity\ActivityDescription;
+use Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider;
 use Bitrix\Bizproc\Internal\Service\Container;
 use Bitrix\Bizproc\RestActivityTable;
 use Bitrix\Bizproc\Activity\Enum\ActivityType;
 use Bitrix\Bizproc\Activity\Mixins\ActivityDescriptionBuilder;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\IO;
 use Bitrix\Main\Loader;
 use CBPRuntime;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 class Searcher
 {
@@ -19,13 +23,35 @@ class Searcher
 
 	private const DESCRIPTION_FILE_NAME = '.description.php';
 	private const AI_DESCRIPTION_FILE_NAME = '.ai.php';
+	private const LOGGER_ID = 'bizproc.runtime.activity_searcher';
+
+	/** Lower-cased: matched against a normalized activity code. {@see self::isNamedAsTrigger()} */
+	private const LEGACY_TRIGGER_CODE_SUFFIX = 'trigger';
 
 	private readonly array $folders;
 
 	private array $loadedActivities = [];
 
-	public function __construct()
+	private array $triggerActivityFlags = [];
+
+	/**
+	 * Descriptions built from `.description.php`, by normalized code, for the request. A null value is a
+	 * remembered miss, told from an unasked code by array_key_exists().
+	 *
+	 * @var array<string, ActivityDescription|null>
+	 */
+	private array $fileDescriptions = [];
+
+	private array $includedAiDescriptionFiles = [];
+
+	private ?LoggerInterface $logger = null;
+
+	private ?UnifiedPanelDescriptorProvider $unifiedPanelDescriptorProvider = null;
+
+	public function __construct(?UnifiedPanelDescriptorProvider $unifiedPanelDescriptorProvider = null)
 	{
+		$this->unifiedPanelDescriptorProvider = $unifiedPanelDescriptorProvider;
+
 		$root = $_SERVER['DOCUMENT_ROOT'];
 		$this->folders = [
 			$root . '/local/activities',
@@ -36,6 +62,11 @@ class Searcher
 		];
 
 		Loader::requireModule('ui');
+	}
+
+	private function getLogger(): LoggerInterface
+	{
+		return $this->logger ??= (new LoggerFactory())->createById(self::LOGGER_ID) ?? new NullLogger();
 	}
 
 	private function addLoadedActivity(string $code): void
@@ -100,7 +131,7 @@ class Searcher
 					if (count(array_intersect($targetTypes, $activityType)) > 0)
 					{
 						$activityDescription->setPathToActivity($folder . '/' . $dirName);
-						$activities->add($key, $activityDescription);
+						$activities->add($key, $this->applyUnifiedPanelDescriptor($key, $activityDescription));
 					}
 				}
 			}
@@ -139,6 +170,8 @@ class Searcher
 
 		if ($this->isRestActivityCode($normalizedCode))
 		{
+			// A REST activity is not memoized: its description comes from the database, which the request may
+			// change, and $lang is part of the answer.
 			$activity = $this->findRestActivityByInternalCode($this->extractRestInternalCode($normalizedCode), ['*']);
 			if (!$activity)
 			{
@@ -148,6 +181,17 @@ class Searcher
 			return $this->buildRestActivityDescription($activity, $lang);
 		}
 
+		if (!array_key_exists($normalizedCode, $this->fileDescriptions))
+		{
+			$this->fileDescriptions[$normalizedCode] = $this->buildFileActivityDescription($normalizedCode);
+		}
+
+		return $this->copyOfFileDescription($normalizedCode);
+	}
+
+	/** The description as it is remembered: read from the file and already completed with the panel descriptor. */
+	private function buildFileActivityDescription(string $normalizedCode): ?ActivityDescription
+	{
 		[, $dirPath] = $this->findActivityFile($normalizedCode);
 		if (empty($dirPath))
 		{
@@ -155,9 +199,47 @@ class Searcher
 		}
 
 		$activityDescription = $this->includeActivityDescriptionByDirectoryPath($dirPath);
+		if (!$activityDescription)
+		{
+			return null;
+		}
 
-		return $activityDescription?->setPathToActivity($dirPath);
+		$activityDescription->setPathToActivity($dirPath);
 
+		return $this->applyUnifiedPanelDescriptor($normalizedCode, $activityDescription);
+	}
+
+	/**
+	 * A copy and never the remembered instance itself: ActivityDescription is mutable and consumers mutate
+	 * what they get. A shallow copy suffices only while the objects a description holds are never modified
+	 * in place - a mutable value object added later has to be cloned here too.
+	 */
+	private function copyOfFileDescription(string $normalizedCode): ?ActivityDescription
+	{
+		$description = $this->fileDescriptions[$normalizedCode];
+
+		return $description === null ? null : clone $description;
+	}
+
+	/**
+	 * The single point where a description is completed with the unified-panel descriptor, so no consumer
+	 * has to. REST activities stay out: they are robots and activities, never nodes or triggers.
+	 */
+	private function applyUnifiedPanelDescriptor(
+		string $normalizedCode,
+		ActivityDescription $description,
+	): ActivityDescription
+	{
+		return $this->getUnifiedPanelDescriptorProvider()->enrich(
+			$normalizedCode,
+			$description,
+			$this->isTriggerActivityByDescription($normalizedCode, $description),
+		);
+	}
+
+	private function getUnifiedPanelDescriptorProvider(): UnifiedPanelDescriptorProvider
+	{
+		return $this->unifiedPanelDescriptorProvider ??= new UnifiedPanelDescriptorProvider();
 	}
 
 	/**
@@ -223,6 +305,148 @@ class Searcher
 		return $fileName !== null;
 	}
 
+	/**
+	 * The single answer to "is this activity a trigger" - callers must not re-derive it from the code, the
+	 * description or the class. A caller already holding the description asks
+	 * {@see self::isTriggerActivityByDescription()} instead.
+	 */
+	public function isTriggerActivity(string $activityCode): bool
+	{
+		$normalizedCode = $this->normalizeActivityCode($activityCode);
+		if (!array_key_exists($normalizedCode, $this->triggerActivityFlags))
+		{
+			$this->triggerActivityFlags[$normalizedCode] = $this->detectTriggerActivity($normalizedCode);
+		}
+
+		return $this->triggerActivityFlags[$normalizedCode];
+	}
+
+	/**
+	 * The recognition itself, and the only place the class-loading fallback is reached from.
+	 *
+	 * @param ActivityDescription|null $description Description of the same activity already in hand.
+	 */
+	private function detectTriggerActivity(string $normalizedCode, ?ActivityDescription $description = null): bool
+	{
+		// The contract answers straight away for a class this request already loaded - no description lookup,
+		// no file read, no localization. This is the common case on the save path, where every node of the
+		// template is asked about right after its own class validated its properties.
+		// class_exists() without autoload is case-insensitive and $normalizedCode is already lower-cased, so
+		// the name matches both the CBPSetField and the CBPsetfield spelling, the same way
+		// {@see self::includeActivityFile()} relies on it.
+		$declaredClass = 'CBP' . $normalizedCode;
+		if (class_exists($declaredClass, false))
+		{
+			return is_subclass_of($declaredClass, \IBPTriggerActivity::class);
+		}
+
+		$description ??= $this->searchByCode($normalizedCode);
+		if ($description !== null)
+		{
+			if (self::declaresTriggerType($description->getType()))
+			{
+				return true;
+			}
+
+			// Cost guard, not a second recognition: a description naming some other category answers without
+			// loading a class, which a catalog traversal would otherwise pay for every activity it touches.
+			// Triggers declaring no type still reach the contract check below, and so does an activity carrying
+			// the legacy `Trigger` name suffix even when its description names another category: that is exactly
+			// the set the suffix used to recognize on its own, so a custom trigger written against the old
+			// convention keeps being recognized. For shipped activities the guard costs nothing either way -
+			// TriggerNamingConventionInventoryTest holds the suffix and the contract to the same set.
+			if ($this->declaresAnyActivityType($description) && !$this->isNamedAsTrigger($normalizedCode))
+			{
+				return false;
+			}
+		}
+
+		// The contract itself, checked on the class and not on an instance: constructing an activity here
+		// would be a side effect.
+		try
+		{
+			$loadedCode = $this->includeActivityFile($normalizedCode);
+		}
+		catch (\Throwable $e)
+		{
+			// Recognition is asked while a template is being loaded or saved and must not break it, so an
+			// activity that cannot be loaded - a missing module of its own - is no trigger.
+			$this->getLogger()->debug(
+				'Activity class of {code} could not be loaded while recognizing a trigger — {error}',
+				['code' => $normalizedCode, 'error' => $e->getMessage()],
+			);
+
+			return false;
+		}
+
+		if (!is_string($loadedCode))
+		{
+			return false;
+		}
+
+		return is_subclass_of('CBP' . $loadedCode, \IBPTriggerActivity::class);
+	}
+
+	/**
+	 * The same verdict as {@see self::isTriggerActivity()}, spared the lookup by the description already in
+	 * hand. Both entry points share one request cache.
+	 *
+	 * @param ActivityDescription $description Description of $activityCode, as searchByCode() returns it.
+	 */
+	public function isTriggerActivityByDescription(string $activityCode, ActivityDescription $description): bool
+	{
+		$normalizedCode = $this->normalizeActivityCode($activityCode);
+		if (!array_key_exists($normalizedCode, $this->triggerActivityFlags))
+		{
+			$this->triggerActivityFlags[$normalizedCode] = $this->detectTriggerActivity(
+				$normalizedCode,
+				$description,
+			);
+		}
+
+		return $this->triggerActivityFlags[$normalizedCode];
+	}
+
+	/**
+	 * The single comparison telling whether declared TYPE values name the trigger category. Public and
+	 * taking the raw values so a caller holding the description as an array reuses it instead of
+	 * comparing on its own.
+	 */
+	public static function declaresTriggerType(array $declaredTypes): bool
+	{
+		foreach ($declaredTypes as $type)
+		{
+			if (mb_strtolower(trim((string)$type)) === ActivityType::TRIGGER->value)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * The pre-contract naming convention: an activity whose code ends in `Trigger` was a trigger by its name
+	 * alone. Recognition never answers by it, it only refuses to answer "no" for free about such a code.
+	 */
+	private function isNamedAsTrigger(string $normalizedCode): bool
+	{
+		return str_ends_with($normalizedCode, self::LEGACY_TRIGGER_CODE_SUFFIX);
+	}
+
+	private function declaresAnyActivityType(ActivityDescription $description): bool
+	{
+		foreach ($description->getType() as $type)
+		{
+			if (trim((string)$type) !== '')
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	public function includeActivityFile(string $code): bool | string
 	{
 		$normalizedCode = $this->normalizeActivityCode($code);
@@ -258,6 +482,28 @@ class Searcher
 		}
 
 		[$filePath, $dirPath] = $this->findActivityFile($normalizedCode);
+		if ($filePath === null)
+		{
+			return false;
+		}
+
+		// Cheap guard: if the expected main activity class is not yet declared by any already-loaded
+		// file there is no conflict possible - skip the expensive file-read+regex scan entirely.
+		// PHP class_exists() without autoload is case-insensitive; $normalizedCode is already
+		// lower-cased by normalizeActivityCode(), so 'CBP' . $normalizedCode correctly matches
+		// both CBPSetField and CBPsetfield naming conventions.
+		// Only when the class IS already declared do we pay for the full content scan.
+		$expectedClass = 'CBP' . $normalizedCode;
+		if (class_exists($expectedClass, false) && $this->hasConflictingClassDeclaration($filePath))
+		{
+			// Including would trigger a non-catchable class-redeclaration fatal.
+			// Treat the activity as already loaded so callers can fail on the expected
+			// class-exists check rather than breaking the whole request.
+			$this->addLoadedActivity($normalizedCode);
+
+			return $normalizedCode;
+		}
+
 		$this->loadLocalization($dirPath, $normalizedCode . '.php');
 		include_once($filePath);
 
@@ -280,10 +526,74 @@ class Searcher
 			return false;
 		}
 
+		if (isset($this->includedAiDescriptionFiles[$filePath]))
+		{
+			return true;
+		}
+
+		$this->includedAiDescriptionFiles[$filePath] = true;
+		if ($this->hasConflictingClassDeclaration($filePath))
+		{
+			// including the file would be a non-catchable fatal class redeclaration; the file is reported
+			// as present, so the caller fails on the expected class check instead of breaking the whole request
+			return true;
+		}
+
 		$this->loadLocalization($dirPath, static::AI_DESCRIPTION_FILE_NAME);
 		include_once($filePath);
 
 		return true;
+	}
+
+	private function hasConflictingClassDeclaration(string $filePath): bool
+	{
+		$content = IO\File::getFileContents($filePath);
+		if (!is_string($content))
+		{
+			return false;
+		}
+
+		// Strip block comments (/* ... */) and line comments (// ...) to avoid false positives
+		// from class-like tokens appearing inside comment blocks.
+		$stripped = preg_replace('/\/\*.*?\*\//s', '', $content);
+		$stripped = preg_replace('/\/\/[^\n]*/m', '', (string)$stripped);
+		$stripped = (string)$stripped;
+
+		// Extract the namespace declared in the file (first `namespace` statement).
+		// PHP allows only one namespace per file in the common single-namespace pattern.
+		$namespace = '';
+		if (preg_match('/^\s*namespace\s+([\\\\\w]+)\s*[;{]/m', $stripped, $nsMatch))
+		{
+			$namespace = trim($nsMatch[1]);
+		}
+
+		preg_match_all(
+			'/^\s*(?:final\s+|abstract\s+|readonly\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)/mi',
+			$stripped,
+			$matches
+		);
+		foreach ($matches[1] as $className)
+		{
+			if ($namespace !== '')
+			{
+				// Namespaced declaration: FQN is `Namespace\ClassName`.
+				// Only check the FQN to avoid false positives against unrelated global classes.
+				if (class_exists($namespace . '\\' . $className, false))
+				{
+					return true;
+				}
+			}
+			else
+			{
+				// Global namespace: bare class name IS the FQN.
+				if (class_exists($className, false))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -366,7 +676,20 @@ class Searcher
 		$arActivityDescription = []; // forbidden to rename
 		$this->loadLocalization($folder . '/' . $dir, self::DESCRIPTION_FILE_NAME);
 
-		$result = include($folder . '/' . $dir . '/' . self::DESCRIPTION_FILE_NAME);
+		try
+		{
+			$result = include($folder . '/' . $dir . '/' . self::DESCRIPTION_FILE_NAME);
+		}
+		catch (\Throwable $e)
+		{
+			// A broken .description.php must not crash the whole catalog traversal - skip this activity.
+			$this->getLogger()->warning(
+				'Skipping activity due to broken .description.php: {path} — {error}',
+				['path' => $folder . '/' . $dir . '/' . self::DESCRIPTION_FILE_NAME, 'error' => $e->getMessage()],
+			);
+
+			return null;
+		}
 
 		if ($result instanceof \Bitrix\Bizproc\Activity\ActivityDescription)
 		{
@@ -386,7 +709,20 @@ class Searcher
 		$arActivityDescription = []; // forbidden to rename
 		$this->loadLocalization($dirPath, self::DESCRIPTION_FILE_NAME);
 
-		$result = include($dirPath . '/' . self::DESCRIPTION_FILE_NAME);
+		try
+		{
+			$result = include($dirPath . '/' . self::DESCRIPTION_FILE_NAME);
+		}
+		catch (\Throwable $e)
+		{
+			// A broken .description.php must not crash the whole catalog traversal - skip this activity.
+			$this->getLogger()->warning(
+				'Skipping activity due to broken .description.php: {path} — {error}',
+				['path' => $dirPath . '/' . self::DESCRIPTION_FILE_NAME, 'error' => $e->getMessage()],
+			);
+
+			return null;
+		}
 
 		if ($result instanceof \Bitrix\Bizproc\Activity\ActivityDescription)
 		{

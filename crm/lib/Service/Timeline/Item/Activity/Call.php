@@ -2,15 +2,16 @@
 
 namespace Bitrix\Crm\Service\Timeline\Item\Activity;
 
+use Bitrix\Crm\Activity\CallDeletionRestriction;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Controller\AiQualityAssessmentController;
 use Bitrix\Crm\Format\Duration;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Dto\Scoring\ScoreCallPayload;
+use Bitrix\Crm\Integration\AI\Dto\Scoring\ScoreCallV2Payload;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
-use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
-use Bitrix\Crm\Integration\AI\Result;
 use Bitrix\Crm\Integration\VoxImplantManager;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Timeline\Item\AIActivity;
@@ -355,6 +356,24 @@ class Call extends AIActivity
 		return array_merge($items, $aiMenuItems);
 	}
 
+	protected function createDeleteMenuItem(int $activityId): ?Layout\Menu\MenuItem
+	{
+		$model = $this->getAssociatedEntityModel();
+		$activityFields = [
+			'PROVIDER_ID' => $model?->get('PROVIDER_ID'),
+			'ORIGIN_ID' => $model?->get('ORIGIN_ID'),
+			'OWNER_TYPE_ID' => $this->getContext()->getEntityTypeId(),
+			'OWNER_ID' => $this->getContext()->getEntityId(),
+		];
+
+		if (CallDeletionRestriction::isDeletionRestricted($activityId, $activityFields, $this->getContext()->getUserId()))
+		{
+			return null;
+		}
+
+		return parent::createDeleteMenuItem($activityId);
+	}
+
 	final public function getTags(): ?array
 	{
 		$tags = [];
@@ -415,24 +434,24 @@ class Call extends AIActivity
 	{
 		if ($this->isAIScope() && $this->getAIService()->isFieldsFillingWrong())
 		{
-			return [
+			return $this->limitScenariosForExtendedEntityTypes([
 				Scenario::CONFIRM_FIELDS_SCENARIO,
 				Scenario::TRANSCRIBE_RECORD_SCENARIO, // in menu only
 				Scenario::SUMMARIZE_SCENARIO, // in menu only
 				Scenario::CALL_SCORING_SCENARIO,
 				Scenario::ANALYZE_COMMUNICATION_SCENARIO, // in menu only
 				Scenario::FULL_SCENARIO, // in menu only
-			];
+			]);
 		}
 
-		return [
+		return $this->limitScenariosForExtendedEntityTypes([
 			Scenario::TRANSCRIBE_RECORD_SCENARIO, // in menu only
 			Scenario::SUMMARIZE_SCENARIO, // in menu only
 			Scenario::FILL_FIELDS_SCENARIO,
 			Scenario::CALL_SCORING_SCENARIO,
 			Scenario::ANALYZE_COMMUNICATION_SCENARIO, // in menu only
 			Scenario::FULL_SCENARIO, // in menu only
-		];
+		]);
 	}
 
 	final protected function canShowAIActions(): bool
@@ -619,7 +638,7 @@ class Call extends AIActivity
 			;
 		}
 
-		// длительность видна только в мобильном клиенте
+		// duration is visible only in the mobile client
 		$duration = (int)($callInfo['DURATION'] ?? 0);
 		if ($duration > 0)
 		{
@@ -769,6 +788,7 @@ class Call extends AIActivity
 			->addActionParamString('userPhotoUrl', $userData['PHOTO_URL'] ?? '')
 			->addActionParamInt('jobId', $jobId)
 			->addActionParamInt('assessmentSettingsId', $scriptData['ASSESSMENT_SETTING_ID'] ?? null)
+			->addActionParamBoolean('isV2', AIManager::isCallScoringV2Enabled())
 		;
 
 		return (new ContentBlock\Copilot\CallScoringV2())
@@ -867,22 +887,31 @@ class Call extends AIActivity
 
 	private function fetchScoringDescription(?int $jobId): ?string
 	{
-		/** @var Result<ScoreCallPayload>|null $result */
-		$result = $this->getAIService()->getAIJobResult(ScoreCall::TYPE_ID, $jobId);
-		if ($result?->isSuccess())
+		// ScoreCallV2::TYPE_ID and ScoreCall::TYPE_ID are routed identically through
+		// AIActivityService::getAIJobResult — both return the latest scoring job of either generation.
+		$result = $this->getAIService()->getAIJobResult(ScoreCallV2::TYPE_ID, $jobId);
+		if (!$result?->isSuccess())
 		{
-			$description = empty($result?->getPayload()?->overallSummary)
-				? $result?->getPayload()?->recommendations
-				: $result?->getPayload()?->overallSummary
-			;
-			if (empty($description))
-			{
-				return null;
-			}
+			return null;
+		}
 
-			$sentences = preg_split('/(?<=[.?!])\s+/u', $description, 3, PREG_SPLIT_NO_EMPTY) ?: [];
+		$payload = $result->getPayload();
+		$description = $this->extractScoringDescription($payload);
+		if (empty($description))
+		{
+			return null;
+		}
 
-			return implode(' ', array_slice($sentences, 0, 1));
+		$sentences = preg_split('/(?<=[.?!])\s+/u', $description, 3, PREG_SPLIT_NO_EMPTY) ?: [];
+
+		return implode(' ', array_slice($sentences, 0, 1));
+	}
+
+	private function extractScoringDescription(mixed $payload): ?string
+	{
+		if ($payload instanceof ScoreCallV2Payload || $payload instanceof ScoreCallPayload)
+		{
+			return $payload->recommendations;
 		}
 
 		return null;

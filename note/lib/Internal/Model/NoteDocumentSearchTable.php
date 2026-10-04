@@ -64,6 +64,9 @@ final class NoteDocumentSearchTable extends DataManager
 					'unique' => true,
 				],
 			),
+			// No Emoji encode/decode modifier here on purpose: rows are written via merge()
+			// (raw INSERT..ON DUPLICATE KEY UPDATE), which bypasses ORM save modifiers.
+			// Emoji::encode/decode for BODY is done explicitly in SearchIndexEntryMapper.
 			new TextField(
 				'BODY',
 				[

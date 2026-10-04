@@ -12,6 +12,8 @@ use Bitrix\Crm\RepeatSale\Logger;
 use Bitrix\Crm\RepeatSale\Queue\Controller\RepeatSaleQueueController;
 use Bitrix\Crm\RepeatSale\Queue\Entity\RepeatSaleQueue;
 use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
+use Bitrix\Crm\RepeatSale\Segment\Entity\RepeatSaleSegment;
+use Bitrix\Crm\RepeatSale\Segment\SegmentItem;
 use Bitrix\Crm\RepeatSale\Segment\SegmentManager;
 use Bitrix\Crm\RepeatSale\Service\Context;
 use Bitrix\Crm\RepeatSale\Service\Handler\Factory;
@@ -29,8 +31,8 @@ final class Executor
 {
 	use Singleton;
 
-	private const ENTITY_ITEMS_LIMIT = 1000;
-	private const ENTITY_ITEMS_ONLY_CALC_LIMIT = 1000;
+	private const ENTITY_ITEMS_LIMIT = 2000;
+	private const ENTITY_ITEMS_ONLY_CALC_LIMIT = 2000;
 	private const MAX_RETRY_COUNT = 3;
 	private ?RepeatSaleQueueController $controller = null;
 	private ?AvailabilityChecker $availabilityChecker = null;
@@ -141,32 +143,36 @@ final class Executor
 
 	private function getQueueItemExecutionResult(QueueItem $item, int $segmentId): Result
 	{
-		$context = (new Context())
-			->setJobId($item->getJobId())
-			->setSegmentId($segmentId)
-		;
-
-		$handler = Factory::getInstance()->getHandler(
-			$item->getHandlerType(),
-			$item->getParams()['segmentCode'] ?? null,
-			$context,
-		);
-
-		if ($handler === null)
-		{
-			return (new Result())->addError(new Error('Unknown handler type id: ' . $item->getHandlerTypeId()));
-		}
-
-		// @todo for ConfigurableHandler will be set segmentId
 		try
 		{
-			$limit = $this->getLimit($item->isOnlyCalc());
-			$minimumDaysAfterLastClosedEntity =
-				RepeatSaleSegmentController::getInstance()
-					->getById($segmentId)
-					?->getMinimumDaysAfterLastClosedEntity()
-					?? 0
+			$segmentEntity = RepeatSaleSegmentController::getInstance()->getById($segmentId, true);
+			if ($segmentEntity === null)
+			{
+				return (new Result())->addError(new Error('Segment is not found. Id: ' . $segmentId));
+			}
+
+			$segmentItem = SegmentItem::createFromEntity($segmentEntity);
+
+			$context = (new Context())
+				->setJobId($item->getJobId())
+				->setSegmentId($segmentId)
+				->setSegmentItem($segmentItem)
+				->setTargetSegmentItem($this->resolveTargetSegmentItem($segmentEntity, $segmentItem))
 			;
+
+			$handler = Factory::getInstance()->getHandler(
+				$item->getHandlerType(),
+				$item->getParams()['segmentCode'] ?? null,
+				$context,
+			);
+
+			if ($handler === null)
+			{
+				return (new Result())->addError(new Error('Unknown handler type id: ' . $item->getHandlerTypeId()));
+			}
+
+			// @todo for ConfigurableHandler will be set segmentId
+			$limit = $this->getLimit($item->isOnlyCalc());
 
 			$result = $handler
 				->setEntityTypeId($item->getLastEntityTypeId() ?? current($handler->getAvailableEntityTypeIds()))
@@ -174,7 +180,7 @@ final class Executor
 				->setLastAssignmentId($item->getLastAssignmentId())
 				->setLimit($limit)
 				->setIsOnlyCalc($item->isOnlyCalc())
-				->setMinimumDaysAfterLastClosedEntity($minimumDaysAfterLastClosedEntity)
+				->setMinimumDaysAfterLastClosedEntity($segmentItem->getMinimumDaysAfterLastClosedEntity())
 				->execute()
 			;
 
@@ -194,6 +200,23 @@ final class Executor
 		}
 
 		return $result;
+	}
+
+	private function resolveTargetSegmentItem(RepeatSaleSegment $segmentEntity, SegmentItem $segmentItem): SegmentItem
+	{
+		if (!$segmentEntity->isChildren())
+		{
+			return $segmentItem;
+		}
+
+		$parentEntity = RepeatSaleSegmentController::getInstance()->getList([
+			'filter' => [
+				'=CODE' => $segmentEntity->getBaseSegmentCode(),
+			],
+			'limit' => 1,
+		])->current();
+
+		return $parentEntity ? SegmentItem::createFromEntity($parentEntity) : $segmentItem;
 	}
 
 	public function getLimit(bool $isOnlyCalc): int

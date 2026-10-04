@@ -20,18 +20,18 @@ class EmbeddingInstaller
 	/**
 	 * @throws PersistenceException
 	 */
-	public function install(App $app, Embedding $embedding): bool
+	public function install(App $app, Embedding $embedding, int $userId = 0): bool
 	{
-		return $this->installLegacy($app, $embedding);
+		return $this->installLegacy($app, $embedding, $userId);
 	}
 
-	private function installLegacy(App $app, Embedding $embedding): bool
+	private function installLegacy(App $app, Embedding $embedding, int $userId): bool
 	{
 		$server = new CRestServer([]);
 		$reflectedServer = new ReflectionClass($server);
 
 		$this->setServerServiceDescription($server, $reflectedServer);
-		$this->setServerAuthData($server, $reflectedServer, $app->getScope());
+		$this->setServerAuthData($server, $reflectedServer, $app->getScope(), $userId);
 		$this->setServerClientId($server, $reflectedServer, $app->getClientId());
 
 		$convertedParams = $this->convertParams($embedding);

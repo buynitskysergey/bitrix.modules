@@ -14,6 +14,7 @@ use Bitrix\Crm\Timeline\Entity\TimelineBindingTable;
 use Bitrix\Crm\Timeline\Entity\TimelineTable;
 use Bitrix\Crm\Timeline\EntityController;
 use Bitrix\Crm\Timeline\TimelineManager;
+use Bitrix\Crm\UI\Filter\EntityHandler;
 use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\Type\DateTime;
 
@@ -202,16 +203,47 @@ class Repository
 		$filter = (array)($params['filter'] ?? []);
 		$isOffsetExist = isset($offsetTime) && $offsetId > 0;
 
-		$bindingQuery = $this->prepareLoadHistoryBindingQuery($onlyFixed);
-		$query = $this->prepareLoadHistoryQuery($limit, false, $bindingQuery, $filter, $offsetTime, $offsetId);
-		$items = $this->fetchHistoryItems($offsetId, $query);
+		// The fixed items panel filters by bind.IS_FIXED which is not covered
+		// by IX_B_CRM_TIMELINE_BIND_3, so the optimized path would scan the
+		// whole entity history. The legacy path narrows binds by
+		// IX_B_CRM_TIMELINE_BIND_2 (ENTITY_ID, ENTITY_TYPE_ID, IS_FIXED) and
+		// the result set is tiny, so it stays fast there.
+		$opt = !$onlyFixed && $this->isOptimizable($filter);
 
-		$fetchDiff = $limit - count($items);
-		if ($fetchDiff > 0 && $isOffsetExist)
+		if ($opt)
 		{
-			$query = $this->prepareLoadHistoryQuery($fetchDiff, true, $bindingQuery, $filter, $offsetTime, $offsetId);
-			$extraItems = $this->fetchHistoryItems($offsetId, $query);
-			$items = array_merge($items, $extraItems);
+			$query = $this->prepareLoadHistoryQuery(
+				$limit, false, null, $filter, $offsetTime, $offsetId, true, $onlyFixed
+			);
+			$items = $this->fetchHistoryItems($offsetId, $query);
+
+			$fetchDiff = $limit - count($items);
+			if ($fetchDiff > 0 && $isOffsetExist)
+			{
+				$query = $this->prepareLoadHistoryQuery(
+					$fetchDiff, true, null, $filter, $offsetTime, $offsetId, true, $onlyFixed
+				);
+				$extraItems = $this->fetchHistoryItems($offsetId, $query);
+				$items = array_merge($items, $extraItems);
+			}
+		}
+		else
+		{
+			$bindingQuery = $this->prepareLoadHistoryBindingQuery($onlyFixed);
+			$query = $this->prepareLoadHistoryQuery(
+				$limit, false, $bindingQuery, $filter, $offsetTime, $offsetId, false
+			);
+			$items = $this->fetchHistoryItems($offsetId, $query);
+
+			$fetchDiff = $limit - count($items);
+			if ($fetchDiff > 0 && $isOffsetExist)
+			{
+				$query = $this->prepareLoadHistoryQuery(
+					$fetchDiff, true, $bindingQuery, $filter, $offsetTime, $offsetId, false
+				);
+				$extraItems = $this->fetchHistoryItems($offsetId, $query);
+				$items = array_merge($items, $extraItems);
+			}
 		}
 
 		$nextOffsetTime = null;
@@ -252,22 +284,45 @@ class Repository
 	private function prepareLoadHistoryQuery(
 		int $limit,
 		bool $isExtraFetch,
-		\Bitrix\Main\ORM\Query\Query $bindingQuery,
+		?\Bitrix\Main\ORM\Query\Query $bindingQuery,
 		array $filter,
 		?DateTime $offsetTime,
-		int $offsetId
+		int $offsetId,
+		bool $isOptimized = false,
+		bool $onlyFixed = false
 	): \Bitrix\Main\ORM\Query\Query
 	{
 		$query = TimelineTable::query();
 		$query->addSelect('*');
 		$query->addSelect('bind.IS_FIXED', 'IS_FIXED');
-		$query->registerRuntimeField('',
-			new ReferenceField('bind',
-				\Bitrix\Main\ORM\Entity::getInstanceByQuery($bindingQuery),
-				['=this.ID' => 'ref.OWNER_ID'],
-				['join_type' => 'INNER']
-			)
-		);
+
+		if ($isOptimized)
+		{
+			$query->registerRuntimeField('',
+				new ReferenceField('bind',
+					TimelineBindingTable::getEntity(),
+					['=this.ID' => 'ref.OWNER_ID'],
+					['join_type' => 'INNER']
+				)
+			);
+			$query->addFilter('=bind.ENTITY_TYPE_ID', $this->context->getEntityTypeId());
+			$query->addFilter('=bind.ENTITY_ID', $this->context->getEntityId());
+
+			if ($onlyFixed)
+			{
+				$query->addFilter('=bind.IS_FIXED', 'Y');
+			}
+		}
+		else
+		{
+			$query->registerRuntimeField('',
+				new ReferenceField('bind',
+					\Bitrix\Main\ORM\Entity::getInstanceByQuery($bindingQuery),
+					['=this.ID' => 'ref.OWNER_ID'],
+					['join_type' => 'INNER']
+				)
+			);
+		}
 
 		if (!empty($filter['ID']))
 		{
@@ -277,7 +332,7 @@ class Repository
 			}
 			else
 			{
-				$query->where('=ID', $filter['ID']);
+				$query->where('ID', $filter['ID']);
 			}
 		}
 
@@ -291,19 +346,58 @@ class Repository
 			$filter['CREATED_from'] = DateTime::tryParse($filter['CREATED_from']);
 		}
 
-		if (
-			$offsetTime instanceof DateTime
-			&& (!isset($filter['CREATED_to']) || $offsetTime->getTimestamp() < $filter['CREATED_to']->getTimestamp())
-		)
+		if ($isOptimized)
 		{
-			if ($isExtraFetch)
+			foreach (EntityHandler::findAllFieldOperations('CREATED', $filter) as $operationInfo)
 			{
-				$query->addFilter('<CREATED', $offsetTime);
+				$date = $operationInfo['CONDITION'] instanceof DateTime
+					? $operationInfo['CONDITION']
+					: DateTime::tryParse($operationInfo['CONDITION']);
+
+				if ($date !== null)
+				{
+					$query->addFilter($operationInfo['OPERATION'] . 'bind.CREATED', $date);
+				}
 			}
-			else
+
+			if (
+				$offsetTime instanceof DateTime
+				&& (
+					!isset($filter['CREATED_to'])
+					|| $offsetTime->getTimestamp() < $filter['CREATED_to']->getTimestamp()
+				)
+			)
 			{
-				$query->addFilter('=CREATED', $offsetTime);
-				$query->addFilter('<ID', $offsetId);
+				if ($isExtraFetch)
+				{
+					$query->addFilter('<bind.CREATED', $offsetTime);
+				}
+				else
+				{
+					$query->addFilter('=bind.CREATED', $offsetTime);
+					$query->addFilter('<bind.OWNER_ID', $offsetId);
+				}
+			}
+		}
+		else
+		{
+			if (
+				$offsetTime instanceof DateTime
+				&& (
+					!isset($filter['CREATED_to'])
+					|| $offsetTime->getTimestamp() < $filter['CREATED_to']->getTimestamp()
+				)
+			)
+			{
+				if ($isExtraFetch)
+				{
+					$query->addFilter('<CREATED', $offsetTime);
+				}
+				else
+				{
+					$query->addFilter('=CREATED', $offsetTime);
+					$query->addFilter('<ID', $offsetId);
+				}
 			}
 		}
 
@@ -314,7 +408,14 @@ class Repository
 
 		(new IgnoredItemsRules($this->context))->applyToQuery($query);
 
-		$query->setOrder(['CREATED' => 'DESC', 'ID' => 'DESC']);
+		if ($isOptimized)
+		{
+			$query->setOrder(['bind.CREATED' => 'DESC', 'bind.OWNER_ID' => 'DESC']);
+		}
+		else
+		{
+			$query->setOrder(['CREATED' => 'DESC', 'ID' => 'DESC']);
+		}
 
 		if ($limit > 0)
 		{
@@ -411,5 +512,48 @@ class Repository
 		}
 
 		return $result;
+	}
+
+	private function isBindCreatedEnabled(): bool
+	{
+		return \Bitrix\Main\Config\Option::get('crm', 'timeline_bind_created_enabled', 'Y') !== 'N';
+	}
+
+	private function isOptimizable(array $filter): bool
+	{
+		if (!$this->isBindCreatedEnabled())
+		{
+			return false;
+		}
+
+		$allowedBaseFields = ['CREATED', 'ID', 'AUTHOR_ID', 'ENTRY_CATEGORY_ID'];
+		// Applied filters/presets carry UI service keys and field postfixes (tab
+		// switch, search, date presets, entity selectors). They are not entity
+		// filter fields. The real conditions (including the FIND search) are
+		// applied by TimelineDataProvider::prepareQuery identically in both
+		// branches, so skipping these keys here only affects whether the
+		// optimized path is taken, never the result set.
+		$serviceKeys = ['PRESET_ID', 'FILTER_ID', 'FILTER_APPLIED', 'FIND'];
+		$servicePostfix = '/_('
+			. 'datesel|numsel|month|months|quarter|year|years|days'
+			. '|isEmpty|hasAnyValue|label|id|name|value'
+			. ')$/';
+
+		foreach (array_keys($filter) as $key)
+		{
+			if (in_array($key, $serviceKeys, true) || preg_match($servicePostfix, $key))
+			{
+				continue;
+			}
+
+			$operationInfo = \CSqlUtil::GetFilterOperation($key);
+			$baseField = $operationInfo['FIELD'] ?? $key;
+			if (!in_array($baseField, $allowedBaseFields, true))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 }

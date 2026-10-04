@@ -168,6 +168,11 @@ abstract class Application
 			$this->addBackgroundJob([VendorNotifier::class, 'refreshNotifications']);
 		}
 
+		if (!defined('BX_SENDPULL_COUNTER_QUEUE_DISABLE') || BX_SENDPULL_COUNTER_QUEUE_DISABLE !== true)
+		{
+			$this->addBackgroundJob(['CUserCounterPage', 'checkSendCounter']);
+		}
+
 		//agents
 		if (Option::get('main', 'check_agents', 'Y') == 'Y')
 		{

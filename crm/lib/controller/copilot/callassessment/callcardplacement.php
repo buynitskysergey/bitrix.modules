@@ -3,14 +3,15 @@
 namespace Bitrix\Crm\Controller\Copilot\CallAssessment;
 
 use Bitrix\Crm\Controller\ErrorCode;
-use Bitrix\Crm\Copilot\CallAssessment\EntitySelector\PullManager;
-use Bitrix\Crm\Integration\AI\AIManager;
-use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
-use \Bitrix\Crm\Integration\AI\ErrorCode as AIErrorCode;
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
+use Bitrix\Crm\Copilot\CallAssessment\CriteriaLoader;
 use Bitrix\Crm\Copilot\CallAssessment\Entity\CopilotCallAssessmentTable;
+use Bitrix\Crm\Copilot\CallAssessment\EntitySelector\PullManager;
 use Bitrix\Crm\Copilot\CallAssessment\ItemFactory;
+use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
+use Bitrix\Crm\Integration\AI\ErrorCode as AIErrorCode;
 use Bitrix\Crm\Integration\VoxImplantManager;
 use Bitrix\Crm\MultiValueStoreService;
 use Bitrix\Crm\Service\Container;
@@ -117,9 +118,16 @@ final class CallCardPlacement extends Controller
 			$this->pull->subscribe($this->getCurrentUser()?->getId());
 		}
 
+		$isV2Enabled = AIManager::isCallScoringV2Enabled();
+		if ($isV2Enabled && $assessment !== null && $assessment->getId() !== null)
+		{
+			$assessment->setCriteria((new CriteriaLoader())->loadForAssessment($assessment->getId()));
+		}
+
 		return [
 			'callAssessment' => $assessment?->toArray() ?? [],
 			'hasAvailableSelectorItems' => $hasAvailableSelectorItems,
+			'isCallScoringV2Enabled' => $isV2Enabled,
 		];
 	}
 

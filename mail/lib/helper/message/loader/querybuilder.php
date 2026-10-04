@@ -2,10 +2,13 @@
 
 namespace Bitrix\Mail\Helper\Message\Loader;
 
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\MailboxDirectoryTable;
 use Bitrix\Mail\Internals\MailMessageMarkTable;
 use Bitrix\Mail\Internals\MessageAccessTable;
 use Bitrix\Mail\Internals\MessageClosureTable;
+use Bitrix\Mail\Internals\MessageLabelTable;
+use Bitrix\Mail\Internals\UserLabelTable;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Mail\MailMessageTable;
 use Bitrix\Mail\MailMessageUidTable;
@@ -24,6 +27,7 @@ class QueryBuilder
 {
 	public const FILTER_KEY_INCLUDE_BINDINGS = '__MAIL_INCLUDE_BINDINGS';
 	public const FILTER_KEY_EXCLUDE_BINDINGS = '__MAIL_EXCLUDE_BINDINGS';
+	public const FILTER_KEY_LABEL = '__MAIL_LABEL_ID';
 	public const FILTER_KEY_IS_FAVORITE = '__MAIL_IS_FAVORITE';
 	public const FILTER_KEY_UNANSWERED = '__MAIL_UNANSWERED';
 	public const FILTER_KEY_CLASSIFICATION = '__MAIL_CLASSIFICATION';
@@ -115,6 +119,13 @@ class QueryBuilder
 	{
 		foreach (array_keys($filter) as $key)
 		{
+			// The classification pseudo-key does not take the filter off the uid driver: it narrows the
+			// letters by MESSAGE_ID, and that is a field of the driver itself.
+			if ($key === self::FILTER_KEY_CLASSIFICATION)
+			{
+				continue;
+			}
+
 			$cleanKey = ltrim((string)$key, "@!*<=>");
 			$cleanKey = preg_replace('/^MESSAGE_UID\./', '', $cleanKey);
 
@@ -163,6 +174,28 @@ class QueryBuilder
 	}
 
 	/**
+	 * Extracts and unsets the label pseudo-key from $filter.
+	 *
+	 * @param array $filter passed by reference; the pseudo-key is removed.
+	 * @return array{id: int, userId: int}|null Label id with its owner, or null when no label filter is requested.
+	 */
+	private static function extractLabel(array &$filter): ?array
+	{
+		$raw = $filter[self::FILTER_KEY_LABEL] ?? null;
+		unset($filter[self::FILTER_KEY_LABEL]);
+
+		if (!is_array($raw))
+		{
+			return null;
+		}
+
+		$labelId = (int)($raw['id'] ?? 0);
+		$userId = (int)($raw['userId'] ?? 0);
+
+		return $labelId > 0 ? ['id' => $labelId, 'userId' => $userId] : null;
+	}
+
+	/**
 	 * @param array $filter passed by reference; the pseudo-key is removed.
 	 * @return int User id whose favorites are requested; 0 when not requested.
 	 */
@@ -201,6 +234,133 @@ class QueryBuilder
 		return array_values(array_filter($raw, 'is_int'));
 	}
 
+	/**
+	 * Keeps a read inside the visible uid rows of the ACTIVE source generation of every
+	 * mailbox it names. The rows a previous physical source left behind are the technical
+	 * identity history of the mailbox, not a fallback source of visibility: a message that
+	 * exists in the retained generation only is not listed, searched or counted. A message
+	 * present in both stays one row, because the uid of the new generation points at the
+	 * same b_mail_message.ID.
+	 *
+	 * The generations are resolved once per query - and, thanks to the pointer cache of the
+	 * scope, once per request - so the condition costs no lookup per message.
+	 *
+	 * Public so that a read path built outside this class - the search, the thread of the
+	 * assistant tools, the chain of the mobile client - states the same condition in the
+	 * same words instead of a copy of it.
+	 *
+	 * @param int[] $mailboxIds Mailboxes the filter is limited to.
+	 * @param string $fieldPrefix Path to the uid entity, '' when it drives the query itself.
+	 * @return array Conditions to merge into the filter. Empty for a mailbox whose pointer
+	 *               names no generation yet, so its read keeps the shape it had before.
+	 */
+	public static function generationScopeFilter(array $mailboxIds, string $fieldPrefix): array
+	{
+		if ($mailboxIds === [])
+		{
+			return [];
+		}
+
+		$scoped = [];
+		foreach (GenerationScope::forMailboxes($mailboxIds) as $mailboxId => $scope)
+		{
+			if ($scope->getGenerationIds() !== null)
+			{
+				$scoped[$mailboxId] = $scope;
+			}
+		}
+
+		if ($scoped === [])
+		{
+			return [];
+		}
+
+		if (count($mailboxIds) === 1)
+		{
+			return reset($scoped)->apply([], $fieldPrefix);
+		}
+
+		$branches = ['LOGIC' => 'OR'];
+
+		foreach ($scoped as $mailboxId => $scope)
+		{
+			$branches[] = $scope->apply(['=MAILBOX_ID' => $mailboxId], $fieldPrefix);
+		}
+
+		if (count($scoped) < count($mailboxIds))
+		{
+			// A mailbox that has never been switched keeps every row it has
+			$branches[] = ['!@MAILBOX_ID' => array_keys($scoped)];
+		}
+
+		return [$branches];
+	}
+
+	/**
+	 * Mailbox ids the filter is limited to. Only a positive constraint counts, and only a
+	 * top-level one: that is the shape {@see MessageFilter} always produces.
+	 *
+	 * @return int[]
+	 */
+	private static function extractMailboxIds(array $filter): array
+	{
+		$ids = [];
+
+		foreach ($filter as $key => $value)
+		{
+			if (!is_string($key) || !preg_match('/^(=|==|@)?(MESSAGE_UID\.)?MAILBOX_ID$/', $key))
+			{
+				continue;
+			}
+
+			foreach ((array)$value as $mailboxId)
+			{
+				$ids[] = (int)$mailboxId;
+			}
+		}
+
+		return array_values(array_unique(array_filter($ids)));
+	}
+
+	/**
+	 * The same conditions for a read that names its messages rather than their mailboxes.
+	 *
+	 * @param array $itemIds b_mail_message ids
+	 * @throws ArgumentException
+	 * @throws SystemException
+	 */
+	public static function generationScopeFilterOfMessages(array $itemIds, string $fieldPrefix): array
+	{
+		return self::generationScopeFilter(self::resolveMailboxIdsOfMessages($itemIds), $fieldPrefix);
+	}
+
+	/**
+	 * The mailboxes of the requested messages, for the details entries that address a
+	 * message directly and carry no mailbox constraint of their own. Not asked for while
+	 * the schema of the feature is missing: there would be nothing to scope by.
+	 *
+	 * @param array $itemIds b_mail_message ids
+	 * @return int[]
+	 * @throws ArgumentException
+	 * @throws SystemException
+	 */
+	private static function resolveMailboxIdsOfMessages(array $itemIds): array
+	{
+		if (empty($itemIds) || !GenerationScope::isSchemaInstalled())
+		{
+			return [];
+		}
+
+		$rows = MailMessageTable::query()
+			->addSelect('MAILBOX_ID')
+			->whereIn('ID', $itemIds)
+			->setDistinct()
+			->fetchAll()
+		;
+
+		return array_map('intval', array_column($rows, 'MAILBOX_ID'));
+	}
+
 	private static function stripUidPrefix(array $filter): array
 	{
 		$result = [];
@@ -227,7 +387,10 @@ class QueryBuilder
 		int $offset,
 	): Query
 	{
-		return MailMessageUidTable::query()
+		$classificationCodes = self::extractClassificationCodes($filter);
+		$driverFilter = self::stripUidPrefix($filter);
+
+		$query = MailMessageUidTable::query()
 			->registerRuntimeField(
 				'MAX_INTERNALDATE',
 				new ExpressionField(
@@ -239,7 +402,8 @@ class QueryBuilder
 			->addSelect('MESSAGE_ID', 'DISTINCT_ID')
 			->setFilter(array_merge(
 				self::VISIBLE_UID_FILTERS_DRIVER,
-				self::stripUidPrefix($filter),
+				$driverFilter,
+				self::generationScopeFilter(self::extractMailboxIds($driverFilter), ''),
 			))
 			->addGroup('MESSAGE_ID')
 			->addOrder('MAX_INTERNALDATE', 'DESC')
@@ -247,6 +411,51 @@ class QueryBuilder
 			->setLimit($limit)
 			->setOffset($offset)
 		;
+
+		if ($classificationCodes !== [])
+		{
+			$query->whereIn(
+				'MESSAGE_ID',
+				self::classifiedMessageIdsQuery($classificationCodes, self::mailboxIdsFromFilter($driverFilter)),
+			);
+		}
+
+		return $query;
+	}
+
+	/**
+	 * @return int[] Mailbox ids the outer filter is already limited to; empty when it names none.
+	 */
+	private static function mailboxIdsFromFilter(array $filter): array
+	{
+		$raw = $filter['@MAILBOX_ID'] ?? $filter['=MAILBOX_ID'] ?? null;
+		$ids = array_map('intval', (array)$raw);
+
+		return array_values(array_filter($ids, static fn(int $id): bool => $id > 0));
+	}
+
+	/**
+	 * Narrowed from the marks and not from the letters. The mailbox is repeated here on purpose: it keeps the
+	 * subquery a range scan over the marks of that mailbox, while without it the scan spans the marks of the
+	 * whole portal and most of what it reads belongs to other mailboxes.
+	 *
+	 * @param int[] $classificationCodes
+	 * @param int[] $mailboxIds
+	 */
+	private static function classifiedMessageIdsQuery(array $classificationCodes, array $mailboxIds): Query
+	{
+		$query = MailMessageMarkTable::query()
+			->addSelect('MESSAGE_ID')
+			->where('USER_ID', MailMessageMarkTable::SHARED_USER_ID)
+			->whereIn('CODE', $classificationCodes)
+		;
+
+		if ($mailboxIds !== [])
+		{
+			$query->whereIn('MAILBOX_ID', $mailboxIds);
+		}
+
+		return $query;
 	}
 
 	/**
@@ -261,6 +470,7 @@ class QueryBuilder
 	{
 		$includeBindings = self::extractIncludeBindings($filter);
 		$excludeBindings = self::extractExcludeBindings($filter);
+		$label = self::extractLabel($filter);
 		$favoriteUserId = self::extractFavoriteUserId($filter);
 		$unanswered = self::extractUnanswered($filter);
 		$classificationCodes = self::extractClassificationCodes($filter);
@@ -324,7 +534,11 @@ class QueryBuilder
 			->addSelect('ID', 'DISTINCT_ID')
 		;
 
-		$finalFilter = array_merge(self::VISIBLE_UID_FILTERS, $filter);
+		$finalFilter = array_merge(
+			self::VISIBLE_UID_FILTERS,
+			$filter,
+			self::generationScopeFilter(self::extractMailboxIds($filter), 'MESSAGE_UID.'),
+		);
 
 		if ($includeBindings !== [])
 		{
@@ -371,6 +585,37 @@ class QueryBuilder
 			);
 
 			$finalFilter['==EXCLUDED_BINDING_EXISTS'] = false;
+		}
+
+		if ($label !== null)
+		{
+			$labelSubquery = (new Query(MessageLabelTable::getEntity()))
+				->registerRuntimeField(
+					new Reference(
+						'USER_LABEL',
+						UserLabelTable::class,
+						[
+							'=this.LABEL_ID' => 'ref.ID',
+						],
+						['join_type' => 'INNER'],
+					),
+				)
+				->addFilter('=MAILBOX_ID', new SqlExpression('%s'))
+				->addFilter('=MESSAGE_ID', new SqlExpression('%s'))
+				->addFilter('=LABEL_ID', $label['id'])
+				->addFilter('=USER_LABEL.USER_ID', $label['userId'])
+			;
+
+			$query->registerRuntimeField(
+				'LABEL_BINDING_EXISTS',
+				new ExpressionField(
+					'LABEL_BINDING_EXISTS',
+					"EXISTS(" . $labelSubquery->getQuery() . ")",
+					['MAILBOX_ID', 'ID'],
+				),
+			);
+
+			$finalFilter['==LABEL_BINDING_EXISTS'] = true;
 		}
 
 		if ($favoriteUserId > 0)
@@ -447,6 +692,20 @@ class QueryBuilder
 				->addFilter('!@IS_OLD', MailMessageUidTable::HIDDEN_STATUSES)
 			;
 
+			/*
+				After the conditions carrying the placeholders: they are bound in the order they
+				appear. The folder is scoped as well as the placement - both generations keep a
+				folder of the same path, and the roles are picked for the prepared one, so an
+				unscoped join would read IS_OUTCOME from the folder of the retained generation.
+			*/
+			foreach (['', 'DIR.'] as $scopedEntity)
+			{
+				foreach (self::generationScopeFilter(self::extractMailboxIds($filter), $scopedEntity) as $key => $condition)
+				{
+					$outgoingReplySubquery->addFilter(is_int($key) ? null : $key, $condition);
+				}
+			}
+
 			$query->registerRuntimeField(
 				'HAS_OUTGOING_REPLY',
 				new ExpressionField(
@@ -500,9 +759,16 @@ class QueryBuilder
 	{
 		self::extractIncludeBindings($filter);
 		self::extractExcludeBindings($filter);
+		self::extractLabel($filter);
 		self::extractFavoriteUserId($filter);
 		self::extractUnanswered($filter);
 		self::extractClassificationCodes($filter);
+
+		$mailboxIds = self::extractMailboxIds($filter);
+		if ($mailboxIds === [])
+		{
+			$mailboxIds = self::resolveMailboxIdsOfMessages($itemIds);
+		}
 
 		$sqlHelper = Application::getConnection()->getSqlHelper();
 		$query = MailMessageTable::query()
@@ -576,6 +842,7 @@ class QueryBuilder
 				['@ID' => $itemIds],
 				self::VISIBLE_UID_FILTERS,
 				$filter,
+				self::generationScopeFilter($mailboxIds, 'MESSAGE_UID.'),
 			))
 			->addOrder('MESSAGE_UID.INTERNALDATE', 'DESC')
 			->addOrder('MESSAGE_ID', 'DESC')

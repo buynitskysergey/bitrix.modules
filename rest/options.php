@@ -153,10 +153,17 @@ $applicationAccessPolicyProvider = new Provider\Application\AccessPolicyProvider
 $accessPolicyOptions = [
 	[
 		'CODE' => 'rest_incoming_webhook_create_own_rights',
-		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_INCOMING_WEBHOOK'),
+		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_INCOMING_WEBHOOK_CREATE_OWN'),
 		'VALUE' => $incomingWebhookAccessPolicyProvider->getAccessCodesAllowedToCreateOwn(),
 		'COMMAND' => Command\IncomingWebhook\AccessPolicy\SetOwnIncomingWebhookCreationAccessCommand::class,
 		'CONTAINER_ID' => 'rest_access_policy_incoming_webhook_create_own',
+	],
+	[
+		'CODE' => 'rest_incoming_webhook_create_rights',
+		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_INCOMING_WEBHOOK_CREATE'),
+		'VALUE' => $incomingWebhookAccessPolicyProvider->getAccessCodesAllowedToCreate(),
+		'COMMAND' => Command\IncomingWebhook\AccessPolicy\SetIncomingWebhookCreationAccessCommand::class,
+		'CONTAINER_ID' => 'rest_access_policy_incoming_webhook_create',
 	],
 	[
 		'CODE' => 'rest_local_app_create_rights',

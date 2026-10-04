@@ -43,6 +43,14 @@ class CAllCrmActivity
 	const COMMUNICATION_TABLE_ALIAS = 'AC';
 	private const ACTIVITY_DEFAULT = 'EVENT';
 
+	/*
+	 * Virtual sort fields of GetEntityList(). The ORDER BY keys and the field names produced by
+	 * PrepareEntityListSortFields() must stay in sync: CSqlUtil::PrepareSql() silently drops an
+	 * ORDER BY key that has no matching field, which would leave the grid unsorted without any error.
+	 */
+	private const ENTITY_LIST_ACTIVITY_USER_FIELD = 'ACTIVITY_USER_ID';
+	private const ENTITY_LIST_ACTIVITY_SORT_FIELD = 'ACTIVITY_SORT';
+
 	private static $FIELDS = null;
 	private static $FIELD_INFOS = null;
 	private static $COMM_FIELD_INFOS = null;
@@ -1271,6 +1279,20 @@ class CAllCrmActivity
 		if(!is_array($ary))
 		{
 			return false; //is not found
+		}
+
+		if ($checkPerms === true)
+		{
+			$userId = isset($options['CURRENT_USER'])
+				? (int)$options['CURRENT_USER']
+				: (int)CCrmSecurityHelper::GetCurrentUserID();
+
+			if (\Bitrix\Crm\Activity\CallDeletionRestriction::isDeletionRestricted($ID, $ary, $userId))
+			{
+				self::RegisterError(['text' => 'Access denied.']);
+
+				return false;
+			}
 		}
 
 		$incomingChannel = \Bitrix\Crm\Activity\IncomingChannel::getInstance();
@@ -4669,7 +4691,7 @@ class CAllCrmActivity
 		}
 
 		$arFields = [];
-		$options = [];
+		$options = ['INITIATED_BY_CALENDAR' => true];
 		self::SetFromCalendarEvent($eventID, $arEventFields, $arFields, $options);
 		if(isset($arFields['BINDINGS']) && count($arFields['BINDINGS']) > 0)
 		{
@@ -4758,6 +4780,45 @@ class CAllCrmActivity
 
 		return self::Add($arFields, false, false);
 	}
+
+	private static function setCalendarEventAttendees(array $arEventFields, array &$arFields): void
+	{
+		if (array_key_exists('IS_MEETING', $arEventFields) && empty($arEventFields['IS_MEETING']))
+		{
+			$arFields['SETTINGS']['USERS'] = [];
+
+			return;
+		}
+
+		$attendeesCodes = (array)($arEventFields['ATTENDEES_CODES'] ?? []);
+		if (in_array('UA', $attendeesCodes, true))
+		{
+			$attendeesEntityList = $arEventFields['attendeesEntityList'] ?? [];
+			$arFields['SETTINGS']['USERS'] = Crm\Integration\Calendar::getUserIdsByAttendeesEntityList(
+				is_array($attendeesEntityList) ? $attendeesEntityList : [],
+			);
+
+			return;
+		}
+
+		if (!isset($arEventFields['ATTENDEE_LIST']) || !is_array($arEventFields['ATTENDEE_LIST']))
+		{
+			return;
+		}
+
+		$userIds = [];
+		foreach ($arEventFields['ATTENDEE_LIST'] as $attendee)
+		{
+			$userId = is_array($attendee) ? (int)($attendee['id'] ?? 0) : 0;
+			if ($userId > 0)
+			{
+				$userIds[$userId] = $userId;
+			}
+		}
+
+		$arFields['SETTINGS']['USERS'] = array_values($userIds);
+	}
+
 	// <-- Contract
 	private static function SetFromCalendarEvent($eventID, &$arEventFields, &$arFields, &$options)
 	{
@@ -4772,6 +4833,8 @@ class CAllCrmActivity
 		if ($arEventFields['EVENT_TYPE'] !== '#resourcebooking#')
 		{
 			$arFields['CALENDAR_EVENT_ID'] = $eventID;
+
+			self::setCalendarEventAttendees($arEventFields, $arFields);
 
 			$arEventOwners = array();
 			if(isset($arEventFields['UF_CRM_CAL_EVENT']))
@@ -4986,21 +5049,6 @@ class CAllCrmActivity
 		$eventID = isset($arFields['ID']) ? (int)$arFields['ID'] : 0;
 		if ($eventID > 0)
 		{
-			$events = CCalendarEvent::GetList(
-				[
-					'arFilter' => [
-						"ID" => $eventID,
-						"DELETED" => "N"
-					],
-					'parseRecursion' => false,
-					'fetchAttendees' => false,
-					'checkPermissions' => false,
-					'setDefaultLimit' => false,
-					'userId' => $userId
-				]
-			);
-			$arEventFields = ($events && is_array($events[0])) ? $events[0] : null;
-
 			$dbEntities = self::GetList(
 				[],
 				[
@@ -5009,6 +5057,107 @@ class CAllCrmActivity
 				]
 			);
 			$arEntity = $dbEntities->Fetch();
+			$events = CCalendarEvent::GetList(
+				[
+					'arFilter' => [
+						'ID' => $eventID,
+						'DELETED' => 'N',
+					],
+					'parseRecursion' => false,
+					'fetchAttendees' => false,
+					'checkPermissions' => false,
+					'setDefaultLimit' => false,
+					'userId' => $userId,
+				]
+			);
+			$arEventFields = ($events && is_array($events[0])) ? $events[0] : null;
+
+			if (!is_array($arEntity))
+			{
+				$arEventOwners = $arFields['UF_CRM_CAL_EVENT'] ?? null;
+				if ($arEventOwners === null)
+				{
+					$arEventOwners = $arEventFields['UF_CRM_CAL_EVENT'] ?? [];
+				}
+
+				$arEventOwners = (array)$arEventOwners;
+				$arOwnerData = [];
+				self::TryResolveUserFieldOwners(
+					$arEventOwners,
+					$arOwnerData,
+					CCrmUserType::GetCalendarEventBindingField()
+				);
+				if (empty($arOwnerData))
+				{
+					return;
+				}
+			}
+
+			$attendeesCodes = (array)($arEventFields['ATTENDEES_CODES'] ?? []);
+			if (empty($arEventFields['IS_MEETING']))
+			{
+				$arEventFields['ATTENDEE_LIST'] = [];
+			}
+			elseif (!in_array('UA', $attendeesCodes, true))
+			{
+				$parentEventId = (int)($arEventFields['PARENT_ID'] ?? 0);
+				$parentEventIdWasEmpty = $parentEventId <= 0;
+				if ($parentEventId <= 0)
+				{
+					$parentEventId = $eventID;
+				}
+				$isOpenEvent = ($arEventFields['CAL_TYPE'] ?? null) === 'open_event';
+				$attendeeListData = CCalendarEvent::getAttendeeList(
+					$isOpenEvent ? [] : [$parentEventId],
+					$isOpenEvent ? [$parentEventId] : [],
+				);
+				$attendeeList = $attendeeListData['attendeeList'][$parentEventId] ?? [];
+				$attendeeUserIds = [];
+				foreach ($attendeeList as $attendee)
+				{
+					$attendeeUserId = is_array($attendee) ? (int)($attendee['id'] ?? 0) : 0;
+					if ($attendeeUserId > 0)
+					{
+						$attendeeUserIds[$attendeeUserId] = true;
+					}
+				}
+
+				$attendeesEntityList = $arEventFields['attendeesEntityList'] ?? [];
+				$directAttendeesEntityList = is_array($attendeesEntityList)
+					? array_filter(
+						$attendeesEntityList,
+						static fn($attendee): bool =>
+							is_array($attendee)
+							&& ($attendee['entityId'] ?? null) === 'user',
+					)
+					: []
+				;
+				$directAttendeeUserIds = Crm\Integration\Calendar::getUserIdsByAttendeesEntityList(
+					$directAttendeesEntityList,
+				);
+				foreach ($directAttendeeUserIds as $directAttendeeUserId)
+				{
+					if (!isset($attendeeUserIds[$directAttendeeUserId]))
+					{
+						$attendeeList[] = ['id' => $directAttendeeUserId];
+						$attendeeUserIds[$directAttendeeUserId] = true;
+					}
+				}
+
+				if ($parentEventIdWasEmpty && !$isOpenEvent)
+				{
+					$meetingHost = (int)($arEventFields['MEETING_HOST'] ?? 0);
+					if ($meetingHost > 0 && !isset($attendeeUserIds[$meetingHost]))
+					{
+						$attendeeList[] = [
+							'id' => $meetingHost,
+							'entryId' => $eventID,
+							'status' => 'H',
+						];
+					}
+				}
+				$arEventFields['ATTENDEE_LIST'] = $attendeeList;
+			}
 
 			if (is_array($arEntity))
 			{
@@ -5530,7 +5679,7 @@ class CAllCrmActivity
 				),
 				'EVENT_TEXT_1' => $oldText !== '' ? $oldText : GetMessage('CRM_ACTIVITY_FIELD_COMPARE_EMPTY'),
 				'EVENT_TEXT_2' => $newText !== '' ? $newText : GetMessage('CRM_ACTIVITY_FIELD_COMPARE_EMPTY'),
-				'USER_ID' => isset($arNewRow['EDITOR_ID']) ? $arNewRow['EDITOR_ID'] : 0
+				'USER_ID' => self::resolveEventAuthorId($arNewRow),
 			);
 		}
 
@@ -5560,7 +5709,7 @@ class CAllCrmActivity
 			$arEvents[$key]['ENTITY_TYPE'] = CCrmOwnerType::ResolveName($arBinding['OWNER_TYPE_ID']);
 			$arEvents[$key]['ENTITY_ID'] = $arBinding['OWNER_ID'];
 			$arEvents[$key]['ENTITY_FIELD'] = 'ACTIVITIES';
-			$arEvents[$key]['USER_ID']  = (int)($fields['EDITOR_ID'] ?? CCrmSecurityHelper::GetCurrentUserID());
+			$arEvents[$key]['USER_ID'] = self::resolveEventAuthorId($fields);
 		}
 
 		$CCrmEvent->AddRelation($eventId, $arEvents, $checkPerms);
@@ -5619,7 +5768,7 @@ class CAllCrmActivity
 			'EVENT_NAME' => Loc::getMessage("CRM_ACTIVITY_{$typeName}_ADD"),
 			'EVENT_TEXT_1' => $eventText,
 			'EVENT_TEXT_2' => '',
-			'USER_ID' => (int)($row['EDITOR_ID'] ?? 0),
+			'USER_ID' => self::resolveEventAuthorId($row),
 		];
 
 		return self::createEvent($ownerTypeId, $ownerId, $arEvent, $checkPerms);
@@ -5869,7 +6018,11 @@ class CAllCrmActivity
 
 		if(!isset($event['USER_ID']) || $event['USER_ID'] <= 0)
 		{
-			$event['USER_ID']  = \Bitrix\Crm\Service\Container::getInstance()->getContext()->getUserId();
+			// The explicitly set context user only. USER_ID=0 propagates to
+			// CCrmEvent::Add which falls back to the system user when no explicit
+			// actor is present.
+			$context = \Bitrix\Crm\Service\Container::getInstance()->getContext();
+			$event['USER_ID'] = (int)($context->getExplicitUserId() ?? 0);
 		}
 
 		$result = $CCrmEvent->Add($event, $checkPerms);
@@ -5879,6 +6032,26 @@ class CAllCrmActivity
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Resolves the history event author from the activity row itself: the
+	 * explicit editor wins, otherwise the responsible, then the activity
+	 * author. Covers rows without EDITOR_ID (mail items skip its stamping),
+	 * so background flows are not attributed to an ambient hit user.
+	 */
+	private static function resolveEventAuthorId(array $row): int
+	{
+		foreach (['EDITOR_ID', 'RESPONSIBLE_ID', 'AUTHOR_ID'] as $fieldName)
+		{
+			$userId = (int)($row[$fieldName] ?? 0);
+			if ($userId > 0)
+			{
+				return $userId;
+			}
+		}
+
+		return 0;
 	}
 
 	protected static function GetUserPermissions()
@@ -6066,6 +6239,28 @@ class CAllCrmActivity
 
 		$permissionEntityType = CCrmPerms::ResolvePermissionEntityType($ownerTypeName, $ownerID);
 		return CCrmAuthorizationHelper::CheckReadPermission($permissionEntityType, $ownerID, $userPermissions);
+	}
+	public static function MaskCommunicationForUser(array &$comm, $userPermissions)
+	{
+		$entityTypeID = isset($comm['ENTITY_TYPE_ID']) ? (int)$comm['ENTITY_TYPE_ID'] : CCrmOwnerType::Undefined;
+		$entityID = isset($comm['ENTITY_ID']) ? (int)$comm['ENTITY_ID'] : 0;
+
+		if($entityID <= 0 || !CCrmOwnerType::IsDefined($entityTypeID))
+		{
+			return;
+		}
+
+		if(self::CheckReadPermission($entityTypeID, $entityID, $userPermissions))
+		{
+			return;
+		}
+
+		$comm['TITLE'] = GetMessage('CRM_ACTIVITY_HIDDEN_CLIENT');
+		$comm['DESCRIPTION'] = '';
+		$comm['VALUE'] = '';
+		$comm['FORMATTED_VALUE'] = '';
+		$comm['ENTITY_ID'] = 0;
+		$comm['ENTITY_TYPE_ID'] = CCrmOwnerType::Undefined;
 	}
 	public static function CheckItemPostponePermission(array $fields, $userPermissions = null)
 	{
@@ -7084,26 +7279,10 @@ class CAllCrmActivity
 		}
 
 		//convert current user time to calendar owner time
-		if ($userTzName = \CCalendar::GetUserTimezoneName($responsibleID, true))
-		{
-			$userTz = new DateTimeZone($userTzName);
-			$format = \Bitrix\Main\Type\DateTime::getFormat();
-
-			if (isset($arFields['START_TIME']))
-			{
-				$startTime = \Bitrix\Main\Type\DateTime::createFromUserTime($arFields['START_TIME']);
-				$startTime->setTimeZone($userTz);
-				$arCalEventFields['DATE_FROM'] = $startTime->format($format);
-				$arCalEventFields['TZ_FROM'] = $userTzName;
-			}
-			if (isset($arFields['END_TIME']))
-			{
-				$endTime = \Bitrix\Main\Type\DateTime::createFromUserTime($arFields['END_TIME']);
-				$endTime->setTimeZone($userTz);
-				$arCalEventFields['DATE_TO'] = $endTime->format($format);
-				$arCalEventFields['TZ_TO'] = $userTzName;
-			}
-		}
+		$arCalEventFields = array_merge(
+			$arCalEventFields,
+			Crm\Activity\ToDo\CalendarEventOccupancyFields::buildEventTimeFields($arFields, $responsibleID)
+		);
 
 		$arCalEventFields['SECTIONS'] = [\CCalendar::GetCrmSection($responsibleID, true)];
 
@@ -7111,40 +7290,52 @@ class CAllCrmActivity
 
 		if($calendarEventId > 0)
 		{
-			$arPresentEventFields = \Bitrix\Crm\Integration\Calendar::getEvent($calendarEventId, true);
-			if(is_array($arPresentEventFields))
+			// Previous-state lookup, not an authorization point: the write below is authorized by the calendar as the responsible
+			// user, while an acting-user read would misread a live event as an orphan and drop the sync. Called directly, not via
+			// Crm\Integration\Calendar::getEvent(), whose static cache ignores the permission flag and would poison checked reads.
+			$arPresentEventFields = CCalendarEvent::GetById($calendarEventId, false);
+			if(!is_array($arPresentEventFields))
 			{
-				$arCalEventFields['ID'] = $calendarEventId;
+				// the linked calendar event was deleted (orphan binding): there is nothing to sync,
+				// and we must not silently recreate it in the responsible user's calendar
+				return false;
+			}
 
-				if(!empty($arPresentEventFields['RRULE']))
-				{
-					$arCalEventFields['RRULE'] = CCalendarEvent::ParseRRULE($arPresentEventFields['RRULE']);
-				}
+			$arCalEventFields['ID'] = $calendarEventId;
 
-				if (
-					!empty($prevEnrichedDescription)
-					&& trim($description) !== trim($prevEnrichedDescription)
-				)
+			if(!empty($arPresentEventFields['RRULE']))
+			{
+				$arCalEventFields['RRULE'] = CCalendarEvent::ParseRRULE($arPresentEventFields['RRULE']);
+			}
+
+			if ($prevEnrichedDescription === null && $provider === ToDo::class)
+			{
+				$prevEnrichedDescription = $arPresentEventFields['DESCRIPTION'] ?? null;
+			}
+
+			if (
+				!empty($prevEnrichedDescription)
+				&& trim($description) !== trim($prevEnrichedDescription)
+			)
+			{
+				$culture = \Bitrix\Main\Context::getCurrent()?->getCulture();
+				$date = new DateTime();
+				if ($culture)
 				{
-					$culture = \Bitrix\Main\Context::getCurrent()?->getCulture();
-					$date = new DateTime();
-					if ($culture)
-					{
-						$date->format($culture->getShortDateFormat() . ' ' . $culture->getShortTimeFormat());
-					}
-					$descriptionSubtitle = Loc::getMessage(
-						'CRM_ACTIVITY_CALENDAR_SUBTITLE',
-						['#DATE#' => $date]
-					);
-					$arCalEventFields['DESCRIPTION'] =
-						$arPresentEventFields['DESCRIPTION']
-						. PHP_EOL
-						. PHP_EOL
-						. $descriptionSubtitle
-						. PHP_EOL
-						. $arCalEventFields['DESCRIPTION']
-					;
+					$date->format($culture->getShortDateFormat() . ' ' . $culture->getShortTimeFormat());
 				}
+				$descriptionSubtitle = Loc::getMessage(
+					'CRM_ACTIVITY_CALENDAR_SUBTITLE',
+					['#DATE#' => $date]
+				);
+				$arCalEventFields['DESCRIPTION'] =
+					$arPresentEventFields['DESCRIPTION']
+					. PHP_EOL
+					. PHP_EOL
+					. $descriptionSubtitle
+					. PHP_EOL
+					. $arCalEventFields['DESCRIPTION']
+				;
 			}
 		}
 		if(isset($arFields['NOTIFY_TYPE']) && (int)$arFields['NOTIFY_TYPE'] !== CCrmActivityNotifyType::None)
@@ -8305,9 +8496,7 @@ class CAllCrmActivity
 
 		$fields = $lb->GetFields();
 		$entityAlias = $lb->GetTableAlias();
-		$join = 'LEFT JOIN '.CCrmActivity::USER_ACTIVITY_TABLE_NAME.' UA ON UA.USER_ID IN ('.implode(',', $userIDs).') AND UA.OWNER_ID = '.$entityAlias.'.ID AND UA.OWNER_TYPE_ID = '.$entityTypeID;
-		$fields['ACTIVITY_USER_ID'] = array('FIELD' => 'MAX(UA.USER_ID)', 'TYPE' => 'int', 'FROM'=> $join);
-		$fields['ACTIVITY_SORT'] = array('FIELD' => 'MAX(UA.SORT)', 'TYPE' => 'string', 'FROM'=> $join);
+		$fields = array_merge($fields, self::PrepareEntityListSortFields($entityAlias, $entityTypeID, $userIDs));
 		$lb->SetFields($fields);
 
 		$sortOrder = mb_strtoupper($sortOrder);
@@ -8326,13 +8515,83 @@ class CAllCrmActivity
 		);
 
 		return $lb->Prepare(
-			array('ACTIVITY_USER_ID' => 'DESC', 'ACTIVITY_SORT' => $sortOrder, 'ID' => $sortOrder),
+			array(
+				self::ENTITY_LIST_ACTIVITY_USER_FIELD => 'DESC',
+				self::ENTITY_LIST_ACTIVITY_SORT_FIELD => $sortOrder,
+				'ID' => $sortOrder,
+			),
 			$filter,
 			array('ID'),
 			$navParams,
 			array('ID'),
 			$options
 		);
+	}
+	private static function PrepareEntityListSortFields(string $entityAlias, int $entityTypeID, array $userIDs): array
+	{
+		// While enable_any_incoming_act = 'N' the MIN_DEADLINE column is still being repaired by
+		// SynchronizeUncompletedActivityDataAgent, so GetNearest() reads b_crm_act instead.
+		// The legacy fallback is safe as long as SynchronizeUserActivity() keeps filling
+		// b_crm_usr_act from every CCrmActivity write path with no option gate of its own.
+		// Revisit this gate if a write path ever stops calling it.
+		$isUncompletedActivityReady =
+			\Bitrix\Main\Config\Option::get('crm', 'enable_entity_uncompleted_act', 'Y') === 'Y'
+			&& \Bitrix\Main\Config\Option::get('crm', 'enable_any_incoming_act', 'Y') === 'Y'
+		;
+
+		return $isUncompletedActivityReady
+			? self::PrepareEntityListSortFieldsFromUncompletedActivity($entityAlias, $entityTypeID, $userIDs)
+			: self::PrepareEntityListSortFieldsFromUserActivity($entityAlias, $entityTypeID, $userIDs);
+	}
+	private static function PrepareEntityListSortFieldsFromUncompletedActivity(
+		string $entityAlias,
+		int $entityTypeID,
+		array $userIDs
+	): array
+	{
+		// Both fields must carry the very same FROM string: CSqlUtil::PrepareSql() and
+		// CCrmEntityListBuilder::Add2SqlData() deduplicate joins by exact string match.
+		$join = 'LEFT JOIN '.Crm\Activity\Entity\EntityUncompletedActivityTable::getTableName().' EUA'
+			.' ON EUA.ENTITY_ID = '.$entityAlias.'.ID'
+			.' AND EUA.ENTITY_TYPE_ID = '.$entityTypeID
+			.' AND EUA.RESPONSIBLE_ID IN ('.implode(',', array_map('intval', $userIDs)).')';
+		$noDeadline = Application::getConnection()->getSqlHelper()->getCharToDateFunction('1970-01-01 00:00:00');
+
+		return [
+			// 1 - the user has an own activity, 0 - only other users have one, -1 - none at all.
+			// The CASE must stay without ELSE: an unmatched LEFT JOIN still yields a row with
+			// RESPONSIBLE_ID IS NULL, and an ELSE branch would score it as 0, making -1 dead.
+			self::ENTITY_LIST_ACTIVITY_USER_FIELD => [
+				'FIELD' => 'COALESCE('
+					.'MAX(CASE WHEN EUA.RESPONSIBLE_ID > 0 THEN 1 WHEN EUA.RESPONSIBLE_ID = 0 THEN 0 END)'
+					.', -1)',
+				'TYPE' => 'int',
+				'FROM' => $join,
+			],
+			// The user's own deadline wins over the aggregated one. The sentinel date itself never
+			// affects the order: entities without activities are already separated by ACTIVITY_USER_ID.
+			// A deadline-less activity is stored as the max database date, so its entity stays in the
+			// "has activities" group - legacy b_crm_usr_act kept no row for it at all and the entity
+			// used to land in the "no activities" group instead.
+			self::ENTITY_LIST_ACTIVITY_SORT_FIELD => [
+				'FIELD' => 'COALESCE('
+					.'MIN(CASE WHEN EUA.RESPONSIBLE_ID > 0 THEN EUA.MIN_DEADLINE END), '
+					.'MIN(CASE WHEN EUA.RESPONSIBLE_ID = 0 THEN EUA.MIN_DEADLINE END), '
+					.$noDeadline
+					.')',
+				'TYPE' => 'datetime',
+				'FROM' => $join,
+			],
+		];
+	}
+	private static function PrepareEntityListSortFieldsFromUserActivity(string $entityAlias, int $entityTypeID, array $userIDs): array
+	{
+		$join = 'LEFT JOIN '.CCrmActivity::USER_ACTIVITY_TABLE_NAME.' UA ON UA.USER_ID IN ('.implode(',', array_map('intval', $userIDs)).') AND UA.OWNER_ID = '.$entityAlias.'.ID AND UA.OWNER_TYPE_ID = '.$entityTypeID;
+
+		return [
+			self::ENTITY_LIST_ACTIVITY_USER_FIELD => array('FIELD' => 'MAX(UA.USER_ID)', 'TYPE' => 'int', 'FROM'=> $join),
+			self::ENTITY_LIST_ACTIVITY_SORT_FIELD => array('FIELD' => 'MAX(UA.SORT)', 'TYPE' => 'string', 'FROM'=> $join),
+		];
 	}
 	public static function HasChildren($ID)
 	{

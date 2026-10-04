@@ -11,7 +11,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_BITRIX_AI_BOSS_REPORT_NAME_1###"
+            "Default": "###BIZPROC_NODES_BITRIX_AI_BOSS_REPORT_NAME_1###",
+            "Source": "SetupTemplateActivity"
         },
         "SetupTemplateActivity_rgrHChbMKt": {
             "Name": "###BIZPROC_NODES_BITRIX_AI_BOSS_REPORT_NAME_3###",
@@ -20,7 +21,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": ""
+            "Default": "",
+            "Source": "SetupTemplateActivity"
         },
         "Manager": {
             "Name": "###BIZPROC_NODES_BITRIX_AI_BOSS_REPORT_NAME_4###",
@@ -29,7 +31,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": ""
+            "Default": "",
+            "Source": "SetupTemplateActivity"
         },
         "USERS": {
             "Name": "###BIZPROC_NODES_BITRIX_AI_BOSS_REPORT_NAME_5###",
@@ -38,7 +41,8 @@
             "Required": 0,
             "Multiple": 1,
             "Options": [],
-            "Default": ""
+            "Default": "",
+            "Source": "SetupTemplateActivity"
         }
     },
     "TEMPLATE": [

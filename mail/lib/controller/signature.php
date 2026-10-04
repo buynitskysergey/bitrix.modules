@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Controller;
 
 use Bitrix\Mail\Dto\SharedSignatureDto;
+use Bitrix\Mail\Helper\Config\Feature;
 use Bitrix\Mail\Internals\SharedSignatureTable;
 use Bitrix\Mail\Service\SharedSignature\AssignmentResolver;
 use Bitrix\Mail\Service\SharedSignature\SharedSignatureService;
+use Bitrix\Mail\Service\SharedSignature\SignatureContextService;
 use Bitrix\Main\Context;
 use Bitrix\Main\Engine\ActionFilter\HttpMethod;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Result;
 
 /**
  * REST controller for signatures of every scope — the single set of operations over the
@@ -24,9 +27,17 @@ use Bitrix\Main\Localization\Loc;
  *   add    POST {signature, scope, assignments:[...]}           → {item}
  *   update POST {id, signature?, scope?, assignments?, assignmentsProvided?} → {item}
  *   delete POST {id}                                            → {ok: true}
+ *   getAvailableForSenders POST {}                              -> {signatures, senders}
+ *   setChoice POST {senderKey, signatureId}                     -> {senderKey, selectedSignatureId}
+ *   addOwner POST {text, senderKey?, senderKeys?}                 -> {item: MobileSignature}
+ *   deleteOwner POST {id}                                       -> {ok: true}
  *
  * Access is not gated wholesale: an owner-scope signature belongs to its owner, a shared one
  * needs the tariff and the mailbox-management right. Both checks live in SharedSignatureService.
+ *
+ * The four mobile actions — getAvailableForSenders, setChoice, addOwner, deleteOwner — are closed
+ * by the mailmobile signatures feature flag. The web actions above them are not: they serve the
+ * unified model for the desktop client.
  */
 class Signature extends Base
 {
@@ -40,7 +51,96 @@ class Signature extends Base
 			'add' => $post,
 			'update' => $post,
 			'delete' => $post,
+			'getAvailableForSenders' => $post,
+			'setChoice' => $post,
+			'addOwner' => $post,
+			'deleteOwner' => $post,
 		];
+	}
+
+	/**
+	 * POST {} -> {signatures: MobileSignature[], senders: MobileSignatureSender[]}
+	 */
+	public function getAvailableForSendersAction(SignatureContextService $service): array|false
+	{
+		if ($this->isMobileSignaturesDisabled())
+		{
+			return false;
+		}
+
+		return $service->getContext($this->getUserId())->toArray();
+	}
+
+	/**
+	 * POST {senderKey, signatureId} -> {senderKey, selectedSignatureId}
+	 */
+	public function setChoiceAction(
+		SignatureContextService $service,
+		string $senderKey,
+		?int $signatureId = null,
+	): array|false
+	{
+		if ($this->isMobileSignaturesDisabled())
+		{
+			return false;
+		}
+
+		$result = $service->setChoice($this->getUserId(), $senderKey, $signatureId);
+		if (!$result->isSuccess())
+		{
+			$this->addSignatureContextErrors($result);
+
+			return false;
+		}
+
+		return $result->getData();
+	}
+
+	/**
+	 * POST {text, senderKey?, senderKeys?} -> {item: MobileSignature}
+	 */
+	public function addOwnerAction(
+		SignatureContextService $service,
+		?string $text = null,
+		?string $senderKey = null,
+		array $senderKeys = [],
+	): array|false
+	{
+		if ($this->isMobileSignaturesDisabled())
+		{
+			return false;
+		}
+
+		$result = $service->addOwner($this->getUserId(), (string)$text, $senderKey, $senderKeys);
+		if (!$result->isSuccess())
+		{
+			$this->addSignatureContextErrors($result);
+
+			return false;
+		}
+
+		return $result->getData();
+	}
+
+	/**
+	 * POST {id} -> {ok: true}
+	 */
+	public function deleteOwnerAction(SignatureContextService $service, int $id): array|false
+	{
+		if ($this->isMobileSignaturesDisabled())
+		{
+			return false;
+		}
+
+		$result = $service->deleteOwner($this->getUserId(), $id);
+		if (!$result->isSuccess())
+		{
+			$this->addSignatureContextErrors($result);
+
+			return false;
+		}
+
+		return $result->getData();
 	}
 
 	/**
@@ -158,7 +258,7 @@ class Signature extends Base
 
 		if (!$result->isSuccess())
 		{
-			$this->errorCollection = $result->getErrors();
+			$this->applyServiceErrors($result->getErrors());
 
 			return false;
 		}
@@ -219,8 +319,7 @@ class Signature extends Base
 			// is entitled to — otherwise a personal signature could be published portal-wide.
 			$targetOwnerId = $scope === SharedSignatureTable::SCOPE_OWNER
 				? $userId
-				: (int)$entry['signature']->get('OWNER_ID')
-			;
+				: (int)$entry['signature']->get('OWNER_ID');
 			if (!$service->canCreate($scope, $targetOwnerId, $userId))
 			{
 				$this->addAccessDeniedError();
@@ -253,17 +352,7 @@ class Signature extends Base
 
 		if (!$result->isSuccess())
 		{
-			foreach ($result->getErrors() as $error)
-			{
-				if ($error->getCode() === SharedSignatureService::ERROR_ASSIGNMENTS_REQUIRED_FOR_SCOPE_CHANGE)
-				{
-					Context::getCurrent()->getResponse()->setStatus(422);
-
-					break;
-				}
-			}
-
-			$this->errorCollection = $result->getErrors();
+			$this->applyServiceErrors($result->getErrors());
 
 			return false;
 		}
@@ -311,6 +400,26 @@ class Signature extends Base
 	private function getUserId(): int
 	{
 		return (int)(CurrentUser::get()->getId() ?? 0);
+	}
+
+	/**
+	 * Registers a 404 refusal when the portal keeps mobile signatures off. The status matches the
+	 * error code so that a client cached before the code existed still reads it as "no such section".
+	 */
+	private function isMobileSignaturesDisabled(): bool
+	{
+		if (Feature::isMobileSignaturesAvailable())
+		{
+			return false;
+		}
+
+		Context::getCurrent()->getResponse()->setStatus(404);
+		$this->addError(new Error(
+			Loc::getMessage('MAIL_SIGNATURE_ERROR_FEATURE_DISABLED'),
+			SignatureContextService::ERROR_FEATURE_DISABLED,
+		));
+
+		return true;
 	}
 
 	private function hasRawSignature(): bool
@@ -375,5 +484,61 @@ class Signature extends Base
 	{
 		Context::getCurrent()->getResponse()->setStatus(422);
 		$this->addError(new Error((string)$message, $code));
+	}
+
+	/**
+	 * @param Error[] $errors
+	 */
+	private function applyServiceErrors(array $errors): void
+	{
+		foreach ($errors as $error)
+		{
+			if (SharedSignatureService::isValidationError($error))
+			{
+				Context::getCurrent()->getResponse()->setStatus(422);
+
+				break;
+			}
+		}
+
+		$this->addErrors($errors);
+	}
+
+	private function addSignatureContextErrors(Result $result): void
+	{
+		foreach ($result->getErrors() as $error)
+		{
+			[$status, $message] = match ($error->getCode())
+			{
+				SignatureContextService::ERROR_INVALID_SIGNATURE_ID => [
+					422,
+					Loc::getMessage('MAIL_SIGNATURE_ERROR_INVALID_ID'),
+				],
+				SignatureContextService::ERROR_INVALID_SENDER_KEY => [
+					422,
+					Loc::getMessage('MAIL_SIGNATURE_ERROR_INVALID_SENDER_KEY'),
+				],
+				SignatureContextService::ERROR_SENDER_NOT_AVAILABLE => [
+					403,
+					Loc::getMessage('MAIL_SIGNATURE_ERROR_SENDER_NOT_AVAILABLE'),
+				],
+				SignatureContextService::ERROR_SIGNATURE_NOT_AVAILABLE => [
+					404,
+					Loc::getMessage('MAIL_SIGNATURE_ERROR_NOT_FOUND'),
+				],
+				SignatureContextService::ERROR_EMPTY_TEXT => [
+					422,
+					Loc::getMessage('MAIL_SIGNATURE_ERROR_EMPTY_BODY'),
+				],
+				SignatureContextService::ERROR_LIMIT_REACHED => [
+					422,
+					Loc::getMessage('MAIL_SIGNATURE_ERROR_LIMIT_REACHED'),
+				],
+				default => [500, Loc::getMessage('MAIL_SIGNATURE_ERROR_OPERATION_FAILED')],
+			};
+
+			Context::getCurrent()->getResponse()->setStatus($status);
+			$this->addError(new Error((string)$message, $error->getCode()));
+		}
 	}
 }

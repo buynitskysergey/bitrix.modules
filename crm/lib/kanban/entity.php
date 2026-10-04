@@ -1075,7 +1075,50 @@ abstract class Entity
 		);
 	}
 
+	/**
+	 * Returns per-stage aggregates for kanban summary.
+	 *
+	 * Default implementation transparently caches results via {@see TotalSumsCache}.
+	 *
+	 * **Subclass contract:** to participate in caching, subclasses with custom
+	 * aggregation must override {@see self::doGetDataToCalculateTotalSums()},
+	 * not this method. Overriding this method directly opts out of caching
+	 * (currently the case for {@see Entity\Invoice} and {@see Entity\Order}).
+	 */
 	protected function getDataToCalculateTotalSums(string $fieldSum, array $filter, array $runtime): array
+	{
+		$cache = $this->getTotalSumsCache();
+		if (!$cache->isEnabled())
+		{
+			return $this->doGetDataToCalculateTotalSums($fieldSum, $filter, $runtime);
+		}
+
+		$userId = (int)\Bitrix\Crm\Service\Container::getInstance()->getContext()->getUserId();
+		if ($userId <= 0)
+		{
+			// Invalidation is per-user and skips userId <= 0, so such a slice
+			// would live by TTL only; keep read/write consistent with it.
+			return $this->doGetDataToCalculateTotalSums($fieldSum, $filter, $runtime);
+		}
+
+		$categoryId = $this->getCategoryId();
+		$cached = $cache->get($this->getTypeId(), $userId, $categoryId, $fieldSum, $filter, $runtime);
+		if ($cached !== null)
+		{
+			return $cached;
+		}
+
+		$data = $this->doGetDataToCalculateTotalSums($fieldSum, $filter, $runtime);
+		$cache->set($this->getTypeId(), $userId, $categoryId, $fieldSum, $filter, $runtime, $data);
+		return $data;
+	}
+
+	private function getTotalSumsCache(): TotalSumsCache
+	{
+		return ServiceLocator::getInstance()->get(TotalSumsCache::class);
+	}
+
+	protected function doGetDataToCalculateTotalSums(string $fieldSum, array $filter, array $runtime): array
 	{
 		$data = [];
 
@@ -2392,7 +2435,7 @@ abstract class Entity
 				? Item::FIELD_NAME_OBSERVERS
 				: 'OBSERVER';
 			$result[$observerFieldCode] =
-				(Field::createByType('user', 'OBSERVER'))
+				(Field::createByType('user', $observerFieldCode))
 					->setIsMultiple(true)
 			;
 		}

@@ -2,6 +2,7 @@
 
 namespace Bitrix\Bizproc\Activity\Dto\Complex;
 
+use Bitrix\Bizproc\Activity\Enum\ActionGroup;
 use Bitrix\Main\Type\Contract\Arrayable;
 
 final class NodeAction implements Arrayable, \JsonSerializable
@@ -11,6 +12,7 @@ final class NodeAction implements Arrayable, \JsonSerializable
 		public readonly ?string $customName = null,
 		public readonly int $sort = 0,
 		public readonly ?string $presetId = null,
+		public readonly ?ActionGroup $group = null,
 	) {}
 
 	public function toArray(): array
@@ -20,6 +22,7 @@ final class NodeAction implements Arrayable, \JsonSerializable
 			'customName' => $this->customName,
 			'sort' => $this->sort,
 			'presetId' => $this->presetId,
+			'group' => $this->group?->value,
 		];
 	}
 

@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Integration\Disk;
 
 use Bitrix\Disk\BaseObject;
-use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\ExternalLink;
 use Bitrix\Disk\File;
 use Bitrix\Disk\Folder;
 use Bitrix\Disk\Storage;
 use Bitrix\Mail\Integration\Disk\Dto\LargeAttachmentResult;
+use Bitrix\Mail\Integration\Disk\Dto\LargeAttachmentTokenPayload;
 use Bitrix\Main\Application;
 use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Error;
@@ -21,7 +21,6 @@ use Bitrix\Main\Security\Random;
 use Bitrix\Main\Security\Sign\Signer;
 use Bitrix\Main\Web\Json;
 use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 
 final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterface
 {
@@ -34,23 +33,26 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 
 	private const RESULT_KEY = 'result';
 	private const DELETED_KEY = 'deleted';
-	private const TOKEN_VERSION = 2;
 	private const TOKEN_SALT = 'mail.large-attachment.v2';
 	private const MAX_TOKEN_LENGTH = 8192;
-	private const FOLDER_NAME_PREFIX = 'mail-attachments-';
-	private const STAGING_FOLDER_NAME_PREFIX = 'mail-attachments-staging-';
 	private const LOGGER_ID = 'mail.large_attachment.storage';
 
 	private Signer $signer;
 	private ?\Closure $uploadPossibilityChecker;
+	private MailAttachmentLinkGateway $linkGateway;
 	private ?LoggerInterface $logger = null;
 
-	public function __construct(?Signer $signer = null, ?callable $isUploadPossible = null)
+	public function __construct(
+		?Signer $signer = null,
+		?callable $isUploadPossible = null,
+		?MailAttachmentLinkGateway $linkGateway = null,
+	)
 	{
 		$this->signer = $signer ?? new Signer();
 		$this->uploadPossibilityChecker = $isUploadPossible !== null
 			? $isUploadPossible(...)
 			: null;
+		$this->linkGateway = $linkGateway ?? new DiskMailAttachmentLinkGateway();
 	}
 
 	public function getMailAttachmentsFolder(int $userId): Result
@@ -82,19 +84,27 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 
 	public function uploadAndLink(int $userId, array $diskFileIds): Result
 	{
-		$fileIds = $this->normalizeIds($diskFileIds);
+		$fileIds = LargeAttachmentTokenPayload::normalizeIds($diskFileIds);
 		if ($userId <= 0 || $fileIds === null || $fileIds === [])
 		{
 			return $this->error('Invalid large attachment data.', self::ERROR_INVALID_ARGUMENT);
 		}
 
-		if (!Loader::includeModule('disk') || !Configuration::isEnabledManualExternalLink())
+		if (!Loader::includeModule('disk'))
 		{
 			return $this->diskUnavailable();
 		}
 
+		// asked before the set folder is created: a refusal must leave no object in the mail folder
+		$availability = $this->checkLinkCreationAvailability();
+		if (!$availability->isSuccess())
+		{
+			return $availability;
+		}
+
 		$batchFolder = null;
-		$externalLink = null;
+		$createdLinkId = null;
+		$linkFailure = null;
 
 		try
 		{
@@ -144,7 +154,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				);
 			}
 
-			$folderName = self::FOLDER_NAME_PREFIX . Random::getString(32);
+			$folderName = LargeAttachmentTokenPayload::FOLDER_NAME_PREFIX . Random::getString(32);
 			$batchFolder = $mailFolder->addSubFolder(
 				[
 					'NAME' => $folderName,
@@ -177,31 +187,40 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			sort($copiedObjectIds, SORT_NUMERIC);
 
 			$linkObject = count($copiedFiles) === 1 ? $copiedFiles[0] : $batchFolder;
-			$externalLink = $linkObject->addExternalLink([
-				'CREATED_BY' => $userId,
-				'TYPE' => ExternalLink::TYPE_MANUAL,
-				'ACCESS_RIGHT' => ExternalLink::ACCESS_RIGHT_VIEW,
-				'CAN_DOWNLOAD_WITH_READ_ACCESS' => 1,
-				'CAN_EDIT_SETTINGS' => false,
-			]);
-			if (!$externalLink instanceof ExternalLink || !$this->isExpectedLink($externalLink, $userId, $linkObject))
+			$created = $this->linkGateway->create($userId, (int)$linkObject->getId());
+			if (!$created->isSuccess())
 			{
+				// a refusal may still name a link that was created: the cleanup below is the only place
+				// that can delete it
+				$createdLinkId = ((int)($created->getData()['externalLinkId'] ?? 0)) ?: null;
+
+				// the refusal is already mapped to a code of the mail module and is carried to the catch
+				// block, so that the copies are cleaned up in the single place that does the cleanup
+				$linkFailure = $created;
+
 				throw new \RuntimeException('Could not create a serviceable external link.');
 			}
 
-			$payload = [
-				'version' => self::TOKEN_VERSION,
-				'userId' => $userId,
-				'storageId' => (int)$storage->getId(),
-				'mailFolderId' => (int)$mailFolder->getId(),
-				'folderId' => (int)$batchFolder->getId(),
-				'folderName' => $batchFolder->getName(),
-				'linkObjectId' => (int)$linkObject->getId(),
-				'externalLinkId' => (int)$externalLink->getId(),
-				'externalLinkHash' => $externalLink->getHash(),
-				'sourceFileIds' => $fileIds,
-				'copiedObjectIds' => $copiedObjectIds,
-			];
+			$createdLink = $created->getData();
+			$createdLinkId = (int)($createdLink['externalLinkId'] ?? 0);
+			$externalLink = ExternalLink::loadById($createdLinkId);
+			if (!$externalLink instanceof ExternalLink || !$this->isExpectedLink($externalLink, $userId, $linkObject))
+			{
+				throw new \RuntimeException('Could not read back a serviceable external link.');
+			}
+
+			$payload = new LargeAttachmentTokenPayload(
+				$userId,
+				(int)$storage->getId(),
+				(int)$mailFolder->getId(),
+				(int)$batchFolder->getId(),
+				$batchFolder->getName(),
+				(int)$linkObject->getId(),
+				$createdLinkId,
+				$externalLink->getHash(),
+				$fileIds,
+				$copiedObjectIds,
+			);
 			$token = $this->signPayload($payload);
 			if (strlen($token) > self::MAX_TOKEN_LENGTH)
 			{
@@ -211,8 +230,8 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			$result = new Result();
 			$result->setData([
 				self::RESULT_KEY => new LargeAttachmentResult(
-					$externalLink->generateUrl()->getUri(),
-					(int)$externalLink->getId(),
+					(string)($createdLink['url'] ?? ''),
+					$createdLinkId,
 					$copiedObjectIds,
 					$fileIds,
 					$token,
@@ -223,9 +242,9 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 		catch (\Throwable)
 		{
-			$this->rollback($batchFolder, $externalLink, $userId);
+			$this->rollback($batchFolder, $createdLinkId, $userId);
 
-			return $this->error(
+			return $linkFailure ?? $this->error(
 				'Could not prepare a large attachment link.',
 				self::ERROR_UPLOAD_FAILED,
 			);
@@ -235,20 +254,20 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 	public function extendAndLink(int $userId, string $token, array $diskFileIds): Result
 	{
 		$payload = $this->parsePayload($token);
-		$fileIds = $this->normalizeIds($diskFileIds);
+		$fileIds = LargeAttachmentTokenPayload::normalizeIds($diskFileIds);
 		if ($userId <= 0 || $payload === null || $fileIds === null || $fileIds === [])
 		{
 			return $this->error('Invalid large attachment data.', self::ERROR_INVALID_ARGUMENT);
 		}
 
-		if ($payload['userId'] !== $userId)
+		if ($payload->userId !== $userId)
 		{
 			return $this->error('The large attachment token belongs to another user.', self::ERROR_ACCESS_DENIED);
 		}
 
-		$newFileIds = array_values(array_diff($fileIds, $payload['sourceFileIds']));
-		$isStrictExtension = count($fileIds) > count($payload['sourceFileIds'])
-			&& array_diff($payload['sourceFileIds'], $fileIds) === [];
+		$newFileIds = array_values(array_diff($fileIds, $payload->sourceFileIds));
+		$isStrictExtension = count($fileIds) > count($payload->sourceFileIds)
+			&& array_diff($payload->sourceFileIds, $fileIds) === [];
 		if (!$isStrictExtension)
 		{
 			return $this->uploadAndLink($userId, $fileIds);
@@ -260,14 +279,22 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			return $this->error('The replacement file set is invalid.', self::ERROR_INVALID_ARGUMENT);
 		}
 
-		if (!Loader::includeModule('disk') || !Configuration::isEnabledManualExternalLink())
+		if (!Loader::includeModule('disk'))
 		{
 			return $this->diskUnavailable();
 		}
 
+		// asked before the staging folder is created: a refusal must leave no object in the mail folder
+		$availability = $this->checkLinkCreationAvailability();
+		if (!$availability->isSuccess())
+		{
+			return $availability;
+		}
+
 		$copiedFiles = [];
-		$newExternalLink = null;
 		$stagingFolder = null;
+		$createdLinkId = null;
+		$linkFailure = null;
 
 		try
 		{
@@ -319,7 +346,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 
 			$stagingFolder = $mailFolder->addSubFolder(
 				[
-					'NAME' => self::STAGING_FOLDER_NAME_PREFIX . Random::getString(32),
+					'NAME' => LargeAttachmentTokenPayload::STAGING_FOLDER_NAME_PREFIX . Random::getString(32),
 					'CREATED_BY' => $userId,
 				],
 				[],
@@ -347,24 +374,31 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			);
 			sort($stagedObjectIds, SORT_NUMERIC);
 			$copiedObjectIds = [
-				...$payload['copiedObjectIds'],
+				...$payload->copiedObjectIds,
 				...$stagedObjectIds,
 			];
 			sort($copiedObjectIds, SORT_NUMERIC);
 
-			$newExternalLink = $folder->addExternalLink([
-				'CREATED_BY' => $userId,
-				'TYPE' => ExternalLink::TYPE_MANUAL,
-				'ACCESS_RIGHT' => ExternalLink::ACCESS_RIGHT_VIEW,
-				'CAN_DOWNLOAD_WITH_READ_ACCESS' => 1,
-				'CAN_EDIT_SETTINGS' => false,
-			]);
+			// a set of two or more files keeps its object, and then the idempotency of the command answers
+			// with the link of the live set instead of creating a new one
+			$created = $this->linkGateway->create($userId, (int)$folder->getId());
+			if (!$created->isSuccess())
+			{
+				$createdLinkId = ((int)($created->getData()['externalLinkId'] ?? 0)) ?: null;
+				$linkFailure = $created;
+
+				throw new \RuntimeException('Could not create a serviceable external link.');
+			}
+
+			$createdLink = $created->getData();
+			$createdLinkId = (int)($createdLink['externalLinkId'] ?? 0);
+			$newExternalLink = ExternalLink::loadById($createdLinkId);
 			if (
 				!$newExternalLink instanceof ExternalLink
 				|| !$this->isExpectedLink($newExternalLink, $userId, $folder)
 			)
 			{
-				throw new \RuntimeException('Could not create a serviceable external link.');
+				throw new \RuntimeException('Could not read back a serviceable external link.');
 			}
 
 			$result = $this->createUploadResult(
@@ -372,6 +406,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				$mailFolder,
 				$folder,
 				$newExternalLink,
+				(string)($createdLink['url'] ?? ''),
 				$fileIds,
 				$copiedObjectIds,
 				$stagingFolder,
@@ -383,9 +418,15 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 		catch (\Throwable)
 		{
-			$this->rollback($stagingFolder, $newExternalLink, $userId);
+			// a link that came back from the idempotency of the command precedes this call and belongs to
+			// the live set: only a link created by this very call may be deleted
+			$this->rollback(
+				$stagingFolder,
+				$createdLinkId === $payload->externalLinkId ? null : $createdLinkId,
+				$userId,
+			);
 
-			return $this->error(
+			return $linkFailure ?? $this->error(
 				'Could not extend a large attachment link.',
 				self::ERROR_UPLOAD_FAILED,
 			);
@@ -401,14 +442,14 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			return $this->error('Invalid replacement token.', self::ERROR_INVALID_TOKEN);
 		}
 
-		if ($previousPayload['userId'] !== $userId || $currentPayload['userId'] !== $userId)
+		if ($previousPayload->userId !== $userId || $currentPayload->userId !== $userId)
 		{
 			return $this->error('The replacement token belongs to another user.', self::ERROR_ACCESS_DENIED);
 		}
 
 		if (
-			$previousPayload['storageId'] !== $currentPayload['storageId']
-			|| $previousPayload['sourceFileIds'] === $currentPayload['sourceFileIds']
+			$previousPayload->storageId !== $currentPayload->storageId
+			|| $previousPayload->sourceFileIds === $currentPayload->sourceFileIds
 		)
 		{
 			return $this->error('The replacement tokens do not match.', self::ERROR_INVALID_TOKEN);
@@ -419,21 +460,21 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			return $this->diskUnavailable();
 		}
 
-		if (!$this->isPendingReplacement($currentPayload))
+		if (!$currentPayload->isPendingReplacement())
 		{
 			return $this->finalizeIndependentReplacement($userId, $previousPayload, $currentPayload);
 		}
 
 		if (
-			$previousPayload['folderId'] !== $currentPayload['folderId']
-			|| $currentPayload['previousExternalLinkId'] !== $previousPayload['externalLinkId']
+			$previousPayload->folderId !== $currentPayload->folderId
+			|| $currentPayload->previousExternalLinkId !== $previousPayload->externalLinkId
 		)
 		{
 			return $this->error('The replacement tokens do not match.', self::ERROR_INVALID_TOKEN);
 		}
 
 		$connection = Application::getConnection();
-		$lockName = 'mail_large_attachment_' . $currentPayload['folderId'];
+		$lockName = 'mail_large_attachment_' . $currentPayload->folderId;
 		if (!$connection->lock($lockName, 5))
 		{
 			return $this->error(
@@ -456,7 +497,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				);
 			}
 
-			$stagingFolder = Folder::loadById($currentPayload['stagingFolderId']);
+			$stagingFolder = Folder::loadById($currentPayload->stagingFolderId);
 			if (!$stagingFolder instanceof Folder)
 			{
 				$this->resolveObjects($currentPayload, $userId);
@@ -469,14 +510,14 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			$stagingObjectIds = $this->getActualFileIds($stagingFolder, $currentPayload, $userId);
 			$actualObjectIds = [...$targetObjectIds, ...$stagingObjectIds];
 			sort($actualObjectIds, SORT_NUMERIC);
-			if ($actualObjectIds !== $currentPayload['copiedObjectIds'])
+			if ($actualObjectIds !== $currentPayload->copiedObjectIds)
 			{
 				throw new \RuntimeException('Replacement files do not match the token.');
 			}
 
 			$stagingObjectIdMap = array_fill_keys($stagingObjectIds, true);
 			$stagedFilesById = [];
-			foreach (File::loadBatchById($currentPayload['stagedObjectIds']) as $stagedFile)
+			foreach (File::loadBatchById($currentPayload->stagedObjectIds) as $stagedFile)
 			{
 				if ($stagedFile instanceof File)
 				{
@@ -484,7 +525,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				}
 			}
 
-			foreach ($currentPayload['stagedObjectIds'] as $stagedObjectId)
+			foreach ($currentPayload->stagedObjectIds as $stagedObjectId)
 			{
 				if (!isset($stagingObjectIdMap[$stagedObjectId]))
 				{
@@ -501,9 +542,9 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			}
 
 			$this->resolveObjects($currentPayload, $userId);
-			if ($previousPayload['externalLinkId'] !== $currentPayload['externalLinkId'])
+			if ($previousPayload->externalLinkId !== $currentPayload->externalLinkId)
 			{
-				$previousLink = ExternalLink::loadById($previousPayload['externalLinkId']);
+				$previousLink = ExternalLink::loadById($previousPayload->externalLinkId);
 				if ($previousLink !== null)
 				{
 					$this->validateLink($previousLink, $previousPayload, $userId);
@@ -570,23 +611,23 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 	public function resolveForSend(int $userId, string $token, array $diskFileIds): Result
 	{
 		$payload = $this->parsePayload($token);
-		$fileIds = $this->normalizeIds($diskFileIds);
+		$fileIds = LargeAttachmentTokenPayload::normalizeIds($diskFileIds);
 		if ($payload === null || $fileIds === null)
 		{
 			return $this->error('Invalid large attachment token.', self::ERROR_INVALID_TOKEN);
 		}
 
-		if ($userId <= 0 || $payload['userId'] !== $userId)
+		if ($userId <= 0 || $payload->userId !== $userId)
 		{
 			return $this->error('The large attachment token belongs to another user.', self::ERROR_ACCESS_DENIED);
 		}
 
-		if ($payload['sourceFileIds'] !== $fileIds)
+		if ($payload->sourceFileIds !== $fileIds)
 		{
 			return $this->error('The large attachment file set does not match the token.', self::ERROR_INVALID_TOKEN);
 		}
 
-		if (!Loader::includeModule('disk') || !Configuration::isEnabledManualExternalLink())
+		if (!Loader::includeModule('disk'))
 		{
 			return $this->diskUnavailable();
 		}
@@ -600,8 +641,8 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				self::RESULT_KEY => new LargeAttachmentResult(
 					$externalLink->generateUrl()->getUri(),
 					(int)$externalLink->getId(),
-					$payload['copiedObjectIds'],
-					$payload['sourceFileIds'],
+					$payload->copiedObjectIds,
+					$payload->sourceFileIds,
 					$token,
 				),
 			]);
@@ -614,15 +655,19 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 	}
 
-	private function finalizeIndependentReplacement(int $userId, array $previousPayload, array $currentPayload): Result
+	private function finalizeIndependentReplacement(
+		int $userId,
+		LargeAttachmentTokenPayload $previousPayload,
+		LargeAttachmentTokenPayload $currentPayload,
+	): Result
 	{
-		if ($previousPayload['folderId'] === $currentPayload['folderId'])
+		if ($previousPayload->folderId === $currentPayload->folderId)
 		{
 			return $this->error('The replacement tokens do not match.', self::ERROR_INVALID_TOKEN);
 		}
 
 		$connection = Application::getConnection();
-		$lockName = 'mail_large_attachment_' . $previousPayload['folderId'];
+		$lockName = 'mail_large_attachment_' . $previousPayload->folderId;
 		if (!$connection->lock($lockName, 5))
 		{
 			return $this->error(
@@ -634,7 +679,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		try
 		{
 			$this->resolveObjects($currentPayload, $userId);
-			$previousFolder = Folder::loadById($previousPayload['folderId']);
+			$previousFolder = Folder::loadById($previousPayload->folderId);
 			if ($previousFolder instanceof Folder)
 			{
 				$this->validateFolder($previousFolder, $previousPayload, $userId);
@@ -645,7 +690,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				}
 			}
 
-			$previousLink = ExternalLink::loadById($previousPayload['externalLinkId']);
+			$previousLink = ExternalLink::loadById($previousPayload->externalLinkId);
 			if ($previousLink instanceof ExternalLink)
 			{
 				try
@@ -694,7 +739,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			return $this->error('Invalid large attachment token.', self::ERROR_INVALID_TOKEN);
 		}
 
-		if ($userId <= 0 || $payload['userId'] !== $userId)
+		if ($userId <= 0 || $payload->userId !== $userId)
 		{
 			return $this->error('The large attachment token belongs to another user.', self::ERROR_ACCESS_DENIED);
 		}
@@ -708,26 +753,26 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		{
 			[$storage, $mailFolder] = $this->getStorageAndMailFolder($userId);
 			if (
-				(int)$storage->getId() !== $payload['storageId']
-				|| (int)$mailFolder->getId() !== $payload['mailFolderId']
+				(int)$storage->getId() !== $payload->storageId
+				|| (int)$mailFolder->getId() !== $payload->mailFolderId
 			)
 			{
 				throw new \RuntimeException('Storage hierarchy does not match the token.');
 			}
 
-			if ($this->isPendingReplacement($payload))
+			if ($payload->isPendingReplacement())
 			{
-				$stagingFolder = Folder::loadById($payload['stagingFolderId']);
+				$stagingFolder = Folder::loadById($payload->stagingFolderId);
 				if ($stagingFolder instanceof Folder)
 				{
-					$folder = Folder::loadById($payload['folderId']);
+					$folder = Folder::loadById($payload->folderId);
 					if (!$folder instanceof Folder)
 					{
 						throw new \RuntimeException('Large attachment folder is unavailable.');
 					}
 					$this->validateStagingFolder($stagingFolder, $payload, $userId);
 					$isCommitted = $this->getActualFileIds($stagingFolder, $payload, $userId) === []
-						&& $this->getActualFileIds($folder, $payload, $userId) === $payload['copiedObjectIds'];
+						&& $this->getActualFileIds($folder, $payload, $userId) === $payload->copiedObjectIds;
 					if ($isCommitted)
 					{
 						$stagingFolder->deleteTree($userId);
@@ -741,8 +786,8 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				}
 			}
 
-			$folder = Folder::loadById($payload['folderId']);
-			$externalLink = ExternalLink::loadById($payload['externalLinkId']);
+			$folder = Folder::loadById($payload->folderId);
+			$externalLink = ExternalLink::loadById($payload->externalLinkId);
 			if ($folder === null && $externalLink === null)
 			{
 				return $this->deletedResult(false);
@@ -812,12 +857,12 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 	/**
 	 * @return array{0: Storage, 1: Folder, 2: Folder, 3: ExternalLink}
 	 */
-	private function resolveObjects(array $payload, int $userId): array
+	private function resolveObjects(LargeAttachmentTokenPayload $payload, int $userId): array
 	{
 		[$storage, $mailFolder, $folder] = $this->resolveObjectsWithoutCopies($payload, $userId);
 		$this->validateCopies($folder, $payload, $userId);
 
-		$externalLink = ExternalLink::loadById($payload['externalLinkId']);
+		$externalLink = ExternalLink::loadById($payload->externalLinkId);
 		if (!$externalLink instanceof ExternalLink)
 		{
 			throw new \RuntimeException('External link is unavailable.');
@@ -830,18 +875,18 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 	/**
 	 * @return array{0: Storage, 1: Folder, 2: Folder}
 	 */
-	private function resolveObjectsWithoutCopies(array $payload, int $userId): array
+	private function resolveObjectsWithoutCopies(LargeAttachmentTokenPayload $payload, int $userId): array
 	{
 		[$storage, $mailFolder] = $this->getStorageAndMailFolder($userId);
 		if (
-			(int)$storage->getId() !== $payload['storageId']
-			|| (int)$mailFolder->getId() !== $payload['mailFolderId']
+			(int)$storage->getId() !== $payload->storageId
+			|| (int)$mailFolder->getId() !== $payload->mailFolderId
 		)
 		{
 			throw new \RuntimeException('Storage hierarchy does not match the token.');
 		}
 
-		$folder = Folder::loadById($payload['folderId']);
+		$folder = Folder::loadById($payload->folderId);
 		if (!$folder instanceof Folder)
 		{
 			throw new \RuntimeException('Large attachment folder is unavailable.');
@@ -851,15 +896,15 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		return [$storage, $mailFolder, $folder];
 	}
 
-	private function validateFolder(Folder $folder, array $payload, int $userId): void
+	private function validateFolder(Folder $folder, LargeAttachmentTokenPayload $payload, int $userId): void
 	{
 		if (
-			(int)$folder->getId() !== $payload['folderId']
-			|| (int)$folder->getStorageId() !== $payload['storageId']
-			|| (int)$folder->getParentId() !== $payload['mailFolderId']
+			(int)$folder->getId() !== $payload->folderId
+			|| (int)$folder->getStorageId() !== $payload->storageId
+			|| (int)$folder->getParentId() !== $payload->mailFolderId
 			|| (int)$folder->getCreatedBy() !== $userId
-			|| $folder->getName() !== $payload['folderName']
-			|| !str_starts_with($folder->getName(), self::FOLDER_NAME_PREFIX)
+			|| $folder->getName() !== $payload->folderName
+			|| !str_starts_with($folder->getName(), LargeAttachmentTokenPayload::FOLDER_NAME_PREFIX)
 			|| $folder->isDeleted()
 		)
 		{
@@ -867,15 +912,15 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 	}
 
-	private function validateStagingFolder(Folder $folder, array $payload, int $userId): void
+	private function validateStagingFolder(Folder $folder, LargeAttachmentTokenPayload $payload, int $userId): void
 	{
 		if (
-			(int)$folder->getId() !== $payload['stagingFolderId']
-			|| (int)$folder->getStorageId() !== $payload['storageId']
-			|| (int)$folder->getParentId() !== $payload['mailFolderId']
+			(int)$folder->getId() !== $payload->stagingFolderId
+			|| (int)$folder->getStorageId() !== $payload->storageId
+			|| (int)$folder->getParentId() !== $payload->mailFolderId
 			|| (int)$folder->getCreatedBy() !== $userId
-			|| $folder->getName() !== $payload['stagingFolderName']
-			|| !str_starts_with($folder->getName(), self::STAGING_FOLDER_NAME_PREFIX)
+			|| $folder->getName() !== $payload->stagingFolderName
+			|| !str_starts_with($folder->getName(), LargeAttachmentTokenPayload::STAGING_FOLDER_NAME_PREFIX)
 			|| $folder->isDeleted()
 		)
 		{
@@ -883,11 +928,11 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 	}
 
-	private function validateCopies(Folder $folder, array $payload, int $userId): void
+	private function validateCopies(Folder $folder, LargeAttachmentTokenPayload $payload, int $userId): void
 	{
 		$actualObjectIds = $this->getActualFileIds($folder, $payload, $userId);
 
-		if ($actualObjectIds !== $payload['copiedObjectIds'])
+		if ($actualObjectIds !== $payload->copiedObjectIds)
 		{
 			throw new \RuntimeException('Large attachment folder contents do not match the token.');
 		}
@@ -896,7 +941,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 	/**
 	 * @return int[]
 	 */
-	private function getActualFileIds(Folder $folder, array $payload, int $userId): array
+	private function getActualFileIds(Folder $folder, LargeAttachmentTokenPayload $payload, int $userId): array
 	{
 		$actualObjectIds = [];
 		foreach (
@@ -910,7 +955,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			if (
 				!$child instanceof File
 				|| (int)$child->getParentId() !== (int)$folder->getId()
-				|| (int)$child->getStorageId() !== $payload['storageId']
+				|| (int)$child->getStorageId() !== $payload->storageId
 				|| (int)$child->getCreatedBy() !== $userId
 				|| $child->isDeleted()
 			)
@@ -927,30 +972,44 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 
 	private function validateLink(
 		ExternalLink $externalLink,
-		array $payload,
+		LargeAttachmentTokenPayload $payload,
 		int $userId,
 	): void
 	{
 		if (
-			(int)$externalLink->getId() !== $payload['externalLinkId']
-			|| !hash_equals($payload['externalLinkHash'], $externalLink->getHash())
-			|| !$this->hasExpectedLinkProperties($externalLink, $userId, $payload['linkObjectId'])
+			(int)$externalLink->getId() !== $payload->externalLinkId
+			|| !hash_equals($payload->externalLinkHash, $externalLink->getHash())
+			|| !$this->hasExpectedLinkProperties($externalLink, $userId, $payload->linkObjectId)
 		)
 		{
 			throw new \RuntimeException('External link does not match the token.');
 		}
 	}
 
+	/**
+	 * The check of a link this very call has just created, and it is stricter than the check of a link the
+	 * token names: here we know which gateway made it, so a gateway that promises the mark of the service
+	 * scenario has to be held to that promise.
+	 */
 	private function isExpectedLink(ExternalLink $externalLink, int $userId, BaseObject $object): bool
 	{
-		return $this->hasExpectedLinkProperties($externalLink, $userId, (int)$object->getId());
+		if (!$this->hasExpectedLinkProperties($externalLink, $userId, (int)$object->getId()))
+		{
+			return false;
+		}
+
+		return !$this->linkGateway->createsServiceLink() || $externalLink->isMailAttachmentLink();
 	}
 
-	private function hasExpectedLinkProperties(
-		ExternalLink $externalLink,
-		int $userId,
-		int $objectId,
-	): bool
+	/**
+	 * The profile accepts a link of either way: the service link of the command carries the mail
+	 * attachments scenario on top of these very fields, and a link of the previous way
+	 * {@see LegacyMailAttachmentLinkGateway} carries the same fields and no scenario. Asking for the
+	 * scenario would reject nothing but the sets created the previous way, which have to stay
+	 * serviceable after the update of Disk arrives; it is not asked, so isMailAttachmentLink() is never
+	 * called and an older Disk without that method is safe.
+	 */
+	private function hasExpectedLinkProperties(ExternalLink $externalLink, int $userId, int $objectId): bool
 	{
 		return (int)$externalLink->getObjectId() === $objectId
 			&& (int)$externalLink->getCreatedBy() === $userId
@@ -961,14 +1020,15 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			&& !$externalLink->isExpired();
 	}
 
-	private function signPayload(array $payload): string
+	private function signPayload(LargeAttachmentTokenPayload $payload): string
 	{
-		$encoded = rtrim(strtr(base64_encode(Json::encode($payload)), '+/', '-_'), '=');
+		$encoded = rtrim(strtr(base64_encode(Json::encode($payload->toArray())), '+/', '-_'), '=');
 
 		return $this->signer->sign($encoded, self::TOKEN_SALT);
 	}
 
 	/**
+	 * @param string $publicUrl address of the link as the command reported it, not as the model builds it
 	 * @param int[] $sourceFileIds
 	 * @param int[] $copiedObjectIds
 	 */
@@ -977,6 +1037,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		Folder $mailFolder,
 		Folder $folder,
 		ExternalLink $externalLink,
+		string $publicUrl,
 		array $sourceFileIds,
 		array $copiedObjectIds,
 		?Folder $stagingFolder = null,
@@ -984,25 +1045,26 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		int $previousExternalLinkId = 0,
 	): Result
 	{
-		$payload = [
-			'version' => self::TOKEN_VERSION,
-			'userId' => (int)$externalLink->getCreatedBy(),
-			'storageId' => (int)$storage->getId(),
-			'mailFolderId' => (int)$mailFolder->getId(),
-			'folderId' => (int)$folder->getId(),
-			'folderName' => $folder->getName(),
-			'linkObjectId' => (int)$externalLink->getObjectId(),
-			'externalLinkId' => (int)$externalLink->getId(),
-			'externalLinkHash' => $externalLink->getHash(),
-			'sourceFileIds' => $sourceFileIds,
-			'copiedObjectIds' => $copiedObjectIds,
-		];
+		$payload = new LargeAttachmentTokenPayload(
+			(int)$externalLink->getCreatedBy(),
+			(int)$storage->getId(),
+			(int)$mailFolder->getId(),
+			(int)$folder->getId(),
+			$folder->getName(),
+			(int)$externalLink->getObjectId(),
+			(int)$externalLink->getId(),
+			$externalLink->getHash(),
+			$sourceFileIds,
+			$copiedObjectIds,
+		);
 		if ($stagingFolder instanceof Folder)
 		{
-			$payload['stagingFolderId'] = (int)$stagingFolder->getId();
-			$payload['stagingFolderName'] = $stagingFolder->getName();
-			$payload['stagedObjectIds'] = $stagedObjectIds;
-			$payload['previousExternalLinkId'] = $previousExternalLinkId;
+			$payload = $payload->withPendingReplacement(
+				(int)$stagingFolder->getId(),
+				$stagingFolder->getName(),
+				$stagedObjectIds,
+				$previousExternalLinkId,
+			);
 		}
 		$token = $this->signPayload($payload);
 		if (strlen($token) > self::MAX_TOKEN_LENGTH)
@@ -1013,7 +1075,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		$result = new Result();
 		$result->setData([
 			self::RESULT_KEY => new LargeAttachmentResult(
-				$externalLink->generateUrl()->getUri(),
+				$publicUrl,
 				(int)$externalLink->getId(),
 				$copiedObjectIds,
 				$sourceFileIds,
@@ -1024,7 +1086,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		return $result;
 	}
 
-	private function parsePayload(string $token): ?array
+	private function parsePayload(string $token): ?LargeAttachmentTokenPayload
 	{
 		if ($token === '' || strlen($token) > self::MAX_TOKEN_LENGTH)
 		{
@@ -1053,144 +1115,16 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			return null;
 		}
 
-		if (!$this->isValidPayload($payload))
-		{
-			return null;
-		}
-
-		return $payload;
+		return LargeAttachmentTokenPayload::fromArray($payload);
 	}
 
-	private function isValidPayload(mixed $payload): bool
+	private function deletePendingReplacement(
+		LargeAttachmentTokenPayload $payload,
+		Folder $stagingFolder,
+		int $userId,
+	): void
 	{
-		if (!is_array($payload))
-		{
-			return false;
-		}
-
-		$expectedKeys = [
-			'copiedObjectIds',
-			'externalLinkHash',
-			'externalLinkId',
-			'folderId',
-			'folderName',
-			'linkObjectId',
-			'mailFolderId',
-			'sourceFileIds',
-			'storageId',
-			'userId',
-			'version',
-		];
-		$actualKeys = array_keys($payload);
-		sort($actualKeys);
-		$pendingKeys = [
-			...$expectedKeys,
-			'previousExternalLinkId',
-			'stagedObjectIds',
-			'stagingFolderId',
-			'stagingFolderName',
-		];
-		sort($pendingKeys);
-		if ($actualKeys !== $expectedKeys && $actualKeys !== $pendingKeys)
-		{
-			return false;
-		}
-
-		foreach (['userId', 'storageId', 'mailFolderId', 'folderId', 'linkObjectId', 'externalLinkId'] as $key)
-		{
-			if (!is_int($payload[$key]) || $payload[$key] <= 0)
-			{
-				return false;
-			}
-		}
-
-		if (!is_array($payload['sourceFileIds']) || !is_array($payload['copiedObjectIds']))
-		{
-			return false;
-		}
-
-		$sourceFileIds = $this->normalizeIds($payload['sourceFileIds']);
-		$copiedObjectIds = $this->normalizeIds($payload['copiedObjectIds']);
-
-		$isValid = $payload['version'] === self::TOKEN_VERSION
-			&& is_string($payload['folderName'])
-			&& str_starts_with($payload['folderName'], self::FOLDER_NAME_PREFIX)
-			&& is_string($payload['externalLinkHash'])
-			&& $payload['externalLinkHash'] !== ''
-			&& $sourceFileIds !== null
-			&& $sourceFileIds !== []
-			&& $sourceFileIds === $payload['sourceFileIds']
-			&& $copiedObjectIds !== null
-			&& count($copiedObjectIds) === count($sourceFileIds)
-			&& $copiedObjectIds === $payload['copiedObjectIds']
-			&& $payload['linkObjectId'] === (
-				count($copiedObjectIds) === 1
-					? $copiedObjectIds[0]
-					: $payload['folderId']
-			);
-		if (!$isValid || $actualKeys === $expectedKeys)
-		{
-			return $isValid;
-		}
-
-		$stagedObjectIds = $this->normalizeIds($payload['stagedObjectIds']);
-
-		return is_int($payload['stagingFolderId'])
-			&& $payload['stagingFolderId'] > 0
-			&& is_string($payload['stagingFolderName'])
-			&& str_starts_with($payload['stagingFolderName'], self::STAGING_FOLDER_NAME_PREFIX)
-			&& is_int($payload['previousExternalLinkId'])
-			&& $payload['previousExternalLinkId'] > 0
-			&& $stagedObjectIds !== null
-			&& $stagedObjectIds !== []
-			&& $stagedObjectIds === $payload['stagedObjectIds']
-			&& array_diff($stagedObjectIds, $copiedObjectIds) === []
-			&& count($copiedObjectIds) - count($stagedObjectIds) > 0;
-	}
-
-	private function isPendingReplacement(array $payload): bool
-	{
-		return isset($payload['stagingFolderId']);
-	}
-
-	/**
-	 * @return int[]|null
-	 */
-	private function normalizeIds(array $ids): ?array
-	{
-		$normalized = [];
-		foreach ($ids as $id)
-		{
-			if (is_int($id))
-			{
-				$normalizedId = $id;
-			}
-			elseif (is_string($id) && preg_match('/^[0-9]+$/D', $id) === 1)
-			{
-				$normalizedId = (int)$id;
-			}
-			else
-			{
-				return null;
-			}
-
-			if ($normalizedId <= 0 || isset($normalized[$normalizedId]))
-			{
-				return null;
-			}
-
-			$normalized[$normalizedId] = $normalizedId;
-		}
-
-		$normalized = array_values($normalized);
-		sort($normalized, SORT_NUMERIC);
-
-		return $normalized;
-	}
-
-	private function deletePendingReplacement(array $payload, Folder $stagingFolder, int $userId): void
-	{
-		$folder = Folder::loadById($payload['folderId']);
+		$folder = Folder::loadById($payload->folderId);
 		if (!$folder instanceof Folder)
 		{
 			throw new \RuntimeException('Large attachment folder is unavailable.');
@@ -1200,8 +1134,8 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 
 		$targetObjectIds = $this->getActualFileIds($folder, $payload, $userId);
 		$expectedTargetObjectIds = array_values(array_diff(
-			$payload['copiedObjectIds'],
-			$payload['stagedObjectIds'],
+			$payload->copiedObjectIds,
+			$payload->stagedObjectIds,
 		));
 		sort($expectedTargetObjectIds, SORT_NUMERIC);
 		if ($targetObjectIds !== $expectedTargetObjectIds)
@@ -1210,14 +1144,14 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 
 		$stagingObjectIds = $this->getActualFileIds($stagingFolder, $payload, $userId);
-		if ($stagingObjectIds !== $payload['stagedObjectIds'])
+		if ($stagingObjectIds !== $payload->stagedObjectIds)
 		{
 			throw new \RuntimeException('Staging folder contents do not match the pending token.');
 		}
 
-		if ($payload['externalLinkId'] !== $payload['previousExternalLinkId'])
+		if ($payload->externalLinkId !== $payload->previousExternalLinkId)
 		{
-			$externalLink = ExternalLink::loadById($payload['externalLinkId']);
+			$externalLink = ExternalLink::loadById($payload->externalLinkId);
 			if ($externalLink instanceof ExternalLink)
 			{
 				$this->validateLink($externalLink, $payload, $userId);
@@ -1234,19 +1168,24 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		}
 	}
 
-	private function rollback(?Folder $folder, ?ExternalLink $externalLink, int $userId): void
+	/**
+	 * Cleans up after a failed upload; the link is addressed by its id and not by its model, because the
+	 * call may have failed exactly on reading the model of an already created link.
+	 */
+	private function rollback(?Folder $folder, ?int $createdLinkId, int $userId): void
 	{
 		$failures = [];
 
-		if ($externalLink !== null)
+		if ($createdLinkId !== null)
 		{
 			try
 			{
-				if (!$externalLink->delete())
+				$externalLink = ExternalLink::loadById($createdLinkId);
+				if (!$externalLink instanceof ExternalLink || !$externalLink->delete())
 				{
 					$failures[] = [
 						'resourceType' => 'externalLink',
-						'resourceId' => (int)$externalLink->getId(),
+						'resourceId' => $createdLinkId,
 						'exception' => null,
 					];
 				}
@@ -1255,7 +1194,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 			{
 				$failures[] = [
 					'resourceType' => 'externalLink',
-					'resourceId' => (int)$externalLink->getId(),
+					'resourceId' => $createdLinkId,
 					'exception' => $exception,
 				];
 			}
@@ -1347,7 +1286,7 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 				self::LOGGER_ID,
 				[],
 				false,
-			) ?? new NullLogger();
+			);
 		}
 
 		return $this->logger;
@@ -1359,6 +1298,54 @@ final class RealLargeAttachmentStorage implements LargeAttachmentStorageInterfac
 		$result->setData([self::DELETED_KEY => $deleted]);
 
 		return $result;
+	}
+
+	/**
+	 * Tells whether the service link may be created at all, translating the answer of the gateway into the
+	 * refusal the caller gets. Successful result carries no data.
+	 *
+	 * The portal policy of manual links is deliberately not asked here, and this is not an omission of the
+	 * mail module: whether it governs the link at all depends on the way the link is created, so it is the
+	 * gateway that answers for it. A service link of a mail attachment is exempt by the policy of Disk
+	 * itself, whose very first branch answers them, while a link of the previous way is a manual one and
+	 * obeys the policy as any other.
+	 *
+	 * @see \Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkOpenPolicy::canOpenByPortalPolicy()
+	 */
+	private function checkLinkCreationAvailability(): Result
+	{
+		try
+		{
+			$availability = $this->linkGateway->canCreate();
+		}
+		catch (\Throwable $exception)
+		{
+			// the question is asked before the guarded block of the caller, so an unexpected throw would
+			// reach the controller and answer the client with the message of the disk side
+			$this->getLogger()->error('Asking for the availability of a large attachment link has thrown.', [
+				'exception' => $exception,
+			]);
+
+			return $this->error(
+				'Could not ask for the availability of a large attachment link.',
+				self::ERROR_UPLOAD_FAILED,
+			);
+		}
+
+		if (!$availability->isSuccess())
+		{
+			return $availability;
+		}
+
+		if (($availability->getData()['available'] ?? false) !== true)
+		{
+			return $this->error(
+				'Creating a large attachment link is not available.',
+				self::ERROR_DISK_FEATURE_UNAVAILABLE,
+			);
+		}
+
+		return new Result();
 	}
 
 	private function isUploadPossible(Storage $storage, int $totalSize): bool

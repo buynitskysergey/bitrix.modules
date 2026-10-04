@@ -5,7 +5,7 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Fileman\UserField\Types\AddressType;
 use Bitrix\Main;
 use Bitrix\Main\Loader;
-use \Bitrix\Main\Type\Date;
+use Bitrix\Main\Type\Date;
 use Bitrix\Crm\Synchronization\UserFieldSynchronizer;
 use Bitrix\Main\UserField\Types\EnumType;
 

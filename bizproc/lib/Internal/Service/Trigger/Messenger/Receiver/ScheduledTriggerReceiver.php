@@ -30,7 +30,6 @@ class ScheduledTriggerReceiver extends AbstractReceiver
 				ScheduleSyncService::TRIGGER_TYPE,
 				[],
 				[
-					'scheduleId' => $message->scheduleId,
 					'triggerName' => $message->triggerName,
 					'scheduledAt' => $message->scheduledAt,
 				],

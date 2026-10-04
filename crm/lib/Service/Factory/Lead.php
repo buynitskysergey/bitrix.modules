@@ -30,19 +30,9 @@ class Lead extends Service\Factory
 		Loc::loadMessages(Path::combine(__DIR__, '..', '..', '..', 'classes', 'general', 'crm_lead.php'));
 	}
 
-	public function isSourceEnabled(): bool
-	{
-		return true;
-	}
-
 	public function isNewRoutingForDetailEnabled(): bool
 	{
 		return false;
-	}
-
-	public function isRecyclebinEnabled(): bool
-	{
-		return LeadSettings::getCurrent()->isRecycleBinEnabled();
 	}
 
 	public function isDeferredCleaningEnabled(): bool
@@ -55,21 +45,6 @@ class Lead extends Service\Factory
 		return false;
 	}
 
-	public function isUseInUserfieldEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isCrmTrackingEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isLinkWithProductsEnabled(): bool
-	{
-		return true;
-	}
-
 	public function getStagesEntityId(?int $categoryId = null): ?string
 	{
 		return 'STATUS';
@@ -78,31 +53,6 @@ class Lead extends Service\Factory
 	public function isNewRoutingForListEnabled(): bool
 	{
 		return false;
-	}
-
-	public function isAutomationEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isBizProcSupported(): bool
-	{
-		return true;
-	}
-
-	public function isObserversEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isClientEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isMultiFieldsEnabled(): bool
-	{
-		return true;
 	}
 
 	public function getDataClass(): string
@@ -643,11 +593,6 @@ class Lead extends Service\Factory
 	protected function getStatisticsFacade(): ?Statistics\OperationFacade
 	{
 		return new Statistics\OperationFacade\Lead($this, $this->getSuccessfulStageId());
-	}
-
-	public function isCountersEnabled(): bool
-	{
-		return true;
 	}
 
 	public function isSmartActivityNotificationSupported(): bool

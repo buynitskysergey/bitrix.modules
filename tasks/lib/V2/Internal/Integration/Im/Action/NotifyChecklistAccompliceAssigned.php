@@ -35,7 +35,7 @@ class NotifyChecklistAccompliceAssigned extends AbstractNotify
 		return [
 			'#USER#' => $this->formatUser($this->triggeredBy),
 			'#ASSIGNEE#' => $this->formatUser($this->assignee),
-			'#CHECKLIST_NAME#' => $this->checklistName,
+			'#CHECKLIST_NAME#' => $this->getNonClickablePlainChecklistTitle($this->checklistName),
 		];
 	}
 }

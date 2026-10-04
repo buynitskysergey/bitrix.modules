@@ -40,11 +40,6 @@ final class HideCatalogItemCommandHandler
 			throw new AccessDeniedException('User has no access to this catalog item');
 		}
 
-		if ($item->getOwnerId() === $command->userId)
-		{
-			throw new AccessDeniedException('User cannot hide own catalog item');
-		}
-
 		$connection = Application::getConnection();
 		$connection->startTransaction();
 		try

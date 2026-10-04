@@ -6,9 +6,9 @@ namespace Bitrix\Note\Internal\Access\Service;
 
 use Bitrix\Main\Access\AccessCode;
 use Bitrix\Main\Application;
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Access\Model\CollectionAccessChange;
 use Bitrix\Note\Internal\Access\Permission\PermissionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
@@ -27,6 +27,19 @@ final class CollectionAccessService
 	public const LEVEL_CODE_VIEW = 'view';
 	public const LEVEL_CODE_MANAGE = 'manage';
 	public const LEVEL_CODE_MODERATE = 'moderate';
+
+	/**
+	 * Access codes of one user for the lifetime of the request, keyed by user id.
+	 *
+	 * The codes describe WHO the user is (their groups, departments, socialnetwork roles), not what
+	 * they may do in note: nothing this module writes can change them, and CAccess re-derives them
+	 * from the same rows on every call, walking every auth provider (CAccess::UpdateCodes) before it
+	 * reaches its own static cache. One document open used to pay that walk three times over - the
+	 * caller's own access snapshot, the backlinks counter's snapshot and its source filter.
+	 *
+	 * @var array<int, array<int, string>>
+	 */
+	private static array $userAccessCodes = [];
 
 	public static function getUserLevel(int $collectionId, int $userId, array $accessCodes): int
 	{
@@ -510,7 +523,7 @@ final class CollectionAccessService
 
 	private static function dispatchAccessChange(int $collectionId, CollectionAccessChange $change, ?PushNotificationService $pushService): void
 	{
-		if (Option::get('note', 'phase4_broadcast_enabled', 'Y') !== 'Y')
+		if (!Configuration::isAccessCascadeBroadcastEnabled())
 		{
 			return;
 		}
@@ -559,14 +572,31 @@ final class CollectionAccessService
 			return [];
 		}
 
+		if (isset(self::$userAccessCodes[$userId]))
+		{
+			return self::$userAccessCodes[$userId];
+		}
+
 		$codes = \CAccess::getUserCodesArray($userId);
 		$codes = is_array($codes) ? $codes : [];
 		$codes[] = 'U' . $userId;
 
-		return array_values(array_unique(array_filter(
+		self::$userAccessCodes[$userId] = array_values(array_unique(array_filter(
 			$codes,
 			static fn($code) => is_string($code) && $code !== '',
 		)));
+
+		return self::$userAccessCodes[$userId];
+	}
+
+	/**
+	 * Drops the request-lifetime code cache. Production has nothing to call this - the codes cannot
+	 * change under a running request - but a test that swaps the current user or grants a group
+	 * membership mid-run has to, exactly as it already clears UserAccessItem's own cache.
+	 */
+	public static function clearUserAccessCodesCache(): void
+	{
+		self::$userAccessCodes = [];
 	}
 
 	public static function batchGetUserLevels(array $collectionIds, array $accessCodes): array

@@ -1,6 +1,7 @@
 <?php
 
 use Bitrix\Bizproc;
+use Bitrix\Bizproc\Public\Provider\PilotVisibilityProvider;
 use Bitrix\Bizproc\UI\WorkflowUserView;
 use Bitrix\Bizproc\Workflow\Template\Collection\Usages;
 use Bitrix\Bizproc\Workflow\Template\SourceType;
@@ -26,6 +27,9 @@ class CBPDocument
 	public const PARAM_USED_DOCUMENT_FIELDS = 'UsedDocumentField';
 	public const PARAM_TRIGGER_EVENT= 'TriggerEvent';
 	public const PARAM_TRIGGER_EVENT_DATA = 'TriggerEventData';
+
+	// identifier of the surface a manual start came from; affects the version of the template only
+	public const PARAM_MANUAL_START_SURFACE = 'ManualStartSurface';
 
 	public const PARAM_START_WORKFLOW_DELAY = 'StartWorkflowDelay';
 
@@ -510,7 +514,7 @@ class CBPDocument
 			$parameters[static::PARAM_DOCUMENT_EVENT_TYPE] = CBPDocumentEventType::None;
 		}
 
-		if (!isset($parameters[static::PARAM_PRE_GENERATED_WORKFLOW_ID]))
+		if (!CBPRuntime::isValidWorkflowId($parameters[static::PARAM_PRE_GENERATED_WORKFLOW_ID] ?? null))
 		{
 			$parameters[static::PARAM_PRE_GENERATED_WORKFLOW_ID] = CBPRuntime::generateWorkflowId();
 		}
@@ -518,6 +522,19 @@ class CBPDocument
 		if (!isset($parameters[static::PARAM_TRIGGER_EVENT_DATA]))
 		{
 			$parameters[static::PARAM_TRIGGER_EVENT_DATA] = [];
+		}
+
+		// the mark of a manual start is either a non-empty surface identifier or no key at all,
+		// so an empty value never travels further as a mark of its own
+		$manualStartSurface = $parameters[static::PARAM_MANUAL_START_SURFACE] ?? null;
+		$manualStartSurface = is_string($manualStartSurface) ? trim($manualStartSurface) : '';
+		if ($manualStartSurface === '')
+		{
+			unset($parameters[static::PARAM_MANUAL_START_SURFACE]);
+		}
+		else
+		{
+			$parameters[static::PARAM_MANUAL_START_SURFACE] = $manualStartSurface;
 		}
 
 		return $parameters;
@@ -1832,8 +1849,13 @@ class CBPDocument
 		return $signer->sign($jsonData, $salt);
 	}
 
-	private static function unSignArray(string $unsignedSource, $salt)
+	private static function unSignArray(?string $unsignedSource, $salt)
 	{
+		if ($unsignedSource === null || $unsignedSource === '')
+		{
+			return [];
+		}
+
 		$signer = new Main\Security\Sign\Signer();
 
 		try
@@ -1871,12 +1893,18 @@ class CBPDocument
 		$templates = [];
 		$dbWorkflowTemplate = CBPWorkflowTemplateLoader::GetList(
 			['SORT' => 'ASC', 'NAME' => 'ASC'],
-			[
-				"DOCUMENT_TYPE" => $documentType,
-				"ACTIVE" => "Y",
-				"IS_SYSTEM" => "N",
-				'<AUTO_EXECUTE' => CBPDocumentEventType::Automation,
-			],
+			array_merge(
+				[
+					"DOCUMENT_TYPE" => $documentType,
+					"ACTIVE" => "Y",
+					"IS_SYSTEM" => "N",
+					'<AUTO_EXECUTE' => CBPDocumentEventType::Automation,
+				],
+				// the list is the manual start point of the document, so the templates a pilot acts on are
+				// narrowed here to the ones this employee may see; the key of the condition is its own and
+				// does not meet the ones above
+				(new PilotVisibilityProvider())->getVisibilityFilter((int)$userId),
+			),
 			false,
 			false,
 			["ID", "NAME", "DESCRIPTION", "PARAMETERS"],

@@ -4,9 +4,13 @@ namespace Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\InputScheme\Propert
 
 final class ArrayProperty extends AbstractProperty
 {
-	private AbstractProperty $arrayItemProperty;
+	use Validation\MaxItemsValidationTrait;
+	use Validation\MinItemsValidationTrait;
+	use Validation\UniqueItemsValidationTrait;
 
-	public function setArrayItemProperty(AbstractProperty $property): self
+	private ?AbstractProperty $arrayItemProperty = null;
+
+	public function setArrayItemProperty(AbstractProperty $property): static
 	{
 		$this->arrayItemProperty = $property;
 
@@ -20,9 +24,18 @@ final class ArrayProperty extends AbstractProperty
 
 	public function toArray(): array
 	{
+		if ($this->arrayItemProperty === null)
+		{
+			throw new \LogicException('Array item property must be set before serializing array schema.');
+		}
+
 		return [
-			...parent::toArray(),
+			...$this->getBaseSchema(),
 			'items' => $this->arrayItemProperty->toArray(),
+			...$this->getCommonValidationSchema(),
+			...$this->getMinItemsValidationSchema(),
+			...$this->getMaxItemsValidationSchema(),
+			...$this->getUniqueItemsValidationSchema(),
 		];
 	}
 }

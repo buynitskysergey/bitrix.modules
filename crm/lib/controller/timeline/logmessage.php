@@ -147,10 +147,11 @@ class LogMessage extends Base
 			return null;
 		}
 
+		$entryCreated = new DateTime();
 		$result = $this->timelineTable::add([
 			'TYPE_ID' => TimelineType::LOG_MESSAGE,
 			'TYPE_CATEGORY_ID' => LogMessageType::REST,
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => Container::getInstance()->getContext()->getUserId(),
 			'SETTINGS' => $settings,
 			'ASSOCIATED_ENTITY_TYPE_ID' => $entityTypeId,
@@ -168,7 +169,7 @@ class LogMessage extends Base
 				]
 			];
 
-			TimelineEntry::registerBindings($id, $bindings);
+			TimelineEntry::registerBindings($id, $bindings, $entryCreated);
 
 			Controller::getInstance()->sendPullEventOnAdd(new ItemIdentifier($entityTypeId, $entityId), $id);
 

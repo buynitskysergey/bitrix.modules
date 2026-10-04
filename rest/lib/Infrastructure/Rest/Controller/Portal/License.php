@@ -18,12 +18,14 @@ class License extends RestController
 	public function getAction(
 		Entity\Portal\License $license,
 		Entity\Portal\MarketSubscription $marketSubscription,
+		Entity\Portal\RestAvailability $restAvailability,
 	): ArrayResponse
 	{
 		return new ArrayResponse(
 			[
 				'portal' => $license->toArray(),
 				'market' => $marketSubscription->toArray(),
+				'rest' => $restAvailability->toArray(),
 			],
 		);
 	}

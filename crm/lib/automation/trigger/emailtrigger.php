@@ -10,9 +10,35 @@ Loc::loadMessages(__FILE__);
 
 class EmailTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use EmailReturnTrait;
+
 	public static function getCode()
 	{
 		return 'EMAIL';
+	}
+
+	/**
+	 * An incoming letter is written by the client, so the node names no portal initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_EMAIL_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getEmailReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public static function getName()

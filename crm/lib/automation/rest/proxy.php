@@ -1,8 +1,8 @@
 <?php
 namespace Bitrix\Crm\Automation\Rest;
 
-use \Bitrix\Crm\Automation;
-use \Bitrix\Crm\Automation\Trigger\Entity\TriggerAppTable;
+use Bitrix\Crm\Automation;
+use Bitrix\Crm\Automation\Trigger\Entity\TriggerAppTable;
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;

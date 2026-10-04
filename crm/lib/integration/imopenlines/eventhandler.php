@@ -88,14 +88,18 @@ class EventHandler
 			return;
 		}
 
-		$activity = CCrmActivity::GetByID($activityId);
+		$activity = CCrmActivity::GetByID($activityId, false);
 		if (!$activity)
 		{
 			return;
 		}
 
+		// Chat::finish() may receive an already completed CRM activity. If the session then waits
+		// for rating, setSessionClosed() is not reached and stale badges must be synced here.
 		if (isset($activity['COMPLETED']) && $activity['COMPLETED'] === 'Y')
 		{
+			ProviderManager::syncBadgesOnActivityUpdate($activityId, $activity);
+
 			return;
 		}
 
@@ -126,14 +130,21 @@ class EventHandler
 
 		if ($isAtLeastOnePermissionEnabled)
 		{
-			CCrmActivity::Complete(
-				$activityId,
-				true,
-				[
-					'REGISTER_SONET_EVENT' => true,
-					'SKIP_BEFORE_HANDLER' => true,
-				]
-			);
+			$operatorId = (int)($session->getData('OPERATOR_ID') ?? 0);
+			$completeOptions = [
+				'REGISTER_SONET_EVENT' => true,
+				'SKIP_BEFORE_HANDLER' => true,
+			];
+			if ($operatorId > 0)
+			{
+				// CURRENT_USER goes through Update() to EDITOR_ID and then to
+				// timeline-event USER_ID (see PrepareUpdateEvent), so passing
+				// the operator here pins the operator as the author of the
+				// "activity completed" history record. Without it EDITOR_ID
+				// falls back to the ambient $USER (visitor / cron-runner).
+				$completeOptions['CURRENT_USER'] = $operatorId;
+			}
+			CCrmActivity::Complete($activityId, true, $completeOptions);
 		}
 	}
 

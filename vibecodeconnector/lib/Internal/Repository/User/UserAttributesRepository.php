@@ -11,6 +11,9 @@ use Bitrix\Vibecodeconnector\Internal\Model\User\UserAttributesTable;
 
 final class UserAttributesRepository
 {
+	private const GROUP_EVENT_SEQUENCE_LOCK_PREFIX = 'vibecodeconnector:user-group-event-sequence:';
+	private const GROUP_EVENT_SEQUENCE_LOCK_TIMEOUT = 5;
+
 	public function get(int $userId, UserAttribute $attr): mixed
 	{
 		$row = UserAttributesTable::query()
@@ -25,6 +28,31 @@ final class UserAttributesRepository
 		}
 
 		return $row[$attr->value] ?? null;
+	}
+
+	/**
+	 * @param list<int> $userIds
+	 * @return array<int, mixed>
+	 */
+	public function getMany(array $userIds, UserAttribute $attr): array
+	{
+		if ($userIds === [])
+		{
+			return [];
+		}
+
+		$rows = UserAttributesTable::query()
+			->setSelect(['USER_ID', $attr->value])
+			->whereIn('USER_ID', $userIds)
+			->fetchAll();
+
+		$values = [];
+		foreach ($rows as $row)
+		{
+			$values[(int)$row['USER_ID']] = $row[$attr->value] ?? null;
+		}
+
+		return $values;
 	}
 
 	public function set(int $userId, UserAttribute $attr, mixed $value): void
@@ -72,6 +100,29 @@ final class UserAttributesRepository
 				throw $e;
 			}
 			UserAttributesTable::update($existing, [$attr->value => $value]);
+		}
+	}
+
+	public function incrementGroupEventSequence(int $userId): int
+	{
+		$connection = Application::getConnection();
+		$lockName = self::GROUP_EVENT_SEQUENCE_LOCK_PREFIX . $userId;
+		if (!$connection->lock($lockName, self::GROUP_EVENT_SEQUENCE_LOCK_TIMEOUT))
+		{
+			throw new \RuntimeException('Unable to acquire the user group event sequence lock');
+		}
+
+		try
+		{
+			$currentSequence = (int)($this->get($userId, UserAttribute::GroupEventSequence) ?? 0);
+			$nextSequence = $currentSequence + 1;
+			$this->set($userId, UserAttribute::GroupEventSequence, $nextSequence);
+
+			return $nextSequence;
+		}
+		finally
+		{
+			$connection->unlock($lockName);
 		}
 	}
 

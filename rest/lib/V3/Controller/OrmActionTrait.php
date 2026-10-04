@@ -9,6 +9,18 @@ trait OrmActionTrait
 {
 	public function getOrmRepositoryByRequest(Request $request): OrmRepository
 	{
-		return new OrmRepository($request->getDtoClass());
+		$repo = new OrmRepository($request->getDtoClass());
+
+		if ($this->isOrmDeferredMode())
+		{
+			$repo->setDeferredMode(true);
+		}
+
+		return $repo;
+	}
+
+	protected function isOrmDeferredMode(): bool
+	{
+		return false;
 	}
 }

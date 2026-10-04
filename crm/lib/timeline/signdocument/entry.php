@@ -77,7 +77,7 @@ class Entry extends TimelineEntry
 				'ENTITY_ID' => $entityId
 			];
 		}
-		self::registerBindings($id, $bindings);
+		self::registerBindings($id, $bindings, $created);
 
 		return $id;
 	}

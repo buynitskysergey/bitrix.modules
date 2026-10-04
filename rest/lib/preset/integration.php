@@ -7,6 +7,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Rest\APAuth\PasswordTable;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 
 Loc::loadMessages(__FILE__);
 
@@ -345,15 +346,21 @@ class IntegrationTable extends Main\Entity\DataManager
 	public static function onAfterUpdate(Main\Entity\Event $event): void
 	{
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
+		if (array_key_exists('PASSWORD_ID', (array)$event->getParameter('fields')))
+		{
+			LicenseScannerStateInvalidator::reset();
+		}
 	}
 
 	public static function onAfterDelete(Main\Entity\Event $event): void
 	{
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
+		LicenseScannerStateInvalidator::reset();
 	}
 
 	public static function onAfterAdd(Main\Entity\Event $event): void
 	{
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
+		LicenseScannerStateInvalidator::reset();
 	}
 }

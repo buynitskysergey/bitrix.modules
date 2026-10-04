@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Mail\Helper\Dto\Message;
 
 use Bitrix\Mail\Internal\Service\DateTime\DateTimeParser;
+use Bitrix\Mail\Internal\Service\Message\ClassificationLabel;
 use Bitrix\Mail\Internals\MessageAccessTable;
+use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
 
 class SearchMessagesDto
@@ -80,9 +82,33 @@ class SearchMessagesDto
 			),
 			limit: self::getInt($props, 'limit') ?? self::DEFAULT_LIMIT,
 			offset: max(0, self::getInt($props, 'offset') ?? 0),
-			classification: self::getString($props, 'classification'),
+			classification: self::getClassification($props),
 			unanswered: self::getBool($props, 'unanswered'),
 		);
+	}
+
+	/**
+	 * Unlike the bindings above, an unknown label is rejected: dropping it would answer a request for one
+	 * label with the whole mailbox.
+	 *
+	 * @throws SystemException
+	 */
+	private static function getClassification(array $props): ?string
+	{
+		$raw = self::getString($props, 'classification');
+		if ($raw === null || trim($raw) === '')
+		{
+			return null;
+		}
+
+		if (ClassificationLabel::tryFrom($raw) === null)
+		{
+			$allowed = implode(', ', array_column(ClassificationLabel::cases(), 'value'));
+
+			throw new SystemException('Invalid classification. Use one of: ' . $allowed . '.');
+		}
+
+		return $raw;
 	}
 
 	/**

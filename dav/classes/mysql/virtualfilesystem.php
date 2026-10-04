@@ -9,13 +9,14 @@ class CDavVirtualFileSystem
 		global $DB;
 
 		if (count($arSelectFields) <= 0)
-			$arSelectFields = array("ID", "PATH", "EXPIRES", "LOCK_OWNER", "LOCK_DEPTH", "LOCK_TYPE", "LOCK_SCOPE", "CREATED", "MODIFIED");
+			$arSelectFields = array("ID", "PATH", "EXPIRES", "LOCK_OWNER", "LOCK_USER_ID", "LOCK_DEPTH", "LOCK_TYPE", "LOCK_SCOPE", "CREATED", "MODIFIED");
 
 		static $arFields = array(
 			"ID" => Array("FIELD" => "L.ID", "TYPE" => "string"),
 			"PATH" => Array("FIELD" => "L.PATH", "TYPE" => "string"),
 			"EXPIRES" => Array("FIELD" => "L.EXPIRES", "TYPE" => "int"),
 			"LOCK_OWNER" => Array("FIELD" => "L.LOCK_OWNER", "TYPE" => "string"),
+			"LOCK_USER_ID" => Array("FIELD" => "L.LOCK_USER_ID", "TYPE" => "int"),
 			"LOCK_DEPTH" => Array("FIELD" => "L.LOCK_DEPTH", "TYPE" => "string"),
 			"LOCK_TYPE" => Array("FIELD" => "L.LOCK_TYPE", "TYPE" => "string"),
 			"LOCK_SCOPE" => Array("FIELD" => "L.LOCK_SCOPE", "TYPE" => "string"),

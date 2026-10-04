@@ -4,6 +4,7 @@ namespace Bitrix\HumanResources\Service\Member;
 
 use Bitrix\HumanResources\Enum\DepthLevel;
 use Bitrix\HumanResources\Exception\WrongStructureItemException;
+use Bitrix\HumanResources\Internals\Service\Container as InternalContainer;
 use Bitrix\HumanResources\Item\Collection\NodeCollection;
 use Bitrix\HumanResources\Item\NodeMember;
 use Bitrix\HumanResources\Public\Service\Container as PublicContainer;
@@ -61,7 +62,7 @@ class DepartmentUserSearchService
 		$nodeCollection = $this->nodeRepository->getParentOf($node, DepthLevel::FULL);
 		foreach ($nodeCollection as $node)
 		{
-			$heads = $this->nodeMemberRepository->findAllByRoleIdAndNodeId($headRoleId, $node->id);
+			$heads = InternalContainer::getNodeMemberRepository()->findAllByRoleIdAndNodeId($headRoleId, $node->id);
 			if (!$heads->empty())
 			{
 				return $heads->getFirst();
@@ -117,7 +118,7 @@ class DepartmentUserSearchService
 			$branchNodeCollection = $this->nodeRepository->getParentOf($node, DepthLevel::FULL);
 			foreach ($branchNodeCollection as $branchNode)
 			{
-				$heads = $this->nodeMemberRepository->findAllByRoleIdAndNodeId($headRoleId, $branchNode->id);
+				$heads = InternalContainer::getNodeMemberRepository()->findAllByRoleIdAndNodeId($headRoleId, $branchNode->id);
 				if (!$heads->empty())
 				{
 					return $heads->getFirst();

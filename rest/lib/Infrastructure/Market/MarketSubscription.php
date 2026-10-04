@@ -2,7 +2,10 @@
 
 namespace Bitrix\Rest\Infrastructure\Market;
 
+use Bitrix\Bitrix24\Public\Enum\VibePlus\MonetizationModel;
+use Bitrix\Bitrix24\Public\Service\VibePlus\MonetizationModelProvider;
 use Bitrix\Main\Application;
+use Bitrix\Main\Loader;
 use Bitrix\Main\Type\Date;
 use Bitrix\Rest\Internal\Integration\Bitrix24\MarketUrlProvider;
 use Bitrix\Rest\Marketplace\Client;
@@ -14,7 +17,8 @@ class MarketSubscription
 	private const BASE_CACHE_DIR = 'rest/market_subscription';
 
 	public function __construct(
-		private readonly MarketOption $marketOption
+		private readonly MarketOption $marketOption,
+		private readonly ?MonetizationModelProvider $monetizationModelProvider = null,
 	)
 	{}
 
@@ -30,7 +34,7 @@ class MarketSubscription
 			return false;
 		}
 
-		if (Application::getInstance()->getLicense()->getRegion() !== 'ru')
+		if (!$this->isSubscriptionModel())
 		{
 			return false;
 		}
@@ -128,5 +132,17 @@ class MarketSubscription
 	public function isTransitionPeriodEnabled(): bool
 	{
 		return $this->marketOption->isTransitionPeriodEnabled();
+	}
+
+	private function isSubscriptionModel(): bool
+	{
+		if (!Loader::includeModule('bitrix24'))
+		{
+			return false;
+		}
+
+		$monetizationModelProvider = $this->monetizationModelProvider ?? new MonetizationModelProvider();
+
+		return $monetizationModelProvider->get() === MonetizationModel::SUBSCRIPTION;
 	}
 }

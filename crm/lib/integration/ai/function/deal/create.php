@@ -7,6 +7,7 @@ use Bitrix\Crm\Integration\AI\Function\Deal\Dto\CreateParameters;
 use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Crm\Item\Deal;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Service\Factory;
 use Bitrix\Crm\Service\Operation;
 use Bitrix\Crm\Result;
@@ -53,6 +54,7 @@ final class Create implements AIFunction
 		$operation
 			->getContext()
 			->setUserId($this->currentUserId)
+			->setScope(Context::SCOPE_AI)
 			->setAnalytics(
 				[
 					'event' => Dictionary::EVENT_ENTITY_CREATE,

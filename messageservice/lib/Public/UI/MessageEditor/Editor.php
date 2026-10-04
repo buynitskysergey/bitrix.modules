@@ -242,7 +242,7 @@ final class Editor implements \JsonSerializable
 		$this->preloadNotificationTranslations();
 
 		return [
-			'scene' => $this->getScene(),
+			'scene' => $this->serializeScene(),
 			'context' => $this->getContext(),
 			'renderTo' => $this->getRenderTo(),
 			'channels' => $this->getViewChannels(),
@@ -257,6 +257,29 @@ final class Editor implements \JsonSerializable
 			'layout' => $this->getLayout(),
 			'preferences' => $this->getPreferences(),
 			'analytics' => $this->getAnalytics(),
+		];
+	}
+
+	/**
+	 * Scene-object payload (DTO-01): the scene's own serialization plus the
+	 * resolved custom-template binding. `templateBinding` is null when the scene
+	 * does not support custom templates, which keeps the editor selector hidden.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function serializeScene(): array
+	{
+		$binding = $this->scene->buildTemplateBinding($this->context);
+
+		return [
+			...$this->scene->jsonSerialize(),
+			'templateBinding' => $binding === null
+				? null
+				: [
+					'zoneId' => $binding->zone,
+					'sceneId' => $binding->scene,
+					'targetId' => $binding->targetId,
+				],
 		];
 	}
 

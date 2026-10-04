@@ -693,7 +693,7 @@ class CUtil
 					if (
 						!$params["delete_repeat_replace"]
 						||
-						($i > 0 && $i != $len - 1 && $lastChrNew != $params["replace_other"])
+						($i > 0 && $lastChrNew != $params["replace_other"])
 					)
 					{
 						$chrNew = $params["replace_other"];

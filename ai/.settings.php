@@ -1,6 +1,7 @@
 <?php
 
 use Bitrix\AI\Integration\Ui\EntitySelector\PromptCategoriesProvider;
+use Bitrix\AI\Limiter\SharedMonthlyPoolService;
 use Bitrix\Main\License\UrlProvider;
 
 $domain = (new UrlProvider())->getTechDomain();
@@ -19,6 +20,14 @@ return [
 	'aiproxy' => [
 		'value' => [
 			'serverListEndpoint' => $serverListEndpoint,
+		],
+		'readonly' => true,
+	],
+	'services' => [
+		'value' => [
+			SharedMonthlyPoolService::class => [
+				'className' => SharedMonthlyPoolService::class,
+			],
 		],
 		'readonly' => true,
 	],

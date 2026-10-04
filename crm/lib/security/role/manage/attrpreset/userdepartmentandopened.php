@@ -6,6 +6,7 @@ use Bitrix\Crm\Security\Role\UIAdapters\AccessRights\Variants;
 use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Ui\Public\Enum\IconSet\Outline;
 
 class UserDepartmentAndOpened
 {
@@ -30,6 +31,15 @@ class UserDepartmentAndOpened
 		self::ALL => self::ALL,
 		self::INHERIT => self::INHERIT,
 	];
+
+	private ?string $inheritDescription = null;
+
+	public function setInheritDescription(?string $inheritDescription): self
+	{
+		$this->inheritDescription = $inheritDescription;
+
+		return $this;
+	}
 
 	public function exclude(string $variableId): self
 	{
@@ -93,7 +103,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::SELF,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_A'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_A_MSGVER_1'),
 				[
 					'conflictsWith' => $this->filterOutNotIncluded([
 						self::INHERIT,
@@ -106,7 +116,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::DEPARTMENT,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_D'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_D_MSGVER_1'),
 				[
 					'dependant' => $this->filterOutNotIncluded([
 						self::SUBDEPARTMENTS,
@@ -125,7 +135,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::SUBDEPARTMENTS,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_F'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_F_MSGVER_1'),
 				[
 					'requires' => $this->filterOutNotIncluded([
 						self::SELF,
@@ -142,7 +152,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::TEAM,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_T'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_T_MSGVER_1'),
 				[
 					'dependant' => $this->filterOutNotIncluded([
 						self::SUBTEAMS,
@@ -162,7 +172,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::SUBTEAMS,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_ST'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_ST_MSGVER_1'),
 				[
 					'requires' => $this->filterOutNotIncluded([
 						self::SELF,
@@ -180,7 +190,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::OPEN,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_O'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_O_MSGVER_1'),
 				[
 					'requires' => $this->filterOutNotIncluded([
 						self::SELF,
@@ -197,7 +207,7 @@ class UserDepartmentAndOpened
 		{
 			$variants->add(
 				self::ALL,
-				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_X_MSGVER_1'),
+				(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_X_MSGVER_2'),
 				[
 					'requires' => $this->filterOutNotIncluded([
 						self::SELF,
@@ -235,6 +245,12 @@ class UserDepartmentAndOpened
 						self::ALL,
 					]),
 					'isUseGroupHeadValuesInHint' => true,
+					'preset' => [
+						'icon' => Outline::STAGES->value,
+						'description' => $this->inheritDescription
+							?? (string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_MULTI_INHERIT_TAB_DESCRIPTION'),
+						'showGroupHeadItems' => true,
+					],
 				]
 			);
 		}

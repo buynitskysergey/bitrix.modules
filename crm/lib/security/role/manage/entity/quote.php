@@ -12,13 +12,15 @@ class Quote implements PermissionEntity
 {
 	private function permissions(): array
 	{
+		$inheritDescription = PermissionAttrPresets::stageInheritDescription(CCrmOwnerType::Quote, null, null);
+
 		return array_merge(
 			\Bitrix\Crm\Security\Controller\Quote::enabled()
-				? PermissionAttrPresets::crmEntityPreset()
-				: PermissionAttrPresets::crmEntityPresetWithoutTeams()
+				? PermissionAttrPresets::crmEntityPreset($inheritDescription)
+				: PermissionAttrPresets::crmEntityPresetWithoutTeams($inheritDescription)
 			,
 			PermissionAttrPresets::crmEntityKanbanHideSum(),
-			PermissionAttrPresets::crmStageTransition(CCrmStatus::GetStatusListEx('QUOTE_STATUS'))
+			PermissionAttrPresets::crmStageTransition(CCrmStatus::GetStatusListEx('QUOTE_STATUS'), $inheritDescription)
 		);
 	}
 

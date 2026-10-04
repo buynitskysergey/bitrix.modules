@@ -189,7 +189,7 @@ class CCrmFields
 				$arFields[] = array(
 					'id' => 'DEFAULT_VALUE',
 					'name' => GetMessage('CRM_FIELDS_DEFAULT_VALUE'),
-					'type' => 'text',
+					'type' => 'textarea',
 				);
 				break;
 			case 'url':

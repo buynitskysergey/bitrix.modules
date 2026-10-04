@@ -52,7 +52,12 @@ final class Dictionary
 	public const EVENT_EXTRACT_FIELDS = 'extract_fields';
 	public const EVENT_CALL_ACTIVITY_WITH_AUDIO_RECORDING = 'activity_call_with_audio_recording';
 	public const EVENT_CALL_SCORING = 'call_scoring';
+	public const EVENT_CALL_SCORING_V2 = 'call_scoring_v2';
+	public const EVENT_SELECT_CALL_SCORE_SCRIPT = 'select_call_score_script';
 	public const EVENT_EXTRACT_SCORING_CRITERIA = 'extract_scoring_criteria';
+	public const EVENT_GENERATE_CALL_CRITERIA = 'generate_call_criteria';
+	public const EVENT_GENERATE_CALL_SCRIPT_FROM_DIALOG = 'generate_call_script_from_dialog';
+	public const EVENT_GENERATE_CALL_SCRIPT_DESCRIPTION = 'generate_call_script_description';
 	public const EVENT_FILL_REPEAT_SALE_TIPS = 'fill_repeat_sale_tips';
 	public const EVENT_SCREENING_REPEAT_SALE_ITEM = 'screening_repeat_sale_item';
 	public const EVENT_ANALYZE_COMMUNICATION = 'analyze_communication';
@@ -134,6 +139,10 @@ final class Dictionary
 	public const SECTION_CRM_SETTINGS = 'crm_settings';
 	public const SECTION_WEBFORM = 'webform';
 	public const SECTION_SITE_WIDGET = 'site_widget_section';
+	public const SECTION_TELEPHONY = 'telephony';
+	public const SECTION_MAIL = 'mail';
+	public const SECTION_OPEN_LINES = 'ol';
+	public const SECTION_CRM_FORM = 'crm_form';
 	public const SECTION_REPEAT_SALE = 'rs';
 	public const SECTION_DOCUMENT = 'document_section';
 	public const SIGN_CONTACT_SECTION = 'sign_contact_section';
@@ -216,6 +225,9 @@ final class Dictionary
 	public const STATUS_ERROR_PROVIDER = 'error_provider';
 	public const STATUS_ERROR_B24 = 'error_b24';
 	public const STATUS_ERROR_FILLING_FIELDS = 'error_fillingFields';
+
+	public const STATUS_REPEAT_SALE_POSSIBLE = 'possible';
+	public const STATUS_REPEAT_SALE_NOT_POSSIBLE = 'notPossible';
 	// endregion
 
 	public const UNKNOWN = 'unknown';

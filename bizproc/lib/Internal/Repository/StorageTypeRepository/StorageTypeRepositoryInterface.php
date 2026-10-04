@@ -26,6 +26,19 @@ interface StorageTypeRepositoryInterface
 	public function getCount(?FilterInterface $filter = null): int;
 
 	/**
+	 * Zero-based position of the record in the list built by $filter and $sort, null when it is not in the list.
+	 *
+	 * @param int $id
+	 * @param FilterInterface|null $filter
+	 * @param array|null $sort
+	 * @return int|null
+	 * @throws \Bitrix\Main\ArgumentException
+	 * @throws \Bitrix\Main\ObjectPropertyException
+	 * @throws \Bitrix\Main\SystemException
+	 */
+	public function getPosition(int $id, ?FilterInterface $filter = null, ?array $sort = null): ?int;
+
+	/**
 	 * @param int|null $limit
 	 * @param int|null $offset
 	 * @param FilterInterface|null $filter

@@ -24,13 +24,13 @@ abstract class AbstractColumn implements ColumnInterface
 		);
 	}
 
-	public function notNull(): self
+	public function notNull(): static
 	{
 		$this->notNull = true;
 		return $this;
 	}
 
-	public function default(?string $defaultValue): self
+	public function default(?string $defaultValue): static
 	{
 		$this->defaultValue = $defaultValue;
 		return $this;

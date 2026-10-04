@@ -920,24 +920,25 @@ abstract class Check extends AbstractCheck
 	 */
 	protected function getProductVatId(BasketItem $basketItem)
 	{
-		static $vatList = array();
-
-		if (!isset($vatList[$basketItem->getProductId()]))
+		$vatRate = $basketItem->getVatRate();
+		if ($vatRate !== null)
 		{
-			$vatId = $this->getVatIdByProductId($basketItem->getProductId());
-			if ($vatId === 0)
+			$vatId = $this->getVatIdByVatRate((float)$vatRate * 100);
+			if ($vatId !== 0)
 			{
-				$vatRate = (int)((float)$basketItem->getVatRate() * 100);
-				if ($vatRate > 0)
-				{
-					$vatId = $this->getVatIdByVatRate($vatRate);
-				}
+				return (int)$vatId;
 			}
-
-			$vatList[$basketItem->getProductId()] = (int)$vatId;
 		}
 
-		return $vatList[$basketItem->getProductId()];
+		static $catalogVatList = [];
+
+		$productId = $basketItem->getProductId();
+		if (!isset($catalogVatList[$productId]))
+		{
+			$catalogVatList[$productId] = (int)$this->getVatIdByProductId($productId);
+		}
+
+		return $catalogVatList[$productId];
 	}
 
 	/**

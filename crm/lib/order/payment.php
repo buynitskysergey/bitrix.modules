@@ -46,7 +46,12 @@ class Payment extends Sale\Payment
 			{
 				Crm\Automation\Trigger\PaymentTrigger::execute(
 					[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getOrderId()]],
-					['PAYMENT' => $this]
+					[
+						Crm\Automation\Trigger\PaymentTrigger::ORDER_INPUT_PAYMENT_ID => $this->getId(),
+						Crm\Automation\Trigger\PaymentTrigger::ORDER_INPUT_SUM => $this->getSum(),
+						Crm\Automation\Trigger\PaymentTrigger::ORDER_INPUT_CURRENCY => $this->getCurrency(),
+						Crm\Automation\Trigger\PaymentTrigger::EVENT_INITIATOR_KEY => (int)$this->getField('EMP_PAID_ID'),
+					]
 				);
 			}
 

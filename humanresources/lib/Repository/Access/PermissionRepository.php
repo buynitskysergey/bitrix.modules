@@ -30,8 +30,8 @@ class PermissionRepository
 
 		try
 		{
-			$permissionCreateResult =
-				$permissionEntity
+			$permissionCreateResult
+				= $permissionEntity
 					->setRoleId($permission->roleId)
 					->setPermissionId($permission->permissionId)
 					->setValue($permission->value)
@@ -59,7 +59,7 @@ class PermissionRepository
 	 * @throws SystemException
 	 */
 	public function createByCollection(
-		Item\Collection\Access\PermissionCollection $permissionCollection
+		Item\Collection\Access\PermissionCollection $permissionCollection,
 	): void
 	{
 		$query = [];
@@ -112,17 +112,45 @@ class PermissionRepository
 
 	/**
 	 * @param array<int> $roleIds
+	 */
+	public function getPermissionListByRoleIds(array $roleIds): Item\Collection\Access\PermissionCollection
+	{
+		$permissionCollection = new Item\Collection\Access\PermissionCollection();
+		$roleIds = array_values(array_unique(array_filter(array_map('intval', $roleIds))));
+		if (empty($roleIds))
+		{
+			return $permissionCollection;
+		}
+
+		foreach (array_chunk($roleIds, 300) as $roleIdsChunk)
+		{
+			$result = AccessPermissionTable::query()
+				->setSelect(['ROLE_ID', 'PERMISSION_ID', 'VALUE'])
+				->whereIn('ROLE_ID', $roleIdsChunk)
+				->exec()
+			;
+			while ($row = $result->fetch())
+			{
+				$permissionCollection->add($this->convertArrayToItem($row));
+			}
+		}
+
+		return $permissionCollection;
+	}
+
+	/**
+	 * @param array<int> $roleIds
 	 * @return void
 	 */
 	public function deleteByRoleIds(array $roleIds): void
 	{
-		try
+		$roleIds = array_values(array_unique(array_filter(array_map('intval', $roleIds))));
+		if (empty($roleIds))
 		{
-			AccessPermissionTable::deleteList(["=ROLE_ID" => $roleIds]);
+			return;
 		}
-		catch (\Exception $e)
-		{
-		}
+
+		AccessPermissionTable::deleteList(['@ROLE_ID' => $roleIds]);
 	}
 
 	/**
@@ -211,7 +239,7 @@ class PermissionRepository
 			$rolePermissionId["ID"],
 			[
 				"VALUE" => $value,
-			]
+			],
 		);
 	}
 }

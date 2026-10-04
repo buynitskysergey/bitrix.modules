@@ -36,6 +36,37 @@ class CCrmEvent
 		$currentUser = (is_object($USER) && ((get_class($USER) === 'CUser') || ($USER instanceof CUser))) ? $USER : (new CUser());
 		$this->currentUserID = $currentUser->GetId();
 	}
+
+	/**
+	 * Resolves the author for a history record / relation when the caller passed
+	 * no explicit user: the explicitly set context user when present; otherwise,
+	 * in interactive scopes, the ambient current user (the actor of a manual
+	 * entry); otherwise the portal system user. The author is never derived from
+	 * the related entity, and the ambient hit user is never trusted in background,
+	 * automation or AI scopes (Mantis 184341).
+	 */
+	protected function resolveAuthorUserId(): int
+	{
+		$context = \Bitrix\Crm\Service\Container::getInstance()->getContext();
+		$userId = (int)($context->getExplicitUserId() ?? 0);
+		if ($userId > 0)
+		{
+			return $userId;
+		}
+
+		// Trust the ambient current user only in interactive scopes: a manual
+		// history entry (e.g. the crm.event.add component) is created right in the
+		// actor's own request, so the current user is the real author. In
+		// background, automation and AI scopes the current user is the runner or
+		// the triggering session, not the actor, so the record goes to the system.
+		if (!$context->isNonInteractiveScope() && $this->currentUserID > 0)
+		{
+			return (int)$this->currentUserID;
+		}
+
+		return \Bitrix\Crm\Service\SystemUser::getDefaultAuthorId();
+	}
+
 	public function Add($arFields, $bPermCheck = true)
 	{
 		$db_events = GetModuleEvents('crm', 'OnBeforeCrmAddEvent');
@@ -46,7 +77,7 @@ class CCrmEvent
 		{
 			foreach($arFields['ENTITY'] as $key => $arEntity)
 				if (!(isset($arEntity['ENTITY_TYPE']) && isset($arEntity['ENTITY_ID'])))
-					unset($arEntity['ENTITY'][$key]);
+					unset($arFields['ENTITY'][$key]);
 		}
 		else if (isset($arFields['ENTITY_TYPE']) && isset($arFields['ENTITY_ID']))
 		{
@@ -55,7 +86,7 @@ class CCrmEvent
 					'ENTITY_TYPE' => $arFields['ENTITY_TYPE'],
 					'ENTITY_ID' => $arFields['ENTITY_ID'],
 					'ENTITY_FIELD' => isset($arFields['ENTITY_FIELD']) ? $arFields['ENTITY_FIELD'] : '',
-					'USER_ID' => (int)(isset($arFields['USER_ID']) ? intval($arFields['USER_ID']) : $this->currentUserID)
+					'USER_ID' => (int)($arFields['USER_ID'] ?? 0)
 				)
 			);
 		}
@@ -102,10 +133,21 @@ class CCrmEvent
 			unset($arFile);
 		}
 
-		$userId = (int)($arFields['USER_ID'] ?? 0);
+		// When the caller passed the 'ENTITY' array form there is no top-level
+		// USER_ID, so fall back to the first related entity USER_ID. This keeps the
+		// event author consistent with its relations (AddRelation()). When no
+		// explicit user is present at all, the resolver attributes the record to
+		// the explicit actor or the portal system user (never derived from entity).
+		$primaryEntity = (isset($arFields['ENTITY']) && is_array($arFields['ENTITY']))
+			? (array_values($arFields['ENTITY'])[0] ?? null)
+			: null;
+		$userId = (int)($arFields['USER_ID'] ?? ($primaryEntity['USER_ID'] ?? 0));
+		$authorId = $userId > 0
+			? $userId
+			: $this->resolveAuthorUserId();
 		$arFields_i = [
-			'ASSIGNED_BY_ID'=> $userId > 0 ? $userId : $this->currentUserID,
-			'CREATED_BY_ID' => $userId > 0 ? $userId : $this->currentUserID,
+			'ASSIGNED_BY_ID' => $authorId,
+			'CREATED_BY_ID'  => $authorId,
 			'EVENT_ID' => $arFields['EVENT_ID'] ?? '',
 			'EVENT_NAME' => $arFields['EVENT_NAME'],
 			'EVENT_TYPE' => (int)$arFields['EVENT_TYPE'],
@@ -202,7 +244,9 @@ class CCrmEvent
 				'ENTITY_ID'	 	=> $entityID,
 				'ENTITY_FIELD'  => isset($arRel['ENTITY_FIELD']) ? $arRel['ENTITY_FIELD'] : '',
 				'EVENT_ID' 		=> $EVENT_ID,
-				'ASSIGNED_BY_ID'=> isset($arRel['USER_ID']) ? intval($arRel['USER_ID']) : $this->currentUserID,
+				'ASSIGNED_BY_ID'=> ((int)($arRel['USER_ID'] ?? 0)) > 0
+					? (int)$arRel['USER_ID']
+					: $this->resolveAuthorUserId(),
 			);
 
 			$REL_ID = $this->cdb->Add('b_crm_event_relations', $arRel_i, array(), 'FILE: '.__FILE__.'<br /> LINE: '.__LINE__);

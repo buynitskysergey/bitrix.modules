@@ -7,7 +7,6 @@ namespace Bitrix\Mail\Internal\Service\Attachment;
 use Bitrix\Mail\Helper\MailboxAccess;
 use Bitrix\Mail\Helper\Message\Loader\MessageLoader;
 use Bitrix\Mail\Internals\MailMessageAttachmentTable;
-use Bitrix\Mail\MailMessageTable;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 
@@ -15,6 +14,12 @@ class ListingService
 {
 	public const ERROR_INVALID_REQUEST = 'INVALID_REQUEST';
 	public const ERROR_MAILBOX_ACCESS_DENIED = 'MAILBOX_ACCESS_DENIED';
+
+	public function __construct(
+		private readonly ActiveMessageLocator $activeMessageLocator = new ActiveMessageLocator(),
+	)
+	{
+	}
 
 	public function getMessageAttachments(int $messageId, int $userId): Result
 	{
@@ -26,7 +31,7 @@ class ListingService
 			return $result->addError(new Error('Invalid request.', self::ERROR_INVALID_REQUEST));
 		}
 
-		$message = MailMessageTable::getConsistentById($messageId, ['ID', 'MAILBOX_ID']);
+		$message = $this->activeMessageLocator->find($messageId);
 
 		if (
 			$message === null
@@ -67,6 +72,7 @@ class ListingService
 				'size' => (string)\CFile::formatSize((int)($attachment['size'] ?? 0)),
 				'url' => $attachment['url'] ?? null,
 				'viewerAttrs' => $attachment['viewerAttrs'] ?? null,
+				'icon' => FileIcon::resolve((string)($attachment['extension'] ?? '')),
 			];
 		}
 

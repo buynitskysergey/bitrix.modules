@@ -4,9 +4,23 @@ namespace Bitrix\Rest\V3\Structure;
 
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Rest\V3\Dto\DtoField;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumDefinition;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumRegistry;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumType;
 
 class FieldsConverter
 {
+	public static function convertValueByDtoField(DtoField $field, mixed $value): mixed
+	{
+		if ($field->getDynamicEnumProvider() !== null)
+		{
+			return self::convertDynamicEnumValue($field->getDynamicEnumProvider(), $value);
+		}
+
+		return self::convertValueByType($field->getPropertyType(), $value);
+	}
+
 	public static function convertValueByType(?string $fieldType, mixed $value)
 	{
 		// `\Throwable` (not `\Exception`) is intentional: BackedEnum::tryFrom() can throw
@@ -55,6 +69,34 @@ class FieldsConverter
 		}
 
 		return $value;
+	}
+
+	private static function convertDynamicEnumValue(string $providerClass, mixed $value): mixed
+	{
+		return self::convertValueByDynamicEnumDefinition(
+			DynamicEnumRegistry::resolve($providerClass),
+			$value,
+		);
+	}
+
+	private static function convertValueByDynamicEnumDefinition(DynamicEnumDefinition $definition, mixed $value): mixed
+	{
+		try
+		{
+			return match ($definition->type)
+			{
+				DynamicEnumType::String => is_string($value) || is_int($value) || is_float($value)
+					? (string)$value
+					: $value,
+				DynamicEnumType::Int => is_int($value) || (is_string($value) && is_numeric($value))
+					? (int)$value
+					: $value,
+			};
+		}
+		catch (\Throwable)
+		{
+			return $value;
+		}
 	}
 
 	/**

@@ -10,19 +10,25 @@ use Bitrix\BizprocDesigner\Internal\Entity\DocumentDescription;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentTemplate;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\WorkflowTemplateIdentifier;
 use Bitrix\BizprocDesigner\Internal\Service\Container;
+use Bitrix\Main\ArgumentException;
+use Bitrix\Main\DI\Exception\CircularDependencyException;
+use Bitrix\Main\DI\Exception\ServiceNotFoundException;
+use Bitrix\Main\ObjectNotFoundException;
+use Bitrix\Main\ObjectPropertyException;
+use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
+use Psr\Container\NotFoundExceptionInterface;
 
-final class LastWorkflowService
+final readonly class LastWorkflowService
 {
-	private readonly AiAssistantWorkflowTemplateConverterService $aiAssistantWorkflowTemplateConverterService;
+	private AiAssistantWorkflowTemplateConverterService $aiAssistantWorkflowTemplateConverterService;
 
 	public function __construct(
 		?AiAssistantWorkflowTemplateConverterService $aiAssistantWorkflowTemplateConverterService = null,
 	)
 	{
 		$this->aiAssistantWorkflowTemplateConverterService = $aiAssistantWorkflowTemplateConverterService
-			?? Container::getAiAssistantWorkflowTemplateConverterService()
-		;
+			?? Container::getAiAssistantWorkflowTemplateConverterService();
 	}
 
 	public function getAgentTemplate(int $userId): ?AgentTemplate
@@ -58,6 +64,11 @@ final class LastWorkflowService
 		return $newestAgentTemplate;
 	}
 
+	/**
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
 	private function getLastUserWorkflowTemplateDraft(int $userId): ?EO_WorkflowTemplateDraft
 	{
 		return WorkflowTemplateDraftTable::query()
@@ -69,6 +80,11 @@ final class LastWorkflowService
 		;
 	}
 
+	/**
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
 	private function getLastUserWorkflowTemplate(int $userId): ?EO_WorkflowTemplate
 	{
 		return WorkflowTemplateTable::query()
@@ -110,6 +126,12 @@ final class LastWorkflowService
 		return null;
 	}
 
+	/**
+	 * @throws NotFoundExceptionInterface
+	 * @throws CircularDependencyException
+	 * @throws ObjectNotFoundException
+	 * @throws ServiceNotFoundException
+	 */
 	private function getAgentTemplateFromEntity(EO_WorkflowTemplate|EO_WorkflowTemplateDraft $entity): ?AgentTemplate
 	{
 		$converted = null;
@@ -120,22 +142,26 @@ final class LastWorkflowService
 				->aiAssistantWorkflowTemplateConverterService
 				->convertFromTemplateArrayToAgentTemplate($templateData)
 			;
+
 			if ($result->isSuccess())
 			{
 				$converted = $this->aiAssistantWorkflowTemplateConverterService->getAgentTemplate();
 			}
 			else
 			{
-				Container::getDefaultLogger()
-					->error(
-						'Workflow template convert errors: ' . implode(',', $result->getErrorMessages())
-				);
+				$errors = implode(', ', $result->getErrorMessages());
+				Container::getDefaultLogger()->error("Workflow template convert errors: $errors");
 			}
 		}
 
 		return $converted && $converted->blocks->count() > 0 ? $converted : null;
 	}
 
+	/**
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
 	public function getUserLastWorkflowTemplateIdentifier(int $userId): ?WorkflowTemplateIdentifier
 	{
 		$lastEntities = [
@@ -170,7 +196,7 @@ final class LastWorkflowService
 	}
 
 	private function getIdentifierForEntity(
-		EO_WorkflowTemplate|EO_WorkflowTemplateDraft|null $entity
+		EO_WorkflowTemplate|EO_WorkflowTemplateDraft|null $entity,
 	): ?WorkflowTemplateIdentifier
 	{
 		if ($entity instanceof EO_WorkflowTemplate)
@@ -194,7 +220,7 @@ final class LastWorkflowService
 	}
 
 	private function makeDocumentDescriptionByEntity(
-		EO_WorkflowTemplate|EO_WorkflowTemplateDraft $entity
+		EO_WorkflowTemplate|EO_WorkflowTemplateDraft $entity,
 	): DocumentDescription
 	{
 		return new DocumentDescription(

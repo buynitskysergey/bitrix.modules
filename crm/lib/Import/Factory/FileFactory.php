@@ -16,16 +16,23 @@ use Bitrix\Crm\Import\File\Writer\NullWriter;
 use Bitrix\Crm\Import\File\Writer\VCardWriter;
 use Bitrix\Crm\Integration\UI\FileUploader;
 use Bitrix\Crm\Result;
+use Bitrix\Crm\Service\Container;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Text\Encoding;
 use CFile;
+use Psr\Log\LoggerInterface;
 
 final class FileFactory
 {
+	private readonly LoggerInterface $logger;
+
 	public function __construct(
 		private readonly TemporaryFileFactory $temporaryFileFactory,
 		private readonly ErrorFactory $errorFactory,
+		?LoggerInterface $logger = null,
 	)
 	{
+		$this->logger = $logger ?? Container::getInstance()->getLogger('Import');
 	}
 
 	public function uploadImportFile(AbstractImportSettings $importSettings): Result
@@ -33,6 +40,14 @@ final class FileFactory
 		$importFileId = $importSettings->getImportFileId();
 		if ($importFileId === null)
 		{
+			$this->logger->error(
+				'Import file upload failed: import file id is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+				],
+			);
+
 			return Result::fail($this->errorFactory->getImportFileNotFoundError());
 		}
 
@@ -50,24 +65,58 @@ final class FileFactory
 		$importFile = $pendingFiles->get($importFileId);
 		if ($importFile === null || !$importFile->isValid())
 		{
+			$this->logger->error(
+				'Import file upload failed: pending uploader file is missing or invalid',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+				],
+			);
+
 			return Result::fail($this->errorFactory->getImportFileNotFoundError());
 		}
 
 		$info = CFile::MakeFileArray($importFile->getFileId());
 		if (!is_array($info) || !isset($info['tmp_name'], $info['type']))
 		{
+			$this->logger->error(
+				'Import file upload failed: uploaded file info is incomplete',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+				],
+			);
+
 			return Result::fail($this->errorFactory->getImportFileNotFoundError());
 		}
 
 		$importFilePath = $info['tmp_name'];
 		if (!is_readable($importFilePath))
 		{
+			$this->logger->error(
+				'Import file upload failed: uploaded file is not readable',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFilename' => $importFilePath,
+				],
+			);
+
 			return Result::fail($this->errorFactory->getImportFileNotFoundError());
 		}
 
 		$extension = Extension::tryFromType($info['type']);
 		if ($extension === null)
 		{
+			$this->logger->error(
+				'Import file upload failed: file type is not supported',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'fileType' => $info['type'],
+				],
+			);
+
 			return Result::fail($this->errorFactory->getImportFileNotSupportedError());
 		}
 
@@ -79,6 +128,15 @@ final class FileFactory
 
 		$this->moveImportFileContent($importSettings, $importFilePath, $newImportFilePath);
 
+		$this->logger->info(
+			'Import file upload finished: temporary import file was created',
+			[
+				'userId' => (int)CurrentUser::get()->getId(),
+				'importSettings' => $importSettings->toArray(),
+				'temporaryFilename' => $newImportFilePath,
+			],
+		);
+
 		return Result::success();
 	}
 
@@ -87,12 +145,56 @@ final class FileFactory
 		$importFileId = $importSettings->getImportFileId();
 		if ($importFileId === null)
 		{
+			$this->logger->error(
+				'Import file reader creation failed: import file id is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+				],
+			);
+
 			return null;
 		}
 
 		$filename = $this->temporaryFileFactory->get($importFileId, TemporaryFileType::Import);
-		if ($filename === null || !is_readable($filename))
+		if ($filename === null)
 		{
+			$this->logger->error(
+				'Import file reader creation failed: temporary storage key with filename is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+				],
+			);
+
+			return null;
+		}
+
+		if (!file_exists($filename))
+		{
+			$this->logger->error(
+				'Import file reader creation failed: temporary file is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFilename' => $filename,
+				],
+			);
+
+			return null;
+		}
+
+		if (!is_readable($filename))
+		{
+			$this->logger->error(
+				'Import file reader creation failed: temporary file is not readable',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFilename' => $filename,
+				],
+			);
+
 			return null;
 		}
 
@@ -110,6 +212,15 @@ final class FileFactory
 			return new VCardReader($filename);
 		}
 
+		$this->logger->error(
+			'Import file reader creation failed: file extension is not supported',
+			[
+				'userId' => (int)CurrentUser::get()->getId(),
+				'importSettings' => $importSettings->toArray(),
+				'temporaryFilename' => $filename,
+			],
+		);
+
 		return null;
 	}
 
@@ -118,10 +229,34 @@ final class FileFactory
 		$type = TemporaryFileType::tryFrom($rawType);
 		if ($type === null)
 		{
+			$this->logger->error(
+				'Import temporary file lookup failed: temporary file type is invalid',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importFileId' => $importFileId,
+					'rawType' => $rawType,
+				],
+			);
+
 			return null;
 		}
 
-		return $this->temporaryFileFactory->get($importFileId, $type);
+		$filename = $this->temporaryFileFactory->get($importFileId, $type);
+		if ($filename === null)
+		{
+			$this->logger->error(
+				'Import temporary file lookup failed: temporary storage key with filename is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importFileId' => $importFileId,
+					'temporaryFileType' => $type->value,
+				],
+			);
+
+			return null;
+		}
+
+		return $filename;
 	}
 
 	public function getFailImportWriter(AbstractImportSettings $importSettings): WriterInterface
@@ -139,12 +274,45 @@ final class FileFactory
 		$importFileId = $importSettings->getImportFileId();
 		if ($importFileId === null)
 		{
+			$this->logger->error(
+				'Import result writer creation failed: import file id is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFileType' => $type->value,
+				],
+			);
+
 			return new NullWriter();
 		}
 
 		$importFilePath = $this->temporaryFileFactory->get($importFileId, TemporaryFileType::Import);
-		if ($importFilePath === null || !is_writable($importFilePath))
+		if ($importFilePath === null)
 		{
+			$this->logger->error(
+				'Import result writer creation failed: temporary storage key with source filename is missing',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFileType' => $type->value,
+				],
+			);
+
+			return new NullWriter();
+		}
+
+		if (!is_writable($importFilePath))
+		{
+			$this->logger->error(
+				'Import result writer creation failed: source temporary file is not writable',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFileType' => $type->value,
+					'temporaryFilename' => $importFilePath,
+				],
+			);
+
 			return new NullWriter();
 		}
 
@@ -155,6 +323,16 @@ final class FileFactory
 				$importSettings->getImportFileId(),
 				$type,
 				Extension::CSV,
+			);
+
+			$this->logger->info(
+				'Import result writer created: CSV temporary file is ready',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFileType' => $type->value,
+					'temporaryFilename' => $filename,
+				],
 			);
 
 			return (new CSVWriter($filename))
@@ -170,8 +348,28 @@ final class FileFactory
 				Extension::VCard,
 			);
 
+			$this->logger->info(
+				'Import result writer created: vCard temporary file is ready',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $importSettings->toArray(),
+					'temporaryFileType' => $type->value,
+					'temporaryFilename' => $filename,
+				],
+			);
+
 			return new VCardWriter($filename);
 		}
+
+		$this->logger->error(
+			'Import result writer creation failed: source temporary file extension is not supported',
+			[
+				'userId' => (int)CurrentUser::get()->getId(),
+				'importSettings' => $importSettings->toArray(),
+				'temporaryFileType' => $type->value,
+				'temporaryFilename' => $importFilePath,
+			],
+		);
 
 		return new NullWriter();
 	}

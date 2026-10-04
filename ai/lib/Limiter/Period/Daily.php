@@ -5,6 +5,7 @@ namespace Bitrix\AI\Limiter\Period;
 use Bitrix\AI\Context;
 use Bitrix\AI\Facade\Bitrix24;
 use Bitrix\AI\Limiter\Plan;
+use Bitrix\AI\Limiter\Policy\LimitPolicyMode;
 use Bitrix\AI\Model\UsageTable;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Type\DateTime;
@@ -63,6 +64,16 @@ class Daily implements IPeriod
 	 * @inheritDoc
 	 */
 	public function getMaximumUsage(): int
+	{
+		if (Bitrix24::getLimitPolicyMode() === LimitPolicyMode::DailyOnly)
+		{
+			return Bitrix24::getAiDailyLimit() ?? $this->getLegacyMaximumUsage();
+		}
+
+		return $this->getLegacyMaximumUsage();
+	}
+
+	protected function getLegacyMaximumUsage(): int
 	{
 		if (Bitrix24::isMarketAvailable())
 		{

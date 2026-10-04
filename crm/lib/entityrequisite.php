@@ -143,6 +143,9 @@ class EntityRequisite
 
 	public function getList($params)
 	{
+		$checkOwnerPermissions = (bool)($params['checkOwnerPermissions'] ?? false);
+		unset($params['checkOwnerPermissions']);
+
 		$addrFieldsMap = array();
 		foreach ($this->getAddressFields() as $fieldName)
 		{
@@ -209,7 +212,33 @@ class EntityRequisite
 		if (is_array($params['filter']))
 			$params['filter'] = $this->rewriteFilterAddressFields($params['filter'], $addrFieldsMap);
 
+		if ($checkOwnerPermissions)
+		{
+			$params['filter'] = $this->applyOwnerPermissionsFilter(
+				isset($params['filter']) && is_array($params['filter']) ? $params['filter'] : []
+			);
+		}
+
 		return RequisiteTable::getList($params);
+	}
+
+	private function applyOwnerPermissionsFilter(array $filter): array
+	{
+		$restrictionFilter = (new Security\OwnerEntityListRestriction(
+			Service\Container::getInstance()->getUserPermissions()
+		))->buildFilter(
+			[CCrmOwnerType::Contact, CCrmOwnerType::Company],
+			'ENTITY_TYPE_ID',
+			'ENTITY_ID'
+		);
+
+		if ($restrictionFilter === null)
+		{
+			return $filter;
+		}
+
+		// combine via AND as a nested subfilter to avoid key conflicts with the existing filter
+		return empty($filter) ? $restrictionFilter : [$filter, $restrictionFilter];
 	}
 
 	protected function rewriteFilterAddressFields(&$filter, &$addressFieldsMap)
@@ -242,8 +271,13 @@ class EntityRequisite
 		return $newFilter;
 	}
 
-	public function getCountByFilter($filter = array())
+	public function getCountByFilter($filter = array(), array $options = [])
 	{
+		if ($options['checkOwnerPermissions'] ?? false)
+		{
+			$filter = $this->applyOwnerPermissionsFilter(is_array($filter) ? $filter : []);
+		}
+
 		return RequisiteTable::getCountByFilter($filter);
 	}
 

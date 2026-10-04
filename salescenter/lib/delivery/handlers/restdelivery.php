@@ -70,7 +70,7 @@ class RestDelivery extends Base implements IRestHandler
 	 */
 	protected function getImageName(): string
 	{
-		return 'rest_delivery.svg';
+		return 'rest_delivery.webp';
 	}
 
 	/**

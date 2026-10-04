@@ -30,6 +30,7 @@ final class ProjectCreateDto
 		public readonly string $knowledgeSettings = SONET_ROLES_USER,
 		public readonly string $knowledgeDelete = SONET_ROLES_USER,
 		public readonly ?array $avatar = null,
+		public readonly ?array $notifications = null,
 	)
 	{
 	}
@@ -72,6 +73,7 @@ final class ProjectCreateDto
 				$fields['avatarId'] ?? null,
 				$fields['image'] ?? null,
 			),
+			notifications: self::normalizeNotifications($fields['notifications'] ?? null),
 		);
 	}
 
@@ -181,6 +183,43 @@ final class ProjectCreateDto
 		}
 
 		return null;
+	}
+
+	private static function normalizeNotifications(mixed $notifications): ?array
+	{
+		if (!is_array($notifications))
+		{
+			return null;
+		}
+
+		$rawTypes = $notifications['types'] ?? null;
+		if (!is_array($rawTypes))
+		{
+			return null;
+		}
+
+		$types = [];
+		foreach ($rawTypes as $rawType)
+		{
+			if (!is_array($rawType))
+			{
+				continue;
+			}
+
+			$id = trim((string)($rawType['id'] ?? ''));
+			$counterEnabled = $rawType['counterEnabled'] ?? null;
+			if ($id === '' || !is_bool($counterEnabled))
+			{
+				continue;
+			}
+
+			$types[] = [
+				'id' => $id,
+				'counterEnabled' => $counterEnabled,
+			];
+		}
+
+		return ['types' => $types];
 	}
 
 	private static function extractPositiveInt(mixed $value): ?int

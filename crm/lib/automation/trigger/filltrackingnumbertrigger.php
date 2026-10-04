@@ -11,9 +11,44 @@ Loc::loadMessages(__FILE__);
 
 class FillTrackingNumberTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use OrderReturnTrait;
+
 	public static function isSupported($entityTypeId)
 	{
 		return ($entityTypeId === \CCrmOwnerType::Order);
+	}
+
+	protected static function getOrderReturnFieldIds(): array
+	{
+		return [
+			self::ORDER_RETURN_TRACKING_NUMBER,
+			self::ORDER_RETURN_DELIVERY_SERVICE_ID,
+			self::ORDER_RETURN_SHIPMENT_ID,
+		];
+	}
+
+	/**
+	 * A shipment keeps no acting user for the tracking number, so the node names no initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_FILL_TRACKNUM_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getOrderReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], $this->buildOrderReturnValues(), [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public static function isEnabled()

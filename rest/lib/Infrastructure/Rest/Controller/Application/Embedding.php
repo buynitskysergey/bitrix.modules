@@ -16,6 +16,7 @@ use Bitrix\Rest\Infrastructure\Rest\Request\Application\Embedding\ListEmbeddingR
 use Bitrix\Rest\Infrastructure\Rest\Scopes\RestDeveloper;
 use Bitrix\Rest\Internal\Access\AppAccessChecker;
 use Bitrix\Rest\Internal\Entity\Application\App;
+use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\Public\Command\Application\Embedding\AddEmbeddingCommand;
 use Bitrix\Rest\Public\Command\Application\Embedding\DeleteEmbeddingCommand;
 use Bitrix\Rest\Public\Provider\ApplicationProvider;
@@ -55,10 +56,15 @@ final class Embedding extends RestController
 
 		$this->ensureCanViewEmbeddingList($app);
 
+		$userIds = $this->getAccessChecker()->canViewAllEmbeddings($app)
+			? null
+			: [PlacementTable::DEFAULT_USER_ID_VALUE, $this->getCurrentUserId()];
+
 		$collection = $embeddingProvider->getListByClientId(
 			$request->clientId,
 			$request->pagination?->getLimit() ?? 50,
-			$request->pagination?->getOffset() ?? 0
+			$request->pagination?->getOffset() ?? 0,
+			$userIds,
 		);
 
 		return new ListResponse($this->getMapper()->toDtoCollection($collection));
@@ -86,10 +92,10 @@ final class Embedding extends RestController
 		$this->runCommand(
 			new AddEmbeddingCommand(
 				app: $app,
-				currentUserId: $this->getCurrentUserId(),
+				userId: $this->getCurrentUserId(),
 				placement: $request->placement,
 				handler: $request->handler,
-				userId: $request->userId,
+				targetUserId: $request->userId,
 				title: $request->title,
 				description: $request->description,
 				groupName: $request->groupName,
@@ -124,10 +130,10 @@ final class Embedding extends RestController
 		$result = $this->runCommand(
 			new DeleteEmbeddingCommand(
 				app: $app,
-				currentUserId: $this->getCurrentUserId(),
+				userId: $this->getCurrentUserId(),
 				placement: $request->placement,
 				handler: $request->handler,
-				userId: $request->userId,
+				targetUserId: $request->userId,
 			),
 		);
 

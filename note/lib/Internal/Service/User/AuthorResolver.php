@@ -5,21 +5,18 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\User;
 
 use Bitrix\Main\UserTable;
-use CFile;
 use CSite;
 use CUser;
 
 /**
- * Batch-resolves author meta (id, name, photoUrl) for a list of user ids.
+ * Batch-resolves author meta (id, name, photoUrl, color) for a list of user ids.
  * Returns associative array keyed by id with stable shape.
  */
 final class AuthorResolver
 {
-	private const PHOTO_SIZE = 40;
-
 	/**
 	 * @param int[] $userIds
-	 * @return array<int, array{id: int, name: string, photoUrl: ?string, isSystem?: true}>
+	 * @return array<int, array{id: int, name: string, photoUrl: ?string, color: string, isSystem?: true}>
 	 */
 	public function resolve(array $userIds): array
 	{
@@ -67,6 +64,10 @@ final class AuthorResolver
 				'id' => $id,
 				'name' => CUser::FormatName($nameFormat, $row, true, false),
 				'photoUrl' => $this->resolvePhotoUrl((int)($row['PERSONAL_PHOTO'] ?? 0)),
+				// Same per-user hue as the editor caret and every other avatar of this user
+				// (see IdentityColor) — a photoless author must not read one color on a card
+				// and another one in the activity feed.
+				'color' => IdentityColor::forUser($id),
 			];
 		}
 
@@ -75,20 +76,6 @@ final class AuthorResolver
 
 	private function resolvePhotoUrl(int $fileId): ?string
 	{
-		if ($fileId <= 0)
-		{
-			return null;
-		}
-
-		$resized = CFile::ResizeImageGet(
-			$fileId,
-			['width' => self::PHOTO_SIZE, 'height' => self::PHOTO_SIZE],
-			BX_RESIZE_IMAGE_PROPORTIONAL,
-			false,
-		);
-
-		$src = $resized['src'] ?? null;
-
-		return is_string($src) && $src !== '' ? $src : null;
+		return AvatarUrl::forFile($fileId);
 	}
 }

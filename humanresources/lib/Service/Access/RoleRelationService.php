@@ -35,6 +35,12 @@ class RoleRelationService
 	 */
 	public function deleteRelationsByRoleIds(array $roleIds): void
 	{
+		$roleIds = array_values(array_unique(array_filter(array_map('intval', $roleIds))));
+		if (empty($roleIds))
+		{
+			return;
+		}
+
 		Container::getAccessRoleRelationRepository()->deleteRelationsByRoleIds($roleIds);
 	}
 

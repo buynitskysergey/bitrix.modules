@@ -10,6 +10,7 @@ use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 
@@ -26,7 +27,7 @@ final class FullScenario extends AbstractScenario
 			TranscribeCallRecording::class,
 			SummarizeCallTranscription::class,
 			FillItemFieldsFromCallTranscription::class,
-			ScoreCall::class,
+			AIManager::isCallScoringV2Enabled() ? ScoreCallV2::class : ScoreCall::class,
 			AnalyzeCommunication::class,
 		];
 	}

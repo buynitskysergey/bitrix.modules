@@ -267,8 +267,7 @@ class Uri implements \JsonSerializable, UriInterface
 	{
 		$data = preg_replace_callback(
 			'/(?:^|(?<=&))[^=[]+/',
-			function($match)
-			{
+			function ($match) {
 				return bin2hex(urldecode($match[0]));
 			},
 			$params
@@ -300,7 +299,7 @@ class Uri implements \JsonSerializable, UriInterface
 				parse_str($query, $currentParams);
 			}
 
-			foreach($params as $param)
+			foreach ($params as $param)
 			{
 				unset($currentParams[$param]);
 			}
@@ -440,7 +439,7 @@ class Uri implements \JsonSerializable, UriInterface
 			foreach ($parts as $i => $part)
 			{
 				/** @noinspection PhpUndefinedVariableInspection */
-				$result .= ($i % 2)	? $part	: rawurlencode(Encoding::convertEncoding($part, $currentCharset, $charset));
+				$result .= ($i % 2) ? $part : rawurlencode(Encoding::convertEncoding($part, $currentCharset, $charset));
 			}
 		}
 		else

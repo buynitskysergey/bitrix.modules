@@ -15,6 +15,7 @@ use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Fields\StringField;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Rest\APAuth\PasswordTable;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 
 class IncomingWebhookAttributeTable extends DataManager
 {
@@ -80,6 +81,7 @@ class IncomingWebhookAttributeTable extends DataManager
 				$passwordId,
 			),
 		);
+		self::resetScannerComputedState();
 	}
 
 	/**
@@ -100,6 +102,7 @@ class IncomingWebhookAttributeTable extends DataManager
 					$helper->forSql($type),
 				),
 			);
+			self::resetScannerComputedState();
 
 			return;
 		}
@@ -121,5 +124,26 @@ class IncomingWebhookAttributeTable extends DataManager
 				$escapedCodes,
 			),
 		);
+		self::resetScannerComputedState();
+	}
+
+	public static function onAfterAdd(Main\ORM\Event $event): void
+	{
+		self::resetScannerComputedState();
+	}
+
+	public static function onAfterUpdate(Main\ORM\Event $event): void
+	{
+		self::resetScannerComputedState();
+	}
+
+	public static function onAfterDelete(Main\ORM\Event $event): void
+	{
+		self::resetScannerComputedState();
+	}
+
+	private static function resetScannerComputedState(): void
+	{
+		LicenseScannerStateInvalidator::reset();
 	}
 }

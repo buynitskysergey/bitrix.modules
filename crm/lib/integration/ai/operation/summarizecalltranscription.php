@@ -6,8 +6,11 @@ use Bitrix\AI\Context;
 use Bitrix\AI\Engine;
 use Bitrix\AI\Quality;
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Badge;
+use Bitrix\Crm\Copilot\AiCallSummary\Controller\AiCallSummaryController;
+use Bitrix\Crm\Copilot\AiCallSummary\Entity\AiCallSummaryItem;
 use Bitrix\Crm\Copilot\Pipeline\StepContext;
 use Bitrix\Crm\Copilot\Pipeline\TargetResolver;
 use Bitrix\Crm\Dto\Dto;
@@ -36,6 +39,7 @@ final class SummarizeCallTranscription extends AbstractOperation
 	public const SUPPORTED_ACTIVITY_PROVIDER_IDS = [
 		Call::ACTIVITY_PROVIDER_ID,
 		OpenLine::ACTIVITY_PROVIDER_ID,
+		Email::ACTIVITY_PROVIDER_ID,
 	];
 
 	protected const PAYLOAD_CLASS = SummarizeCallTranscriptionPayload::class;
@@ -74,9 +78,22 @@ final class SummarizeCallTranscription extends AbstractOperation
 
 	public static function shouldRelaunch(Result $existingResult, StepContext $context): bool
 	{
+		if ($context->getActivityId() <= 0)
+		{
+			return false;
+		}
+
+		if ($context->getActivityProvider() === Email::getId())
+		{
+			$ownerTypeId = (int)$context->getExtra('targetOwnerTypeId');
+			$ownerId = (int)$context->getExtra('targetOwnerId');
+
+			return $ownerTypeId > 0 && $ownerId > 0
+				&& Email::isCopilotRepeatProcessingAvailable($context->getActivityId(), $ownerTypeId, $ownerId);
+		}
+
 		if (
-			$context->getActivityId() <= 0
-			|| !$context->isManualLaunch()
+			!$context->isManualLaunch()
 			|| $context->getActivityProvider() !== OpenLine::getId()
 		)
 		{
@@ -93,9 +110,19 @@ final class SummarizeCallTranscription extends AbstractOperation
 			return mb_strlen($messages, 'UTF-8') >= (int)$lastMessagesVolume + OpenLine::CHAT_MESSAGE_COPILOT_PROCESSING_LIMIT;
 		}
 
+		// The summary feeds FillFields, so gate its relaunch on the same per-entity baseline as the fill
+		// button (keyed by the fill target). Otherwise Analyze/Summarize advancing the chat-global baseline
+		// would suppress the relaunch and fill would run on a stale summary. See fill-fields-any-entity.
+		$fillTarget = in_array($context->getScenarioName(), [Scenario::FILL_FIELDS_SCENARIO, Scenario::FULL_SCENARIO], true)
+			? $context->resolveFillTarget(new TargetResolver())
+			: null
+		;
+
 		return OpenLine::isCopilotProcessingAvailable(
 			$context->getActivityId(),
 			is_string($messages) ? $messages : '',
+			true,
+			$fillTarget,
 		);
 	}
 
@@ -120,12 +147,13 @@ final class SummarizeCallTranscription extends AbstractOperation
 	protected static function checkPreviousJobs(ItemIdentifier $target, int $parentId): Main\Result
 	{
 		$activity = Container::getInstance()->getActivityBroker()->getById($target->getEntityId());
-		if (($activity['PROVIDER_ID'] ?? null) !== OpenLine::getId())
+		$providerId = $activity['PROVIDER_ID'] ?? null;
+		if ($providerId === OpenLine::getId() || $providerId === Email::getId())
 		{
-			return parent::checkPreviousJobs($target, $parentId);
+			return parent::checkPreviousJobsAllowingSuccessfulRelaunch($target, $parentId);
 		}
 
-		return parent::checkPreviousJobsAllowingSuccessfulRelaunch($target, $parentId);
+		return parent::checkPreviousJobs($target, $parentId);
 	}
 
 	protected function getAIPayload(): Main\Result
@@ -158,7 +186,11 @@ final class SummarizeCallTranscription extends AbstractOperation
 		$nextTarget = (new TargetResolver())->findTarget($activityId);
 		if ($nextTarget)
 		{
-			OpenLine::saveLastMessagesVolumeForCopilot($activityId);
+			$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
+			if (($activity['PROVIDER_ID'] ?? null) !== Email::getId())
+			{
+				OpenLine::saveLastMessagesVolumeForCopilot($activityId);
+			}
 			self::notifyTimelinesAboutActivityUpdate($activityId, true);
 		}
 	}
@@ -168,17 +200,21 @@ final class SummarizeCallTranscription extends AbstractOperation
 	protected static function notifyAboutJobError(
 		Result $result,
 		bool $withSyncBadges = true,
-		bool $withSendAnalytics = true
+		bool $withSendAnalytics = true,
+		?ItemIdentifier $target = null
 	): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();
-		$nextTarget = (new TargetResolver())->findTarget($activityId);
-		if ($nextTarget)
+		// Prefer the clicked entity carried across the async boundary (ERR-002/AC-030). The auto path and
+		// legacy single-target callers pass no target and keep resolving the priority Deal/Lead via findTarget.
+		// Gating on the resolved target (not findTarget alone) lets a contact-only manual launch get the badge.
+		$badgeTarget = $target ?? (new TargetResolver())->findTarget($activityId);
+		if ($badgeTarget)
 		{
 			if ($withSyncBadges)
 			{
 				Controller::getInstance()->onLaunchError(
-					$nextTarget,
+					$badgeTarget,
 					$activityId,
 					[
 						'OPERATION_TYPE_ID' => self::TYPE_ID,
@@ -188,7 +224,7 @@ final class SummarizeCallTranscription extends AbstractOperation
 					$result->getUserId(),
 				);
 
-				self::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_VALUE);
+				self::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_VALUE, $badgeTarget);
 			}
 
 			self::notifyTimelinesAboutActivityUpdate($activityId);
@@ -206,16 +242,80 @@ final class SummarizeCallTranscription extends AbstractOperation
 	protected static function onAfterSuccessfulJobFinish(Result $result, ?Context $context = null): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();
-		if ($activityId > 0)
+		if (!$activityId)
 		{
-			self::notifyTimelinesAboutActivityUpdate($activityId);
+			return;
+		}
+
+		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
+		$isEmailActivity = (($activity['PROVIDER_ID'] ?? null) === Email::getId());
+		if ($isEmailActivity)
+		{
+			$additionalInfo = $context?->getParameters()['additionalInfo'] ?? [];
+			$targetOwnerTypeId = is_array($additionalInfo) ? (int)($additionalInfo['targetOwnerTypeId'] ?? 0) : 0;
+			$targetOwnerId = is_array($additionalInfo) ? (int)($additionalInfo['targetOwnerId'] ?? 0) : 0;
+
+			Email::saveCopilotContentFingerprint($activityId, $targetOwnerTypeId, $targetOwnerId);
+		}
+
+		self::notifyTimelinesAboutActivityUpdate($activityId);
+
+		if (!$result->isSuccess() || $isEmailActivity)
+		{
+			return;
+		}
+
+		/** @var SummarizeCallTranscriptionPayload|null $payload */
+		$payload = $result->getPayload();
+		$data = $payload?->data;
+		if ($data === null)
+		{
+			return;
+		}
+
+		$controller = AiCallSummaryController::getInstance();
+		$item = AiCallSummaryItem::createFromEntityFields([
+			'ACTIVITY_ID' => $activityId,
+			'JOB_ID' => (int)$result->getJobId(),
+			'THEME' => $data->theme,
+			'PRODUCT' => $data->product,
+			'INTENT' => $data->intent,
+		]);
+
+		$existing = $controller->getByActivityId($activityId);
+		if ($existing !== null && $existing->getId() !== null)
+		{
+			$controller->update($existing->getId(), $item);
+		}
+		else
+		{
+			$controller->add($item);
 		}
 	}
 
 	protected static function extractPayloadFromAIResult(\Bitrix\AI\Result $result, EO_Queue $job): Dto
 	{
+		$json = self::extractPayloadPrettifiedData($result);
+
+		// Version-tolerant parsing: the `summarize_transcript` prompt is rolled out independently
+		// of the speech-analytics feature, so a job may return either the new JSON payload
+		// (`{summary, data}`) or the legacy plain-text summary. We can't rely on rollout ordering,
+		// so we sniff the shape. A JSON object carrying a `summary` key is the new format; anything
+		// else is treated as the legacy plain-text summary.
+		if (array_key_exists('summary', $json))
+		{
+			return new SummarizeCallTranscriptionPayload([
+				'summary' => $json['summary'] ?? '',
+				'data' => $json['data'] ?? null,
+			]);
+		}
+
+		// Legacy plain-text response: the whole prettified text is the summary and there is no
+		// structured data. Keeping `data` null makes `onAfterSuccessfulJobFinish` skip the
+		// AiCallSummaryItem write, so an old prompt never produces empty summary rows.
 		return new SummarizeCallTranscriptionPayload([
-			'summary' => $result->getPrettifiedData(),
+			'summary' => self::extractPayloadString($result->getPrettifiedData()) ?? '',
+			'data' => null,
 		]);
 	}
 

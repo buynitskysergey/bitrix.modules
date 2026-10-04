@@ -201,8 +201,10 @@ class CVoxImplantIncoming
 			$config = Array(
 				"callId" => $params['CALL_ID'],
 			);
+			$idSuffix = $params['COMMAND'] == 'answer_self' ? '_ANSWER' : '_FINISH';
 			$push['send_immediately'] = 'Y';
 			$push['advanced_params'] = Array(
+				"id" => 'VI_CALL_'.$params['CALL_ID'].$idSuffix,
 				"notificationsToCancel" => array('VI_CALL_'.$params['CALL_ID']),
 			);
 		}
@@ -473,12 +475,7 @@ class CVoxImplantIncoming
 			if($config['WORKTIME_USER_ID'] > 0)
 			{
 				$call->updateUserId($config['WORKTIME_USER_ID']);
-				CVoxImplantCrmHelper::registerCallInCrm($call);
-
-				if(\CVoxImplantConfig::GetLeadWorkflowExecution() == \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE)
-				{
-					CVoxImplantCrmHelper::StartCallTrigger($call, true);
-				}
+				CVoxImplantCrmHelper::registerCallInCrmWithLeadLock($call, true);
 			}
 			else
 			{

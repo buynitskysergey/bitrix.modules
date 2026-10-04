@@ -11,6 +11,11 @@ use Bitrix\Main\UserField\File\ManualUploadRegistry;
 class FileUploader
 {
 	protected $files = [];
+	protected bool $deferPersistentDeletions = false;
+	/** @var array<int, int> */
+	protected array $deferredPersistentDeletions = [];
+	/** @var array<int, array<int, int>> */
+	protected array $deferredPersistentDeletionFrames = [];
 	/** @var \CFile */
 	protected $cfile = \CFile::class;
 
@@ -169,6 +174,54 @@ class FileUploader
 		return $this;
 	}
 
+	public function beginDeferredPersistentDeletions(): self
+	{
+		$this->deferredPersistentDeletionFrames[] = [];
+		$this->deferPersistentDeletions = true;
+
+		return $this;
+	}
+
+	public function commitDeferredPersistentDeletions(): self
+	{
+		$frame = array_pop($this->deferredPersistentDeletionFrames) ?? [];
+		if ($this->deferredPersistentDeletionFrames !== [])
+		{
+			$parentFrameKey = array_key_last($this->deferredPersistentDeletionFrames);
+			$this->deferredPersistentDeletionFrames[$parentFrameKey] += $frame;
+			$this->deferredPersistentDeletions = $this->deferredPersistentDeletionFrames[0] ?? [];
+			$this->deferPersistentDeletions = true;
+
+			return $this;
+		}
+
+		$this->deferredPersistentDeletions = [];
+		$this->deferPersistentDeletions = false;
+
+		foreach ($frame as $fileId)
+		{
+			try
+			{
+				$this->cfile::Delete($fileId);
+			}
+			catch (\Throwable)
+			{
+				$this->markFileAsTemporary($fileId);
+			}
+		}
+
+		return $this;
+	}
+
+	public function rollbackDeferredPersistentDeletions(): self
+	{
+		array_pop($this->deferredPersistentDeletionFrames);
+		$this->deferredPersistentDeletions = $this->deferredPersistentDeletionFrames[0] ?? [];
+		$this->deferPersistentDeletions = $this->deferredPersistentDeletionFrames !== [];
+
+		return $this;
+	}
+
 	/**
 	 * Delete all not bound files.
 	 *
@@ -178,16 +231,49 @@ class FileUploader
 	{
 		foreach ($this->files as $fileId)
 		{
-			$this->deleteFilePersistently($fileId);
+			try
+			{
+				$this->cfile::Delete($fileId);
+				unset($this->files[$fileId]);
+			}
+			catch (\Throwable)
+			{
+			}
 		}
-
-		$this->files = [];
 
 		return $this;
 	}
 
+	/**
+	 * Deletes a registered temporary file.
+	 *
+	 * @param int $fileId
+	 * @return bool
+	 */
+	public function deleteTemporaryFile(int $fileId): bool
+	{
+		if (!isset($this->files[$fileId]))
+		{
+			return false;
+		}
+
+		$this->deleteFilePersistently($fileId);
+		unset($this->files[$fileId]);
+
+		return true;
+	}
+
 	final public function deleteFilePersistently(int $fileId): self
 	{
+		if ($this->deferPersistentDeletions)
+		{
+			$frameKey = array_key_last($this->deferredPersistentDeletionFrames);
+			$this->deferredPersistentDeletionFrames[$frameKey][$fileId] = $fileId;
+			$this->deferredPersistentDeletions = $this->deferredPersistentDeletionFrames[0] ?? [];
+
+			return $this;
+		}
+
 		$this->cfile::Delete($fileId);
 
 		return $this;

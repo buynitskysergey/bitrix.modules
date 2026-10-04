@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Activity;
 
+use Bitrix\Bizproc\Activity\Dto\NodeActionSettings;
 use Bitrix\Bizproc\Activity\Dto\NodeSettings;
 use Bitrix\Bizproc\Activity\Dto\Complex;
 
@@ -32,12 +33,13 @@ final class ActivityDescription implements \JsonSerializable
 
 	private ?array $robotSettings = null;
 	private ?array $filter = null;
-	private ?array $nodeActionSettings = null;
+	private ?NodeActionSettings $nodeActionSettings = null;
 	private ?Complex\Settings $complexActivitySettings = null;
 	private ?array $presets = null;
 	private ?string $presetId = null;
 	private bool $excluded = false;
 	private bool $deprecated = false;
+	private bool $aiAutoDescriptionAllowed = true;
 	private array $rawData = [];
 
 	public function __construct(
@@ -283,8 +285,13 @@ final class ActivityDescription implements \JsonSerializable
 		return $this->presetId;
 	}
 
-	public function setComplexActivitySettings(?Complex\Settings $settings): self
+	public function setComplexActivitySettings(Complex\Settings|array|null $settings): self
 	{
+		if (is_array($settings))
+		{
+			$settings = Complex\Settings::fromArray($settings);
+		}
+
 		$this->complexActivitySettings = $settings;
 
 		return $this;
@@ -295,14 +302,31 @@ final class ActivityDescription implements \JsonSerializable
 		return $this->complexActivitySettings;
 	}
 
-	public function setNodeActionSettings(array $nodeActionSettings): self
+	/**
+	 * Whether the node is served by the unified settings panel: owning a complex-settings descriptor, its
+	 * own or one completed by
+	 * {@see \Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider}, is the marker.
+	 * Derived and never stored, so a saved block and the catalog item of the same activity cannot disagree.
+	 */
+	public function isServedByUnifiedPanel(): bool
 	{
-		$this->nodeActionSettings = $nodeActionSettings;
+		return $this->complexActivitySettings !== null;
+	}
+
+	public function setNodeActionSettings(NodeActionSettings|array $settings): self
+	{
+		$this->nodeActionSettings = is_array($settings) ? NodeActionSettings::fromArray($settings) : $settings;
 
 		return $this;
 	}
 
+	/** Legacy array projection: the public contract shipped with `?array`, external code may index it. */
 	public function getNodeActionSettings(): ?array
+	{
+		return $this->nodeActionSettings?->toArray();
+	}
+
+	public function getNodeActionSettingsDto(): ?NodeActionSettings
 	{
 		return $this->nodeActionSettings;
 	}
@@ -322,6 +346,22 @@ final class ActivityDescription implements \JsonSerializable
 	private function getAiDescription(): string
 	{
 		return $this->aiDescription ?? '';
+	}
+
+	/**
+	 * Suitability marker: when disabled, the AI settings schema of the activity must not be derived
+	 * automatically from its properties map. A manual `.ai.php` description still works.
+	 */
+	public function setAiAutoDescription(string|bool $value): self
+	{
+		$this->aiAutoDescriptionAllowed = is_bool($value) ? $value : ($value !== 'N');
+
+		return $this;
+	}
+
+	public function isAiAutoDescriptionAllowed(): bool
+	{
+		return $this->aiAutoDescriptionAllowed;
 	}
 
 	public function applyPreset(array $preset): self
@@ -471,6 +511,12 @@ final class ActivityDescription implements \JsonSerializable
 			case 'ADDITIONAL_RESULT':
 				$this->setAdditionalResult($value);
 				break;
+			case 'AI_DESCRIPTION':
+				$this->setAiDescription((string)$value);
+				break;
+			case 'AI_AUTO_DESCRIPTION':
+				$this->setAiAutoDescription($value);
+				break;
 			default:
 				$this->rawData[$key] = $value;
 		}
@@ -508,6 +554,7 @@ final class ActivityDescription implements \JsonSerializable
 			'PRESETS' => $this->getPresets(),
 			'PRESET_ID' => $this->getPresetId(),
 			'ADDITIONAL_RESULT' => $this->getAdditionalResult(),
+			'AI_AUTO_DESCRIPTION' => $this->isAiAutoDescriptionAllowed() ? 'Y' : 'N',
 			default => $this->rawData[$key] ?? null,
 		};
 	}
@@ -656,14 +703,14 @@ final class ActivityDescription implements \JsonSerializable
 			$description['PRESETS'] = $this->getPresets();
 		}
 
-		if ($this->getNodeActionSettings())
+		if ($this->nodeActionSettings !== null)
 		{
-			$description['NODE_ACTION_SETTINGS'] = $this->getNodeActionSettings();
+			$description['NODE_ACTION_SETTINGS'] = $this->nodeActionSettings->toArray();
 		}
 
 		if ($this->getComplexActivitySettings())
 		{
-			$description['COMPLEX_ACTIVITY_SETTINGS'] = $this->getComplexActivitySettings();
+			$description['COMPLEX_ACTIVITY_SETTINGS'] = $this->getComplexActivitySettings()->toArray();
 		}
 
 		if ($this->getAdditionalResult())
@@ -679,6 +726,11 @@ final class ActivityDescription implements \JsonSerializable
 		if ($this->getAiDescription())
 		{
 			$description['AI_DESCRIPTION'] = $this->getAiDescription();
+		}
+
+		if (!$this->isAiAutoDescriptionAllowed())
+		{
+			$description['AI_AUTO_DESCRIPTION'] = 'N';
 		}
 
 		return $description;

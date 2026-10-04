@@ -2,6 +2,7 @@
 
 namespace Bitrix\Bizproc\Worker\Workflow;
 
+use Bitrix\Bizproc\Workflow\Entity\WorkflowFilterTable;
 use Bitrix\Main;
 use Bitrix\Main\Application;
 
@@ -46,13 +47,9 @@ class ClearFilterAgent
 		{
 			while ($partIds = array_splice($ids, 0, $partLimit))
 			{
-				$inSql = "'" . implode("','", array_column($partIds, 'WORKFLOW_ID')) . "'";
-				$connection->query(
-					sprintf(
-						'DELETE from b_bp_workflow_filter WHERE WORKFLOW_ID IN(%s)',
-						$inSql,
-					)
-				);
+				WorkflowFilterTable::deleteByFilter([
+					'@WORKFLOW_ID' => array_column($partIds, 'WORKFLOW_ID'),
+				]);
 			}
 		}
 

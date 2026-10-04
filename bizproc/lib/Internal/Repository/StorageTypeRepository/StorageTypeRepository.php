@@ -9,6 +9,8 @@ use Bitrix\Bizproc\Internal\Exception\StorageType\DeleteStorageTypeException;
 use Bitrix\Bizproc\Internal\Exception\StorageType\CreateStorageTypeException;
 use Bitrix\Bizproc\Internal\Repository\Mapper\StorageTypeMapper;
 use Bitrix\Bizproc\Public\Provider\Params\StorageType\StorageTypeFilter;
+use Bitrix\Main\ORM\Query\Filter\ConditionTree;
+use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\ORM\Query\QueryHelper;
 use Bitrix\Main\ORM\Data\AddResult;
 use Bitrix\Main\ORM\Data\UpdateResult;
@@ -51,6 +53,87 @@ class StorageTypeRepository implements StorageTypeRepositoryInterface
 		}
 
 		return $query->queryCountTotal();
+	}
+
+	public function getPosition(int $id, ?FilterInterface $filter = null, ?array $sort = null): ?int
+	{
+		$order = $sort ?: ['ID' => 'ASC'];
+
+		$query = StorageTypeTable::query()->setSelect(array_keys($order))->where('ID', $id);
+		if ($filter !== null)
+		{
+			$query->where($filter->prepareFilter());
+		}
+
+		$row = $query->fetch();
+		if ($row === false)
+		{
+			return null;
+		}
+
+		$precedingCondition = $this->buildPrecedingCondition($order, $row);
+		if ($precedingCondition === null)
+		{
+			return 0;
+		}
+
+		$countQuery = StorageTypeTable::query()->where($precedingCondition);
+		if ($filter !== null)
+		{
+			$countQuery->where($filter->prepareFilter());
+		}
+
+		return $countQuery->queryCountTotal();
+	}
+
+	/**
+	 * Rows preceding the given one under $order: NULLs are placed as MySQL does — first for ASC, last for DESC.
+	 */
+	private function buildPrecedingCondition(array $order, array $row): ?ConditionTree
+	{
+		$condition = Query::filter()->logic('or');
+		$equalValues = [];
+
+		foreach ($order as $column => $direction)
+		{
+			$value = $row[$column] ?? null;
+			$isAscending = strtoupper((string)$direction) !== 'DESC';
+
+			if ($value === null && $isAscending)
+			{
+				$equalValues[$column] = null;
+
+				continue;
+			}
+
+			$branch = Query::filter();
+			foreach ($equalValues as $equalColumn => $equalValue)
+			{
+				$equalValue === null
+					? $branch->whereNull($equalColumn)
+					: $branch->where($equalColumn, $equalValue);
+			}
+
+			if ($value === null)
+			{
+				$branch->whereNotNull($column);
+			}
+			elseif ($isAscending)
+			{
+				$branch->where(
+					Query::filter()->logic('or')->where($column, '<', $value)->whereNull($column)
+				);
+			}
+			else
+			{
+				$branch->where($column, '>', $value);
+			}
+
+			$condition->where($branch);
+			$equalValues[$column] = $value;
+		}
+
+		return $condition->hasConditions() ? $condition : null;
 	}
 
 	public function getList(

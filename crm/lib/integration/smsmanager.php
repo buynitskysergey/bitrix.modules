@@ -477,7 +477,7 @@ class SmsManager implements ICanSendMessage
 	 */
 	public static function getEntityPhoneCommunications($entityTypeId, $entityId)
 	{
-		return (new Communications((int)$entityTypeId, (int)$entityId))->setCheckPermissions(false)->get();
+		return (new Communications((int)$entityTypeId, (int)$entityId))->get();
 	}
 
 	/**

@@ -2,6 +2,7 @@
 
 namespace Bitrix\Disk\Integration;
 
+use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
 use Bitrix\Disk\Internals\FileHelper;
@@ -146,6 +147,12 @@ class TransformerManager implements InterfaceCallback
 	 */
 	public static function transformToView(File $file)
 	{
+		$fileExtension = mb_strtolower($file->getExtension());
+		if ($fileExtension === 'mkv' && !Configuration::isEnabledFileViewerFormats())
+		{
+			return false;
+		}
+
 		$view = $file->getView();
 
 		if(!Loader::includeModule('transformer'))
@@ -156,7 +163,6 @@ class TransformerManager implements InterfaceCallback
 		$transformFormats = array($view->getPreviewExtension());
 		$transformParams = array('id' => $file->getId(), 'fileId' => $file->getFileId(), 'queue' => \Bitrix\Main\UI\Viewer\Transformation\TransformerManager::QUEUE_NAME);
 		$viewExtension = $view->getViewExtension();
-		$fileExtension = mb_strtolower($file->getExtension());
 		if($view::isAlwaysTransformToViewFormat())
 		{
 			$transformFormats[] = $viewExtension;
@@ -166,7 +172,7 @@ class TransformerManager implements InterfaceCallback
 			$transformFormats[] = $viewExtension;
 		}
 
-		$transformer = self::getTransformerByFormat($viewExtension);
+		$transformer = static::getTransformerByFormat($viewExtension);
 		if($transformer)
 		{
 			$result = $transformer->transform((int)$file->getFileId(), $transformFormats, self::MODULE_ID, [self::className(), CallbackHandler::class], $transformParams);
@@ -182,7 +188,7 @@ class TransformerManager implements InterfaceCallback
 	 * @param string $viewFormat Extension of the view.
 	 * @return \Bitrix\Transformer\FileTransformer|bool
 	 */
-	private static function getTransformerByFormat($viewFormat)
+	protected static function getTransformerByFormat($viewFormat)
 	{
 		if($viewFormat == 'mp4')
 		{

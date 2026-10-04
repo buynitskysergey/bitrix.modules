@@ -101,9 +101,15 @@ class EntityController extends Controller
 			$settings['ENTITIES'][] = ['ENTITY_TYPE_ID' => $entityTypeID, 'ENTITY_ID' => $entityID];
 		}
 
-		$authorID = isset($params['USER_ID'])
-			? (int)$params['USER_ID']
-			: \CCrmSecurityHelper::GetCurrentUserID();
+		if (isset($params['USER_ID']))
+		{
+			$authorID = (int)$params['USER_ID'];
+		}
+		else
+		{
+			$context = \Bitrix\Crm\Service\Container::getInstance()->getContext();
+			$authorID = (int)($context->getExplicitUserId() ?? 0);
+		}
 		if ($authorID <= 0)
 		{
 			$authorID = static::getDefaultAuthorId();

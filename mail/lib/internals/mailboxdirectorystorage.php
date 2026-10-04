@@ -2,24 +2,32 @@
 
 namespace Bitrix\Mail\Internals;
 
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\MailboxDirectory;
 use Bitrix\Main\Text\Emoji;
 
 class MailboxDirectoryStorage
 {
 	private $mailboxId = null;
+	private GenerationScope $generationScope;
 	private $data = [];
 
-	public function __construct($mailboxId)
+	public function __construct($mailboxId, ?GenerationScope $generationScope = null)
 	{
 		$this->mailboxId = $mailboxId;
+		$this->generationScope = $generationScope ?? GenerationScope::forMailbox((int)$mailboxId);
 
 		$this->init();
 	}
 
+	public function getGenerationScope(): GenerationScope
+	{
+		return $this->generationScope;
+	}
+
 	public function init()
 	{
-		$items = MailboxDirectory::fetchAll($this->mailboxId);
+		$items = MailboxDirectory::fetchAll((int)$this->mailboxId, $this->generationScope);
 
 		$this->set($items);
 	}

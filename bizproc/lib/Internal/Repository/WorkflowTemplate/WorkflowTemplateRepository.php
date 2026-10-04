@@ -14,6 +14,21 @@ class WorkflowTemplateRepository
 		return WorkflowTemplateTable::update($id, $data);
 	}
 
+	/**
+	 * Physical row-presence check. Intentionally broader than the business-level template lookups
+	 * that exclude SYSTEM_CODE templates: this only disambiguates a 0-affected-rows update between a
+	 * genuine no-op on an existing row and a deleted row, so a system template must count as existing.
+	 */
+	public function exists(int $id): bool
+	{
+		return (bool)WorkflowTemplateTable::query()
+			->setSelect(['ID'])
+			->where('ID', $id)
+			->setLimit(1)
+			->fetch()
+		;
+	}
+
 	public function isTemplateActive(int $templateId): ?bool
 	{
 		$templateRow = WorkflowTemplateTable::query()

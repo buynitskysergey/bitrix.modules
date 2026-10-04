@@ -8,6 +8,7 @@ use Bitrix\Crm\Integration\AI\Function\Deal\Dto\MoveBetweenStageParameters;
 use Bitrix\Crm\Item\Deal;
 use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Service\Factory;
 use Bitrix\Crm\Service\Operation\Update;
 use Bitrix\Crm\Service\UserPermissions;
@@ -102,7 +103,8 @@ final class MoveBetweenStage implements AIFunction
 		$operation = $this->factory->getUpdateOperation($deal);
 		$operation
 			->getContext()
-			->setUserId($this->currentUserId);
+			->setUserId($this->currentUserId)
+			->setScope(Context::SCOPE_AI);
 
 		$operation
 			->disableCheckFields()

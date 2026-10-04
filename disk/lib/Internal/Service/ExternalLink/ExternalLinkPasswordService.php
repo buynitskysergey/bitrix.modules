@@ -143,7 +143,7 @@ class ExternalLinkPasswordService
 			return (string)call_user_func($this->sessionIdResolver);
 		}
 
-		return Application::getInstance()->getSession()->getId();
+		return Application::getInstance()->getKernelSession()->getId();
 	}
 
 	/**

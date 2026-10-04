@@ -58,10 +58,7 @@ class ActivityStatusStatistics extends DataSource
 
 		list($providerId, $providerTypeId) = $this->getActivityProviderInfo();
 
-		if($name === '')
-		{
-			$name = 'TOTAL';
-		}
+		$name = $this->sanitizeSelectName($name, 'TOTAL');
 
 		$permissionSql = '';
 		if($this->enablePermissionCheck)
@@ -331,6 +328,10 @@ class ActivityStatusStatistics extends DataSource
 		);
 	}
 
+	protected function getAllowedSelectNames()
+	{
+		return array('TOTAL', 'UNANSWERED_QTY', 'ANSWERED_QTY');
+	}
 	/**
 	 * @return void
 	 */

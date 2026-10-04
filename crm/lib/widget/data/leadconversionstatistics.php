@@ -58,10 +58,7 @@ class LeadConversionStatistics extends LeadDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'TOTALS.SUM_TOTAL';
-		}
+		$name = $this->sanitizeSelectName($name, 'TOTALS.SUM_TOTAL');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -331,6 +328,10 @@ class LeadConversionStatistics extends LeadDataSource
 		);
 	}
 
+	protected function getAllowedSelectNames()
+	{
+		return array('COUNT', 'CONTACT_QTY', 'COMPANY_QTY', 'DEAL_QTY', 'TOTALS.SUM_TOTAL');
+	}
 	/** @return array */
 	public function prepareEntityListFilter(array $filterParams)
 	{

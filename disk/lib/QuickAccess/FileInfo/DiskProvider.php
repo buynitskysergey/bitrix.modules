@@ -5,39 +5,38 @@ declare(strict_types=1);
 namespace Bitrix\Disk\QuickAccess\FileInfo;
 
 use Bitrix\Disk\AttachedObject;
-use Bitrix\Disk\BaseObject;
 use Bitrix\Disk\File;
 use Bitrix\Disk\TypeFile;
+use Bitrix\Disk\Version;
 use Bitrix\Main\NotImplementedException;
+use Bitrix\Main\UI\Viewer\PreviewManager;
 use RuntimeException;
 
 class DiskProvider extends BaseProvider
 {
 	private ?int $bFileId = null;
-	private File $diskFile;
+	private File|Version $source;
 
-	/**
-	 * @param File $file
-	 */
 	protected function __construct(mixed $file)
 	{
-		$this->diskFile = $file;
+		if (!$file instanceof File && !$file instanceof Version)
+		{
+			throw new RuntimeException('Unsupported quick access source');
+		}
+
+		$this->source = $file;
 	}
 
 	public static function create(mixed $file): ?static
 	{
-		if (
-			$file instanceof AttachedObject
-			|| $file instanceof BaseObject
-		)
+		if ($file instanceof AttachedObject)
 		{
-			$fileObject = self::extractFileObject($file);
-			if (!$fileObject instanceof File)
-			{
-				return null;
-			}
+			$file = $file->isSpecificVersion() ? $file->getVersion() : $file->getFile();
+		}
 
-			return new static($fileObject);
+		if ($file instanceof Version || $file instanceof File)
+		{
+			return new static($file);
 		}
 
 		return null;
@@ -47,10 +46,10 @@ class DiskProvider extends BaseProvider
 	{
 		if ($this->bFileId === null)
 		{
-			$fileData = $this->diskFile->getFile();
+			$fileData = $this->source->getFile();
 			if ($fileData === null)
 			{
-				throw new RuntimeException('Failed to get file data for disk file with id ' . $this->diskFile->getId());
+				throw new RuntimeException('Failed to get source file data');
 			}
 
 			$this->bFileId = (int)$fileData['ID'];
@@ -61,7 +60,7 @@ class DiskProvider extends BaseProvider
 
 	public function getFileName(): string
 	{
-		return $this->diskFile->getName();
+		return $this->source->getName();
 	}
 
 	/**
@@ -72,7 +71,7 @@ class DiskProvider extends BaseProvider
 	 */
 	public function getFileInfo(): ?FileInfoDto
 	{
-		$fileData = $this->diskFile->getFile();
+		$fileData = $this->source->getFile();
 		if (
 			!is_array($fileData)
 			|| empty($fileData)
@@ -86,44 +85,49 @@ class DiskProvider extends BaseProvider
 			return null;
 		}
 
-		$previewFileData = [];
-		if (TypeFile::isVideo($this->diskFile))
-		{
-			$previewFileData = $this->diskFile->getView()->getPreviewData();
-		}
-
 		$fileInfo = $this->getInfoForAccelRedirect($fileData);
 		if ($fileInfo->id <= 0)
 		{
 			return null;
 		}
 
-		if (!empty($previewFileData) && is_array($previewFileData) && isset($previewFileData['ID']))
+		if ($this->source instanceof File && TypeFile::isVideo($this->getTypeFileSource()))
 		{
-			$fileInfo->preview = $this->getInfoForAccelRedirect($previewFileData);
+			$previewFileData = $this->source->getView()->getPreviewData();
+			if (is_array($previewFileData) && isset($previewFileData['ID']))
+			{
+				$fileInfo->preview = $this->getInfoForAccelRedirect($previewFileData);
+			}
 		}
 
 		return $fileInfo;
 	}
 
-	public function getSourceId(): string
+	public function getPreviewFileInfo(): ?FileInfoDto
 	{
-		return 'DiskFile:' . $this->diskFile->getId();
-	}
-
-	private static function extractFileObject(AttachedObject|BaseObject $object): ?BaseObject
-	{
-		if ($object instanceof AttachedObject)
+		$previewRow = (new PreviewManager())->getFilePreviewEntryByFileId($this->getBFileId());
+		$previewImageId = (int)($previewRow['PREVIEW_IMAGE_ID'] ?? 0);
+		if ($previewImageId <= 0)
 		{
-			if ($object->isSpecificVersion())
-			{
-				return $object->getVersion()?->getObject();
-			}
-
-			return $object->getFile();
+			return null;
 		}
 
-		return $object;
+		$previewFileData = \CFile::getFileArray($previewImageId);
+		if (!is_array($previewFileData))
+		{
+			return null;
+		}
+
+		$fileInfo = $this->getInfoForAccelRedirect($previewFileData);
+
+		return $fileInfo->id > 0 ? $fileInfo : null;
+	}
+
+	public function getSourceId(): string
+	{
+		return $this->source instanceof Version
+			? 'DiskVersion:' . $this->source->getId()
+			: 'DiskFile:' . $this->source->getId();
 	}
 
 	/**
@@ -135,22 +139,28 @@ class DiskProvider extends BaseProvider
 	 */
 	private function isMediaFile(array $fileData): bool
 	{
-		if (TypeFile::isVideo($this->diskFile))
+		$typeFileSource = $this->getTypeFileSource();
+		if (TypeFile::isVideo($typeFileSource))
 		{
 			return true;
 		}
 
-		if (TypeFile::isAudio($this->diskFile))
+		if (TypeFile::isAudio($typeFileSource))
 		{
 			return true;
 		}
 
-		if (!TypeFile::isImage($this->diskFile))
+		if (!TypeFile::isImage($typeFileSource))
 		{
 			return false;
 		}
 
-		return \CFile::IsImage($this->diskFile->getName(), $fileData['CONTENT_TYPE']);
+		return \CFile::IsImage($this->getFileName(), $fileData['CONTENT_TYPE']);
+	}
+
+	private function getTypeFileSource(): File|string
+	{
+		return $this->source instanceof File ? $this->source : $this->source->getName();
 	}
 
 	/**

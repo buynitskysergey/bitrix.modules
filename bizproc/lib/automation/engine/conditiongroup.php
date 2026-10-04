@@ -109,6 +109,7 @@ class ConditionGroup
 
 			$fld = $document[$conditionField] ?? null;
 			$fieldType = $this->getFieldTypeObject($documentService, $documentType, $conditionField);
+			$condition = $this->resolveRuntimeDateExpression($condition, $fieldType);
 
 			if (!$condition->checkValue($fld, $fieldType, $documentId))
 			{
@@ -524,6 +525,97 @@ class ConditionGroup
 		}
 
 		return $fieldType;
+	}
+
+	private function resolveRuntimeDateExpression(
+		Condition $condition,
+		Bizproc\FieldType $fieldType,
+	): Condition
+	{
+		if (!in_array($fieldType->getBaseType(), [Bizproc\FieldType::DATE, Bizproc\FieldType::DATETIME], true))
+		{
+			return $condition;
+		}
+
+		$value = $this->resolveRuntimeDateExpressionValue($condition->getValue());
+		if ($value === $condition->getValue())
+		{
+			return $condition;
+		}
+
+		$condition = clone $condition;
+		$condition->setValue($value);
+
+		return $condition;
+	}
+
+	private function resolveRuntimeDateExpressionValue(mixed $value): mixed
+	{
+		if (is_array($value))
+		{
+			return array_map($this->resolveRuntimeDateExpressionValue(...), $value);
+		}
+
+		$expression = \CBPActivity::parseExpression($value);
+		if (($expression['object'] ?? null) !== Bizproc\Workflow\Template\SourceType::System)
+		{
+			return $value;
+		}
+
+		$modifiers = array_map(
+			static fn(string $modifier): string => mb_strtolower($modifier),
+			array_slice($expression['modifiers'] ?? [], 0, 2),
+		);
+		if (array_diff($modifiers, [Bizproc\FieldType::DATE, 'printable']))
+		{
+			return $value;
+		}
+
+		[$runtimeValue, $runtimeType, $runtimeTypeClass] = match (mb_strtolower($expression['field']))
+		{
+			'now' => [
+				new Bizproc\BaseType\Value\DateTime(),
+				Bizproc\FieldType::DATETIME,
+				Bizproc\BaseType\Datetime::class,
+			],
+			'nowlocal' => [
+				new Bizproc\BaseType\Value\DateTime(time(), \CTimeZone::getOffset()),
+				Bizproc\FieldType::DATETIME,
+				Bizproc\BaseType\Datetime::class,
+			],
+			'date' => [
+				new Bizproc\BaseType\Value\Date(),
+				Bizproc\FieldType::DATE,
+				Bizproc\BaseType\Date::class,
+			],
+			default => [null, null, null],
+		};
+
+		if ($runtimeValue === null || !$modifiers)
+		{
+			return $runtimeValue ?? $value;
+		}
+
+		$runtimeFieldType = new Bizproc\FieldType(
+			['Type' => $runtimeType, 'Multiple' => false],
+			[],
+			$runtimeTypeClass,
+		);
+
+		foreach ($modifiers as $modifier)
+		{
+			if ($modifier === Bizproc\FieldType::DATE)
+			{
+				$runtimeValue = $runtimeFieldType->convertValue($runtimeValue, Bizproc\BaseType\Date::class);
+			}
+			else
+			{
+				$runtimeValue = $runtimeFieldType->formatValue($runtimeValue, $modifier);
+				$runtimeFieldType->setTypeClass(Bizproc\BaseType\StringType::class);
+			}
+		}
+
+		return $runtimeValue;
 	}
 
 	public function getEvaluateResults(): array

@@ -24,23 +24,53 @@ class StorageFieldValueRepository
 
 	public function add(Entity\StorageItem\StorageItem $item): void
 	{
-		$recordId = $item->getId();
-		$data = [];
+		$this->addMultiple([$item]);
+	}
 
-		foreach ($this->buildFieldRows($item) as $fieldId => $rows)
+	/**
+	 * @param array $items
+	 * @return void
+	 * @throws CreateStorageItemException
+	 * @throws \Bitrix\Main\ArgumentException
+	 * @throws \Bitrix\Main\SystemException
+	 */
+	public function addMultiple(array $items): void
+	{
+		// Flushed as soon as a chunk fills up rather than after collecting everything: a full
+		// materialization passes up to 1000 records here, and one row per record and field means
+		// tens of thousands of arrays alive at once.
+		$data = [];
+		foreach ($items as $item)
 		{
-			foreach ($rows as $row)
+			$recordId = $item->getId();
+			foreach ($this->buildFieldRows($item) as $fieldId => $rows)
 			{
-				$data[] = ['RECORD_ID' => $recordId, 'FIELD_ID' => $fieldId] + $row;
+				foreach ($rows as $row)
+				{
+					$data[] = ['RECORD_ID' => $recordId, 'FIELD_ID' => $fieldId] + $row;
+					if (count($data) >= self::QUERY_CHUNK)
+					{
+						$this->addChunk($data);
+						$data = [];
+					}
+				}
 			}
 		}
 
-		if (!$data)
+		$this->addChunk($data);
+	}
+
+	/**
+	 * @throws CreateStorageItemException
+	 */
+	private function addChunk(array $rows): void
+	{
+		if (!$rows)
 		{
 			return;
 		}
 
-		$result = StorageRecordFieldTable::addMulti($data, true);
+		$result = StorageRecordFieldTable::addMulti($rows, true);
 		if (!$result->isSuccess())
 		{
 			throw new CreateStorageItemException($result->getErrors()[0]->getMessage());
@@ -183,13 +213,93 @@ class StorageFieldValueRepository
 		return $rows;
 	}
 
-	public function getFieldMap(int $storageTypeId): array
+	public function assertKnownFieldCodes(int $storageTypeId, array $valueFields): void
 	{
-		if (isset($this->fieldMapCache[$storageTypeId]))
+		$unknown = array_diff_key($valueFields, $this->getFieldMap($storageTypeId));
+		if (!$unknown)
 		{
-			return $this->fieldMapCache[$storageTypeId];
+			return;
 		}
 
+		$unknown = array_diff_key($unknown, $this->refreshFieldMap($storageTypeId));
+		if (!$unknown)
+		{
+			return;
+		}
+
+		throw new CreateStorageItemException(
+			'Unknown field codes in storage ' . $storageTypeId . ': ' . implode(', ', array_keys($unknown))
+		);
+	}
+
+	public function buildStorageValues(Entity\StorageItem\StorageItem $item): array
+	{
+		$values = [];
+		foreach ($this->buildFieldRows($item) as $fieldId => $rows)
+		{
+			$values[(int)$fieldId] = array_map(static fn(array $row): string => (string)$row['VALUE'], $rows);
+		}
+
+		ksort($values);
+
+		return $values;
+	}
+
+	public function readStorageValues(array $recordIds): array
+	{
+		if (!$recordIds)
+		{
+			return [];
+		}
+
+		$values = [];
+		foreach (array_chunk($recordIds, self::QUERY_CHUNK) as $chunk)
+		{
+			$result = StorageRecordFieldTable::getList([
+				'select' => ['RECORD_ID', 'FIELD_ID', 'VALUE'],
+				'filter' => ['=RECORD_ID' => $chunk],
+				'order' => ['ID' => 'ASC'],
+			]);
+
+			while ($row = $result->fetch())
+			{
+				$values[(int)$row['RECORD_ID']][(int)$row['FIELD_ID']][] = (string)$row['VALUE'];
+			}
+		}
+
+		foreach ($values as &$recordValues)
+		{
+			ksort($recordValues);
+		}
+		unset($recordValues);
+
+		return $values;
+	}
+
+	public function getFieldMap(int $storageTypeId): array
+	{
+		return $this->fieldMapCache[$storageTypeId] ??= $this->loadFieldMap($storageTypeId, true);
+	}
+
+	public function resetFieldMapCache(?int $storageTypeId = null): void
+	{
+		if ($storageTypeId === null)
+		{
+			$this->fieldMapCache = [];
+
+			return;
+		}
+
+		unset($this->fieldMapCache[$storageTypeId]);
+	}
+
+	private function refreshFieldMap(int $storageTypeId): array
+	{
+		return $this->fieldMapCache[$storageTypeId] = $this->loadFieldMap($storageTypeId, false);
+	}
+
+	private function loadFieldMap(int $storageTypeId, bool $useCache): array
+	{
 		$fields = $this->fieldRepository->getByStorageId(
 			$storageTypeId,
 			[
@@ -198,7 +308,7 @@ class StorageFieldValueRepository
 				'TYPE',
 				'MULTIPLE',
 			],
-			true,
+			$useCache,
 		);
 
 		$map = [];
@@ -207,6 +317,6 @@ class StorageFieldValueRepository
 			$map[$field->getCode()] = $field;
 		}
 
-		return $this->fieldMapCache[$storageTypeId] = $map;
+		return $map;
 	}
 }

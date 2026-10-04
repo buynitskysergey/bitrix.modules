@@ -24,9 +24,12 @@ final class UpdateCatalogItemCommand extends Main\Command\AbstractCommand
 
 	protected function execute(): Main\Result
 	{
+		$updateResult = (new UpdateCatalogItemCommandHandler())($this);
+
 		$result = new Main\Result();
 		$result->setData([
-			'item' => (new UpdateCatalogItemCommandHandler())($this),
+			'item' => $updateResult->item,
+			'displacedIconFileId' => $updateResult->displacedIconFileId,
 		]);
 
 		return $result;

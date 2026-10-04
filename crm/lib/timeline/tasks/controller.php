@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Timeline\Tasks;
 use Bitrix\Crm\Activity\Provider\Tasks\Task;
 use Bitrix\Crm\Activity\Provider\Tasks\Comment;
 use Bitrix\Crm\Activity\Provider\Tasks\TaskActivityStatus;
+use Bitrix\Crm\Activity\Provider\Tasks\TaskActivityState;
 use Bitrix\Crm\ActivityBindingTable;
 use Bitrix\Crm\ActivityTable;
 use Bitrix\Crm\EO_Activity;
@@ -21,15 +22,22 @@ use Bitrix\Crm\Integration\Tasks\Service\TriggerService;
 use Bitrix\Crm\Timeline\TimelineEntry;
 use Bitrix\Crm\Timeline\TimelineEntry\Facade;
 use Bitrix\Crm\Timeline\TimelineType;
+use Bitrix\Main\Error;
+use Bitrix\Main\Result;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Tasks\Integration\CRM\Timeline\Bindings;
+use Bitrix\Tasks\V2\Public\Entity\TaskState;
 use CCrmOwnerType;
 
 final class Controller extends FactoryBasedController
 {
+	private const MAX_RETURN_TO_WORK_ATTEMPTS = 3;
+
 	private static ?self $instance = null;
 	private ActivityController $activityController;
 	private Task $taskActivityProvider;
 	private Comment $commentActivityProvider;
+	private TaskActivityStatus $taskActivityStatus;
 	private TriggerService $triggerService;
 
 	protected function getTrackedFieldNames(): array
@@ -43,6 +51,7 @@ final class Controller extends FactoryBasedController
 		$this->activityController = ActivityController::getInstance();
 		$this->taskActivityProvider = new Task();
 		$this->commentActivityProvider = new Comment();
+		$this->taskActivityStatus = new TaskActivityStatus();
 		$this->triggerService = new TriggerService();
 	}
 
@@ -186,15 +195,28 @@ final class Controller extends FactoryBasedController
 		$this->handleTaskEvent(CategoryType::GROUP_CHANGED, $bindings, $timelineParams);
 	}
 
-	public function onTaskExpired(Bindings $bindings, array $timelineParams): void
+	public function onTaskExpired(Bindings $bindings, array $timelineParams): Result
 	{
-		[$bindings, $timelineParams] = $this->prepareParams($bindings, $timelineParams);
-		if ($bindings->isEmpty())
+		$result = new Result();
+		$taskId = (int)($timelineParams['TASK_ID'] ?? 0);
+
+		$syncResult = $this->taskActivityProvider->syncExpiredStatusWithTask($taskId);
+		$result->addErrors($syncResult->getErrors());
+		if ($this->isTaskOrActivityMissing($syncResult))
 		{
-			return;
+			return $result;
 		}
 
-		$this->handleTaskEvent(CategoryType::EXPIRED, $bindings, $timelineParams);
+		[$bindings, $timelineParams] = $this->prepareParams($bindings, $timelineParams);
+		$this->sendPullEventsOnDelete($bindings, $syncResult->getDeletedCompletionEntryIds());
+		if ($bindings->isEmpty())
+		{
+			return $result;
+		}
+
+		return $result->addErrors(
+			$this->handleTaskEvent(CategoryType::EXPIRED, $bindings, $timelineParams)->getErrors(),
+		);
 	}
 
 	public function onTaskResultAdded(Bindings $bindings, array $timelineParams): void
@@ -208,27 +230,50 @@ final class Controller extends FactoryBasedController
 		$this->handleTaskEvent(CategoryType::RESULT_ADDED, $bindings, $timelineParams);
 	}
 
-	public function onTaskStatusChanged(Bindings $bindings, array $timelineParams): void
+	public function onTaskStatusChanged(Bindings $bindings, array $timelineParams): Result
 	{
+		$result = new Result();
 		$taskId = (int)($timelineParams['TASK_ID'] ?? 0);
 		if ($taskId <= 0)
 		{
-			return;
+			return $result;
+		}
+
+		$syncResult = $this->taskActivityProvider->syncStateWithTask($taskId);
+		$result->addErrors($syncResult->getErrors());
+		if ($this->isTaskOrActivityMissing($syncResult))
+		{
+			return $result;
 		}
 
 		[$bindings, $timelineParams] = $this->prepareParams($bindings, $timelineParams);
+		$this->sendPullEventsOnDelete($bindings, $syncResult->getDeletedCompletionEntryIds());
 		if ($bindings->isEmpty())
 		{
-			return;
+			return $result;
 		}
 
-		$this->handleTaskEvent(CategoryType::STATUS_CHANGED, $bindings, $timelineParams);
+		$result->addErrors(
+			$this->handleTaskEvent(CategoryType::STATUS_CHANGED, $bindings, $timelineParams)->getErrors(),
+		);
+		if ($result->isSuccess() && $this->isTaskReturnedToWork($timelineParams))
+		{
+			$result->addErrors(
+				$this->returnTaskActivityToWork(
+					$bindings,
+					$timelineParams,
+					$syncResult->getInitialActivityState(),
+				)->getErrors(),
+			);
+		}
 
 		$status = (int)($timelineParams['TASK_CURRENT_STATUS'] ?? 0);
 		if ($status > 0)
 		{
 			$this->triggerService->executeTriggers($bindings, $taskId, $status);
 		}
+
+		return $result;
 	}
 
 	public function onTaskChecklistAdded(Bindings $bindings, array $timelineParams): void
@@ -275,43 +320,276 @@ final class Controller extends FactoryBasedController
 		$this->handleCommentActivity($bindings, CategoryType::COMMENT_ADD, $timelineParams);
 	}
 
-	public function onTaskRenew(Bindings $bindings, array $timelineParams): void
+	public function onTaskRenew(Bindings $bindings, array $timelineParams): Result
 	{
+		$result = new Result();
 		$taskId = $timelineParams['TASK_ID'] ?? null;
 		if (is_null($taskId))
 		{
-			return;
+			return $result;
 		}
 		$bindings = $this->filterBindings($bindings, $timelineParams);
 		if ($bindings->isEmpty())
 		{
-			return;
+			return $result;
 		}
 
-		$activity = $this->taskActivityProvider->find($taskId);
-		$task = TaskObject::getObject($taskId);
-		if (is_null($task))
+		return $result->addErrors(
+			$this->returnTaskActivityToWork($bindings, $timelineParams)->getErrors(),
+		);
+	}
+
+	/**
+	 * Undoing a completion goes by the state of the activity, not by the event that led here: a return to work
+	 * publishes a status change and a renew, both of them arrive at this point independently, and either has to
+	 * be able to finish what the other one left undone.
+	 */
+	private function returnTaskActivityToWork(
+		Bindings $bindings,
+		array $timelineParams,
+		?TaskActivityState $initialActivityState = null,
+	): Result
+	{
+		$result = new Result();
+		$taskId = (int)($timelineParams['TASK_ID'] ?? 0);
+		$activity = $this->taskActivityProvider->find($taskId, true);
+		if ($activity === null)
 		{
-			return;
-		}
-		$status = (int)$task->getStatus();
-		if ($status !== TaskActivityStatus::TASKS_STATE_PENDING)
-		{
-			return;
+			return $result;
 		}
 
-		$endDatePlan = $task->getEndDatePlan();
-		$this->taskActivityProvider->setEndTime($activity, $endDatePlan);
-		$this->taskActivityProvider->renew($activity->getId());
-		$completedActivityEntryId = $this->taskActivityProvider->getCompletedActivityEntryId($activity->getId(), $taskId);
-		if ($completedActivityEntryId > 0)
+		// the completion record is the only marker of a completion to undo: without it nothing was overwritten
+		$completedActivityEntryIds = (
+			$initialActivityState !== null
+			&& $initialActivityState->activityId === $activity->getId()
+			&& $initialActivityState->completedEntryIds !== null
+		)
+			? $initialActivityState->completedEntryIds
+			: $this->taskActivityProvider->getCompletedActivityEntryIds($activity->getId(), $taskId)
+		;
+		if ($completedActivityEntryIds === [])
 		{
-			TimelineEntry::delete($completedActivityEntryId);
+			return $result;
+		}
+
+		$taskState = $this->taskActivityProvider->getCurrentTaskStateSnapshot($taskId);
+		if ($taskState === null || !$this->isActiveTaskState($taskState->status))
+		{
+			return $result;
+		}
+
+		if ($initialActivityState === null || $initialActivityState->activityId !== $activity->getId())
+		{
+			$activitySettings = $activity->getSettings();
+			$activityEndTime = $activity->getEndTime();
+			$initialActivityState = new TaskActivityState(
+				activityId: $activity->getId(),
+				completed: $activity->getCompleted(),
+				status: is_array($activitySettings) ? ($activitySettings['ACTIVITY_STATUS'] ?? null) : null,
+				endTime: $activityEndTime === null ? null : clone $activityEndTime,
+				completedEntryIds: $completedActivityEntryIds,
+			);
+		}
+
+		for ($attempt = 1; $attempt <= self::MAX_RETURN_TO_WORK_ATTEMPTS; $attempt++)
+		{
+			if ($this->isActiveTaskState($taskState->status))
+			{
+				$taskStateBeforeWrite = $taskState;
+				$entryIdsToDelete = $this->taskActivityProvider->getCompletedActivityEntryIds(
+					$activity->getId(),
+					$taskId,
+				);
+				$stateResult = $this->taskActivityProvider->restoreState(
+					$activity,
+					false,
+					$this->taskActivityStatus->onStatusChange(
+						$taskStateBeforeWrite->status,
+						$taskStateBeforeWrite->isExpired,
+					),
+					$this->getTaskActivityEndTime($taskStateBeforeWrite),
+				);
+				if (!$stateResult->isSuccess())
+				{
+					return $result->addErrors($stateResult->getErrors());
+				}
+
+				$activity = $this->taskActivityProvider->find($taskId, true);
+				$taskState = $this->taskActivityProvider->getCurrentTaskStateSnapshot($taskId);
+				if ($activity === null || $taskState === null)
+				{
+					return $result;
+				}
+
+				if (
+					!$activity->getCompleted()
+					&& $taskStateBeforeWrite->isEqualTo($taskState)
+				)
+				{
+					$this->deleteCompletedActivityEntries($bindings, $entryIdsToDelete);
+
+					return $result;
+				}
+
+				continue;
+			}
+
+			$syncResult = $this->taskActivityProvider->syncStateWithTask($taskId);
+			if (!$syncResult->isSuccess())
+			{
+				return $result->addErrors($syncResult->getErrors());
+			}
+
+			$activity = $this->taskActivityProvider->find($taskId, true);
+			$taskState = $this->taskActivityProvider->getCurrentTaskStateSnapshot($taskId);
+			if ($activity === null || $taskState === null)
+			{
+				return $result;
+			}
+
+			if ($this->isActiveTaskState($taskState->status))
+			{
+				continue;
+			}
+
+			if (
+				$this->taskActivityStatus->onStatusChange($taskState->status, $taskState->isExpired) === ''
+			)
+			{
+				$restoreResult = $this->restoreCompletionWithoutReplacingEntries(
+					$bindings,
+					$taskId,
+					$activity->getId(),
+					$completedActivityEntryIds,
+					$initialActivityState->status,
+					$initialActivityState->endTime,
+				);
+				if (!$restoreResult->isSuccess())
+				{
+					return $result->addErrors($restoreResult->getErrors());
+				}
+
+				$taskState = $this->taskActivityProvider->getCurrentTaskStateSnapshot($taskId);
+				if (
+					$taskState !== null
+					&& $this->taskActivityStatus->onStatusChange($taskState->status, $taskState->isExpired) === ''
+				)
+				{
+					return $result;
+				}
+
+				continue;
+			}
+
+			if (
+				!$activity->getCompleted()
+				|| !$this->taskActivityStatus->isCompletedTaskState($taskState->status)
+			)
+			{
+				continue;
+			}
+
+			$this->deleteCompletedActivityEntries($bindings, $completedActivityEntryIds);
+
+			return $result;
+		}
+
+		return $result->addError(new Error(
+			'Task state kept changing while its activity was being returned to work.',
+			Task::ERROR_TASK_STATE_CHANGED,
+			['taskId' => $taskId],
+		));
+	}
+
+	private function getTaskActivityEndTime(TaskState $taskState): ?DateTime
+	{
+		$endTimeTs = $taskState->endPlanTs ?? $taskState->deadlineTs;
+
+		return $endTimeTs === null ? null : DateTime::createFromTimestamp($endTimeTs);
+	}
+
+	/**
+	 * @param int[] $preservedEntryIds
+	 */
+	private function restoreCompletionWithoutReplacingEntries(
+		Bindings $bindings,
+		int $taskId,
+		int $activityId,
+		array $preservedEntryIds,
+		?string $preservedStatus,
+		?DateTime $preservedEndTime,
+	): Result
+	{
+		$result = new Result();
+		$activity = $this->taskActivityProvider->find($taskId, true);
+		if ($activity === null)
+		{
+			return $result->addError(new Error(
+				'Task activity was not found.',
+				Task::ERROR_ACTIVITY_NOT_FOUND,
+				['taskId' => $taskId],
+			));
+		}
+
+		$stateResult = $this->taskActivityProvider->restoreState(
+			$activity,
+			true,
+			$preservedStatus,
+			$preservedEndTime,
+		);
+		if (!$stateResult->isSuccess())
+		{
+			return $result->addErrors($stateResult->getErrors());
+		}
+
+		$currentEntryIds = $this->taskActivityProvider->getCompletedActivityEntryIds($activityId, $taskId);
+		$technicalEntryIds = array_values(array_diff($currentEntryIds, $preservedEntryIds));
+		$this->deleteCompletedActivityEntries($bindings, $technicalEntryIds);
+
+		return $result;
+	}
+
+	/**
+	 * @param int[] $entryIds
+	 */
+	private function deleteCompletedActivityEntries(Bindings $bindings, array $entryIds): void
+	{
+		foreach ($entryIds as $entryId)
+		{
+			TimelineEntry::delete($entryId);
 			foreach ($bindings as $identifier)
 			{
-				$this->sendPullEventOnDelete($identifier, $completedActivityEntryId);
+				$this->sendPullEventOnDelete($identifier, $entryId);
 			}
 		}
+	}
+
+	/**
+	 * @param int[] $entryIds
+	 */
+	private function sendPullEventsOnDelete(Bindings $bindings, array $entryIds): void
+	{
+		foreach ($entryIds as $entryId)
+		{
+			foreach ($bindings as $identifier)
+			{
+				$this->sendPullEventOnDelete($identifier, $entryId);
+			}
+		}
+	}
+
+	/**
+	 * A state without a projection (deferred, declined) postpones the cleanup instead of doing it: it keeps
+	 * the completion effects and publishes no renew event, so they surface again on the next step of the
+	 * chain. Every arrival into work has to look for them, not only the one right after a completed state.
+	 */
+	private function isTaskReturnedToWork(array $timelineParams): bool
+	{
+		$previousStatus = (int)($timelineParams['TASK_PREVIOUS_STATUS'] ?? 0);
+		$currentStatus = (int)($timelineParams['TASK_CURRENT_STATUS'] ?? 0);
+
+		return !$this->isActiveTaskState($previousStatus)
+			&& $this->isActiveTaskState($currentStatus);
 	}
 
 	public function onTaskDeleted(Bindings $bindings, array $timelineParams): void
@@ -514,15 +792,18 @@ final class Controller extends FactoryBasedController
 		}
 	}
 
-	protected function handleTaskEvent(int $typeCategoryId, Bindings $bindings, array $timelineParams): void
+	protected function handleTaskEvent(int $typeCategoryId, Bindings $bindings, array $timelineParams): Result
 	{
+		$result = new Result();
 		if ($typeCategoryId === CategoryType::TASK_ADDED)
 		{
 			$this->handleTaskActivityOnNewTask($bindings, $typeCategoryId, $timelineParams);
-			return;
+
+			return $result;
 		}
 		$this->handleTaskTimeline($typeCategoryId, $timelineParams, $bindings);
-		$this->handleTaskActivity($typeCategoryId, $timelineParams, $bindings);
+
+		return $this->handleTaskActivity($typeCategoryId, $timelineParams, $bindings);
 	}
 
 	private function handleTaskTimeline(int $typeCategoryId, array $timelineParams, Bindings $bindings): void
@@ -553,12 +834,13 @@ final class Controller extends FactoryBasedController
 		}
 	}
 
-	private function handleTaskActivity(int $typeCategoryId, array $params, Bindings $bindings): void
+	private function handleTaskActivity(int $typeCategoryId, array $params, Bindings $bindings): Result
 	{
+		$result = new Result();
 		$taskId = $params['TASK_ID'] ?? null;
 		if(is_null($taskId))
 		{
-			return;
+			return $result;
 		}
 
 		$desiredStatus = null;
@@ -574,10 +856,6 @@ final class Controller extends FactoryBasedController
 				break;
 
 			case CategoryType::STATUS_CHANGED:
-				$desiredStatus = (new TaskActivityStatus())->onStatusChange(
-					(int)$params['TASK_CURRENT_STATUS'],
-					$params['IS_EXPIRED'] ?? false
-				);
 				break;
 
 			case CategoryType::RESULT_ADDED:
@@ -585,7 +863,6 @@ final class Controller extends FactoryBasedController
 				break;
 
 			case CategoryType::EXPIRED:
-				$desiredStatus = TaskActivityStatus::STATUS_EXPIRED;
 				break;
 
 			case CategoryType::DESCRIPTION_CHANGED:
@@ -613,7 +890,7 @@ final class Controller extends FactoryBasedController
 
 		if ($desiredStatus && $this->isActivityStatusUpdateRequired($params, $bindings, $desiredStatus))
 		{
-			$this->taskActivityProvider->updateStatus(
+			$result = $this->taskActivityProvider->updateStatus(
 				$taskId,
 				$desiredStatus
 			);
@@ -630,6 +907,8 @@ final class Controller extends FactoryBasedController
 		{
 			$this->refreshTaskActivity($bindings, $params);
 		}
+
+		return $result;
 	}
 
 	private function handleTaskActivityOnNewTask(Bindings $bindings, int $typeId, array $timelineParams): void
@@ -844,6 +1123,30 @@ final class Controller extends FactoryBasedController
 		return $result;
 	}
 
+	/**
+	 * A task state the activity mirrors as not completed. States without a projection (deferred, declined)
+	 * leave the activity state untouched, so there is nothing to return to work for them either.
+	 */
+	private function isActiveTaskState(int $taskStatus): bool
+	{
+		$projection = $this->taskActivityStatus->onStatusChange($taskStatus);
+
+		return $projection !== '' && !$this->taskActivityStatus->isCompletedTaskState($taskStatus);
+	}
+
+	/**
+	 * A failed write still leaves a task and an activity for the rest of the handler to work on, so only a
+	 * missing one of them cancels it: the timeline entry, the triggers and the related updates never depended
+	 * on the status write, while a missing task or activity leaves nothing to build them from anyway.
+	 */
+	private function isTaskOrActivityMissing(Result $syncResult): bool
+	{
+		$errors = $syncResult->getErrorCollection();
+
+		return $errors->getErrorByCode(Task::ERROR_TASK_NOT_FOUND) !== null
+			|| $errors->getErrorByCode(Task::ERROR_ACTIVITY_NOT_FOUND) !== null;
+	}
+
 	private function isActivityStatusUpdateRequired(array $params, Bindings $bindings, string $desiredStatus): bool
 	{
 		$authorId = $params['AUTHOR_ID'] ?? 0;
@@ -860,7 +1163,8 @@ final class Controller extends FactoryBasedController
 			return false;
 		}
 
-		if (in_array($desiredStatus, TaskActivityStatus::STATUSES_MANAGER_CAN_UPDATE, true))
+		// a deadline change keeps its historical right to be applied by the assignee as well
+		if ($desiredStatus === TaskActivityStatus::STATUS_DEADLINE_CHANGED)
 		{
 			return true;
 		}

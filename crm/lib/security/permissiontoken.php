@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Security;
 
 use Bitrix\Crm\Integration\Im\Chat;
+use Bitrix\Crm\Integration\Tasks\TaskAccessController;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\Loader;
@@ -42,6 +43,16 @@ class PermissionToken
 		return $instance->createToken(self::ACCESS_TYPE_VIEW_ACTIVITY, [
 			'activityId' => $activityId,
 			'chatId' => $chatId,
+		]);
+	}
+
+	public static function createViewActivityTokenForTask(int $activityId, int $taskId): string
+	{
+		$instance = new self();
+
+		return $instance->createToken(self::ACCESS_TYPE_VIEW_ACTIVITY, [
+			'activityId' => $activityId,
+			'taskId' => $taskId,
 		]);
 	}
 
@@ -112,12 +123,18 @@ class PermissionToken
 				case self::ACCESS_TYPE_VIEW_ACTIVITY:
 					$tokenActivityId = (int)($payload['activityId'] ?? 0);
 					$tokenChatId = (int)($payload['chatId'] ?? 0);
+					$tokenTaskId = (int)($payload['taskId'] ?? 0);
 					$requestedActivityId = (int)($data['activityId'] ?? 0);
 					$userId = (int)($data['userId'] ?? 0);
 
 					if ($tokenActivityId <= 0 || $tokenActivityId !== $requestedActivityId)
 					{
 						return false;
+					}
+
+					if ($tokenTaskId > 0)
+					{
+						return $userId > 0 && TaskAccessController::canRead($tokenTaskId, $userId);
 					}
 
 					if ($tokenChatId <= 0 || $userId <= 0)

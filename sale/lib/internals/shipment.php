@@ -171,11 +171,17 @@ class ShipmentTable extends Main\Entity\DataManager
 			),
 
 			new Main\Entity\FloatField(
-				'BASE_PRICE_DELIVERY'
+				'BASE_PRICE_DELIVERY',
+				[
+					'scale' => 8,
+				]
 			),
 
 			new Main\Entity\FloatField(
-				'PRICE_DELIVERY'
+				'PRICE_DELIVERY',
+				[
+					'scale' => 8,
+				]
 			),
 
 			new Main\Entity\FloatField(
@@ -202,7 +208,10 @@ class ShipmentTable extends Main\Entity\DataManager
 			),
 
 			new Main\Entity\FloatField(
-				'DISCOUNT_PRICE'
+				'DISCOUNT_PRICE',
+				[
+					'scale' => 8,
+				]
 			),
 
 			new Main\Entity\BooleanField(

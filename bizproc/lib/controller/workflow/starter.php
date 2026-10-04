@@ -22,6 +22,7 @@ use Bitrix\Bizproc\Starter\Dto\DocumentDto;
 use Bitrix\Bizproc\Starter\Dto\EventDto;
 use Bitrix\Bizproc\Starter\Dto\MetaDataDto;
 use Bitrix\Bizproc\Starter\Enum\Face;
+use Bitrix\Bizproc\Starter\Enum\ManualStartSurface;
 use Bitrix\Main\Localization\Loc;
 use CBPDocumentEventType;
 
@@ -115,6 +116,10 @@ class Starter extends Base
 		}
 
 		$templateService = new WorkflowTemplateService();
+
+		// the version is chosen anew here, at the confirmation of the start: the one the form was built
+		// from could have been replaced or stopped meanwhile, and a set of fields that no longer matches
+		// comes back as an ordinary "fill in the field" error bound to the field
 		$workflowParameters = $templateService->prepareStartParameters(
 			new PrepareStartParametersRequest(
 				templateId: $templateId,
@@ -124,6 +129,7 @@ class Starter extends Base
 					$this->getRequest()->getFileList()->toArray()
 				),
 				targetUserId: $userId,
+				manualStartSurface: $this->manualStartSurfaceOf($triggerType),
 			)
 		);
 
@@ -159,10 +165,19 @@ class Starter extends Base
 	{
 		$currentUserId = $this->getCurrentUserId();
 
-		$context = new ContextDto('bizproc', Face::WEB);
+		$context = new ContextDto(
+			'bizproc',
+			Face::WEB,
+			manualStartSurface: $this->manualStartSurfaceOf($triggerType),
+		);
 		$metaData = new MetaDataDto($startDuration >= 0 ? $startDuration : null);
 		$documentId = $this->getComplexDocumentId();
 		$documentType = $this->getComplexDocumentType();
+
+		// the values are already prepared against the parameters of the version that acts for this
+		// employee, so they are handed over keyed by the template: a flat set would be matched against the
+		// live row once more and would lose the fields the pilot version of the template has of its own
+		$workflowParameters = [$templateId => $workflowParameters];
 
 		if ($triggerType)
 		{
@@ -194,6 +209,17 @@ class Starter extends Base
 			parameters: $workflowParameters,
 			metaData: $metaData,
 		);
+	}
+
+	/**
+	 * Every start of this action is a start an employee performs by hand, and the two branches of the
+	 * action are two different surfaces of the product: the start form and the trigger button of the
+	 * scheme. The form and the start it confirms must name the same one, otherwise the set of the fields
+	 * would be built for one surface and the start performed on another.
+	 */
+	private function manualStartSurfaceOf(?string $triggerType): ManualStartSurface
+	{
+		return $triggerType ? ManualStartSurface::TriggerButton : ManualStartSurface::StartForm;
 	}
 
 	public function checkParametersAction(int $autoExecuteType): ?array

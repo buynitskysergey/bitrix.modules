@@ -4,6 +4,8 @@ namespace Bitrix\Crm\Copilot\CallAssessment\EntitySelector;
 
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
+use Bitrix\Crm\Copilot\CallAssessment\CriteriaLoader;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Main\Loader;
 use CPullWatch;
 
@@ -47,6 +49,8 @@ final class PullManager
 
 	public function dispatchUpdate(CallAssessmentItem $callAssessment): void
 	{
+		$this->attachCriteria($callAssessment);
+
 		$params = [
 			'itemOptions' => (new ItemAdapter($callAssessment))
 				->addTab(CallScriptProvider::ENTITY_ID)
@@ -58,6 +62,11 @@ final class PullManager
 
 	public function dispatchSelect(string $selectorId, ?CallAssessmentItem $callAssessmentItem): void
 	{
+		if ($callAssessmentItem !== null)
+		{
+			$this->attachCriteria($callAssessmentItem);
+		}
+
 		$itemOptions = $callAssessmentItem !== null
 			? (new ItemAdapter($callAssessmentItem))->addTab(CallScriptProvider::ENTITY_ID)
 			: null
@@ -69,6 +78,27 @@ final class PullManager
 		];
 
 		$this->addToStack(self::COMMAND_SELECT, $params);
+	}
+
+	private function attachCriteria(CallAssessmentItem $item): void
+	{
+		if ($item->getCriteria() !== null)
+		{
+			return;
+		}
+
+		if (!AIManager::isCallScoringV2Enabled())
+		{
+			return;
+		}
+
+		$id = $item->getId();
+		if ($id === null)
+		{
+			return;
+		}
+
+		$item->setCriteria((new CriteriaLoader())->loadForAssessment($id));
 	}
 
 	private function isPullAvailable(): bool

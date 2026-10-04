@@ -4,6 +4,7 @@ namespace Bitrix\Mail\ImapCommands;
 
 use Bitrix\Mail;
 use Bitrix\Mail\Helper\Mailbox;
+use Bitrix\Mail\Internal\Service\SourceGeneration\ActivePlacementResolver;
 use Bitrix\Mail\Internals\MailboxDirectoryTable;
 use Bitrix\Main;
 use Bitrix\Main\Localization\Loc;
@@ -29,6 +30,7 @@ class SyncInternalManager
 	/** @var int[]|null message ids captured before the operation */
 	protected ?array $deferredPushTargets = null;
 	private $isInit;
+	private ?ActivePlacementResolver $activePlacementResolver = null;
 	/** @var Repository */
 	protected $repository;
 	/** @var Mailbox */
@@ -62,6 +64,25 @@ class SyncInternalManager
 		return Mailbox::createInstance($this->mailboxId, $throwExceptions);
 	}
 
+	/**
+	 * Admission of the command to the active source generation of the mailbox. Resolved
+	 * here and not on the repository: test doubles replace the repository with an object
+	 * that does not inherit it.
+	 */
+	protected function getActivePlacementResolver(): ActivePlacementResolver
+	{
+		return $this->activePlacementResolver ??= new ActivePlacementResolver((int)$this->mailboxId);
+	}
+
+	/**
+	 * The uid rows the command names: a row left by a previous physical source exists
+	 * but is read-only, so the command is refused before it changes anything.
+	 */
+	private function checkActivePlacements(): Main\Result
+	{
+		return $this->getActivePlacementResolver()->checkPlacements($this->messagesIds);
+	}
+
 	protected function initData($folderType = null)
 	{
 		if ($this->isInit)
@@ -78,11 +99,23 @@ class SyncInternalManager
 				'MAIL_CLIENT_MAILBOX_NOT_FOUND'));
 		}
 
+		$generationCheck = $this->checkActivePlacements();
+		if (!$generationCheck->isSuccess())
+		{
+			return $generationCheck;
+		}
+
 		if ($folderType)
 		{
 			$folder = $this->getDirPathByType($folderType);
 			if (!$folder)
 			{
+				$generationCheck = $this->getActivePlacementResolver()->checkMissingFolderType($folderType);
+				if (!$generationCheck->isSuccess())
+				{
+					return $generationCheck;
+				}
+
 				$errorCode = 'MAIL_CLIENT_' . ($folderType == MailboxDirectoryTable::TYPE_TRASH ? 'TRASH' : 'SPAM') . '_FOLDER_NOT_SELECTED_ERROR';
 				return $result->addError(new Main\Error(
 					Loc::getMessage($errorCode),
@@ -169,13 +202,14 @@ class SyncInternalManager
 		);
 
 		$messageIds = [];
+		// A uid id of a prepared generation never belongs to a message the user has just read
 		$res = Mail\MailMessageUidTable::getList([
 			'select' => ['MESSAGE_ID'],
-			'filter' => [
+			'filter' => $this->getActivePlacementResolver()->getScope()->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'@ID' => $this->messagesIds,
 				'>=DATE_INSERT' => $deliveredAfter,
-			],
+			]),
 		]);
 		while ($row = $res->fetch())
 		{

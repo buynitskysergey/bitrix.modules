@@ -22,7 +22,7 @@ final class AccessController extends BaseAccessController
 		$this->ruleFactory = new NoteRuleFactory();
 	}
 
-	protected function loadItem(int $itemId = null): ?AccessibleItem
+	protected function loadItem(?int $itemId = null): ?AccessibleItem
 	{
 		if ($itemId)
 		{
@@ -53,7 +53,7 @@ final class AccessController extends BaseAccessController
 	/**
 	 * @throws UnknownActionException
 	 */
-	public function check(string $action, AccessibleItem $item = null, $params = null): bool
+	public function check(string $action, ?AccessibleItem $item = null, $params = null): bool
 	{
 		if ($this->isPortalAdmin())
 		{

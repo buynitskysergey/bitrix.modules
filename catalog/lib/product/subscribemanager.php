@@ -296,18 +296,20 @@ class SubscribeManager
 
 		/* Preparation of data for the mail template */
 		$dataSendToNotice = array();
-		$listSubscribesUrl = (string)(new Uri('/personal/subscribe/'))->toAbsolute();
+		$listSubscribesUrl = (new Uri('/personal/subscribe/'))->toAbsolute();
 		$dataSendToNotice[$subscriberData['contactType']][$subscriberData['userContact']][] = array(
 			'EVENT_NAME' => 'CATALOG_PRODUCT_SUBSCRIBE_LIST_CONFIRM',
 			'EMAIL_TO' => $subscriberData['userContact'],
 			'SITE_ID' => $subscriberData['siteId'],
 			'USER_NAME' => Loc::getMessage('EMAIL_TEMPLATE_USER_NAME'),
 			'TOKEN' => $token,
-			'LIST_SUBSCRIBES' => $listSubscribesUrl,
-			'TOKEN_URL' => \CHTTP::urlAddParams($listSubscribesUrl, array('accessCodeVerification' => 'Y',
-				'userContact' => $subscriberData['userContact'], 'subscribeToken' => $token)),
-			'URL_PARAMETERS' => \CHTTP::urlAddParams('', array('accessCodeVerification' => 'Y',
-				'userContact' => $subscriberData['userContact'], 'subscribeToken' => $token))
+			'LIST_SUBSCRIBES' => (string)$listSubscribesUrl,
+			'TOKEN_URL' => (string)$listSubscribesUrl->addParams([
+				'accessCodeVerification' => 'Y',
+				'userContact' => $subscriberData['userContact'],
+				'subscribeToken' => $token,
+			]),
+			'URL_PARAMETERS' => $listSubscribesUrl->getQuery(),
 		);
 
 		foreach($this->contactTypes as $typeId => $typeData)

@@ -94,6 +94,11 @@ class ActivityAiPropertyConverter
 
 	private function makeFieldSetting(string $name, array $field, array $documentType): ?Setting
 	{
+		if (!$this->isNormalizableProperty($field))
+		{
+			return null;
+		}
+
 		$fieldType = $this->getFieldType($field, $documentType);
 		if ($fieldType === null || empty($fieldType->getBaseType()))
 		{
@@ -101,6 +106,11 @@ class ActivityAiPropertyConverter
 		}
 
 		$description = $this->getFieldDescription($field, $fieldType);
+		if (empty($description))
+		{
+			$description = $this->makeNameBasedDescription($name);
+		}
+
 		if (empty($description))
 		{
 			return null;
@@ -113,7 +123,7 @@ class ActivityAiPropertyConverter
 			required: $fieldType->isRequired(),
 			multiple: $fieldType->isMultiple(),
 			options: $this->makeSettingOptions($fieldType),
-			defaultValue: $fieldType->getValue(),
+			defaultValue: $this->makeDefaultValue($fieldType->getValue()),
 		);
 	}
 
@@ -131,6 +141,48 @@ class ActivityAiPropertyConverter
 			type: static::SETTING_TYPE_MAP,
 			children: $children,
 		);
+	}
+
+	private function makeDefaultValue(mixed $value): ?string
+	{
+		if (!is_scalar($value))
+		{
+			return null;
+		}
+
+		$str = (string)$value;
+
+		// Bizproc expressions ({=...} reference substitutions and {{=...}} computed expressions)
+		// must not be exposed as literal default values - they are runtime placeholders, not scalars.
+		if (str_starts_with($str, '{=') || str_starts_with($str, '{{='))
+		{
+			return null;
+		}
+
+		return $str;
+	}
+
+	private function makeNameBasedDescription(string $name): string
+	{
+		$words = preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', ' ', str_replace(['_', '-'], ' ', $name));
+
+		return trim((string)$words);
+	}
+
+	private function isNormalizableProperty(array $field): bool
+	{
+		// FieldType::normalizeProperty() casts these keys to string,
+		// arrays there mean the value is not a property descriptor
+		foreach ($field as $key => $value)
+		{
+			$key = mb_strtoupper((string)$key);
+			if (in_array($key, ['TYPE', '0', 'ID'], true) && !is_scalar($value) && $value !== null)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	public function getFieldType(array $field, array $documentType): ?FieldType

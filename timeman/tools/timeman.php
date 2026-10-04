@@ -65,6 +65,7 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 					'view' => 'inline',
 					'showIcon' => false,
 					'initTime' => $start_time,
+					'step' => 1,
 				]
 			);
 
@@ -92,6 +93,7 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 						'view' => 'inline',
 						'showIcon' => false,
 						'initTime' => $start_time_1,
+						'step' => 1,
 					]
 				);
 				$clock2 = ob_get_contents();
@@ -1099,7 +1101,12 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 						$longDateFormat = $culture->getLongDateFormat();
 						$arInfo = CTimeMan::GetRuntimeInfo(true);
 						$arInfo['DATE_TEXT'] = FormatDate($longDateFormat, $arInfo['INFO']['DATE_START']);
-						$arInfo['INFO']['TIME_OFFSET'] = CTimeManUser::instance()->getDayStartOffset($arInfo['INFO'], true);
+						// TIME_OFFSET must be reconstructed from the TRUE absolute start instant, which
+						// GetCurrentInfo() carries in RECORDED_START_TIMESTAMP (getDayStartOffset prefers that
+						// column over the site-shifted DATE_START display string): on a DST transition an instant
+						// shifted by the site offset lands in the neighbouring period and yields a wrong offset.
+						$tmUser = CTimeManUser::instance();
+						$arInfo['INFO']['TIME_OFFSET'] = $tmUser->getDayStartOffset($tmUser->GetCurrentInfo());
 
 
 						if ($arInfo['PLANNER'])
@@ -2300,8 +2307,11 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 										];
 									}
 
+									// Both offsets cancel: the read added the site offset, GetOffset() takes it back.
 									$arRes['DATE_START'] = MakeTimeStamp($arRes['DATE_START']) - CTimeZone::GetOffset();
-									$arRes['DATE_FINISH'] = MakeTimeStamp($arRes['DATE_FINISH']) - CTimeZone::GetOffset();
+									$arRes['DATE_FINISH'] = $arRes['DATE_FINISH']
+										? MakeTimeStamp($arRes['DATE_FINISH']) - CTimeZone::GetOffset()
+										: '';
 
 									$culture = \Bitrix\Main\Application::getInstance()->getContext()->getCulture();
 									$longDateFormat = $culture->getLongDateFormat();

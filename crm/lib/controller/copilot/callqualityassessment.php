@@ -2,6 +2,9 @@
 
 namespace Bitrix\Crm\Controller\Copilot;
 
+use Bitrix\Bizproc\Starter\Dto\ContextDto;
+use Bitrix\Bizproc\Starter\Enum\Scenario as BizprocScenario;
+use Bitrix\Bizproc\Starter\Starter;
 use Bitrix\Crm\Controller\Base;
 use Bitrix\Crm\Controller\ErrorCode;
 use Bitrix\Crm\Controller\Timeline\AI;
@@ -20,15 +23,17 @@ use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\ErrorCode as AIErrorCode;
 use Bitrix\Crm\Integration\AI\Operation\OperationState;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Result;
 use Bitrix\Crm\ItemIdentifier;
+use Bitrix\Crm\MultiValueStoreService;
 use Bitrix\Crm\Service\Container;
-use Bitrix\Main\DI\Exception\CircularDependencyException;
-use Bitrix\Main\DI\Exception\ServiceNotFoundException;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\ActionFilter\Scope;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
-use Bitrix\Main\ObjectNotFoundException;
+use Bitrix\Main\Loader;
+use CCrmOwnerType;
 
 final class CallQualityAssessment extends Base
 {
@@ -147,10 +152,6 @@ final class CallQualityAssessment extends Base
 	 * @param ItemIdentifier $itemIdentifier
 	 *
 	 * @return Result|null
-	 *
-	 * @throws CircularDependencyException
-	 * @throws ServiceNotFoundException
-	 * @throws ObjectNotFoundException
 	 */
 	public function doAssessmentAction(
 		int $activityId,
@@ -174,62 +175,125 @@ final class CallQualityAssessment extends Base
 		}
 
 		if (
-			AIManager::isAiCallProcessingEnabled()
-			&& in_array($itemIdentifier->getEntityTypeId(), AIManager::SUPPORTED_ENTITY_TYPE_IDS, true)
+			!AIManager::isAiCallProcessingEnabled()
+			|| !in_array($itemIdentifier->getEntityTypeId(), AIManager::SUPPORTED_ENTITY_TYPE_IDS, true)
 		)
 		{
-			if (!AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment))
-			{
-				$this->addError(AIErrorCode::getAIDisabledError(['sliderCode' => Scenario::CALL_SCORING_SCENARIO_SLIDER_CODE]));
+			$this->addError(AIErrorCode::getAIEngineNotFoundError());
 
-				return null;
-			}
-
-			$entity = CopilotCallAssessmentController::getInstance()->getById($assessmentSettingsId);
-			if ($entity === null)
-			{
-				$this->addError(ErrorCode::getNotFoundError());
-
-				return null;
-			}
-
-			$item = CallAssessmentItem::createFromEntity($entity);
-			$checkerResult = CallAssessmentItemChecker::getInstance()
-				->setItem($item)
-				->run()
-			;
-
-			if (!$checkerResult->isSuccess())
-			{
-				$this->addError($checkerResult->getError());
-
-				return null;
-			}
-
-			$executor = ServiceLocator::getInstance()->get(PipelineExecutor::class);
-			$context = new StepContext(
-				activityId: $activityId,
-				userId: $this->getCurrentUserId(),
-				scenarioName: Scenario::CALL_SCORING_SCENARIO,
-				isManualLaunch: true,
-			);
-			$result = $executor->startOrResume($context->withExtra('assessmentSettingsId', $assessmentSettingsId));
-			if ($result?->isSuccess() === false)
-			{
-				$this->addErrors($result?->getErrors());
-			}
-
-			return $result;
+			return null;
 		}
 
-		$this->addError(AIErrorCode::getAIEngineNotFoundError());
+		if (!AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment))
+		{
+			$this->addError(AIErrorCode::getAIDisabledError(['sliderCode' => Scenario::CALL_SCORING_SCENARIO_SLIDER_CODE]));
 
-		return null;
+			return null;
+		}
+
+		$entity = CopilotCallAssessmentController::getInstance()->getById($assessmentSettingsId);
+		if ($entity === null)
+		{
+			$this->addError(ErrorCode::getNotFoundError());
+
+			return null;
+		}
+
+		$item = CallAssessmentItem::createFromEntity($entity);
+		$checkerResult = CallAssessmentItemChecker::getInstance()
+			->setItem($item)
+			->run()
+		;
+
+		if (!$checkerResult->isSuccess())
+		{
+			$this->addError($checkerResult->getError());
+
+			return null;
+		}
+
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			return $this->fireCallAssessmentTrigger($activityId, $assessmentSettingsId);
+		}
+
+		return $this->launchLegacyCallScoring($activityId, $assessmentSettingsId);
 	}
 	// endregion
 
 	private function getCurrentUserId(): int
 	{
 		return $this->getCurrentUser()?->getId() ?? Container::getInstance()->getContext()->getUserId();
+	}
+
+	private function fireCallAssessmentTrigger(int $activityId, int $assessmentSettingsId): ?Result
+	{
+		$userId = $this->getCurrentUserId();
+		$target = new ItemIdentifier(CCrmOwnerType::Activity, $activityId);
+
+		if (!Loader::includeModule('bizproc'))
+		{
+			$this->addError(AIErrorCode::getAIEngineNotFoundError());
+
+			return (new Result(ScoreCallV2::TYPE_ID, $target, $userId, isPending: false))
+				->addError(AIErrorCode::getAIEngineNotFoundError())
+			;
+		}
+
+		$startResult = Starter::getByScenario(BizprocScenario::onEvent)
+			->setContext(new ContextDto('crm'))
+			->addEvent('CrmCallAssessmentTrigger', [], [
+				'ActivityId' => $activityId,
+				'AssessmentSettingsId' => $assessmentSettingsId,
+				'UserId' => $userId,
+			])
+			->start()
+		;
+
+		if (!$startResult->isSuccess())
+		{
+			$this->addErrors($startResult->getErrors());
+
+			return (new Result(ScoreCallV2::TYPE_ID, $target, $userId, isPending: false))
+				->addErrors($startResult->getErrors())
+			;
+		}
+
+		if (!$startResult->isTriggerApplied())
+		{
+			$this->addError(AIErrorCode::getAIEngineNotFoundError());
+
+			return (new Result(ScoreCallV2::TYPE_ID, $target, $userId, isPending: false))
+				->addError(AIErrorCode::getAIEngineNotFoundError())
+			;
+		}
+
+		return new Result(ScoreCallV2::TYPE_ID, $target, $userId, isPending: true);
+	}
+
+	private function launchLegacyCallScoring(int $activityId, int $assessmentSettingsId): ?Result
+	{
+		$executor = ServiceLocator::getInstance()->get(PipelineExecutor::class);
+		$context = new StepContext(
+			activityId: $activityId,
+			userId: $this->getCurrentUserId(),
+			scenarioName: Scenario::CALL_SCORING_SCENARIO,
+			isManualLaunch: true,
+		);
+
+		$result = $executor->startOrResume($context->withExtra('assessmentSettingsId', $assessmentSettingsId));
+
+		if ($assessmentSettingsId > 0 && $result?->getJobId() !== null)
+		{
+			$key = ScoreCall::generateJobCallAssessmentBindKey($result->getJobId(), $activityId);
+			MultiValueStoreService::getInstance()->set($key, $assessmentSettingsId);
+		}
+
+		if ($result?->isSuccess() === false)
+		{
+			$this->addErrors($result->getErrors());
+		}
+
+		return $result;
 	}
 }

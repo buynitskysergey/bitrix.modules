@@ -2263,7 +2263,7 @@ class CCalendarEvent
 		{
 			if ($private)
 			{
-				$event['NAME'] = '[' . Loc::getMessage('EC_ACCESSIBILITY_' . mb_strtoupper($event['ACCESSIBILITY'])) . ']';
+				$event['NAME'] = self::getBusyMaskedName($event);
 				$event['IS_ACCESSIBLE_TO_USER'] = false;
 
 				if (!$accessResult[ActionDictionary::ACTION_EVENT_VIEW_TIME])
@@ -2275,7 +2275,7 @@ class CCalendarEvent
 			{
 				if ($accessResult[ActionDictionary::ACTION_EVENT_VIEW_TIME])
 				{
-					$event['NAME'] = '[' . Loc::getMessage('EC_ACCESSIBILITY_' . mb_strtoupper($event['ACCESSIBILITY'])) . ']';
+					$event['NAME'] = self::getBusyMaskedName($event);
 					$event['IS_ACCESSIBLE_TO_USER'] = false;
 				}
 				else
@@ -2285,7 +2285,7 @@ class CCalendarEvent
 			}
 			else
 			{
-				$event['NAME'] .= ' [' . Loc::getMessage('EC_ACCESSIBILITY_' . mb_strtoupper($event['ACCESSIBILITY'])) . ']';
+				$event['NAME'] .= ' ' . self::getBusyMaskedName($event);
 			}
 
 			// Clear information about
@@ -2301,6 +2301,13 @@ class CCalendarEvent
 		}
 
 		return $event;
+	}
+
+	public static function getBusyMaskedName(array $event): string
+	{
+		$accessibility = mb_strtoupper((string)($event['ACCESSIBILITY'] ?? '')) ?: 'BUSY';
+
+		return '[' . Loc::getMessage('EC_ACCESSIBILITY_' . $accessibility) . ']';
 	}
 
 	public static function convertDateToCulture(string $str): string
@@ -5374,7 +5381,7 @@ class CCalendarEvent
 				|| !$accessController->check(ActionDictionary::ACTION_EVENT_VIEW_TITLE, $eventModel)
 			)
 			{
-				$name = '[' . Loc::getMessage('EC_ACCESSIBILITY_' . mb_strtoupper($event['ACCESSIBILITY'])) . ']';
+				$name = self::getBusyMaskedName($event);
 			}
 
 			$accessibility[$event['OWNER_ID']][] = [

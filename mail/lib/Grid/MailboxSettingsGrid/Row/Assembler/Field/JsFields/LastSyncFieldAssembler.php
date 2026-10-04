@@ -7,7 +7,7 @@ class LastSyncFieldAssembler extends JsExtensionFieldAssembler
 	private const EXTENSION_CLASS_NAME = 'LastSyncField';
 
 	/**
-	 * @return array{lastSync: ?int, mailboxId: ?int}
+	 * @return array{lastSync: ?int, mailboxId: ?int, migrationStatus: ?string, migrationActive: bool}
 	 */
 	protected function getRenderParams(array $rawValue): array
 	{
@@ -16,6 +16,8 @@ class LastSyncFieldAssembler extends JsExtensionFieldAssembler
 			'mailboxId' => $rawValue['ID'] ?? null,
 			'hasError' => $rawValue['HAS_ERROR'] ?? null,
 			'canEdit' => $rawValue['CAN_EDIT'] ?? false,
+			'migrationStatus' => $rawValue['MIGRATION_STATUS'] ?? null,
+			'migrationActive' => $rawValue['MIGRATION_ACTIVE'] ?? false,
 		];
 	}
 

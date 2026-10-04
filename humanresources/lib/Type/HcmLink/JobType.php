@@ -14,4 +14,6 @@ enum JobType: int
 	case FIELD_VALUES = 3;
 	case FIELDS = 4;
 	case COMPLETE_MAPPING = 5;
+	case PIN_REQUEST = 6;
+	case SALARY_VACATION_REQUEST = 7;
 }

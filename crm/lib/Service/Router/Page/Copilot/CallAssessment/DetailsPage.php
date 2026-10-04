@@ -2,7 +2,7 @@
 
 namespace Bitrix\Crm\Service\Router\Page\Copilot\CallAssessment;
 
-use Bitrix\Crm\Feature;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Service\Router\AbstractPage;
 use Bitrix\Crm\Service\Router\Component\Component;
 use Bitrix\Crm\Service\Router\Component\SidePanelWrapper;
@@ -12,7 +12,6 @@ use Bitrix\Crm\Service\Router\Dto\SidePanelAnchorRule;
 use Bitrix\Crm\Service\Router\Enum\Scope;
 use Bitrix\Crm\Service\Router\Route;
 use Bitrix\Main\HttpRequest;
-use Bitrix\Main\Request;
 
 final class DetailsPage extends AbstractPage
 {
@@ -63,14 +62,16 @@ final class DetailsPage extends AbstractPage
 
 	public static function getSidePanelAnchorRules(): array
 	{
+		$width = AIManager::isCallScoringV2Enabled() ? 1045 : 700;
+
 		return [
 			(new SidePanelAnchorRule("copilot-call-assessment/details/[0-9]+/?"))
 				->scopes(self::scopes())
-				->configureOptions(function (SidePanelAnchorOptions $options){
+				->configureOptions(function (SidePanelAnchorOptions $options) use ($width){
 					$options
 						->setCacheable(false)
 						->setAllowChangeHistory(false)
-						->setWidth(700)
+						->setWidth($width)
 					;
 				})
 			,

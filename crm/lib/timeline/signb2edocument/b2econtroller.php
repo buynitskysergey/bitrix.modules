@@ -317,6 +317,30 @@ final class B2eController extends Timeline\Controller
 		);
 	}
 
+	public function onAnnulled(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_ANNULLED,
+			$identifier,
+			$documentData,
+		);
+	}
+
+	public function onAnnulmentCanceled(
+		ItemIdentifier $identifier,
+		DocumentData $documentData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_ANNULMENT_CANCELED,
+			$identifier,
+			$documentData,
+		);
+	}
+
 	protected function handleSignEvent(
 		int $typeCategoryId,
 		ItemIdentifier $identifier,
@@ -405,6 +429,8 @@ final class B2eController extends Timeline\Controller
 			Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_ASSIGNEE => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 			Entry::TYPE_CATEGORY_MEMBER_SIGNED_DELIVERED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 			Entry::TYPE_CATEGORY_CONFIGURATION_ERROR => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_ANNULLED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 		];
 	}
 

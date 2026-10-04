@@ -58,7 +58,7 @@ class AvatarManager
 		{
 			if (!empty($mailContacts[$email]))
 			{
-				if ((!$data['name'] || $data['name'] === $data['email']) &&
+				if ((!$data['name'] || strcasecmp($data['name'], $data['email']) === 0) &&
 					($mailContacts[$email]['NAME'] && $mailContacts[$email]['NAME'] !== $mailContacts[$email]['EMAIL']))
 				{
 					$mailsNames[$email]['name'] = $mailContacts[$email]['NAME'];
@@ -114,7 +114,7 @@ class AvatarManager
 			}
 			$newName = $data['name'];
 			$oldName = $bestNames[$data['email']];
-			if (!$oldName || $oldName == $data['email'])
+			if (!$oldName || strcasecmp($oldName, $data['email']) === 0)
 			{
 				$bestNames[$data['email']] = $newName;
 				$results[$data['email']] = [
@@ -135,17 +135,14 @@ class AvatarManager
 		{
 			foreach (Message::parseAddressList($parsedListOfEmails) as $mailCopy)
 			{
-				$avatarKey = static::getAvatarKeyByString($mailCopy);
-				if ($avatarKey)
+				$address = new Main\Mail\Address(trim($mailCopy));
+				if ($address->validate())
 				{
-					$address = new Main\Mail\Address($avatarKey);
-					if ($address->validate())
-					{
-						$emailNames[] = [
-							'email' => $address->getEmail(),
-							'name' => $address->getName() ?: $address->getEmail(),
-						];
-					}
+					$name = \Bitrix\Mail\Message::stripQuotes($address->getName());
+					$emailNames[] = [
+						'email' => $address->getEmail(),
+						'name' => $name ?: $address->getEmail(),
+					];
 				}
 			}
 		}

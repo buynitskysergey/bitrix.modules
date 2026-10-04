@@ -8,14 +8,14 @@ use Bitrix\BizprocDesigner\Internal\Entity\Collection\BlockCollection;
 use Bitrix\BizprocDesigner\Internal\Entity\Collection\ConnectionCollection;
 use Bitrix\Main\Type\Contract\Arrayable;
 
-class Draft implements Arrayable
+final class Draft implements Arrayable
 {
 	public function __construct(
-		public readonly int $draftId = 0,
-		public readonly int $templateId = 0,
-		public readonly int $userId = 0,
-		public readonly BlockCollection $blocks = new BlockCollection(),
-		public readonly ConnectionCollection $connections = new ConnectionCollection(),
+		public int $draftId = 0,
+		public int $templateId = 0,
+		public int $userId = 0,
+		public BlockCollection $blocks = new BlockCollection(),
+		public ConnectionCollection $connections = new ConnectionCollection(),
 	)
 	{
 	}

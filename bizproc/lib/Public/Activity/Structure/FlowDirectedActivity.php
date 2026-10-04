@@ -4,28 +4,50 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Public\Activity\Structure;
 
-use Bitrix\Bizproc\Internal\Entity\Port\PortType;
-use CBPActivity;
-use CBPActivityExecutionResult;
+use Bitrix\Bizproc\Public\Activity\Mixins\ChildFlowTraversal;
+use Bitrix\Main\NotImplementedException;
 use CBPActivityExecutionStatus;
-use CBPArgumentNullException;
 
 /**
+ * A node whose whole execution is the flow of its children: it starts the flow and stays open until the
+ * queue has drained. The mechanics of the flow itself is shared with every other surface that runs children
+ * ({@see ChildFlowTraversal}).
+ *
+ * The mixin is applied here even though the base activity already carries it ({@see \CBPActivity}): it is
+ * what gives this family the public `onEvent` its listener interface asks for - the base class declares the
+ * legacy protected one - and what restores the extension points of the traversal to their neutral defaults,
+ * instead of the addressing the base class implements for the nodes of the unified settings panel. Every
+ * node of this family answers both points itself
+ * ({@see \Bitrix\Bizproc\Public\Activity\BaseComplexActivity}, {@see \CBPNodeWorkflowActivity}).
+ *
  * @property-read string $Title
  * @property-read array $Links
  */
 abstract class FlowDirectedActivity extends \CBPCompositeActivity implements \IBPActivityEventListener
 {
-	protected const PARAM_LINKS = 'Links';
-	public const LINK_DELIMITER = ':';
-	public const LINK_SOURCE = 0;
-	public const LINK_TARGET = 1;
+	use ChildFlowTraversal;
 
-	protected array $activityQueue = [];
-	protected array $pendingQueue = [];
+	/**
+	 * The two points of the traversal a member of this family answers itself, and the reason the answers are
+	 * demanded here at all: the defaults the mixin brings are "nowhere" and "a dead end", so a member leaving
+	 * a point to them is a node that runs no children and closes at once - silently.
+	 *
+	 * @var list<string>
+	 */
+	private const FLOW_DIRECTION_POINTS = ['getStartActivityNames', 'onDeadEndReached'];
+
+	/**
+	 * Classes of the family already known to answer both points: the demand is read once per class and not
+	 * once per activity of a process.
+	 *
+	 * @var array<string, true>
+	 */
+	private static array $flowDirectionAnswered = [];
 
 	public function __construct($name)
 	{
+		self::demandTheFlowDirectionIsAnswered(static::class);
+
 		parent::__construct($name);
 		$this->arProperties = [
 			'Title' => '',
@@ -33,280 +55,40 @@ abstract class FlowDirectedActivity extends \CBPCompositeActivity implements \IB
 		];
 	}
 
+	/**
+	 * The contract this class used to make with two `abstract` declarations. PHP refuses to re-declare an
+	 * inherited concrete method as abstract, and the mixin above brings both points in concrete, so the demand
+	 * is made at construction instead: a member of the family leaving either point unanswered is not built at
+	 * all, the way the abstract declarations refused to compile it.
+	 *
+	 * @throws NotImplementedException
+	 */
+	private static function demandTheFlowDirectionIsAnswered(string $class): void
+	{
+		if (isset(self::$flowDirectionAnswered[$class]))
+		{
+			return;
+		}
+
+		foreach (self::FLOW_DIRECTION_POINTS as $point)
+		{
+			if ((new \ReflectionMethod($class, $point))->getDeclaringClass()->getName() === self::class)
+			{
+				throw new NotImplementedException(
+					$class . ' must answer ' . $point . '(): the execution of a node of this family is the flow'
+					. ' of its children, and the neutral default of the mixin runs none of them',
+				);
+			}
+		}
+
+		self::$flowDirectionAnswered[$class] = true;
+	}
+
 	public function execute(): int
 	{
-		$startActivityNames = $this->getStartActivityNames();
-		if ($startActivityNames && $this->executeByNames($this, $startActivityNames))
-		{
-			return CBPActivityExecutionStatus::Executing;
-		}
-
-		return CBPActivityExecutionStatus::Closed;
-	}
-
-	/**
-	 * @return list<string>
-	 */
-	abstract protected function getStartActivityNames(): array;
-
-	/**
-	 * @param CBPActivity $sender
-	 * @param list<string> $names
-	 * @return bool
-	 * @throws CBPArgumentNullException
-	 */
-	protected function executeByNames(CBPActivity $sender, array $names): bool
-	{
-		foreach ($names as $activityName)
-		{
-			$inputPort = 0;
-			$originalActivityName = $activityName;
-			if (str_contains($activityName, $this->getInputPortPrefix()))
-			{
-				[$activityName, $inputPort] = explode($this->getInputPortPrefix(), $activityName);
-				$inputPort = (int)$inputPort;
-			}
-
-			$activity = $this->workflow->getActivityByName($activityName);
-			if (!$activity)
-			{
-				continue;
-			}
-
-			if (CBPActivityExecutionStatus::isInProgress($activity->executionStatus))
-			{
-				$this->subscribeActivity($activity);
-				$this->pendingQueue[$activity->getName()][] = [$sender, [$originalActivityName]];
-
-				continue;
-			}
-
-			$this->executeActivity($sender, $activity, $inputPort);
-		}
-
-		return !empty($this->activityQueue);
-	}
-
-	protected function executeActivity(CBPActivity $sender, CBPActivity $activity, int $inputPort): void
-	{
-		$this->subscribeActivity($activity);
-		$activity->reInitialize();
-		$payload = $this->workflow->executeActivity($activity);
-
-		$payload
-			->setParentName($sender->getName())
-			->setParentPort($sender->getOutputPortId())
-			->setInputPort($inputPort)
+		return $this->startChildFlow()
+			? CBPActivityExecutionStatus::Executing
+			: CBPActivityExecutionStatus::Closed
 		;
-	}
-
-	private function subscribeActivity(CBPActivity $activity): void
-	{
-		if (!isset($this->activityQueue[$activity->getName()]))
-		{
-			$activity->addStatusChangeHandler(static::ClosedEvent, $this);
-			$this->activityQueue[$activity->getName()] = true;
-		}
-	}
-
-	public function onEvent(CBPActivity $sender, $arEventParameters = []): void
-	{
-		$sender->removeStatusChangeHandler(static::ClosedEvent, $this);
-		unset($this->activityQueue[$sender->getName()]);
-
-		if ($sender->executionResult === CBPActivityExecutionResult::Succeeded)
-		{
-			$next = $this->getOutputNames($sender->getName(), [$sender->getOutputPortId()]);
-			if ($next)
-			{
-				$this->executeByNames($sender, $next);
-			}
-			else
-			{
-				$this->onDeadEndReached($sender);
-			}
-		}
-
-		$this->executePendingQueue($sender->getName());
-
-		if (empty($this->activityQueue))
-		{
-			$this->close();
-		}
-	}
-
-	private function executePendingQueue($name)
-	{
-		$queue = $this->pendingQueue[$name] ?? [];
-		unset($this->pendingQueue[$name]);
-
-		foreach ($queue as [$sender, $names])
-		{
-			$this->executeByNames($sender, $names);
-		}
-	}
-
-	abstract protected function onDeadEndReached(CBPActivity $lastActivity): void;
-
-	protected function close(): void
-	{
-		$this->workflow->closeActivity($this);
-	}
-
-	/**
-	 * @param string $name
-	 * @param array $outputIds
-	 * @return list<string> Returns array of strings activity name with port like ['A1111_2222_3333_4444:i0']
-	 */
-	public function getOutputNames(string $name, array $outputIds = [0]): array
-	{
-		$links = $this->getRawProperty(self::PARAM_LINKS);
-
-		$found = [];
-		foreach ($outputIds as $outputId)
-		{
-			$haystack = [static::createOutputName($name, $outputId) => true];
-			if ($outputId === 0)
-			{
-				$haystack[$name] = true;
-			}
-
-			$found[] = array_filter(
-				$links,
-				fn($link) =>
-					isset($haystack[$link[self::LINK_SOURCE]])
-					&& str_contains($link[self::LINK_TARGET], $this->getInputPortPrefix())
-			);
-		}
-
-		return array_values(array_column(array_merge(...$found), self::LINK_TARGET));
-	}
-
-	protected static function createOutputName(string $name, int $outputId): string
-	{
-		return self::composeLink($name, PortType::Output, $outputId);
-	}
-
-	/**
-	 * @param string $name
-	 * @param array $inputIds
-	 *
-	 * @return list<string> Returns array of strings activity name with port like ['A1111_2222_3333_4444:i0']
- */
-	public function getInputNames(string $name, array $inputIds = [0]): array
-	{
-		$links = $this->getRawProperty(self::PARAM_LINKS);
-
-		$found = [];
-		foreach ($inputIds as $inputId)
-		{
-			$haystack = [static::createInputName($name, $inputId) => true];
-			if ($inputId === 0)
-			{
-				$haystack[$name] = true;
-			}
-
-			$found[] = array_filter(
-				$links,
-				fn($link) =>
-					isset($haystack[$link[self::LINK_TARGET]])
-					&& str_contains($link[self::LINK_SOURCE], $this->getOutputPrefix())
-			);
-		}
-
-		return array_values(array_column(array_merge(...$found), self::LINK_SOURCE));
-	}
-
-	protected static function createInputName(string $name, int $inputId): string
-	{
-		return self::composeLink($name, PortType::Input, $inputId);
-	}
-
-	private function getInputPortPrefix(): string
-	{
-		return self::LINK_DELIMITER . PortType::Input->value;
-	}
-
-	private function getOutputPrefix(): string
-	{
-		return self::LINK_DELIMITER . PortType::Output->value;
-	}
-
-	private static function composeLink(string $name, PortType $portType, int $portId = 0): string
-	{
-		return $name . self::LINK_DELIMITER . $portType->value . $portId;
-	}
-
-	/**
-	 * @param string $sourceActivityName
-	 *
-	 * @return list<string> Returns array of strings activity name with port like ['A1111_2222_3333_4444:i0']
-	 */
-	public function getAuxNames(string $sourceActivityName): array
-	{
-		$names = [];
-		$auxPrefix = $sourceActivityName . self::LINK_DELIMITER . PortType::Aux->value;
-		$links = $this->getRawProperty(self::PARAM_LINKS);
-		foreach ($links as $link)
-		{
-			if (!isset($link[self::LINK_SOURCE], $link[self::LINK_TARGET]))
-			{
-				continue;
-			}
-
-			$anotherActivityPort = null;
-			[$sourceNodeLink, $targetNodeLink] = $link;
-			if (str_starts_with($targetNodeLink, $auxPrefix))
-			{
-				$anotherActivityPort = $sourceNodeLink;
-			}
-
-			if (str_starts_with($sourceNodeLink, $auxPrefix))
-			{
-				$anotherActivityPort = $targetNodeLink;
-			}
-
-			if (!empty($anotherActivityPort))
-			{
-				$names[] = $anotherActivityPort;
-			}
-		}
-
-		return $names;
-	}
-
-	/**
-	 * @param string $activityNameWithPort like 'A1111_2222_3333_4444:i0'
-	 *
-	 * @return string|null 'A1111_2222_3333_4444'
-	 */
-	public function extractActivityNameFromLink(string $activityNameWithPort): ?string
-	{
-		$parts = explode(self::LINK_DELIMITER, $activityNameWithPort);
-
-		return array_shift($parts);
-	}
-
-	/**
-	 * @param list<string> $activityNamesWithPorts like ['A1111_2222_3333_4444:i0']
-	 *
-	 * @return list<string> like ['A1111_2222_3333_4444']
-	 */
-	public function extractActivityNamesFromLinks(array $activityNamesWithPorts): array
-	{
-		$names = [];
-		foreach ($activityNamesWithPorts as $nameWithPort)
-		{
-			if (is_string($nameWithPort))
-			{
-				$name = $this->extractActivityNameFromLink($nameWithPort);
-				if (!empty($name))
-				{
-					$names[] = $name;
-				}
-			}
-		}
-
-		return $names;
 	}
 }

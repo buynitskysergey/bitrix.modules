@@ -53,6 +53,29 @@ class MoveToRecycleBinService
 	}
 
 	/**
+	 * Move a single document (its subtree untouched) into the recycle bin with
+	 * ORIGIN_USER_DELETE. Used by no-cascade delete, where the node's direct children have
+	 * already been re-hung onto its parent by ReparentService. The document row itself is
+	 * not mutated and serves as the restore source.
+	 *
+	 * @return int[] the trashed document id (the node alone), or [] if it does not exist
+	 */
+	public function moveNode(int $documentId, int $userId): array
+	{
+		$document = $this->documentRepository->getMetaById($documentId);
+		if ($document === null)
+		{
+			return [];
+		}
+
+		$this->recycleBinRepository->addBatch([
+			RecycleBinRecord::createForUserDelete($documentId, $userId),
+		]);
+
+		return [$documentId];
+	}
+
+	/**
 	 * Move every document of a collection (live or archived) into the recycle bin with
 	 * ORIGIN_CASCADE_COLLECTION_DELETED. Iterates in keyset chunks of 500 to bound memory.
 	 *

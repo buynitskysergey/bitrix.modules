@@ -12,9 +12,7 @@ use Bitrix\Crm\Model\Dynamic\PrototypeItem;
 use Bitrix\Crm\Model\Dynamic\PrototypeItemFieldsContext;
 use Bitrix\Crm\Model\Dynamic\PrototypeItemIndex;
 use Bitrix\Crm\Model\Dynamic\Type;
-use Bitrix\Crm\Model\Dynamic\TypeTable;
 use Bitrix\Crm\Model\ItemCategoryTable;
-use Bitrix\Crm\Recurring\Manager;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Context;
@@ -23,7 +21,6 @@ use Bitrix\Crm\Service\Operation;
 use Bitrix\Crm\Service\Operation\Action;
 use Bitrix\Crm\Statistics;
 use Bitrix\Crm\StatusTable;
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Fields\BooleanField;
@@ -387,31 +384,6 @@ class Dynamic extends Service\Factory
 		return $info;
 	}
 
-	public function isCategoriesSupported(): bool
-	{
-		return true;
-	}
-
-	public function isCategoriesEnabled(): bool
-	{
-		return $this->type->getIsCategoriesEnabled();
-	}
-
-	public function isStagesEnabled(): bool
-	{
-		return $this->type->getIsStagesEnabled();
-	}
-
-	public function isBeginCloseDatesEnabled(): bool
-	{
-		return $this->type->getIsBeginCloseDatesEnabled();
-	}
-
-	public function isLinkWithProductsEnabled(): bool
-	{
-		return $this->type->getIsLinkWithProductsEnabled();
-	}
-
 	/**
 	 * @inheritDoc
 	 */
@@ -438,101 +410,6 @@ class Dynamic extends Service\Factory
 		return ItemCategoryTable::getItemCategoriesByEntityTypeId($this->getEntityTypeId());
 	}
 
-	public function isClientEnabled(): bool
-	{
-		return $this->type->getIsClientEnabled();
-	}
-
-	public function isClientContactEnabled(): bool
-	{
-		return
-			$this->getEntityTypeId() === \CCrmOwnerType::SmartDocument
-			|| $this->isClientCompanyEnabled()
-		;
-	}
-
-	public function isClientCompanyEnabled(): bool
-	{
-		return
-			$this->getEntityTypeId() === \CCrmOwnerType::SmartInvoice
-			|| ($this->isClientEnabled() && \CCrmOwnerType::isPossibleDynamicTypeId($this->getEntityTypeId()))
-		;
-	}
-
-	public function isObserversEnabled(): bool
-	{
-		return $this->type->getIsObserversEnabled();
-	}
-
-	final public function isCrmTrackingEnabled(): bool
-	{
-		return false;
-//		return $this->type->getIsCrmTrackingEnabled();
-	}
-
-	public function isMyCompanyEnabled(): bool
-	{
-		return $this->type->getIsMycompanyEnabled();
-	}
-
-	public function isDocumentGenerationEnabled(): bool
-	{
-		return $this->type->getIsDocumentsEnabled();
-	}
-
-	public function isSourceEnabled(): bool
-	{
-		return $this->type->getIsSourceEnabled();
-	}
-
-	public function isUseInUserfieldEnabled(): bool
-	{
-		return $this->type->getIsUseInUserfieldEnabled();
-	}
-
-	public function isRecyclebinEnabled(): bool
-	{
-		return $this->type->getIsRecyclebinEnabled();
-	}
-
-	public function isAutomationEnabled(): bool
-	{
-		return ($this->type->getIsStagesEnabled() && $this->type->getIsAutomationEnabled());
-	}
-
-	public function isRecurringEnabled(): bool
-	{
-		return
-			$this->isRecurringSupported()
-			&& $this->type->getIsRecurringEnabled()
-			&& Manager::isAllowedExpose(Manager::DYNAMIC)
-		;
-	}
-
-	public function isRecurringSupported(): bool
-	{
-		$optionName = '~is_recurring_column_alter_success_' . $this->getEntityTypeId();
-
-		return Option::get('crm', $optionName, 'Y') !== 'N';
-	}
-
-	public function isBizProcSupported(): bool
-	{
-		return true;
-	}
-
-	public function isBizProcEnabled(): bool
-	{
-		return $this->type->getIsBizProcEnabled();
-	}
-
-	public function isLastActivitySupported(): bool
-	{
-		return (
-			$this->isFieldExists(Item::FIELD_NAME_LAST_ACTIVITY_TIME)
-			&& $this->isFieldExists(Item::FIELD_NAME_LAST_ACTIVITY_BY)
-		);
-	}
 
 	protected function getTrackedFieldNames(): array
 	{
@@ -703,19 +580,6 @@ class Dynamic extends Service\Factory
 		}
 
 		return $fields;
-	}
-
-	public function isCountersEnabled(): bool
-	{
-		/** @var TypeTable $typeDataClass */
-		$typeDataClass = $this->type::$dataClass;
-
-		if (!$typeDataClass::getEntity()->hasField('IS_COUNTERS_ENABLED'))
-		{
-			return false;
-		}
-
-		return $this->type->getIsCountersEnabled() ?? false;
 	}
 
 	public function isInCustomSection(): bool

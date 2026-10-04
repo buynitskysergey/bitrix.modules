@@ -54,17 +54,23 @@ class AutoCloseWorktimeAgent
 			return '';
 		}
 
-		$recordStop = TimeHelper::getInstance()->createUserDateTimeFromFormat('U', $recordStopUtcTimestamp, $record->getUserId());
-		if (!$recordStop)
-		{
-			return '';
-		}
+		// The exact stop instant is carried through recordedStopTimestamp on the trusted system path, so
+		// StopCustomTimeWorktimeManager uses it verbatim WITHOUT a wall-time round-trip. The wall
+		// seconds/date below are derived from the same instant for downstream display consumers, but they
+		// must NOT redefine the stop moment: on a fall-back the local time is ambiguous and rebuilding from
+		// wall-time could pick the other occurrence and shift the stop by an hour.
+		$recordStop = (new \DateTime('@' . (int)$recordStopUtcTimestamp))
+			->setTimezone(TimeHelper::getInstance()->getUserDateTimeZone($record->getUserId()));
 		$recordForm = WorktimeRecordForm::createWithEventForm();
+		$recordForm->recordedStopTimestamp = $recordStopUtcTimestamp;
 		$recordForm->recordedStopSeconds = TimeHelper::getInstance()->getSecondsFromDateTime($recordStop);
 		$recordForm->recordedStopDateFormatted = \Bitrix\Main\Type\Date::createFromPhp($recordStop)->toString();
 		$recordForm->userId = $record->getUserId();
 		$recordForm->isSystem = true;
-		$recordForm->stopOffset = $record->getStartOffset();
+		// STOP_OFFSET is no longer forced to START_OFFSET: stopWork() derives it date-aware (ALG-02) at the
+		// stop instant from the employee's real IANA zone. Day continuity holds because both ends live in
+		// the same IANA zone (resolveEffectiveTimeZoneId); on a DST boundary inside the day STOP_OFFSET
+		// legitimately differs from START_OFFSET. This relies on DURATION being elapsed-based (ALG-03).
 
 		if (\Bitrix\Timeman\Integration\Stafftrack\CheckIn::isCheckInStartEnabled())
 		{

@@ -13,4 +13,8 @@ class SenderDto extends Dto
 	public ?string $name;
 
 	public ?string $sender;
+
+	public ?int $senderId;
+
+	public ?int $mailboxId;
 }

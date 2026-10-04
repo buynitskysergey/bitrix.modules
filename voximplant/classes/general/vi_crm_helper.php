@@ -4,13 +4,48 @@ IncludeModuleLangFile(__FILE__);
 use Bitrix\Crm\Activity\Provider;
 use Bitrix\Crm\Integration\BizProc\Starter\CrmStarter;
 use Bitrix\Crm\Tracking;
+use Bitrix\Main\Application;
+use Bitrix\Main\DB\TransactionException;
+use Bitrix\Main\Diag\FileLogger;
+use Bitrix\Main\Diag\LoggerFactory;
+use Bitrix\Main\Error;
 use Bitrix\Main\Event;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\PhoneNumber\Parser;
+use Bitrix\Main\Result;
 use Bitrix\Voximplant as VI;
+use Psr\Log\LoggerInterface;
 
 class CVoxImplantCrmHelper
 {
+	public const CRM_LEAD_LOCK_NAME_PREFIX = 'vi_crm_lead_';
+	public const CRM_LEAD_LOCK_TIMEOUT = 5;
+
+	public const CRM_LEAD_OUTCOME_CREATED = 'created';
+	public const CRM_LEAD_OUTCOME_ALREADY_EXISTS = 'alreadyExists';
+	public const CRM_LEAD_OUTCOME_NOT_REQUIRED = 'notRequired';
+	public const CRM_LEAD_OUTCOME_LOCK_TIMEOUT = 'lockTimeout';
+	public const CRM_LEAD_OUTCOME_FAILED = 'failed';
+
+	public const CRM_LEAD_LOCK_TIMEOUT_ERROR = 'CRM_LEAD_LOCK_TIMEOUT';
+	public const CRM_LEAD_REGISTRATION_FAILED_ERROR = 'CRM_LEAD_REGISTRATION_FAILED';
+	public const CRM_LEAD_REGISTRATION_EMPTY_RESULT_ERROR = 'CRM_LEAD_REGISTRATION_EMPTY_RESULT';
+	public const CRM_LEAD_REGISTRATION_EXCEPTION_ERROR = 'CRM_LEAD_REGISTRATION_EXCEPTION';
+	public const CRM_LEAD_TRANSACTION_ROLLBACK_ERROR = 'CRM_LEAD_TRANSACTION_ROLLBACK_ERROR';
+	public const CRM_LEAD_STATE_RELOAD_ERROR = 'CRM_LEAD_STATE_RELOAD_ERROR';
+	public const CRM_LEAD_POST_COMMIT_ACTION_ERROR = 'CRM_LEAD_POST_COMMIT_ACTION_ERROR';
+	public const CRM_LEAD_TRIGGER_ERROR = 'CRM_LEAD_TRIGGER_ERROR';
+	public const CRM_LEAD_RESTORATIVE_TRIGGER_ERROR = 'CRM_LEAD_RESTORATIVE_TRIGGER_ERROR';
+	public const CRM_LEAD_LOCK_RELEASE_ERROR = 'CRM_LEAD_LOCK_RELEASE_ERROR';
+
+	private const CRM_LEAD_REGISTRATION_LOGGER_ID = 'voximplant.crmLeadRegistration';
+	private const CRM_ENTITY_TYPE_LEAD = 'LEAD';
+	private const CRM_LEAD_REGISTRATION_SUCCESS = 'success';
+	private const CRM_LEAD_REGISTRATION_POST_COMMIT_CONTEXT = 'postCommitContext';
+	private const CRM_LEAD_POST_COMMIT_ENTITY_MANAGER = 'entityManager';
+	private const CRM_LEAD_POST_COMMIT_REGISTERED_ENTITIES = 'registeredEntities';
+	private const CRM_LEAD_POST_COMMIT_EVENT_SENT = 'eventSent';
+
 	public static $lastError;
 	public static function GetCrmEntity($phoneNumber, $country = '')
 	{
@@ -258,16 +293,35 @@ class CVoxImplantCrmHelper
 	 */
 	public static function registerCallInCrm(VI\Call $call, $config = null)
 	{
+		$registrationResult = static::registerCallInCrmTransaction($call, $config);
+		if (!($registrationResult[self::CRM_LEAD_REGISTRATION_SUCCESS] ?? false))
+		{
+			return false;
+		}
+
+		$postCommitContext = $registrationResult[self::CRM_LEAD_REGISTRATION_POST_COMMIT_CONTEXT] ?? null;
+		if (is_array($postCommitContext))
+		{
+			static::runCrmRegistrationPostCommitContext($call, $postCommitContext);
+		}
+
+		return true;
+	}
+
+	protected static function registerCallInCrmTransaction(VI\Call $call, $config = null): array
+	{
 		if(!\Bitrix\Main\Loader::includeModule('crm'))
 		{
 			static::$lastError = 'CRM module is not installed';
-			return false;
+
+			return self::createCrmLeadRegistrationTransactionResult(false);
 		}
 
 		if($call->getCallerId() == '')
 		{
 			static::$lastError = 'Can not register in CRM call without caller id';
-			return false;
+
+			return self::createCrmLeadRegistrationTransactionResult(false);
 		}
 
 		$isCallRegisteredInCrmEventSent = false;
@@ -290,7 +344,7 @@ class CVoxImplantCrmHelper
 		}
 		if(!$shouldCreateLead)
 		{
-			return true;
+			return self::createCrmLeadRegistrationTransactionResult(true);
 		}
 
 		$arFields = static::getLeadFields([
@@ -304,16 +358,17 @@ class CVoxImplantCrmHelper
 
 		if(!$arFields)
 		{
-			return false;
+			return self::createCrmLeadRegistrationTransactionResult(false);
 		}
 
 		$entityManager = VI\Integration\Crm\EntityManagerRegistry::getWithCall($call);
 		if(!$entityManager)
 		{
-			return false;
+			return self::createCrmLeadRegistrationTransactionResult(false);
 		}
 
-		if ($call->getIncoming() == CVoxImplantMain::CALL_OUTGOING && !empty($entityManager->getActivityBindings()))
+		$isOnlyUpdate = self::shouldRegisterCallInCrmOnlyUpdate($call);
+		if ($isOnlyUpdate)
 		{
 			$entityManager->setRegisterMode($entityManager::REGISTER_MODE_ONLY_UPDATE);
 		}
@@ -337,30 +392,224 @@ class CVoxImplantCrmHelper
 			? \Bitrix\Crm\Integration\Analytics\Dictionary::SECTION_TELEPHONY
 			: 'telephony';
 
-		$isSuccessful = $entityManager->registerTouch(
-			CCrmOwnerType::Lead,
-			$arFields,
+		$connection = Application::getConnection();
+		static::startCrmLeadRegistrationTransaction($connection);
+		$isTransactionActive = true;
+
+		try
+		{
+			$isSuccessful = $entityManager->registerTouch(
+				CCrmOwnerType::Lead,
+				$arFields,
+				true,
+				[
+					'CURRENT_USER' => $call->getUserId(),
+					'DISABLE_USER_FIELD_CHECK' => true,
+					'ANALYTICS' => [
+						'c_section' => $analyticsSection,
+					],
+				]
+			);
+
+			if(!$isSuccessful)
+			{
+				$hasErrors = $entityManager->hasErrors();
+				if($hasErrors)
+				{
+					$errors = $entityManager->getErrorMessages();
+					static::$lastError = end($errors);
+					CVoxImplantHistory::WriteToLog(join(';', $entityManager->getErrorMessages()), 'ERROR CREATING LEAD');
+				}
+
+				static::rollbackCrmLeadRegistrationTransaction($connection, $call);
+				$isTransactionActive = false;
+
+				return self::createCrmLeadRegistrationTransactionResult($isOnlyUpdate && !$hasErrors);
+			}
+
+			$registeredEntites = [];
+			/** @var \Bitrix\Crm\Entity\Identificator\Complex $registeredEntity */
+			foreach ($entityManager->getRegisteredEntities() as $registeredEntity)
+			{
+				$registeredEntites[] = [
+					'ENTITY_TYPE' => CCrmOwnerType::ResolveName($registeredEntity->getTypeId()),
+					'ENTITY_ID' => $registeredEntity->getId(),
+					'IS_CREATED' => 'Y',
+					'IS_PRIMARY' => ($registeredEntity->getTypeId() == $entityManager->getPrimaryTypeId() && $registeredEntity->getId() == $entityManager->getPrimaryId()) ? 'Y' : 'N',
+				];
+			}
+
+			if (empty($registeredEntites))
+			{
+				static::rollbackCrmLeadRegistrationTransaction($connection, $call);
+				$isTransactionActive = false;
+
+				return self::createCrmLeadRegistrationTransactionResult(true);
+			}
+
+			static::persistRegisteredCrmEntities($call, $entityManager, $registeredEntites);
+			static::commitCrmLeadRegistrationTransaction($connection);
+			$isTransactionActive = false;
+		}
+		catch (\Throwable $exception)
+		{
+			if ($isTransactionActive)
+			{
+				static::rollbackCrmLeadRegistrationTransaction($connection, $call);
+			}
+
+			throw $exception;
+		}
+
+		return self::createCrmLeadRegistrationTransactionResult(
 			true,
 			[
-				'CURRENT_USER' => $call->getUserId(),
-				'DISABLE_USER_FIELD_CHECK' => true,
-				'ANALYTICS' => [
-					'c_section' => $analyticsSection,
-				],
+				self::CRM_LEAD_POST_COMMIT_ENTITY_MANAGER => $entityManager,
+				self::CRM_LEAD_POST_COMMIT_REGISTERED_ENTITIES => $registeredEntites,
+				self::CRM_LEAD_POST_COMMIT_EVENT_SENT => $isCallRegisteredInCrmEventSent,
 			]
 		);
+	}
 
-		if(!$isSuccessful)
+	protected static function createCrmLeadRegistrationTransactionResult(
+		bool $isSuccessful,
+		?array $postCommitContext = null
+	): array
+	{
+		return [
+			self::CRM_LEAD_REGISTRATION_SUCCESS => $isSuccessful,
+			self::CRM_LEAD_REGISTRATION_POST_COMMIT_CONTEXT => $postCommitContext,
+		];
+	}
+
+	protected static function runCrmRegistrationPostCommitContext(VI\Call $call, array $context): void
+	{
+		$registeredEntities = $context[self::CRM_LEAD_POST_COMMIT_REGISTERED_ENTITIES] ?? [];
+		$entityManager = $context[self::CRM_LEAD_POST_COMMIT_ENTITY_MANAGER] ?? null;
+
+		try
 		{
-			if($entityManager->hasErrors())
+			CVoxImplantHistory::WriteToLog($registeredEntities, "Created CRM entities");
+		}
+		catch (\Throwable $exception)
+		{
+			static::logCrmLeadPostCommitActionFailure(
+				(string)$call->getCallId(),
+				'createdEntitiesLog',
+				$exception
+			);
+		}
+
+		try
+		{
+			static::runCrmRegistrationPostCommitActions($entityManager);
+		}
+		catch (\Throwable $exception)
+		{
+			static::logCrmLeadPostCommitActionFailure(
+				(string)$call->getCallId(),
+				'trackerOrWorkflow',
+				$exception
+			);
+		}
+
+		if (
+			!($context[self::CRM_LEAD_POST_COMMIT_EVENT_SENT] ?? false)
+			&& static::isNewCallScenarioEnabled()
+		)
+		{
+			try
 			{
-				$errors = $entityManager->getErrorMessages();
-				static::$lastError = end($errors);
-				CVoxImplantHistory::WriteToLog(join(';', $entityManager->getErrorMessages()), 'ERROR CREATING LEAD');
+				static::sendCallRegisteredInCrmEvent($call);
 			}
+			catch (\Throwable $exception)
+			{
+				static::logCrmLeadPostCommitActionFailure(
+					(string)$call->getCallId(),
+					'onCallRegisteredInCrm',
+					$exception
+				);
+			}
+		}
+	}
+
+	private static function shouldRegisterCallInCrmOnlyUpdate(VI\Call $call): bool
+	{
+		if ($call->getIncoming() != CVoxImplantMain::CALL_OUTGOING)
+		{
 			return false;
 		}
 
+		$entityManager = VI\Integration\Crm\EntityManagerRegistry::getWithCall($call);
+
+		return $entityManager && !empty($entityManager->getActivityBindings());
+	}
+
+	protected static function startCrmLeadRegistrationTransaction($connection): void
+	{
+		$connection->startTransaction();
+	}
+
+	protected static function commitCrmLeadRegistrationTransaction($connection): void
+	{
+		$connection->commitTransaction();
+	}
+
+	private static function rollbackCrmLeadRegistrationTransaction($connection, VI\Call $call): void
+	{
+		try
+		{
+			$connection->rollbackTransaction();
+		}
+		catch (TransactionException $exception)
+		{
+			if ($exception->getMessage() !== 'Nested rollbacks are unsupported.')
+			{
+				static::logCrmLeadTransactionRecoveryFailure(
+					(string)$call->getCallId(),
+					self::CRM_LEAD_TRANSACTION_ROLLBACK_ERROR,
+					$exception
+				);
+			}
+		}
+		catch (\Throwable $exception)
+		{
+			static::logCrmLeadTransactionRecoveryFailure(
+				(string)$call->getCallId(),
+				self::CRM_LEAD_TRANSACTION_ROLLBACK_ERROR,
+				$exception
+			);
+		}
+
+		VI\Integration\Crm\EntityManagerRegistry::forget($call);
+
+		try
+		{
+			self::reloadCallCrmEntitiesFromMaster($call);
+			self::reloadCallCrmBindingsFromMaster($call);
+		}
+		catch (\Throwable $exception)
+		{
+			static::logCrmLeadTransactionRecoveryFailure(
+				(string)$call->getCallId(),
+				self::CRM_LEAD_STATE_RELOAD_ERROR,
+				$exception
+			);
+		}
+	}
+
+	protected static function persistRegisteredCrmEntities(
+		VI\Call $call,
+		$entityManager,
+		array $registeredEntities
+	): void
+	{
+		$call->addCrmEntities($registeredEntities);
+		$call->updateCrmBindings($entityManager->getActivityBindings());
+	}
+
+	protected static function runCrmRegistrationPostCommitActions($entityManager): void
+	{
 		if ($entityManager->getRegisteredTypeId() == \CCrmOwnerType::Lead)
 		{
 			\Bitrix\Crm\Integration\Channel\VoxImplantTracker::getInstance()->registerLead($entityManager->getRegisteredId());
@@ -374,33 +623,505 @@ class CVoxImplantCrmHelper
 		{
 			\Bitrix\Crm\Integration\Channel\VoxImplantTracker::getInstance()->registerDeal($entityManager->getRegisteredId());
 		}
+	}
 
-		$registeredEntites = [];
-		/** @var \Bitrix\Crm\Entity\Identificator\Complex $registeredEntity */
-		foreach ($entityManager->getRegisteredEntities() as $registeredEntity)
+	/**
+	 * This lead-lock operation must be called without an active outer database transaction.
+	 */
+	public static function registerCallInCrmWithLeadLock(
+		VI\Call $call,
+		bool $onlyCreated = false,
+		$config = null,
+		bool $startCallTrigger = true
+	): Result
+	{
+		static::$lastError = '';
+		$callId = (string)$call->getCallId();
+		$lockName = self::CRM_LEAD_LOCK_NAME_PREFIX . $callId;
+		if (!static::isLeadCreationEnabledByCallConfig($call, $config))
 		{
-			$registeredEntites[] = [
-				'ENTITY_TYPE' => CCrmOwnerType::ResolveName($registeredEntity->getTypeId()),
-				'ENTITY_ID' => $registeredEntity->getId(),
-				'IS_CREATED' => 'Y',
-				'IS_PRIMARY' => ($registeredEntity->getTypeId() == $entityManager->getPrimaryTypeId() && $registeredEntity->getId() == $entityManager->getPrimaryId()) ? 'Y' : 'N'
-			];
+			return self::createCrmLeadRegistrationResultWithEvent(
+				$call,
+				self::CRM_LEAD_OUTCOME_NOT_REQUIRED
+			);
 		}
 
-		CVoxImplantHistory::WriteToLog($registeredEntites, "Created CRM entities");
-
-		$call->addCrmEntities($registeredEntites);
-		if(!empty($registeredEntites))
+		try
 		{
-			$call->updateCrmBindings($entityManager->getActivityBindings());
+			$shouldCreateLeadBeforeLock = static::shouldCreateLead($call, $config);
+			$connection = Application::getConnection();
+			$isLocked = static::acquireCrmLeadLock($connection, $lockName);
+		}
+		catch (\Throwable $exception)
+		{
+			return static::createCrmLeadRegistrationFailureResult(
+				$callId,
+				self::CRM_LEAD_OUTCOME_FAILED,
+				self::CRM_LEAD_REGISTRATION_EXCEPTION_ERROR,
+				$lockName,
+				$exception
+			);
 		}
 
-		if (!$isCallRegisteredInCrmEventSent && static::isNewCallScenarioEnabled())
+		if (!$isLocked)
+		{
+			try
+			{
+				$crmEntities = self::reloadCallCrmEntitiesFromMaster($call);
+				if (self::hasBlockingCrmLeadBinding($crmEntities))
+				{
+					self::reloadCallCrmBindingsFromMaster($call);
+
+					return self::createCrmLeadRegistrationResultWithEvent(
+						$call,
+						$shouldCreateLeadBeforeLock
+							? self::CRM_LEAD_OUTCOME_ALREADY_EXISTS
+							: self::CRM_LEAD_OUTCOME_NOT_REQUIRED
+					);
+				}
+			}
+			catch (\Throwable $exception)
+			{
+				return static::createCrmLeadRegistrationFailureResult(
+					$callId,
+					self::CRM_LEAD_OUTCOME_FAILED,
+					self::CRM_LEAD_REGISTRATION_EXCEPTION_ERROR,
+					$lockName,
+					$exception
+				);
+			}
+
+			return static::createCrmLeadRegistrationFailureResult(
+				$callId,
+				self::CRM_LEAD_OUTCOME_LOCK_TIMEOUT,
+				self::CRM_LEAD_LOCK_TIMEOUT_ERROR,
+				$lockName
+			);
+		}
+
+		$registrationResult = null;
+		$postCommitContext = null;
+		$shouldStartCallTrigger = false;
+		$restorativeTriggerEntities = [];
+		try
+		{
+			$crmEntitiesBeforeRegistration = self::reloadCallCrmEntitiesFromMaster($call);
+			if (self::hasBlockingCrmLeadBinding($crmEntitiesBeforeRegistration))
+			{
+				self::reloadCallCrmBindingsFromMaster($call);
+
+				return self::createCrmLeadRegistrationResultWithEvent(
+					$call,
+					$shouldCreateLeadBeforeLock
+						? self::CRM_LEAD_OUTCOME_ALREADY_EXISTS
+						: self::CRM_LEAD_OUTCOME_NOT_REQUIRED
+				);
+			}
+
+			if (!$shouldCreateLeadBeforeLock)
+			{
+				return self::createCrmLeadRegistrationResultWithEvent(
+					$call,
+					self::CRM_LEAD_OUTCOME_NOT_REQUIRED
+				);
+			}
+
+			$registrationErrorCode = null;
+			$isRegistrationNotRequired = false;
+			$crmRegistrationResult = static::registerCallInCrmTransaction($call, $config);
+			if (!($crmRegistrationResult[self::CRM_LEAD_REGISTRATION_SUCCESS] ?? false))
+			{
+				$registrationErrorCode = self::CRM_LEAD_REGISTRATION_FAILED_ERROR;
+			}
+			else
+			{
+				$postCommitContext = $crmRegistrationResult[self::CRM_LEAD_REGISTRATION_POST_COMMIT_CONTEXT] ?? null;
+			}
+
+			if ($registrationErrorCode === null && empty($call->getCreatedCrmEntities()))
+			{
+				if (self::shouldRegisterCallInCrmOnlyUpdate($call))
+				{
+					$isRegistrationNotRequired = true;
+				}
+				else
+				{
+					$registrationErrorCode = self::CRM_LEAD_REGISTRATION_EMPTY_RESULT_ERROR;
+				}
+			}
+
+			if ($registrationErrorCode !== null)
+			{
+				$registrationResult = static::createCrmLeadRegistrationFailureResult(
+					$callId,
+					self::CRM_LEAD_OUTCOME_FAILED,
+					$registrationErrorCode,
+					$lockName
+				);
+
+				if (
+					$startCallTrigger
+					&& !$onlyCreated
+					&& !empty($crmEntitiesBeforeRegistration)
+					&& \CVoxImplantConfig::GetLeadWorkflowExecution()
+						== \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE
+				)
+				{
+					$restorativeTriggerEntities = $crmEntitiesBeforeRegistration;
+				}
+			}
+			elseif ($isRegistrationNotRequired)
+			{
+				$registrationResult = self::createCrmLeadRegistrationResult(
+					self::CRM_LEAD_OUTCOME_NOT_REQUIRED
+				);
+			}
+			else
+			{
+				$shouldStartCallTrigger = (
+					$startCallTrigger
+					&& \CVoxImplantConfig::GetLeadWorkflowExecution()
+						== \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE
+				);
+
+				$registrationResult = self::createCrmLeadRegistrationResult(self::CRM_LEAD_OUTCOME_CREATED);
+			}
+		}
+		catch (\Throwable $exception)
+		{
+			return static::createCrmLeadRegistrationFailureResult(
+				$callId,
+				self::CRM_LEAD_OUTCOME_FAILED,
+				self::CRM_LEAD_REGISTRATION_EXCEPTION_ERROR,
+				$lockName,
+				$exception
+			);
+		}
+		finally
+		{
+			try
+			{
+				static::releaseCrmLeadLock($connection, $lockName);
+			}
+			catch (\Throwable $exception)
+			{
+				static::logCrmLeadLockReleaseFailure($callId, $lockName, $exception);
+			}
+		}
+
+		if (is_array($postCommitContext))
+		{
+			static::runCrmRegistrationPostCommitContext($call, $postCommitContext);
+		}
+
+		if ($shouldStartCallTrigger)
+		{
+			try
+			{
+				static::StartCallTrigger($call, $onlyCreated);
+			}
+			catch (\Throwable $exception)
+			{
+				static::logCrmLeadTriggerFailure($callId, $lockName, $exception);
+			}
+		}
+		elseif (!empty($restorativeTriggerEntities))
+		{
+			try
+			{
+				static::startCallTriggerForEntities($call, $restorativeTriggerEntities);
+			}
+			catch (\Throwable $exception)
+			{
+				static::logCrmLeadRestorativeTriggerFailure($callId, $lockName, $exception);
+			}
+		}
+
+		return $registrationResult;
+	}
+
+	protected static function acquireCrmLeadLock($connection, string $lockName): bool
+	{
+		return (bool)$connection->lock($lockName, self::CRM_LEAD_LOCK_TIMEOUT);
+	}
+
+	protected static function releaseCrmLeadLock($connection, string $lockName): void
+	{
+		$connection->unlock($lockName);
+	}
+
+	private static function reloadCallCrmEntitiesFromMaster(VI\Call $call): array
+	{
+		$connectionPool = Application::getInstance()->getConnectionPool();
+		$connectionPool->useMasterOnly(true);
+
+		try
+		{
+			return $call->reloadCrmEntities();
+		}
+		finally
+		{
+			$connectionPool->useMasterOnly(false);
+		}
+	}
+
+	private static function reloadCallCrmBindingsFromMaster(VI\Call $call): void
+	{
+		$connectionPool = Application::getInstance()->getConnectionPool();
+		$connectionPool->useMasterOnly(true);
+
+		try
+		{
+			$call->reloadCrmBindings();
+		}
+		finally
+		{
+			$connectionPool->useMasterOnly(false);
+		}
+	}
+
+	private static function hasBlockingCrmLeadBinding(array $crmEntities): bool
+	{
+		foreach ($crmEntities as $entity)
+		{
+			if (
+				($entity['IS_CREATED'] ?? null) === 'Y'
+				|| (
+					($entity['ENTITY_TYPE'] ?? null) === self::CRM_ENTITY_TYPE_LEAD
+					&& ($entity['IS_PRIMARY'] ?? null) === 'Y'
+				)
+			)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function createCrmLeadRegistrationResult(string $outcome): Result
+	{
+		$result = new Result();
+		$result->setData([
+			'outcome' => $outcome,
+		]);
+
+		return $result;
+	}
+
+	private static function createCrmLeadRegistrationResultWithEvent(VI\Call $call, string $outcome): Result
+	{
+		if (!empty($call->getCrmBindings()) && static::isNewCallScenarioEnabled())
 		{
 			static::sendCallRegisteredInCrmEvent($call);
 		}
 
-		return true;
+		return self::createCrmLeadRegistrationResult($outcome);
+	}
+
+	protected static function createCrmLeadRegistrationFailureResult(
+		string $callId,
+		string $outcome,
+		string $errorCode,
+		string $lockName,
+		?\Throwable $exception = null
+	): Result
+	{
+		$message = self::formatCrmLeadRegistrationFailureMessage($callId, $outcome, $lockName);
+
+		$result = self::createCrmLeadRegistrationResult($outcome);
+		$result->addError(new Error($message, $errorCode));
+
+		self::logCrmLeadRegistrationFailure($message, $callId, $outcome, $errorCode, $lockName, $exception);
+
+		return $result;
+	}
+
+	private static function logCrmLeadRegistrationFailure(
+		string $message,
+		string $callId,
+		string $outcome,
+		string $errorCode,
+		string $lockName,
+		?\Throwable $exception
+	): void
+	{
+		$context = [
+			'callId' => $callId,
+			'outcome' => $outcome,
+			'lockName' => $lockName,
+			'timeout' => self::CRM_LEAD_LOCK_TIMEOUT,
+			'errorCode' => $errorCode,
+			'exceptionClass' => $exception !== null ? get_class($exception) : null,
+		];
+
+		try
+		{
+			self::getCrmLeadRegistrationLogger()->error(
+				'{date} ' . $message . '; errorCode={errorCode}; exceptionClass={exceptionClass}' . "\n",
+				$context
+			);
+		}
+		catch (\Throwable)
+		{
+		}
+
+		try
+		{
+			CVoxImplantHistory::WriteToLog(
+				[
+					'CALL_ID' => $context['callId'],
+					'OUTCOME' => $context['outcome'],
+					'LOCK' => $context['lockName'],
+					'TIMEOUT' => $context['timeout'],
+					'ERROR_CODE' => $context['errorCode'],
+					'EXCEPTION_CLASS' => $context['exceptionClass'],
+				],
+				'CRM LEAD REGISTRATION FAILURE'
+			);
+		}
+		catch (\Throwable)
+		{
+		}
+	}
+
+	protected static function logCrmLeadLockReleaseFailure(
+		string $callId,
+		string $lockName,
+		\Throwable $exception
+	): void
+	{
+		$message = 'Voximplant CRM lead lock release failed: '
+			. 'CALL_ID=' . $callId
+			. '; lock=' . $lockName
+		;
+
+		self::logCrmLeadRegistrationFailure(
+			$message,
+			$callId,
+			self::CRM_LEAD_OUTCOME_FAILED,
+			self::CRM_LEAD_LOCK_RELEASE_ERROR,
+			$lockName,
+			$exception
+		);
+	}
+
+	protected static function logCrmLeadTransactionRecoveryFailure(
+		string $callId,
+		string $errorCode,
+		\Throwable $exception
+	): void
+	{
+		$lockName = self::CRM_LEAD_LOCK_NAME_PREFIX . $callId;
+		$message = 'Voximplant CRM lead transaction recovery failed: '
+			. 'CALL_ID=' . $callId
+			. '; lock=' . $lockName
+		;
+
+		self::logCrmLeadRegistrationFailure(
+			$message,
+			$callId,
+			self::CRM_LEAD_OUTCOME_FAILED,
+			$errorCode,
+			$lockName,
+			$exception
+		);
+	}
+
+	protected static function logCrmLeadPostCommitActionFailure(
+		string $callId,
+		string $action,
+		\Throwable $exception
+	): void
+	{
+		$lockName = self::CRM_LEAD_LOCK_NAME_PREFIX . $callId;
+		$message = 'Voximplant CRM lead post-commit action failed: '
+			. 'CALL_ID=' . $callId
+			. '; action=' . $action
+			. '; lock=' . $lockName
+		;
+
+		self::logCrmLeadRegistrationFailure(
+			$message,
+			$callId,
+			self::CRM_LEAD_OUTCOME_CREATED,
+			self::CRM_LEAD_POST_COMMIT_ACTION_ERROR,
+			$lockName,
+			$exception
+		);
+	}
+
+	protected static function logCrmLeadTriggerFailure(
+		string $callId,
+		string $lockName,
+		\Throwable $exception
+	): void
+	{
+		$message = 'Voximplant CRM lead trigger failed: '
+			. 'CALL_ID=' . $callId
+			. '; lock=' . $lockName
+		;
+
+		self::logCrmLeadRegistrationFailure(
+			$message,
+			$callId,
+			self::CRM_LEAD_OUTCOME_CREATED,
+			self::CRM_LEAD_TRIGGER_ERROR,
+			$lockName,
+			$exception
+		);
+	}
+
+	protected static function logCrmLeadRestorativeTriggerFailure(
+		string $callId,
+		string $lockName,
+		\Throwable $exception
+	): void
+	{
+		$message = 'Voximplant CRM lead restorative trigger failed: '
+			. 'CALL_ID=' . $callId
+			. '; lock=' . $lockName
+		;
+
+		self::logCrmLeadRegistrationFailure(
+			$message,
+			$callId,
+			self::CRM_LEAD_OUTCOME_FAILED,
+			self::CRM_LEAD_RESTORATIVE_TRIGGER_ERROR,
+			$lockName,
+			$exception
+		);
+	}
+
+	private static function getCrmLeadRegistrationLogger(): LoggerInterface
+	{
+		$logger = (new LoggerFactory(false))->createById(
+			self::CRM_LEAD_REGISTRATION_LOGGER_ID,
+			isCheckEnabledFromRegistry: false,
+			returnDefaultLoggerIfNotExists: false,
+		);
+		if ($logger !== null)
+		{
+			return $logger;
+		}
+
+		$path = ($_SERVER['DOCUMENT_ROOT'] ?? '') . '/bitrix/modules/voximplant.log';
+
+		return new FileLogger($path);
+	}
+
+	private static function formatCrmLeadRegistrationFailureMessage(
+		string $callId,
+		string $outcome,
+		string $lockName
+	): string
+	{
+		return 'Voximplant CRM lead registration failed: '
+			. 'CALL_ID=' . $callId
+			. '; outcome=' . $outcome
+			. '; lock=' . $lockName
+			. '; timeout=' . self::CRM_LEAD_LOCK_TIMEOUT
+		;
 	}
 
 	/**
@@ -655,15 +1376,7 @@ class CVoxImplantCrmHelper
 	 */
 	public static function shouldCreateLead(VI\Call $call, $config = null)
 	{
-		if(!\Bitrix\Main\Loader::includeModule('crm'))
-			return false;
-
-		if(is_null($config))
-		{
-			$config = $call->getConfig();
-		}
-
-		if($call->getParentCallId() != '')
+		if (!static::isLeadCreationEnabledByCallConfig($call, $config))
 		{
 			return false;
 		}
@@ -676,11 +1389,28 @@ class CVoxImplantCrmHelper
 		{
 			return false;
 		}
-		if(!$call->isCrmEnabled())
+
+		return true;
+	}
+
+	protected static function isLeadCreationEnabledByCallConfig(VI\Call $call, $config = null): bool
+	{
+		if (!\Bitrix\Main\Loader::includeModule('crm'))
 		{
 			return false;
 		}
-		if($config['CRM_CREATE'] !== CVoxImplantConfig::CRM_CREATE_LEAD)
+
+		if (is_null($config))
+		{
+			$config = $call->getConfig();
+		}
+
+		if ($call->getParentCallId() != '' || !$call->isCrmEnabled())
+		{
+			return false;
+		}
+
+		if ($config['CRM_CREATE'] !== CVoxImplantConfig::CRM_CREATE_LEAD)
 		{
 			return false;
 		}
@@ -697,6 +1427,8 @@ class CVoxImplantCrmHelper
 		{
 			return $call->getIncoming() == CVoxImplantMain::CALL_OUTGOING;
 		}
+
+		return false;
 	}
 
 	/**
@@ -1137,17 +1869,28 @@ class CVoxImplantCrmHelper
 	// Starts call trigger for all associated entities, except for created lead.
 	public static function StartCallTrigger(VI\Call $call, $onlyCreated = false)
 	{
-		if(!\Bitrix\Main\Loader::includeModule('crm'))
-		{
-			return;
-		}
-
-		if($call->getIncoming() != CVoxImplantMain::CALL_INCOMING && $call->getIncoming() != CVoxImplantMain::CALL_INCOMING_REDIRECT)
+		if (!self::canStartCallTrigger($call))
 		{
 			return;
 		}
 
 		$crmEntities = $onlyCreated ? $call->getCreatedCrmEntities() : $call->getCrmEntities();
+
+		self::executeCallTriggerForEntities($call, $crmEntities);
+	}
+
+	protected static function startCallTriggerForEntities(VI\Call $call, array $crmEntities): void
+	{
+		if (!self::canStartCallTrigger($call))
+		{
+			return;
+		}
+
+		self::executeCallTriggerForEntities($call, $crmEntities);
+	}
+
+	private static function executeCallTriggerForEntities(VI\Call $call, array $crmEntities): void
+	{
 		$bindings = array_map(function($e)
 		{
 			return [
@@ -1166,6 +1909,17 @@ class CVoxImplantCrmHelper
 				'CALL_STATUS' => $call->getStatus(),
 			]);
 		}
+	}
+
+	private static function canStartCallTrigger(VI\Call $call): bool
+	{
+		return (
+			\Bitrix\Main\Loader::includeModule('crm')
+			&& (
+				$call->getIncoming() == CVoxImplantMain::CALL_INCOMING
+				|| $call->getIncoming() == CVoxImplantMain::CALL_INCOMING_REDIRECT
+			)
+		);
 	}
 
 	public static function StartMissedCallTrigger(VI\Call $call)

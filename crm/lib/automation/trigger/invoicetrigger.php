@@ -15,9 +15,45 @@ Loc::loadMessages(__FILE__);
 
 class InvoiceTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use OrderReturnTrait;
+
 	public static function isSupported($entityTypeId)
 	{
 		return ($entityTypeId === \CCrmOwnerType::Deal);
+	}
+
+	protected static function getOrderReturnFieldIds(): array
+	{
+		return [
+			self::ORDER_RETURN_SUM,
+			self::ORDER_RETURN_CURRENCY,
+			self::ORDER_RETURN_INVOICE_ID,
+		];
+	}
+
+	/**
+	 * The payment of an invoice is registered by the system as often as by a person, and the status
+	 * handlers name no acting user, so the node names no initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_INVOICE_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getOrderReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], $this->buildOrderReturnValues(), [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public static function getCode()
@@ -47,7 +83,7 @@ class InvoiceTrigger extends BaseTrigger
 				array('ID' => $id, 'CHECK_PERMISSIONS' => 'N'),
 				false,
 				false,
-				array('ID', 'UF_DEAL_ID')
+				array('ID', 'UF_DEAL_ID', 'PRICE', 'CURRENCY')
 			);
 			$fields = is_object($iterator) ? $iterator->fetch() : null;
 			$dealId = 0;
@@ -61,7 +97,12 @@ class InvoiceTrigger extends BaseTrigger
 				static::execute(array(array(
 					'OWNER_TYPE_ID' => \CCrmOwnerType::Deal,
 					'OWNER_ID' => $dealId
-				)), array('INVOICE_ID' => $id));
+				)), array(
+					'INVOICE_ID' => $id,
+					self::ORDER_INPUT_INVOICE_ID => (int)$id,
+					self::ORDER_INPUT_SUM => (float)($fields['PRICE'] ?? 0),
+					self::ORDER_INPUT_CURRENCY => (string)($fields['CURRENCY'] ?? ''),
+				));
 			}
 		}
 	}
@@ -103,6 +144,9 @@ class InvoiceTrigger extends BaseTrigger
 				],
 				[
 					'SMART_INVOICE_ID' => $item->getId(),
+					self::ORDER_INPUT_INVOICE_ID => (int)$item->getId(),
+					self::ORDER_INPUT_SUM => (float)($item->getOpportunity() ?? 0),
+					self::ORDER_INPUT_CURRENCY => (string)($item->getCurrencyId() ?? ''),
 				]
 			);
 		}

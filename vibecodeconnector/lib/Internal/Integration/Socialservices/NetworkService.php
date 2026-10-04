@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Internal\Integration\Socialservices;
 
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Service\MicroService\Client;
 use CSocServBitrix24Net;
 
 class NetworkService
 {
+	public function __construct(
+		private readonly PortalNetworkId $portalNetworkId = new PortalNetworkId(),
+	) {
+	}
+
 	public function getUserNetworkId(int $userId): ?string
 	{
 		if (!Loader::includeModule('socialservices'))
@@ -53,9 +57,7 @@ class NetworkService
 
 	public function getPortalNetworkId(): ?string
 	{
-		$id = (string)Option::get('socialservices', 'bitrix24net_id', '');
-
-		return $id !== '' ? $id : null;
+		return $this->portalNetworkId->get();
 	}
 
 	public function isCloudPortal(): bool

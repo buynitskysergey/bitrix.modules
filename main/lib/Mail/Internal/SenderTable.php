@@ -4,6 +4,7 @@ namespace Bitrix\Main\Mail\Internal;
 
 use Bitrix\Main\Config;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Mail\Address;
 use Bitrix\Main\Security;
 use Bitrix\Main\ORM\Fields;
 use Bitrix\Main\ORM\Data\DataManager;
@@ -36,17 +37,84 @@ class SenderTable extends DataManager
 	{
 		$result = parent::add($data);
 
-		\Bitrix\Main\Mail\Sender::clearCustomSmtpCache($data['EMAIL']);
+		if ($result->isSuccess())
+		{
+			$senderId = (int)$result->getId();
+			\Bitrix\Main\Mail\Sender::clearSenderCache($senderId, $data['EMAIL'] ?? null);
+			\Bitrix\Main\Mail\Sender::clearIdentitySenderCache(
+				$senderId,
+				$data['PARENT_MODULE_ID'] ?? 'main',
+				isset($data['PARENT_ID']) ? (int)$data['PARENT_ID'] : null,
+			);
+		}
 
 		return $result;
+	}
+
+	public static function update($primary, array $data)
+	{
+		$current = static::getCurrentRow($primary);
+
+		$result = parent::update($primary, $data);
+
+		if ($result->isSuccess())
+		{
+			// the address of the record may change, so both the old and the new one lose their fallback cache
+			\Bitrix\Main\Mail\Sender::clearSenderCache((int)$current['ID'], $current['EMAIL']);
+			\Bitrix\Main\Mail\Sender::clearSenderCache((int)$current['ID'], $data['EMAIL'] ?? null);
+			\Bitrix\Main\Mail\Sender::clearIdentitySenderCache(
+				(int)$current['ID'],
+				$current['PARENT_MODULE_ID'],
+				$current['PARENT_ID'],
+			);
+			\Bitrix\Main\Mail\Sender::clearIdentitySenderCache(
+				(int)$current['ID'],
+				$data['PARENT_MODULE_ID'] ?? $current['PARENT_MODULE_ID'],
+				array_key_exists('PARENT_ID', $data) ? (int)$data['PARENT_ID'] : $current['PARENT_ID'],
+			);
+		}
+
+		return $result;
+	}
+
+	public static function delete($primary)
+	{
+		$current = static::getCurrentRow($primary);
+
+		$result = parent::delete($primary);
+
+		if ($result->isSuccess())
+		{
+			\Bitrix\Main\Mail\Sender::clearSenderCache((int)$current['ID'], $current['EMAIL']);
+			\Bitrix\Main\Mail\Sender::clearIdentitySenderCache(
+				(int)$current['ID'],
+				$current['PARENT_MODULE_ID'],
+				$current['PARENT_ID'],
+			);
+		}
+
+		return $result;
+	}
+
+	private static function getCurrentRow($primary): array
+	{
+		$row = static::getByPrimary(
+			$primary,
+			['select' => ['ID', 'EMAIL', 'PARENT_MODULE_ID', 'PARENT_ID']],
+		)->fetch();
+
+		return [
+			'ID' => $row['ID'] ?? 0,
+			'EMAIL' => $row['EMAIL'] ?? null,
+			'PARENT_MODULE_ID' => $row['PARENT_MODULE_ID'] ?? null,
+			'PARENT_ID' => isset($row['PARENT_ID']) ? (int)$row['PARENT_ID'] : null,
+		];
 	}
 
 	public static function getObjectClass()
 	{
 		return Sender::class;
 	}
-
-	// @TODO: invalidate smtp cache on update and delete
 
 	public static function getMap()
 	{
@@ -58,7 +126,13 @@ class SenderTable extends DataManager
 
 			(new Fields\StringField("EMAIL"))
 				->configureRequired(true)
-				->configureTitle(Loc::getMessage("main_mail_sender_email_title")),
+				->configureTitle(Loc::getMessage("main_mail_sender_email_title"))
+				// the form of the stored address is a property of the field, so every write path of the
+				// entity passes through it: add, addMulti, update and updateMulti alike
+				->addSaveDataModifier(static function ($value)
+					{
+						return is_string($value) ? Address::normalizeEmail($value) : $value;
+					}),
 
 			(new Fields\StringField("NAME"))
 				->configureTitle(Loc::getMessage("main_mail_sender_name_title")),

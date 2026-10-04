@@ -24,6 +24,7 @@ class MailCounterTable extends Entity\DataManager
 {
 	const DIR = 'DIR';
 	const MAILBOX = 'MAILBOX';
+	const LABEL = 'LABEL';
 
 	public static function getFilePath()
 	{
@@ -58,7 +59,7 @@ class MailCounterTable extends Entity\DataManager
 			),
 			'ENTITY_TYPE' => array(
 				'data_type' => 'enum',
-				'values' => array(self::DIR, self::MAILBOX),
+				'values' => array(self::DIR, self::MAILBOX, self::LABEL),
 				'required'  => true,
 				'primary' => true,
 			),

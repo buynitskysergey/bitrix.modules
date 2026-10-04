@@ -9,6 +9,7 @@ use Bitrix\Timeman\V2\Internal\Repository\FullReportRepository;
 use Bitrix\Timeman\V2\Internal\Repository\InMemoryUserRepository;
 use Bitrix\Timeman\V2\Internal\Repository\Mapper\FileMapper;
 use Bitrix\Timeman\V2\Internal\Repository\Mapper\UserMapper;
+use Bitrix\Timeman\V2\Internal\Repository\RecordIntentStateRepository;
 use Bitrix\Timeman\V2\Internal\Repository\RecordRepository;
 use Bitrix\Timeman\V2\Internal\Repository\ReportRepository;
 use Bitrix\Timeman\V2\Internal\Repository\ScheduleRepository;
@@ -19,6 +20,7 @@ use Bitrix\Timeman\V2\Internal\Service\FullReportService;
 use Bitrix\Timeman\V2\Internal\Service\FullReportUserService;
 use Bitrix\Timeman\V2\Internal\Service\NameService;
 use Bitrix\Timeman\V2\Internal\Service\PhotoService;
+use Bitrix\Timeman\V2\Internal\Service\RecordIntentService;
 use Bitrix\Timeman\V2\Internal\Service\RecordService;
 use Bitrix\Timeman\V2\Internal\Service\ReportTextNormalizerService;
 use Bitrix\Timeman\V2\Internal\Service\ScheduledActionService;
@@ -104,6 +106,16 @@ class Container extends AbstractContainer
 	public function getRecordService(): RecordService
 	{
 		return $this->get(RecordService::class);
+	}
+
+	public function getRecordIntentStateRepository(): RecordIntentStateRepository
+	{
+		return $this->get(RecordIntentStateRepository::class);
+	}
+
+	public function getRecordIntentService(): RecordIntentService
+	{
+		return $this->get(RecordIntentService::class);
 	}
 
 	public function getScheduleRepository(): ScheduleRepository

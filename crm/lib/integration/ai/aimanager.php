@@ -6,18 +6,29 @@ use Bitrix\AI\Agreement;
 use Bitrix\AI\Context;
 use Bitrix\AI\Context\Language;
 use Bitrix\AI\Engine;
+use Bitrix\AI\Enum\VibePlusLimitState;
 use Bitrix\AI\Services\CopilotNameService;
 use Bitrix\AI\Tuning\Manager;
 use Bitrix\Crm\Activity\Provider\OpenLine;
+use Bitrix\Crm\Copilot\CallScriptEditReview\EditReviewRepository;
+use Bitrix\Crm\Feature;
+use Bitrix\Crm\Feature\CallScoringV2;
 use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
 use Bitrix\Crm\Integration\AI\Operation\ExtractScoringCriteria;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\FillRepeatSaleTips;
+use Bitrix\Crm\Integration\AI\Operation\GenerateCallCriteria;
+use Bitrix\Crm\Integration\AI\Operation\GenerateCallScriptDescription;
+use Bitrix\Crm\Integration\AI\Operation\GenerateCallScriptFromDialog;
+use Bitrix\Crm\Integration\AI\Operation\GenerateManagerSummary;
+use Bitrix\Crm\Integration\AI\Operation\GroupSuspiciousCalls;
 use Bitrix\Crm\Integration\AI\Operation\Sandbox;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\ScreeningRepeatSaleItem;
+use Bitrix\Crm\Integration\AI\Operation\SelectCallScoreScript;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 use Bitrix\Crm\Integration\Bitrix24Manager;
@@ -31,6 +42,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Event;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Security\Random;
+use Bitrix\Main\Type\DateTime;
 use CCrmActivity;
 use CCrmOwnerType;
 use Psr\Log\LoggerInterface;
@@ -38,6 +50,10 @@ use Psr\Log\LoggerInterface;
 class AIManager
 {
 	public const AI_COPILOT_FEATURE_NAME = 'crm_copilot';
+	/**
+	 * @deprecated Kept for BC. Use {@see AIManager::isEntityTypeSupported()} as the single source of truth
+	 *             for the fill-fields scenario entity-type gate.
+	 */
 	public const SUPPORTED_ENTITY_TYPE_IDS = FillItemFieldsFromCallTranscription::SUPPORTED_TARGET_ENTITY_TYPE_IDS;
 	public const AI_LICENCE_FEATURE_NAME = 'ai_available_by_version';
 	public const AI_COPILOT_FEATURE_RESTRICTED_SLIDER_CODE = 'limit_v2_crm_copilot_call_assessment';
@@ -47,6 +63,7 @@ class AIManager
 	public const AI_LIMIT_BAAS = 'BAAS';
 
 	private const AI_CALL_PROCESSING_AUTOMATICALLY_OPTION_NAME = 'AI_CALL_PROCESSING_ALLOWED_AUTO_V2';
+	public const CALL_SCORING_V2_PENDING_BACKFILL_OPTION_NAME = 'CALL_SCORING_V2_PENDING_BACKFILL';
 	private const AI_APP_COLLECTION_MARKET_MAP = [
 		'ru' => 19021440,
 		'by' => 19021806,
@@ -75,6 +92,25 @@ class AIManager
 		}
 
 		return !in_array(mb_strtolower($region), $regionBlacklist, true);
+	}
+
+	/**
+	 * Single source of truth: whether the given CRM entity type is a valid target for the
+	 * "fill fields" scenario.
+	 *
+	 * Replaces the hardcoded Deal/Lead whitelist ({@see AIManager::SUPPORTED_ENTITY_TYPE_IDS}).
+	 * The scenario is allowed for any entity backed by the universal CRM model (Factory-based),
+	 * which also covers smart processes; those entities are exactly the ones that accept activity
+	 * bindings. The factory-presence check guards against dynamic type ids with no real type
+	 * created. `CCrmOwnerType::isPossibleActivityOwner()` does not exist in this codebase, so the
+	 * factual equivalent (Factory-based + existing factory) is used.
+	 */
+	public static function isEntityTypeSupported(int $entityTypeId): bool
+	{
+		return $entityTypeId > 0
+			&& CCrmOwnerType::isUseFactoryBasedApproach($entityTypeId)
+			&& Container::getInstance()->getFactory($entityTypeId) !== null
+		;
 	}
 
 	public static function isEnabledInGlobalSettings(string|GlobalSetting $code = GlobalSetting::FillItemFromCall): bool
@@ -108,13 +144,23 @@ class AIManager
 		return isset($item) && $item->getValue();
 	}
 
-	/**
-	 * @internal Resets the cached Tuning\Manager so that subsequent calls re-read the `ai.tuning` option.
-	 *           Intended for tests that mutate global AI settings between cases.
-	 */
-	public static function resetGlobalSettingsCache(): void
+	public static function isCallTranscriptionEngineConfigured(): bool
 	{
-		self::$globalSettingsTuningManager = null;
+		if (!static::isAvailable())
+		{
+			return false;
+		}
+
+		if (self::$globalSettingsTuningManager === null)
+		{
+			self::$globalSettingsTuningManager = new Manager();
+		}
+
+		$item = self::$globalSettingsTuningManager->getItem(
+			EventHandler::SETTINGS_FILL_ITEM_FROM_CALL_ENGINE_AUDIO_CODE,
+		);
+
+		return isset($item) && !empty($item->getValue());
 	}
 
 	public static function isEngineAvailable(string $type): bool
@@ -153,6 +199,16 @@ class AIManager
 			static::isAiCallProcessingEnabled()
 			&& Option::get('crm', self::AI_CALL_PROCESSING_AUTOMATICALLY_OPTION_NAME, BaasManager::isAvailable())
 		;
+	}
+
+	public static function isCallScoringV2Enabled(): bool
+	{
+		return Feature::enabled(CallScoringV2::class) && !self::isCallScoringV2BackfillPending();
+	}
+
+	public static function isCallScoringV2BackfillPending(): bool
+	{
+		return Option::get('crm', self::CALL_SCORING_V2_PENDING_BACKFILL_OPTION_NAME, 'N') === 'Y';
 	}
 
 	public static function isAILicenceAccepted(int $userId = null): bool
@@ -234,6 +290,7 @@ class AIManager
 		?int $storageTypeId = null,
 		?int $storageElementId = null,
 		bool $isManualLaunch = true,
+		?string $launchSource = null,
 	): Result
 	{
 		$result = new Result(TranscribeCallRecording::TYPE_ID);
@@ -282,6 +339,7 @@ class AIManager
 			$storageElementId,
 			$userId,
 		))
+			->setLaunchSource($launchSource)
 			->setIsManualLaunch($isManualLaunch)
 			->setScenario($scenario)
 			->launch()
@@ -436,6 +494,251 @@ class AIManager
 			->launch()
 		;
 	}
+
+	public static function launchSelectCallScoringScript(
+		int $activityId,
+		string $transcription,
+		?int $userId = null,
+		bool $isManualLaunch = false,
+		array $assessmentSettingsIds = [],
+	): Result
+	{
+		$result = new Result(SelectCallScoreScript::TYPE_ID);
+
+		if (!self::isCallScoringV2Enabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if ($activityId <= 0)
+		{
+			return $result->addError(ErrorCode::getNotFoundError());
+		}
+
+		$target = new ItemIdentifier(CCrmOwnerType::Activity, $activityId);
+		if (!SelectCallScoreScript::isSuitableTarget($target))
+		{
+			return $result->addError(ErrorCode::getNotFoundError());
+		}
+
+		$operation = (new SelectCallScoreScript(
+			$target,
+			$userId,
+		))
+			->setTranscription($transcription)
+			->setIsManualLaunch($isManualLaunch)
+			->setScenario(Scenario::SELECT_CALL_SCORING_SCRIPT_SCENARIO)
+		;
+
+		if (!empty($assessmentSettingsIds))
+		{
+			$operation->setAssessmentSettingsIds($assessmentSettingsIds);
+		}
+
+		return $operation->launch();
+	}
+
+	public static function launchScoreCallV2(
+		int $activityId,
+		string $transcription,
+		int $assessmentSettingsId,
+		?int $userId = null,
+		bool $isManualLaunch = false,
+	): Result
+	{
+		$result = new Result(ScoreCallV2::TYPE_ID);
+
+		if (!self::isCallScoringV2Enabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if ($activityId <= 0)
+		{
+			return $result->addError(ErrorCode::getNotFoundError());
+		}
+
+		$operation = (new ScoreCallV2(
+			new ItemIdentifier(CCrmOwnerType::Activity, $activityId),
+			$userId,
+		))
+			->setTranscription($transcription)
+			->setAssessmentSettingsId($assessmentSettingsId)
+			->setIsManualLaunch($isManualLaunch)
+			->setScenario(Scenario::CALL_SCORING_V2_SCENARIO)
+		;
+
+		return $operation->launch();
+	}
+
+	public static function launchGenerateCallCriteria(
+		int $assessmentSettingsId,
+		array $dialogues,
+		?int $userId = null,
+		bool $isManualLaunch = false,
+	): Result
+	{
+		$result = new Result(GenerateCallCriteria::TYPE_ID);
+
+		if (!self::isCallScoringV2Enabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if ($assessmentSettingsId <= 0)
+		{
+			return $result->addError(ErrorCode::getNotFoundError());
+		}
+
+		$operation = (new GenerateCallCriteria(
+			new ItemIdentifier(CCrmOwnerType::CopilotCallAssessment, $assessmentSettingsId),
+			$userId,
+		))
+			->setDialogues($dialogues)
+			->setIsManualLaunch($isManualLaunch)
+		;
+
+		return $operation->launch();
+	}
+
+	public static function launchReviewCallScriptAfterEdit(
+		int $assessmentSettingsId,
+		?int $userId = null,
+	): Result
+	{
+		$result = new Result(GenerateCallScriptDescription::TYPE_ID);
+
+		if (!self::isCallScoringV2Enabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if ($assessmentSettingsId <= 0)
+		{
+			return $result->addError(ErrorCode::getNotFoundError());
+		}
+
+		EditReviewRepository::getInstance()->clear($assessmentSettingsId);
+
+		$operation = new GenerateCallScriptDescription($assessmentSettingsId, $userId);
+
+		$inputResult = $operation->checkRequiredInput();
+		if (!$inputResult->isSuccess())
+		{
+			return $result->addErrors($inputResult->getErrors());
+		}
+
+		return $operation->setIsManualLaunch(false)->launch();
+	}
+
+	/**
+	 * @param int[] $clientTypeIds
+	 */
+	public static function launchGenerateCallScriptFromDialog(
+		string $userText,
+		int $assessmentId,
+		?int $userId = null,
+	): Result
+	{
+		$result = new Result(GenerateCallScriptFromDialog::TYPE_ID);
+
+		if (!self::isCallScoringV2Enabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		return (new GenerateCallScriptFromDialog($assessmentId, $userId))
+			->setUserText($userText)
+			->launch()
+		;
+	}
+
+	/**
+	 * @param array<int, array{id: int, data: array{theme: ?string, product: ?string, intent: ?string}}> $calls
+	 * @param array<int, array{id: int, name: string, description: string}> $scripts
+	 */
+	public static function launchGroupSuspiciousCalls(
+		array $calls,
+		array $scripts,
+		?int $userId = null,
+	): Result
+	{
+		$result = new Result(GroupSuspiciousCalls::TYPE_ID);
+
+		if (!self::isCallScoringV2Enabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		return (new GroupSuspiciousCalls($userId))
+			->setCalls($calls)
+			->setScripts($scripts)
+			->setIsManualLaunch(false)
+			->launch()
+		;
+	}
+
+	public static function launchGenerateManagerSummary(
+		int $managerId,
+		?int $userId = null,
+		?DateTime $referenceDate = null,
+	): Result
+	{
+		$result = new Result(GenerateManagerSummary::TYPE_ID);
+
+		if (!static::isAvailable() || !static::isAiCallProcessingEnabled())
+		{
+			return $result->addError(ErrorCode::getAINotAvailableError());
+		}
+
+		if ($managerId <= 0)
+		{
+			return $result->addError(ErrorCode::getNotFoundError());
+		}
+
+		// Idempotency shortcut: if the manager's data has not changed since the last summary,
+		// re-deliver the cached result instead of spending a new AI request. The reference date
+		// keeps the dedup window aligned with the window the fresh generation would use.
+		if (GenerateManagerSummary::deliverCachedIfFresh($managerId, (int)$userId, $referenceDate))
+		{
+			return $result;
+		}
+
+		return (new GenerateManagerSummary($managerId, $userId, null, $referenceDate))
+			->setIsManualLaunch(false)
+			->launch()
+		;
+	}
 	// endregion
 
 	public static function getAllOperationTypes(): array
@@ -445,7 +748,14 @@ class AIManager
 			SummarizeCallTranscription::TYPE_ID,
 			FillItemFieldsFromCallTranscription::TYPE_ID,
 			ScoreCall::TYPE_ID,
+			ScoreCallV2::TYPE_ID,
+			SelectCallScoreScript::TYPE_ID,
 			ExtractScoringCriteria::TYPE_ID,
+			GenerateCallCriteria::TYPE_ID,
+			GenerateCallScriptFromDialog::TYPE_ID,
+			GenerateCallScriptDescription::TYPE_ID,
+			GroupSuspiciousCalls::TYPE_ID,
+			GenerateManagerSummary::TYPE_ID,
 			FillRepeatSaleTips::TYPE_ID,
 			ScreeningRepeatSaleItem::TYPE_ID,
 			Sandbox\FillRepeatSaleTips::TYPE_ID,
@@ -477,6 +787,49 @@ class AIManager
 		if (!str_starts_with($errorCode, 'LIMIT_IS_EXCEEDED'))
 		{
 			return null;
+		}
+
+		$vibePlusLimitState = $customData['vibePlusLimitState'] ?? null;
+		if (
+			!empty($vibePlusLimitState)
+			&& $vibePlusLimitState !== VibePlusLimitState::NotApplicable->name
+			&& !in_array(
+				$errorCode,
+				['LIMIT_IS_EXCEEDED_BAAS', 'LIMIT_IS_EXCEEDED_BAAS_RATE_LIMIT'],
+				true,
+			)
+		)
+		{
+			$vibePlusCustomData = [
+				'vibePlusLimitState' => $vibePlusLimitState,
+				'showSliderWithMsg' => $customData['showSliderWithMsg'] ?? null,
+				'msgForIm' => $customData['msgForIm'] ?? null,
+			];
+
+			$limitCode = match ($errorCode)
+			{
+				'LIMIT_IS_EXCEEDED_DAILY' => self::AI_LIMIT_CODE_DAILY,
+				'LIMIT_IS_EXCEEDED_MONTHLY' => self::AI_LIMIT_CODE_MONTHLY,
+				default => null,
+			};
+			if ($limitCode !== null)
+			{
+				$vibePlusCustomData['limitCode'] = $limitCode;
+			}
+
+			if (
+				in_array(
+					$vibePlusLimitState,
+					[VibePlusLimitState::BuyWithDemo->name, VibePlusLimitState::BuyWithoutDemo->name],
+					true,
+				)
+				&& !empty($customData['sliderCode'])
+			)
+			{
+				$vibePlusCustomData['sliderCode'] = $customData['sliderCode'];
+			}
+
+			return ErrorCode::getAILimitOfRequestsExceededError($vibePlusCustomData);
 		}
 
 		if (!empty($customData['sliderCode']))
@@ -538,5 +891,14 @@ class AIManager
 		}
 
 		return '';
+	}
+
+	/**
+	 * @internal Resets the cached Tuning\Manager so that subsequent calls re-read the `ai.tuning` option.
+	 *           Intended for tests that mutate global AI settings between cases.
+	 */
+	public static function resetGlobalSettingsCache(): void
+	{
+		self::$globalSettingsTuningManager = null;
 	}
 }

@@ -275,6 +275,39 @@ class FullReportRepository
 		return $this->reportMapper->mapToEntity($row);
 	}
 
+	/**
+	 * Same as getById() but selects only the scalar and text columns, skipping the heavy
+	 * serialized payload (TASKS, EVENTS, FILES, PLANS). The mapper leaves those entity fields
+	 * null. Use for callers that need owner, active flag, dates, type and the two report texts
+	 * only — the discussion flow — to avoid transferring and unserializing large blobs.
+	 */
+	public function getByIdWithoutPayload(int $reportId): ?FullReport
+	{
+		$row = FullReportTable::query()
+			->addSelect('ID')
+			->addSelect('USER_ID')
+			->addSelect('ACTIVE')
+			->addSelect('REPORT_DATE')
+			->addSelect('DATE_FROM')
+			->addSelect('DATE_TO')
+			->addSelect('REPORT')
+			->addSelect('REPORT_EXTENDED')
+			->addSelect('TYPE')
+			->addSelect('TIMESTAMP_X')
+			->where('ID', $reportId)
+			->setLimit(1)
+			->exec()
+			->fetch()
+		;
+
+		if (!is_array($row))
+		{
+			return null;
+		}
+
+		return $this->reportMapper->mapToEntity($row);
+	}
+
 	public function findLatestDraft(int $userId): ?FullReport
 	{
 		$row = FullReportTable::query()

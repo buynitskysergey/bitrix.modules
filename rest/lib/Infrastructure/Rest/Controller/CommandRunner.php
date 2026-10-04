@@ -59,6 +59,14 @@ trait CommandRunner
 				throw new Infrastructure\Rest\Exception\IncomingWebhookNotFoundException($previousException);
 			}
 
+			if (
+				$previousException instanceof
+					Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface
+			)
+			{
+				throw new \Bitrix\Rest\V3\Exception\FeatureNotAvailableOnCurrentPlanException($previousException);
+			}
+
 			if ($previousException instanceof Main\AccessDeniedException)
 			{
 				throw new AccessDeniedException($previousException);
@@ -73,6 +81,23 @@ trait CommandRunner
 			{
 				throw new RequestValidationException([
 					new Main\Error($previousException->getMessage(), $previousException->getParameter()),
+				]);
+			}
+
+			if ($previousException instanceof \Bitrix\Rest\AccessException)
+			{
+				throw new AccessDeniedException($previousException);
+			}
+
+			if ($previousException instanceof \Bitrix\Rest\RestException)
+			{
+				if ($previousException->getErrorCode() === \Bitrix\Rest\RestException::ERROR_CORE)
+				{
+					throw new InternalException($exception);
+				}
+
+				throw new RequestValidationException([
+					new Main\Error($previousException->getMessage(), $previousException->getErrorCode()),
 				]);
 			}
 

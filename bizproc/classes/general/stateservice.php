@@ -113,6 +113,11 @@ class CBPStateService extends CBPRuntimeService
 			throw new Exception("workflowId");
 		}
 
+		if (!CBPRuntime::isValidWorkflowId($workflowId))
+		{
+			throw new Exception("InvalidWorkflowId");
+		}
+
 		$workflowTemplateId = (int)$workflowTemplateId;
 		if ($workflowTemplateId <= 0)
 		{

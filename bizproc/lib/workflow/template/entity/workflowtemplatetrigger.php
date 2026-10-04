@@ -10,6 +10,7 @@ use Bitrix\Bizproc\Public\Entity\Trigger\Section;
 use Bitrix\Bizproc\Workflow\Template\Converter\NodesToTemplate;
 use Bitrix\Bizproc\WorkflowTemplateTable;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\ORM;
 use Bitrix\Main\ORM\Data\DataManager;
@@ -34,6 +35,8 @@ use Bitrix\Main\Web\Json;
  */
 class WorkflowTemplateTriggerTable extends DataManager
 {
+	private const EMPTY_APPLY_RULES_JSON = '[]';
+
 	public static function getTableName(): string
 	{
 		return 'b_bp_workflow_template_trigger';
@@ -97,6 +100,138 @@ class WorkflowTemplateTriggerTable extends DataManager
 		;
 	}
 
+	/**
+	 * Tells a row whose rules were never built. Empty rules are stored as '[]' (the json encoding of an empty
+	 * array), the null and '' checks cover historic rows. The resync selects the rows to repair by the same
+	 * condition, so both the selection and the write share one definition of "no rules stored".
+	 *
+	 * @return array{0: string, 1: list<string>} sql condition and its parameters
+	 */
+	public static function getEmptyApplyRulesCondition(): array
+	{
+		return [
+			'(APPLY_RULES IS NULL OR APPLY_RULES = ?s OR APPLY_RULES = ?s)',
+			['', self::EMPTY_APPLY_RULES_JSON],
+		];
+	}
+
+	/**
+	 * Rebuilds the trigger rows of a stored template without touching its sections and schedules.
+	 *
+	 * APPLY_RULES is a derived column written only on template add and update, so a fixed activity class
+	 * does not repair the rules already stored on a portal. onTemplateUpdate() cannot be reused for that:
+	 * it also rewrites the sections and resyncs the schedules - an extra write and a risk for the schedule
+	 * agents. Orphan rows are left in place on purpose: a template that fails to parse must not lose them.
+	 *
+	 * An inactive template is skipped: syncByTemplate() stores no trigger rows for such a template, so a write
+	 * here would return its triggers to the start selections. The rows are not deleted either - that write
+	 * belongs to the template update path, not to a repair of the rules.
+	 *
+	 * Every trigger node of the template is rebuilt, not only the rows a caller selected the template by: the
+	 * rules always come from the whole template body.
+	 */
+	public static function resyncApplyRules(int $templateId): void
+	{
+		$templateRow = WorkflowTemplateTable::query()
+			->where('ID', $templateId)
+			->setSelect(['TEMPLATE', 'ACTIVE'])
+			->setLimit(1)
+			->fetch()
+		;
+
+		// The template may be gone: a trigger row outlives a template deleted outside the sync path, and a
+		// stepper selects its cursor long before it processes the step.
+		if (!is_array($templateRow) || ($templateRow['ACTIVE'] ?? 'N') !== 'Y')
+		{
+			return;
+		}
+
+		$template = $templateRow['TEMPLATE'] ?? [];
+		if (($template[0]['Type'] ?? null) !== NodesToTemplate::ROOT_NODE_TYPE)
+		{
+			return;
+		}
+
+		self::repairApplyRules($templateId, self::buildTriggersToResync($template[0]['Children'] ?? []));
+	}
+
+	/**
+	 * Writes the rebuilt columns of the rows that still carry no rules, and only those.
+	 *
+	 * The repair runs in the background and races the regular sync of a template save: both write the same row
+	 * by the same primary key, and neither path locks it. A merge would win that race with a snapshot read
+	 * before the save, rolling the row back to the reaction mode and the target document the user has just
+	 * replaced - and a row with rules of its own never comes back to the selection, so the next save is what
+	 * fixes it. Hence the condition of the selection is repeated in the write itself.
+	 *
+	 * An UPDATE also keeps the repair a repair: a row deleted by a parallel template save is not resurrected,
+	 * and a node the table knows nothing about gets no row - storing rows belongs to the sync path.
+	 */
+	private static function repairApplyRules(int $templateId, array $triggers): void
+	{
+		$connection = Application::getConnection();
+		[$emptyRulesCondition, $emptyRulesParameters] = self::getEmptyApplyRulesCondition();
+
+		foreach ($triggers as $trigger)
+		{
+			$columns = self::buildRowColumns($trigger);
+			if ($columns === null)
+			{
+				continue;
+			}
+
+			$sql = (new SqlExpression(
+				'UPDATE ?# SET TRIGGER_TYPE = ?s, APPLY_RULES = ?s, MODULE_ID = ?s, ENTITY = ?s,'
+				. ' DOCUMENT_TYPE = ?s WHERE TEMPLATE_ID = ?i AND TRIGGER_NAME = ?s AND ' . $emptyRulesCondition,
+				static::getTableName(),
+				$columns['TRIGGER_TYPE'],
+				$columns['APPLY_RULES'],
+				$columns['MODULE_ID'],
+				$columns['ENTITY'],
+				$columns['DOCUMENT_TYPE'],
+				$templateId,
+				$trigger['TRIGGER_NAME'],
+				...$emptyRulesParameters,
+			))->compile();
+
+			$connection->queryExecute($sql);
+		}
+	}
+
+	/**
+	 * A repair must not cost the template more than it fixes, so it differs from the regular build twice.
+	 *
+	 * The nodes are built one by one: a node whose activity class is gone or throws would otherwise take the
+	 * whole template with it, including the very rows the repair is about.
+	 *
+	 * A trigger that builds no rules is dropped instead of being written: empty rules are read as "applies to
+	 * any document", and an activity file older than this repair - the module owning it is updated on its own
+	 * schedule - would replace the stored rules with exactly that.
+	 */
+	private static function buildTriggersToResync(array $nodes): array
+	{
+		$triggers = [];
+		foreach ($nodes as $node)
+		{
+			try
+			{
+				foreach (self::filterTriggersByActivities([$node]) as $trigger)
+				{
+					if ($trigger['APPLY_RULES'])
+					{
+						$triggers[] = $trigger;
+					}
+				}
+			}
+			catch (\Throwable $exception)
+			{
+				Application::getInstance()->getExceptionHandler()->writeToLog($exception);
+			}
+		}
+
+		return $triggers;
+	}
+
 	private static function fillRowFromActivity(\CBPActivity|\IBPTriggerActivity $activity): array
 	{
 		return [
@@ -147,7 +282,7 @@ class WorkflowTemplateTriggerTable extends DataManager
 		$result = [];
 		$triggers = array_filter(
 			$activities,
-			static fn($activity) => str_ends_with($activity['Type'], 'Trigger')
+			static fn($activity) => \CBPRuntime::getRuntime()->isTriggerActivity((string)$activity['Type'])
 		);
 
 		if (!$triggers)
@@ -206,41 +341,56 @@ class WorkflowTemplateTriggerTable extends DataManager
 
 		foreach ($triggers as $trigger)
 		{
-			/** @var $configuration Configurator */
-			$configuration = $trigger['CONFIGURATION'];
-			[$moduleId, $entity, $documentType] = $configuration->getDocumentComplexType()?->toArray();
-
-			if (!$moduleId || !$entity || !$documentType)
+			$columns = self::buildRowColumns($trigger);
+			if ($columns === null)
 			{
 				continue;
 			}
 
-			$triggerType = $trigger['TRIGGER_TYPE'];
-			$rules = Json::encode($trigger['APPLY_RULES'], 0);
 			$insert = [
 				'TEMPLATE_ID' => $templateId,
 				'TRIGGER_NAME' => $trigger['TRIGGER_NAME'],
-				'TRIGGER_TYPE' => $triggerType,
-				'APPLY_RULES' => $rules,
-				'MODULE_ID' => $moduleId,
-				'ENTITY' => $entity,
-				'DOCUMENT_TYPE' => $documentType,
-			];
-			$update = [
-				'TRIGGER_TYPE' => $triggerType,
-				'APPLY_RULES' => $rules,
-				'MODULE_ID' => $moduleId,
-				'ENTITY' => $entity,
-				'DOCUMENT_TYPE' => $documentType,
+				...$columns,
 			];
 
-			$queries = $sqlHelper->prepareMerge($tableName, $primary, $insert, $update);
+			$queries = $sqlHelper->prepareMerge($tableName, $primary, $insert, $columns);
 
 			foreach ($queries as $query)
 			{
 				$connection->queryExecute($query);
 			}
 		}
+	}
+
+	/**
+	 * A row is not stored at all when the configurator gives no complete document type.
+	 *
+	 * @return array{
+	 *     TRIGGER_TYPE: string,
+	 *     APPLY_RULES: string,
+	 *     MODULE_ID: string,
+	 *     ENTITY: string,
+	 *     DOCUMENT_TYPE: string
+	 * }|null
+	 */
+	private static function buildRowColumns(array $trigger): ?array
+	{
+		/** @var $configuration Configurator */
+		$configuration = $trigger['CONFIGURATION'];
+		[$moduleId, $entity, $documentType] = $configuration->getDocumentComplexType()?->toArray();
+
+		if (!$moduleId || !$entity || !$documentType)
+		{
+			return null;
+		}
+
+		return [
+			'TRIGGER_TYPE' => $trigger['TRIGGER_TYPE'],
+			'APPLY_RULES' => Json::encode($trigger['APPLY_RULES'], 0),
+			'MODULE_ID' => $moduleId,
+			'ENTITY' => $entity,
+			'DOCUMENT_TYPE' => $documentType,
+		];
 	}
 
 	public static function updateSectionsByTriggers(int $templateId, array $triggers): void
@@ -253,7 +403,7 @@ class WorkflowTemplateTriggerTable extends DataManager
 			$section = $configuration->getSection();
 			if ($section?->id)
 			{
-				$sections[$section->id][] = $section;
+				$sections[$section->id][$section->path ?? ''] ??= $section;
 			}
 		}
 
@@ -261,7 +411,7 @@ class WorkflowTemplateTriggerTable extends DataManager
 	}
 
 	/**
-	 * @param array<Section> $sections
+	 * @param array<string, array<Section>> $sections sections grouped by section id
 	 * @param int $templateId
 	 *
 	 * @return void
@@ -269,9 +419,9 @@ class WorkflowTemplateTriggerTable extends DataManager
 	public static function provideSectionsToTemplate(array $sections, int $templateId): void
 	{
 		WorkflowTemplateSectionTable::deleteByTemplate($templateId);
-		foreach ($sections as $sectionPath)
+		foreach ($sections as $sectionsByPath)
 		{
-			foreach ($sectionPath as $section)
+			foreach ($sectionsByPath as $section)
 			{
 				WorkflowTemplateSectionTable::upsert($templateId, $section->id, $section->path ?? null);
 			}

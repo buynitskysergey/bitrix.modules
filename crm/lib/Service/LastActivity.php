@@ -192,9 +192,21 @@ final class LastActivity
 		$item->set(Item::FIELD_NAME_LAST_ACTIVITY_TIME, $queueItem->getTime());
 		$item->set(Item::FIELD_NAME_LAST_ACTIVITY_BY, $queueItem->getUserId());
 
-		$context = clone Container::getInstance()->getContext();
+		// Build a fresh context instead of cloning the global one — global context can carry
+		// a hit-user that has nothing to do with the user captured when the queue item was
+		// created. We need only the data we captured at enqueue time: userId (who triggered
+		// the last-activity bump) and eventId (so the originating client can dedupe its own
+		// pull echo). itemOptions from the global context is intentionally NOT inherited —
+		// background task should not pick up request-scope per-operation flags.
+		$context = new Context();
 		$context->setScope(Context::SCOPE_TASK);
 		$context->setUserId($queueItem->getUserId());
+
+		$capturedEventId = $queueItem->getEventId();
+		if ($capturedEventId !== null && $capturedEventId !== '')
+		{
+			$context->setEventId($capturedEventId);
+		}
 
 		return $factory->getUpdateOperation($item, $context)
 			// system action, perms and fields validity are not checked
@@ -202,6 +214,8 @@ final class LastActivity
 			// system action, no automation
 			->disableBizProc()
 			->disableAutomation()
+			// service-only update, must not change "modified by" / "modified time"
+			->markAsSystemUpdate()
 			->launch()
 		;
 	}

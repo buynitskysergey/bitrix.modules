@@ -97,12 +97,14 @@ class WorktimeRecordForm extends CompositeForm
 
 		if ($timestampUtcForUserDate > 0)
 		{
-			$userDateTime = $timeHelper->createUserDateTimeFromFormat('U', $timestampUtcForUserDate, $userIdTimezone);
-			if ($userDateTime)
-			{
-				$timeHelper->setTimeFromSeconds($userDateTime, $startSeconds);
-				$startTimestamp = $userDateTime->getTimestamp();
-			}
+			// Resolve the calendar date in the employee's real IANA zone for that absolute instant, then
+			// rebuild the start wall-time on that date in the same real zone (date-aware, DST-correct),
+			// replacing the legacy synthetic "+HH:MM as of now" zone path.
+			$userDate = (new \DateTime('@' . $timestampUtcForUserDate))
+				->setTimezone($timeHelper->getUserDateTimeZone($userIdTimezone));
+			$startTimestamp = $timeHelper->buildTimestampFromWallTime(
+				$userIdTimezone, $userDate->format('Y-m-d'), $startSeconds
+			);
 		}
 		return $startTimestamp;
 	}

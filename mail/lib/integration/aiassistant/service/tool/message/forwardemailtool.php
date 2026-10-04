@@ -7,6 +7,7 @@ namespace Bitrix\Mail\Integration\AiAssistant\Service\Tool\Message;
 use Bitrix\AiAssistant\Definition\Tool\Contract\ToolContract;
 use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\AiAssistant\Facade\TracedLogger;
+use Bitrix\Mail\Helper;
 use Bitrix\Mail\Helper\Message\MessageSender;
 use Bitrix\Mail\Helper\RecipientHelper;
 use Bitrix\Main\SystemException;
@@ -30,17 +31,21 @@ class ForwardEmailTool extends ToolContract
 
 	public function getDescription(): string
 	{
+		$recipientsTotalLimit = Helper\LicenseManager::getMessageRecipientsTotalLimit();
+
 		return
 			"Forwards an existing email message to new recipients on behalf of the user. "
 			. "Includes all original attachments and a quoted original body appended to the user's comment. "
 			. "Requires forwardMessageId of the source message, sender email, recipients, subject, and body. "
 			. "Recipients in to, cc, and bcc must be email addresses; resolve any names via list_mail_recipients or search_employee_emails first. "
-			. "The total number of recipients across to, cc, and bcc must not exceed 10."
+			. "The total number of recipients across to, cc, and bcc must not exceed {$recipientsTotalLimit}."
 		;
 	}
 
 	public function getInputSchema(): array
 	{
+		$recipientsTotalLimit = Helper\LicenseManager::getMessageRecipientsTotalLimit();
+
 		return [
 			'type' => 'object',
 			'properties' => [
@@ -54,6 +59,16 @@ class ForwardEmailTool extends ToolContract
 					'description' => 'Sender email address. Must be one of the user\'s available mailbox senders.',
 					'minLength' => 1,
 				],
+				'senderId' => [
+					'type' => ['integer', 'null'],
+					'description' => 'Exact sender record ID returned by list_mail_senders.',
+					'minimum' => 1,
+				],
+				'mailboxId' => [
+					'type' => ['integer', 'null'],
+					'description' => 'Exact mailbox ID returned by list_mail_senders. Takes priority over senderId.',
+					'minimum' => 1,
+				],
 				'to' => [
 					'type' => 'array',
 					'description' => 'List of recipient email addresses.',
@@ -61,7 +76,7 @@ class ForwardEmailTool extends ToolContract
 						'type' => 'string',
 					],
 					'minItems' => 1,
-					'maxItems' => 10,
+					'maxItems' => $recipientsTotalLimit,
 				],
 				'subject' => [
 					'type' => 'string',
@@ -79,7 +94,7 @@ class ForwardEmailTool extends ToolContract
 					'items' => [
 						'type' => 'string',
 					],
-					'maxItems' => 10,
+					'maxItems' => $recipientsTotalLimit,
 				],
 				'bcc' => [
 					'type' => 'array',
@@ -87,7 +102,7 @@ class ForwardEmailTool extends ToolContract
 					'items' => [
 						'type' => 'string',
 					],
-					'maxItems' => 10,
+					'maxItems' => $recipientsTotalLimit,
 				],
 			],
 			'required' => ['forwardMessageId', 'from', 'to', 'subject', 'body'],
@@ -114,6 +129,8 @@ class ForwardEmailTool extends ToolContract
 		$body = (string)($args['body'] ?? '');
 		$cc = (array)($args['cc'] ?? []);
 		$bcc = (array)($args['bcc'] ?? []);
+		$senderId = isset($args['senderId']) ? (int)$args['senderId'] : null;
+		$mailboxId = isset($args['mailboxId']) ? (int)$args['mailboxId'] : null;
 
 		try
 		{
@@ -126,15 +143,10 @@ class ForwardEmailTool extends ToolContract
 			throw new McpException($e->getMessage(), previous: $e);
 		}
 
-		try
-		{
-			return (new MessageSender())->forward(
-				$forwardMessageId, $from, $recipients, $subject, $body, $userId, $cc, $bcc,
-			);
-		}
-		catch (SystemException $e)
-		{
-			throw new McpException($e->getMessage(), previous: $e);
-		}
+		return MigrationAwareMessageSenderExecutor::execute(
+			static fn (): array => (new MessageSender())->forward(
+				$forwardMessageId, $from, $recipients, $subject, $body, $userId, $cc, $bcc, $senderId, $mailboxId,
+			),
+		);
 	}
 }

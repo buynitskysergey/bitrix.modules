@@ -49,6 +49,9 @@ class CHTTP
 		return $url;
 	}
 
+	/**
+	 * @deprecated Use Bitrix\Main\Web\HttpClient
+	 */
 	public function Download($url, $file)
 	{
 		if (is_resource($file))
@@ -102,6 +105,9 @@ class CHTTP
 		return false;
 	}
 
+	/**
+	 * @deprecated Use http_build_query()
+	 */
 	public static function PrepareData($arPostData, $prefix = '')
 	{
 		$str = '';

@@ -7,23 +7,38 @@ namespace Bitrix\Note\Internal\Service\Document\Position;
 use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Access\PortalAdmin;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Model\Document;
+use Bitrix\Note\Infrastructure\Agent\Access\SubtreeAclReconcileScheduler;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
 
 final class PositionService
 {
 	private const LOCK_TIMEOUT = 5;
 
+	// [P4.T2] Distinct from a generic access-denied so the client can explain that the move would open
+	// the branch to a subtree-share audience and needs moderator level.
+	public const ERROR_MOVE_ACCESS_ESCALATION = 'NOTE_MOVE_ACCESS_ESCALATION';
+
 	private readonly DocumentRepository $repository;
 	private readonly BranchManager $branchManager;
+	private readonly SubtreeAclReconciler $subtreeAclReconciler;
 
 	public function __construct(
 		?DocumentRepository $repository = null,
-		?BranchManager $branchManager = null
+		?BranchManager $branchManager = null,
+		?SubtreeAclReconciler $subtreeAclReconciler = null
 	)
 	{
 		$this->repository = $repository ?? new DocumentRepository();
 		$this->branchManager = $branchManager ?? new BranchManager($this->repository);
+		// Reparenting a wide subtree under a covering source can push the widen past the sync threshold;
+		// the queue sink hands that widen to the durable agent (P4.T6), matching the save-path. Narrowing
+		// stays synchronous and atomic inside the move transaction.
+		$this->subtreeAclReconciler = $subtreeAclReconciler
+			?? new SubtreeAclReconciler($this->repository, new SubtreeAclReconcileScheduler());
 	}
 
 	public function move(
@@ -51,13 +66,23 @@ final class PositionService
 		}
 
 		$sourceCollectionId = $document->getCollectionId();
+		$isReparent = !$this->isSameParent($document->getParentId(), $targetParentId)
+			|| $sourceCollectionId !== $targetCollectionId;
+
 		$subtreeIds = null;
-		if ($targetParentId !== null || $sourceCollectionId !== $targetCollectionId)
+		if ($isReparent)
 		{
 			$subtreeIds = $this->repository->getSubtreeIds($documentId, $sourceCollectionId, true);
 			if ($targetParentId !== null && in_array($targetParentId, $subtreeIds, true))
 			{
 				return $this->createErrorResult('Target parent belongs to moved subtree.');
+			}
+
+			// [P4.T2] Block a silent escalation: a reparent into a subtree-shared branch that would
+			// hand new positive access to a share audience needs moderator level, not just manage.
+			if ($this->movementEscalatesAccess($targetParentId, $targetCollectionId, $subtreeIds, $userId))
+			{
+				return $this->createEscalationErrorResult();
 			}
 		}
 
@@ -221,7 +246,7 @@ final class PositionService
 			);
 		}
 
-		return $this->branchManager->moveBetweenBranches(
+		$result = $this->branchManager->moveBetweenBranches(
 			$document,
 			$sourceCollectionId,
 			$sourceParentId,
@@ -231,6 +256,24 @@ final class PositionService
 			$userId,
 			$precomputedSubtreeIds,
 		);
+		if (!$result->isSuccess())
+		{
+			return $result;
+		}
+
+		// [P4.T2/T5] Re-align derived rows of the moved subtree inside the move transaction so the
+		// narrowing DELETE is atomic with the reparent. Uses the source-collection subtree ids
+		// (stable across the reparent) computed in move().
+		$subtreeIds = $precomputedSubtreeIds
+			?? $this->repository->getSubtreeIds((int)$document->getId(), $sourceCollectionId, true);
+		$this->subtreeAclReconciler->syncOnMove(
+			(int)$document->getId(),
+			$targetParentId,
+			$targetCollectionId,
+			$subtreeIds,
+		);
+
+		return $result;
 	}
 
 	private function acquireLocks(array $lockKeys): ?array
@@ -284,6 +327,47 @@ final class PositionService
 		$result->addError(new Error($message));
 
 		return $result;
+	}
+
+	private function createEscalationErrorResult(): Result
+	{
+		$result = new Result();
+		$result->addError(new Error(
+			'Moving here would open the branch to a subtree share; moderator level is required.',
+			self::ERROR_MOVE_ACCESS_ESCALATION,
+		));
+
+		return $result;
+	}
+
+	/**
+	 * [P4.T2] True when the reparent would grant new positive access AND the actor lacks moderator
+	 * level on the target collection. Admins bypass; a target branch with no covering source never
+	 * escalates, so ordinary moves stay at manage-level authorisation.
+	 *
+	 * @param int[] $subtreeIds
+	 */
+	private function movementEscalatesAccess(
+		?int $targetParentId,
+		int $targetCollectionId,
+		array $subtreeIds,
+		int $userId
+	): bool
+	{
+		if (PortalAdmin::isAdmin($userId))
+		{
+			return false;
+		}
+
+		if (!$this->subtreeAclReconciler->movementEscalatesAccess($targetParentId, $subtreeIds))
+		{
+			return false;
+		}
+
+		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
+		$level = CollectionAccessService::getUserLevel($targetCollectionId, $userId, $accessCodes);
+
+		return $level < CollectionAccessService::LEVEL_MODERATE;
 	}
 
 	private function isSameParent(?int $leftParentId, ?int $rightParentId): bool

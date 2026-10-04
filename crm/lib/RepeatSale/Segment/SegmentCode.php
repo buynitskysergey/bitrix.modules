@@ -21,4 +21,25 @@ enum SegmentCode: string
 			|| $segmentCode === self::REMAINING->value
 		;
 	}
+
+	/**
+	 * Single source of truth for the segment analytics alias (used as p5 value: segment_<alias>).
+	 *
+	 * The alias must never contain the `_` symbol (only dashes), so the resulting p5 string
+	 * splits into exactly two parts by `_`.
+	 */
+	public function toAnalyticsAlias(): string
+	{
+		return match ($this)
+		{
+			self::SLEEPING_CLIENT => 'deal-activity-less-12m',
+			self::LOST_CLIENT => 'deal-lost-more-12m',
+			self::DEAL_EVERY_YEAR => 'deal-annual',
+			self::DEAL_EVERY_HALF_YEAR => 'deal-semiannual',
+			self::DEAL_EVERY_MONTH => 'deal-month-yr',
+			self::AI_SCREENING => 'deal-ai-screening',
+			self::AI_APPROVE => 'deal-ai-approve',
+			self::REMAINING => 'deal-remaining',
+		};
+	}
 }

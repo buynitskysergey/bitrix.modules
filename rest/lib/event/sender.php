@@ -5,11 +5,14 @@ namespace Bitrix\Rest\Event;
 use Bitrix\Main\Context;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventManager;
+use Bitrix\Main\Loader;
 use Bitrix\Rest\Application;
 use Bitrix\Rest\AppTable;
 use Bitrix\Rest\OAuth\Auth;
 use Bitrix\Rest\OAuthService;
+use Bitrix\Rest\Preset\IntegrationTable;
 use Bitrix\Rest\Sqs;
+use Bitrix\Rest\Service\ServiceContainer;
 use Bitrix\Rest\Tools\Diagnostics\Event\Logger;
 use Bitrix\Rest\Tools\Diagnostics\Event\LogType;
 use Bitrix\Rest\UsageStatTable;
@@ -45,6 +48,7 @@ class Sender
 	);
 
 	protected static array $appData = [];
+	private static array $legacyCustomBotOwnerCache = [];
 
 	/**
 	 * Utility function to parse pseudo-method name
@@ -167,12 +171,49 @@ class Sender
 			'handlersList' => $handlersList,
 			'MESSAGE' => LogType::SENDER_CALL_START->value,
 		]);
+		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
+		$isUserWebhookDenied = $tariffAccessService->isUserWebhookDenied();
+		$userOwnedLegacyCustomBotTokens = $isUserWebhookDenied
+			? static::getUserOwnedLegacyCustomBotTokens($handlersList)
+			: [];
 
 		foreach($handlersList as $handlerInfo)
 		{
 			$handler = $handlerInfo[0];
 			$data = $handlerInfo[1];
 			$additional = $handlerInfo[2];
+			$appId = (int)($handler['APP_ID'] ?? 0);
+			$integrationId = (int)($handler['INTEGRATION_ID'] ?? 0);
+			$handlerUserId = (int)($handler['USER_ID'] ?? 0);
+			$application = null;
+			$appStatus = (string)($handler['APP_STATUS'] ?? '');
+			if ($appId > 0 && $appStatus === '')
+			{
+				$application = static::getApplicationData($appId);
+				if (is_array($application))
+				{
+					$appStatus = (string)($application['STATUS'] ?? '');
+				}
+			}
+			$isPublishedApplication = $appId > 0
+				&& $appStatus !== ''
+				&& $appStatus !== AppTable::STATUS_LOCAL;
+			$applicationToken = (string)($handler['APPLICATION_TOKEN'] ?? '');
+			$isLegacyCustomBotHandler = isset($userOwnedLegacyCustomBotTokens[$applicationToken]);
+			$isSystemHandler = $appId <= 0
+				&& $integrationId <= 0
+				&& $handlerUserId <= 0
+				&& !$isLegacyCustomBotHandler;
+			if (
+				!$tariffAccessService->isOutgoingEventHandlerAvailable(
+					$isPublishedApplication,
+					$isSystemHandler,
+					$isUserWebhookDenied,
+				)
+			)
+			{
+				continue;
+			}
 
 			foreach(static::$defaultEventParams as $key => $value)
 			{
@@ -207,32 +248,12 @@ class Sender
 				);
 
 			$authData = null;
-			if(isset($handler['APP_ID']) && $handler['APP_ID'] > 0)
+			if($appId > 0)
 			{
-				if (isset(static::$appData[$handler['APP_ID']]) && is_array(static::$appData[$handler['APP_ID']]))
+				if ($application === null)
 				{
-					$application = static::$appData[$handler['APP_ID']];
+					$application = static::getApplicationData($appId);
 				}
-				else
-				{
-					$select = [
-						'CLIENT_ID',
-						'ID',
-						'CODE',
-						'STATUS',
-						'DATE_FINISH',
-						'IS_TRIALED',
-						'URL_DEMO',
-						'APPLICATION_TOKEN',
-						'CLIENT_SECRET',
-						'SHARED_KEY',
-					];
-					$dbRes = AppTable::getByPrimary($handler['APP_ID'], ['select' => $select]);
-					$application = $dbRes->fetch();
-					static::$appData[$handler['APP_ID']] = $application;
-				}
-
-
 				$appStatus = \Bitrix\Rest\AppTable::getAppStatusInfo($application, '');
 				if($appStatus['PAYMENT_ALLOW'] === 'Y')
 				{
@@ -322,6 +343,137 @@ class Sender
 		{
 			self::enqueueBackgroundJob();
 		}
+	}
+
+	private static function getApplicationData(int $appId): array|false
+	{
+		if (array_key_exists($appId, static::$appData))
+		{
+			return static::$appData[$appId];
+		}
+
+		$select = [
+			'CLIENT_ID',
+			'ID',
+			'CODE',
+			'STATUS',
+			'DATE_FINISH',
+			'IS_TRIALED',
+			'URL_DEMO',
+			'APPLICATION_TOKEN',
+			'CLIENT_SECRET',
+			'SHARED_KEY',
+		];
+		$dbRes = AppTable::getByPrimary($appId, ['select' => $select]);
+		static::$appData[$appId] = $dbRes->fetch();
+
+		return static::$appData[$appId];
+	}
+
+	/**
+	 * @return array<string, true>
+	 */
+	private static function getUserOwnedLegacyCustomBotTokens(array $handlersList): array
+	{
+		$userOwnedTokens = [];
+		$tokensToLoad = [];
+		foreach ($handlersList as $handlerInfo)
+		{
+			$handler = $handlerInfo[0] ?? null;
+			if (!is_array($handler) || !self::isLegacyCustomBotHandlerCandidate($handler))
+			{
+				continue;
+			}
+
+			$token = (string)$handler['APPLICATION_TOKEN'];
+			if (array_key_exists($token, self::$legacyCustomBotOwnerCache))
+			{
+				if (self::$legacyCustomBotOwnerCache[$token])
+				{
+					$userOwnedTokens[$token] = true;
+				}
+				continue;
+			}
+
+			$tokensToLoad[$token] = true;
+		}
+
+		if ($tokensToLoad === [])
+		{
+			return $userOwnedTokens;
+		}
+
+		foreach ($tokensToLoad as $token => $_)
+		{
+			self::$legacyCustomBotOwnerCache[$token] = false;
+		}
+
+		if (!Loader::includeModule('im'))
+		{
+			return $userOwnedTokens;
+		}
+
+		$botAppIds = [];
+		foreach (array_keys($tokensToLoad) as $token)
+		{
+			$botAppIds[] = $token;
+			$botAppIds[] = 'custom' . $token;
+		}
+
+		$botTokensById = [];
+		$botResult = \Bitrix\Im\Model\BotTable::getList([
+			'filter' => [
+				'=MODULE_ID' => 'rest',
+				'=APP_ID' => $botAppIds,
+			],
+			'select' => ['BOT_ID', 'APP_ID'],
+		]);
+		while ($bot = $botResult->fetch())
+		{
+			$botAppId = (string)$bot['APP_ID'];
+			$token = isset($tokensToLoad[$botAppId])
+				? $botAppId
+				: (str_starts_with($botAppId, 'custom') ? substr($botAppId, 6) : '');
+			if ($token !== '' && isset($tokensToLoad[$token]))
+			{
+				$botTokensById[(int)$bot['BOT_ID']][] = $token;
+			}
+		}
+
+		if ($botTokensById === [])
+		{
+			return $userOwnedTokens;
+		}
+
+		$integrationResult = IntegrationTable::getList([
+			'filter' => [
+				'=BOT_ID' => array_keys($botTokensById),
+				'>USER_ID' => 0,
+			],
+			'select' => ['BOT_ID'],
+		]);
+		while ($integration = $integrationResult->fetch())
+		{
+			foreach ($botTokensById[(int)$integration['BOT_ID']] ?? [] as $token)
+			{
+				self::$legacyCustomBotOwnerCache[$token] = true;
+				$userOwnedTokens[$token] = true;
+			}
+		}
+
+		return $userOwnedTokens;
+	}
+
+	private static function isLegacyCustomBotHandlerCandidate(array $handler): bool
+	{
+		return (int)($handler['APP_ID'] ?? 0) <= 0
+			&& (int)($handler['INTEGRATION_ID'] ?? 0) <= 0
+			&& (int)($handler['USER_ID'] ?? 0) <= 0
+			&& (string)($handler['APPLICATION_TOKEN'] ?? '') !== ''
+			&& str_starts_with(
+				mb_strtoupper((string)($handler['EVENT_NAME'] ?? '')),
+				'ONIMBOT',
+			);
 	}
 
 	/**

@@ -4,9 +4,14 @@ declare(strict_types=1);
 namespace Bitrix\Bizproc\Internal\Integration\Rag\Service;
 
 use Bitrix\Bizproc\Error;
+use Bitrix\Bizproc\Public\Feature\Rag\KnowledgeBaseFlag;
 use Bitrix\Bizproc\Result;
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
+use Bitrix\Main\SystemException;
+use Bitrix\Rag\Public\Service\FileKnowledgeBasePublicService;
 
 class RagService
 {
@@ -33,43 +38,22 @@ class RagService
 	 */
 	public function getAcceptedFileTypes(): array
 	{
-		$types = [
-			'.txt',
-			'.md',
-			'.pdf',
-			'.doc',
-			'.docx',
-		];
-
-		if (Option::get('bizproc', 'rag_tables_enabled', 'N') === 'Y')
+		if (!$this->isAvailable())
 		{
-			$types = array_merge($types, [
-				'.csv',
-				'.xlsx',
-				'.xls',
-			]);
+			return [];
 		}
 
-		if (Option::get('bizproc', 'rag_pptx_enabled', 'N') === 'Y')
+		try
 		{
-			$types = array_merge($types, [
-				'.ppt',
-				'.pptx',
-			]);
-		}
+			/** @var FileKnowledgeBasePublicService $fileService */
+			$fileService = ServiceLocator::getInstance()->get(FileKnowledgeBasePublicService::class);
 
-		if (Option::get('bizproc', 'rag_images_enabled', 'N') === 'Y')
+			return $fileService->getFileUploadConfig()->extensions;
+		}
+		catch (SystemException)
 		{
-			$types = array_merge($types, [
-				'.jpeg',
-				'.jpg',
-				'.png',
-				'.tif',
-				'.gif',
-			]);
+			return [];
 		}
-
-		return $types;
 	}
 
 	public function getMaxFileSize(): int
@@ -89,6 +73,6 @@ class RagService
 
 	private function isFeatureAvailable(): bool
 	{
-		return Option::get('bizproc', 'is_rag_available', 'N') === 'Y';
+		return Feature::isEnabled(KnowledgeBaseFlag::class);
 	}
 }

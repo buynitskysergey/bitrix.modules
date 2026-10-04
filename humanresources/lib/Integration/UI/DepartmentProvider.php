@@ -330,6 +330,7 @@ class DepartmentProvider extends BaseStructureProvider
 			new NodeMemberFilter(
 				entityIdFilter: EntityIdFilter::fromEntityId($currentUserId),
 				entityType: MemberEntityType::USER,
+				withVirtualUsers: true,
 			),
 		)
 			->getAll()
@@ -372,6 +373,7 @@ class DepartmentProvider extends BaseStructureProvider
 				entityIdFilter: EntityIdFilter::fromEntityId($currentUserId),
 				entityType: MemberEntityType::USER,
 				roleFilter: RoleFilter::fromRoles(...$this->providerOptions->managedHierarchyRoles),
+				withVirtualUsers: true,
 			),
 		)
 			->getAll()
@@ -1151,6 +1153,7 @@ class DepartmentProvider extends BaseStructureProvider
 			new NodeMemberFilter(
 				entityType: MemberEntityType::USER,
 				nodeFilter: NodeFilter::createWithNodeId($node->id),
+				withVirtualUsers: false,
 			),
 		)
 			->getAll()
@@ -1177,6 +1180,7 @@ class DepartmentProvider extends BaseStructureProvider
 			new NodeMemberFilter(
 				entityType: MemberEntityType::USER,
 				nodeFilter: NodeFilter::createWithNodeId($node->id),
+				withVirtualUsers: false,
 			),
 		)
 			->getAll()

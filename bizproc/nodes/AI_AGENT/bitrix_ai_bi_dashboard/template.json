@@ -11,7 +11,8 @@
 			"Required": 0,
 			"Multiple": 0,
 			"Options": [],
-			"Default": ""
+			"Default": "",
+			"Source": "SetupTemplateActivity"
 		},
 		"SetupTemplateActivity_D7Skxhpzpm": {
 			"Name": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_NAME_3###",
@@ -20,7 +21,8 @@
 			"Required": 0,
 			"Multiple": 0,
 			"Options": [],
-			"Default": ""
+			"Default": "",
+			"Source": "SetupTemplateActivity"
 		},
 		"SetupTemplateActivity_eQy6LBm7Yt": {
 			"Name": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_NAME_4###",
@@ -29,7 +31,8 @@
 			"Required": 0,
 			"Multiple": 1,
 			"Options": [],
-			"Default": ""
+			"Default": "",
+			"Source": "SetupTemplateActivity"
 		},
 		"SetupTemplateActivity_XW6yGGCKct": {
 			"Name": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_NAME_5###",
@@ -38,7 +41,8 @@
 			"Required": 0,
 			"Multiple": 0,
 			"Options": [],
-			"Default": ""
+			"Default": "",
+			"Source": "SetupTemplateActivity"
 		},
 		"SetupTemplateActivity_7IGW4aXf1t": {
 			"Name": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_NAME_6###",
@@ -47,7 +51,8 @@
 			"Required": 0,
 			"Multiple": 0,
 			"Options": [],
-			"Default": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_DEFAULT_1###"
+			"Default": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_DEFAULT_1###",
+			"Source": "SetupTemplateActivity"
 		},
 		"SetupTemplateActivity_29mfeeiRJY": {
 			"Name": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_NAME_7###",
@@ -56,7 +61,8 @@
 			"Required": 0,
 			"Multiple": 0,
 			"Options": [],
-			"Default": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_DEFAULT_2###"
+			"Default": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_DEFAULT_2###",
+			"Source": "SetupTemplateActivity"
 		},
 		"SetupTemplateActivity_6ymj93vXGi": {
 			"Name": "###BIZPROC_NODES_BITRIX_AI_BI_DASHBOARD_NAME_8###",
@@ -65,7 +71,8 @@
 			"Required": 0,
 			"Multiple": 0,
 			"Options": [],
-			"Default": ""
+			"Default": "",
+			"Source": "SetupTemplateActivity"
 		}
 	},
 	"TEMPLATE": [

@@ -13,6 +13,7 @@ use Bitrix\Sale;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Landing\Connector\Iblock as IblockConnector;
+use Bitrix\Main\Web\Uri;
 
 /**
  * Class SubscribeTable
@@ -465,7 +466,7 @@ class SubscribeTable extends DataManager
 		if(static::checkLastUpdate())
 			return '\Bitrix\Catalog\SubscribeTable::sendNotice();';
 
-		list($listSubscribe, $totalCount) = static::getSubscriptionsData();
+		[$listSubscribe, $totalCount] = static::getSubscriptionsData();
 
 		if(empty($listSubscribe))
 		{
@@ -475,7 +476,7 @@ class SubscribeTable extends DataManager
 
 		$anotherStep = (int)$totalCount['CNT'] > static::LIMIT_SEND;
 
-		list($dataSendToNotice, $listNotifiedSubscribeId) =
+		[$dataSendToNotice, $listNotifiedSubscribeId] =
 			static::prepareDataForNotice($listSubscribe, 'CATALOG_PRODUCT_SUBSCRIBE_NOTIFY');
 
 		static::startEventNotification($dataSendToNotice);
@@ -504,7 +505,7 @@ class SubscribeTable extends DataManager
 		if(static::checkLastUpdate())
 			return 'Bitrix\Catalog\SubscribeTable::sendRepeatedNotice();';
 
-		list($listSubscribe, $totalCount) = static::getSubscriptionsData();
+		[$listSubscribe, $totalCount] = static::getSubscriptionsData();
 
 		if(empty($listSubscribe))
 		{
@@ -514,7 +515,7 @@ class SubscribeTable extends DataManager
 
 		$anotherStep = (int)$totalCount['CNT'] > static::LIMIT_SEND;
 
-		list($dataSendToNotice, $listNotifiedSubscribeId) =
+		[$dataSendToNotice, $listNotifiedSubscribeId] =
 			static::prepareDataForNotice($listSubscribe, 'CATALOG_PRODUCT_SUBSCRIBE_NOTIFY_REPEATED');
 
 		static::startEventNotification($dataSendToNotice);
@@ -679,23 +680,25 @@ class SubscribeTable extends DataManager
 			$listNotifiedSubscribeId[] = $subscribeData['ID'];
 
 			$subscribeData['EVENT_NAME'] = $eventName;
-			$subscribeData['USER_NAME'] = $subscribeData['USER_NAME'] ?
-				$subscribeData['USER_NAME'] : Loc::getMessage('EMAIL_TEMPLATE_USER_NAME');
+			$subscribeData['USER_NAME'] = $subscribeData['USER_NAME'] ? $subscribeData['USER_NAME'] : Loc::getMessage('EMAIL_TEMPLATE_USER_NAME');
 			$subscribeData['EMAIL_TO'] = $subscribeData['USER_CONTACT'];
 			$subscribeData['NAME'] = $subscribeData['PRODUCT_NAME'];
 			$subscribeData['PAGE_URL'] = $pageUrl;
 			$subscribeData['PRODUCT_ID'] = $subscribeData['ITEM_ID'];
-			$subscribeData['CHECKOUT_URL'] = \CHTTP::urlAddParams($pageUrl, array(
-				'action' => 'BUY', 'id' => $subscribeData['PRODUCT_ID']));
-			$subscribeData['CHECKOUT_URL_PARAMETERS'] = \CHTTP::urlAddParams('', array(
-				'action' => 'BUY', 'id' => $subscribeData['PRODUCT_ID']));
-			$subscribeData['UNSUBSCRIBE_URL'] = \CHTTP::urlAddParams(
-				self::getUnsubscribeUrl($subscribeData),
-				array('unSubscribe' => 'Y', 'subscribeId' => $subscribeData['ID'],
-					'userContact' => $subscribeData['USER_CONTACT'], 'productId' => $subscribeData['PRODUCT_ID']));
-			$subscribeData['UNSUBSCRIBE_URL_PARAMETERS'] = \CHTTP::urlAddParams('',
-				array('unSubscribe' => 'Y', 'subscribeId' => $subscribeData['ID'],
-					'userContact' => $subscribeData['USER_CONTACT'], 'productId' => $subscribeData['PRODUCT_ID']));
+			$checkoutUrl = (new Uri($pageUrl))->addParams([
+				'action' => 'BUY',
+				'id' => $subscribeData['PRODUCT_ID'],
+			]);
+			$subscribeData['CHECKOUT_URL'] = (string)$checkoutUrl;
+			$subscribeData['CHECKOUT_URL_PARAMETERS'] = $checkoutUrl->getQuery();
+			$unsubscribeUrl = (new Uri(self::getUnsubscribeUrl($subscribeData)))->addParams([
+				'unSubscribe' => 'Y',
+				'subscribeId' => $subscribeData['ID'],
+				'userContact' => $subscribeData['USER_CONTACT'],
+				'productId' => $subscribeData['PRODUCT_ID'],
+			]);
+			$subscribeData['UNSUBSCRIBE_URL'] = (string)$unsubscribeUrl;
+			$subscribeData['UNSUBSCRIBE_URL_PARAMETERS'] = $unsubscribeUrl->getQuery();
 
 			$dataSendToNotice[$subscribeData['CONTACT_TYPE']][$subscribeData['USER_CONTACT']][$key] = $subscribeData;
 		}

@@ -117,10 +117,25 @@ abstract class Base extends Controller
 			new ExactParameter(
 				\Bitrix\Main\Numerator\Numerator::class,
 				'numerator',
-				function($className, $id)
+				function($className, $id) use ($controller)
 				{
+					if (!$controller)
+					{
+						$controller = $this;
+					}
 					/** @var \Bitrix\Main\Numerator\Numerator $className */
-					return $className::load($id);
+					$numerator = $className::load($id);
+					if (
+						!$numerator
+						|| $numerator->getConfig()[$className::getType()]['type'] !== Driver::NUMERATOR_TYPE
+					)
+					{
+						$controller->addError(new Error('Numerator was not found.'));
+
+						return null;
+					}
+
+					return $numerator;
 				}
 			),
 		];

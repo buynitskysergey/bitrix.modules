@@ -123,4 +123,29 @@ abstract class AbstractNotify
 	{
 		return preg_replace('#\[URL=[^]]*](.*?)\[/URL]#i', '$1', $text);
 	}
+
+	protected function getPlainChecklistTitle(string $text): string
+	{
+		return (new ChecklistTitlePresenter())->toPlainText($text);
+	}
+
+	protected function getNonClickablePlainChecklistTitle(string $text): string
+	{
+		return (new ChecklistTitlePresenter())->toNonClickablePlainText($text);
+	}
+
+	protected function getActionLinkPlainChecklistTitle(string $text): string
+	{
+		return (new ChecklistTitlePresenter())->toActionLinkPlainText($text);
+	}
+
+	protected function getChecklistTitleForActionLink(string $text): string
+	{
+		if ($this->isClickable())
+		{
+			return $this->getActionLinkPlainChecklistTitle($text);
+		}
+
+		return $this->getNonClickablePlainChecklistTitle($text);
+	}
 }

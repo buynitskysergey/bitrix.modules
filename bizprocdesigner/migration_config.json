@@ -1,0 +1,7 @@
+{
+	"installDirectoriesMapping": {
+		"install/components": "components",
+		"install/js": "js",
+		"install/tools": "tools"
+	}
+}

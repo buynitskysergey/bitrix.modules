@@ -49,6 +49,7 @@ class UserService
 				entityIdFilter: EntityIdFilter::fromEntityId($userId),
 				nodeFilter: $nodeFilter,
 				findRelatedMembers: false,
+				withVirtualUsers: true,
 			);
 
 		$currentTeamMembers = $nodeDataBuilder

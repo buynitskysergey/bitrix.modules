@@ -119,6 +119,21 @@ class HiddenStorage
 			: [];
 	}
 
+	public function getOrCreateFolder(string $folderCode): ?Folder
+	{
+		if (!isset($this->storage))
+		{
+			return null;
+		}
+
+		if (!$this->storage->canAdd($this->storage->getSecurityContext($this->userId)))
+		{
+			return null;
+		}
+
+		return $this->findOrCreateFolder($folderCode);
+	}
+
 	public function deleteFiles(array $fileIds): void
 	{
 		if (empty($fileIds))

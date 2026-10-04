@@ -12,6 +12,7 @@ class VoxImplantManager
 	private const ORIGIN_ID_PREFIX = 'VI_';
 
 	private static array $callInfoCache = [];
+	private static array $callDurationCache = [];
 
 	public static function getCallInfo(?string $callId): ?array
 	{
@@ -39,9 +40,60 @@ class VoxImplantManager
 
 	public static function getCallDuration(string $callId): ?int
 	{
+		if (array_key_exists($callId, self::$callDurationCache))
+		{
+			return self::$callDurationCache[$callId];
+		}
+
 		$info = self::getCallInfo($callId) ?? [];
 
 		return isset($info['DURATION']) ? (int)$info['DURATION'] : null;
+	}
+
+	/**
+	 * Warms the durations of many calls with a single statistic query so that the following
+	 * getCallDuration() calls hit the warm cache instead of one getBriefDetails() query per call.
+	 * Calls without a statistic row are cached as null so a later lookup still hits the cache.
+	 *
+	 * @param string[] $callIds
+	 */
+	public static function warmCallDurations(array $callIds): void
+	{
+		$missing = [];
+		foreach ($callIds as $callId)
+		{
+			if (is_string($callId) && $callId !== '' && !array_key_exists($callId, self::$callDurationCache))
+			{
+				$missing[$callId] = true;
+			}
+		}
+
+		if (empty($missing))
+		{
+			return;
+		}
+
+		if (!Loader::includeModule('voximplant'))
+		{
+			return;
+		}
+
+		$rows = \Bitrix\Voximplant\StatisticTable::getList([
+			'select' => ['CALL_ID', 'CALL_DURATION'],
+			'filter' => ['@CALL_ID' => array_keys($missing)],
+		]);
+		foreach ($rows as $row)
+		{
+			$callId = (string)$row['CALL_ID'];
+			self::$callDurationCache[$callId] = (int)$row['CALL_DURATION'];
+			unset($missing[$callId]);
+		}
+
+		// cache the remaining misses as null to avoid re-querying them
+		foreach (array_keys($missing) as $callId)
+		{
+			self::$callDurationCache[$callId] = null;
+		}
 	}
 
 	public static function saveComment(string $callId, $comment): void

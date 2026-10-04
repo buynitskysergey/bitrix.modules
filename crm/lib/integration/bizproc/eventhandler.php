@@ -5,11 +5,13 @@ namespace Bitrix\Crm\Integration\BizProc;
 use Bitrix\Bizproc\Public\Event\Document\OnGetDocumentFieldTypesEvent\OnGetDocumentFieldTypesEvent;
 use Bitrix\Bizproc\Public\Event\Document\OnGetDocumentTypeEvent\OnGetDocumentTypeEvent;
 use Bitrix\Crm;
+use Bitrix\Crm\Activity\Provider\Bizproc;
 use Bitrix\Crm\Integration\BizProc\Events\OnGetDocumentType\CrmDocumentTypeFilter;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Main\Application;
 use Bitrix\Main\Event;
-use Bitrix\Crm\Activity\Provider\Bizproc;
 use Bitrix\Main\EventResult;
+use Bitrix\Main\IO\Directory;
 use CCrmBizProcHelper;
 use CCrmOwnerType;
 use CCrmSaleHelper;
@@ -217,5 +219,24 @@ class EventHandler
 			EventResult::SUCCESS,
 			['documentTypes' => $documentTypes]
 		);
+	}
+
+	public static function onGetExternalNodesDirs(Event $event): void
+	{
+		$sectionId = $event->getParameter('sectionId');
+		if (!is_string($sectionId) || preg_match('/[^a-z0-9_\-]/i', $sectionId))
+		{
+			return;
+		}
+
+		$documentRoot = Application::getInstance()->getContext()->getServer()->getDocumentRoot();
+		$nodesDir = $documentRoot . '/bitrix/modules/crm/nodes/' . $sectionId;
+
+		if (Directory::isDirectoryExists($nodesDir))
+		{
+			$event->addResult(
+				new EventResult(EventResult::SUCCESS, ['dirs' => [$nodesDir]]),
+			);
+		}
 	}
 }

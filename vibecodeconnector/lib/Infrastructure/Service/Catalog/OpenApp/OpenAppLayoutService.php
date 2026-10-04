@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Infrastructure\Service\Catalog\OpenApp;
 
+use Bitrix\Main\Engine\Response\Redirect;
 use Bitrix\Main\HttpResponse;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Web\Uri;
 use Bitrix\Vibecodeconnector\Internal\Dto\Catalog\OpenApp\OpenAppPayload;
+use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItem;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemType;
 use Bitrix\Vibecodeconnector\Internal\Exception\OpenAppException;
+use Bitrix\Vibecodeconnector\Internal\Integration\Bitrix24\VibePlusPolicy;
 use Bitrix\Vibecodeconnector\Internal\Integration\Main\AccessCodes;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\CatalogItemRepository;
 use Bitrix\Vibecodeconnector\Internal\Service\Catalog\OpenApp\OpenAppLayoutRenderer;
@@ -21,6 +25,7 @@ final class OpenAppLayoutService
 	private const ERROR_NOT_FOUND = 'ITEM_NOT_FOUND';
 	private const ERROR_ACCESS_DENIED = 'ACCESS_DENIED';
 	private const ERROR_BUILD_FAILED = 'OPEN_APP_BUILD_FAILED';
+	private const ERROR_FEATURE_NOT_AVAILABLE = 'FEATURE_NOT_AVAILABLE_ON_CURRENT_PLAN';
 
 	public function __construct(
 		private readonly OpenAppSettings $settings = new OpenAppSettings(),
@@ -28,6 +33,7 @@ final class OpenAppLayoutService
 		private readonly OpenAppPayloadBuilder $payloadBuilder = new OpenAppPayloadBuilder(),
 		private readonly OpenAppLayoutRenderer $renderer = new OpenAppLayoutRenderer(),
 		private readonly AccessCodes $accessCodes = new AccessCodes(),
+		private readonly VibePlusPolicy $vibePlusPolicy = new VibePlusPolicy(),
 	) {
 	}
 
@@ -55,10 +61,54 @@ final class OpenAppLayoutService
 
 	public function renderPageResponse(int $catalogItemId, int $userId): HttpResponse
 	{
+		$item = $this->resolveAccessibleItem($catalogItemId, $userId);
+		if (is_string($item))
+		{
+			return $this->createHtmlResponse(
+				$this->renderer->renderErrorPage(...$this->errorParams($item)),
+			);
+		}
+
+		$viewUrl = $this->resolveViewUrl($item);
+		if (
+			!$this->settings->isOpenInIframeEnabled()
+			|| trim((string)$item->getExternalId()) === ''
+		)
+		{
+			if ($viewUrl !== null)
+			{
+				$response = new Redirect($viewUrl);
+				$response->addHeader('Cache-Control', 'private, no-store');
+
+				return $response;
+			}
+
+			return $this->createHtmlResponse(
+				$this->renderer->renderErrorPage(...$this->errorParams(
+					$this->settings->isOpenInIframeEnabled()
+						? OpenAppException::CODE_EXTERNAL_ID_MISSING
+						: self::ERROR_DISABLED,
+				)),
+			);
+		}
+
+		$payload = $this->buildPayload($item, $userId);
+		if (is_string($payload))
+		{
+			return $this->createHtmlResponse(
+				$this->renderer->renderErrorPage(...$this->errorParams($payload)),
+			);
+		}
+
+		return $this->createHtmlResponse($this->renderer->renderPage($payload));
+	}
+
+	private function createHtmlResponse(string $content): HttpResponse
+	{
 		$response = new HttpResponse();
 		$response->addHeader('Content-Type', 'text/html; charset=UTF-8');
 		$response->addHeader('Cache-Control', 'private, no-store');
-		$response->setContent($this->renderPage($catalogItemId, $userId));
+		$response->setContent($content);
 
 		return $response;
 	}
@@ -74,6 +124,17 @@ final class OpenAppLayoutService
 			return self::ERROR_DISABLED;
 		}
 
+		$item = $this->resolveAccessibleItem($catalogItemId, $userId);
+		if (is_string($item))
+		{
+			return $item;
+		}
+
+		return $this->buildPayload($item, $userId);
+	}
+
+	private function resolveAccessibleItem(int $catalogItemId, int $userId): CatalogItem|string
+	{
 		$item = $this->itemRepository->getById($catalogItemId);
 		if ($item === null || $item->isDeactivated())
 		{
@@ -99,6 +160,16 @@ final class OpenAppLayoutService
 			return self::ERROR_ACCESS_DENIED;
 		}
 
+		if ($this->vibePlusPolicy->getAvailability() === false)
+		{
+			return self::ERROR_FEATURE_NOT_AVAILABLE;
+		}
+
+		return $item;
+	}
+
+	private function buildPayload(CatalogItem $item, int $userId): OpenAppPayload|string
+	{
 		try
 		{
 			return $this->payloadBuilder->build($item, $userId);
@@ -111,6 +182,35 @@ final class OpenAppLayoutService
 		{
 			return self::ERROR_BUILD_FAILED;
 		}
+	}
+
+	private function resolveViewUrl(CatalogItem $item): ?string
+	{
+		$viewUrl = trim((string)$item->getViewUrl());
+		if (
+			$viewUrl === ''
+			|| str_contains($viewUrl, "\r")
+			|| str_contains($viewUrl, "\n")
+		)
+		{
+			return null;
+		}
+
+		if (str_starts_with($viewUrl, '/'))
+		{
+			return str_starts_with($viewUrl, '//') ? null : $viewUrl;
+		}
+
+		$uri = new Uri($viewUrl);
+		if (
+			!in_array($uri->getScheme(), ['http', 'https'], true)
+			|| $uri->getHost() === ''
+		)
+		{
+			return null;
+		}
+
+		return $viewUrl;
 	}
 
 	/**

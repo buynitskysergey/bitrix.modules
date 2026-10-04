@@ -9,6 +9,7 @@ use Bitrix\Bizproc\Public\Activity\ActivityControlsBuilder;
 use Bitrix\Bizproc\Public\Activity\Interface\NodeFilterMetadataProvider;
 use Bitrix\BizprocDesigner\Internal\Trait\ActivitySettingsDecoder;
 use Bitrix\BizprocDesigner\Public\Command;
+use Bitrix\BizprocDesigner\Public\Service\Activity\TriggerUpgradeResolver;
 use Bitrix\Main\Engine\JsonController;
 use Bitrix\Main\Loader;
 use Bitrix\Bizproc\Api\Enum\ErrorMessage;
@@ -27,6 +28,7 @@ class Activity extends JsonController
 		string $activityType,
 		array $documentType = [],
 		bool $onlyDynamicEntities = false,
+		bool $includeRelatedEntityTypes = false,
 	): ?array
 	{
 		$user = new \CBPWorkflowTemplateUser(\CBPWorkflowTemplateUser::CurrentUser);
@@ -57,7 +59,7 @@ class Activity extends JsonController
 			return null;
 		}
 
-		$metadata = $className::getNodeFilterMetadata($documentType, $onlyDynamicEntities);
+		$metadata = $className::getNodeFilterMetadata($documentType, $onlyDynamicEntities, $includeRelatedEntityTypes);
 
 		$documentFields = [];
 		$documentName = '';
@@ -86,6 +88,21 @@ class Activity extends JsonController
 		array $options = [],
 	): ?array
 	{
+		// Same object authorization as the sibling actions: the client-supplied documentType reaches
+		// getPropertiesMap(), whose controls expose document metadata (categories, stages) in Options.
+		$user = new \CBPWorkflowTemplateUser(\CBPWorkflowTemplateUser::CurrentUser);
+		$canWrite = \CBPDocument::CanUserOperateDocumentType(
+			\CBPCanUserOperateOperation::CreateWorkflow,
+			$user->getId(),
+			$documentType,
+		);
+		if (!$canWrite)
+		{
+			$this->errorCollection->setError(ErrorMessage::ACCESS_DENIED->getError());
+
+			return null;
+		}
+
 		$brokenLinks = [];
 		$activityName = $activity['Name'] ?? '';
 		$hideEditorComment = (bool)($options['hideEditorComment'] ?? false);
@@ -96,13 +113,20 @@ class Activity extends JsonController
 			'constants' => $workflowConstants,
 		] = $this->decodeActivitySettings($workflow, $documentType);
 
-		$description = Container::instance()->getActivitySearcherService()->searchByCode((string)$activity['Type']);
+		$activity = $this->applyTriggerUpgrade($activity, $documentType);
+
+		$description = Container::instance()->getActivitySearcherService()->searchByCode($activity['Type']);
 		$result = [
 			'brokenLinks' => $brokenLinks,
 			'controls' => null,
 			'useDocumentContext' => $description?->getFilter() !== null,
 		];
-		$configurator = \CBPActivity::createConfigurator($activity['Type'], $activity['Properties'] ?? []);
+		$configurator = \CBPActivity::createConfigurator(
+			$activity['Type'],
+			$activity['Properties'],
+			$documentType,
+		);
+
 
 		if (!$configurator->getActivityType())
 		{
@@ -201,5 +225,27 @@ class Activity extends JsonController
 		}
 
 		return $result->getSettings()?->toArray();
+	}
+
+	/**
+	 * The settings form of a node saved with a deprecated trigger class is built from the class that
+	 * replaces it, otherwise the owner of such a node would not see the controls the new class added and
+	 * could only re-save it blindly. Nothing is written into the template here: the type of the node changes
+	 * on save (see {@see \Bitrix\BizprocDesigner\Public\Command\Activity\Settings\SaveCommandHandler}).
+	 */
+	private function applyTriggerUpgrade(array $activity, array $documentType): array
+	{
+		$properties = is_array($activity['Properties'] ?? null) ? $activity['Properties'] : [];
+
+		$upgradeResolver = new TriggerUpgradeResolver();
+		$upgrade = $upgradeResolver->resolveUpgradedType(
+			(string)($activity['Type'] ?? ''),
+			$upgradeResolver->resolveNodeDocumentType([$properties['Document'] ?? null], $documentType),
+		);
+
+		$activity['Type'] = $upgrade['type'];
+		$activity['Properties'] = $upgradeResolver->applyUpgradeProperties($properties, $upgrade['properties']);
+
+		return $activity;
 	}
 }

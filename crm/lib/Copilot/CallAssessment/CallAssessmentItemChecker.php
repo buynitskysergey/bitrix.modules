@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Copilot\CallAssessment;
 
 use Bitrix\Crm\Controller\ErrorCode;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
 use Bitrix\Crm\Traits\Singleton;
 use Bitrix\Main\Error;
@@ -40,6 +41,11 @@ final class CallAssessmentItemChecker
 				Loc::getMessage('CALL_ASSESSMENT_ITEM_DISABLED'),
 				ErrorCode::ACCESS_DENIED
 			));
+		}
+
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			return $result;
 		}
 
 		if (

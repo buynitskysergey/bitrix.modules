@@ -1,0 +1,625 @@
+{
+    "NAME": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_1###",
+    "DESCRIPTION": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_DESCRIPTION_1###",
+    "PARAMETERS": [],
+    "VARIABLES": [],
+    "CONSTANTS": {
+        "lowBorder": {
+            "Name": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_2###",
+            "Description": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_DESCRIPTION_2###",
+            "Type": "int",
+            "Required": 0,
+            "Multiple": 0,
+            "Options": [],
+            "Default": 30,
+            "Settings": []
+        },
+        "highBorder": {
+            "Name": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_3###",
+            "Description": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_DESCRIPTION_3###",
+            "Type": "int",
+            "Required": 0,
+            "Multiple": 0,
+            "Options": [],
+            "Default": 80,
+            "Settings": []
+        }
+    },
+    "TEMPLATE": [
+        {
+            "Type": "NodeWorkflowActivity",
+            "Name": "Template",
+            "Properties": {
+                "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_1###",
+                "Links": [
+                    [
+                        "A1307_8761_2117_6974:o0",
+                        "A9737_1749_4646_8157:i0",
+                        1773940230075
+                    ],
+                    [
+                        "A9737_1749_4646_8157:o0",
+                        "A9969_3507_2548_6142:i0",
+                        1773940266720
+                    ],
+                    [
+                        "A9969_3507_2548_6142:o0",
+                        "A8091_5428_6619_5953:i0",
+                        1773940303091
+                    ],
+                    [
+                        "A9969_3507_2548_6142:o0",
+                        "A7709_4946_2215_2202:i0",
+                        1774009519243
+                    ],
+                    [
+                        "A5296_8192_9175_1928:o0",
+                        "A9737_1749_4646_8157:i0",
+                        1774358628004
+                    ],
+                    [
+                        "A9239_4876_9375_1091:o0",
+                        "A9737_1749_4646_8157:i0",
+                        1774358915604
+                    ],
+                    [
+                        "A1584_6779_4069_3764:o0",
+                        "A9737_1749_4646_8157:i0",
+                        1774358989781
+                    ],
+                    [
+                        "A1584_6779_4069_3764:o0",
+                        "A8880_9067_4765_1098:i0",
+                        1774359019072
+                    ],
+                    [
+                        "A5698_6950_4533_3762:o0",
+                        "A8880_9067_4765_1098:i0",
+                        1774359511551
+                    ],
+                    [
+                        "A9737_1749_4646_8157:o1",
+                        "A7074_7919_4652_9430:i0",
+                        1774360645550
+                    ],
+                    [
+                        "A9737_1749_4646_8157:o1",
+                        "A1747_9032_5410_9564:i0",
+                        1774360771604
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o0",
+                        "A6149_2082_5052_5973:i0",
+                        1774361290762
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o0",
+                        "A2537_9477_5649_8340:i0",
+                        1774361386380
+                    ],
+                    [
+                        "A9737_1749_4646_8157:o0",
+                        "A1188_1336_5592_1850:i0",
+                        1774361995706
+                    ],
+                    [
+                        "A1747_9032_5410_9564:o0",
+                        "A2143_8237_2440_5011:i0",
+                        1774362164137
+                    ],
+                    [
+                        "A1747_9032_5410_9564:o1",
+                        "A4251_8052_4302_5628:i0",
+                        1774362205424
+                    ],
+                    [
+                        "A4251_8052_4302_5628:o0",
+                        "A1578_1258_1930_1609:i0",
+                        1774362542496
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o1",
+                        "A6965_3580_4012_7541:i0",
+                        1774362892580
+                    ],
+                    [
+                        "A6965_3580_4012_7541:o1",
+                        "A9737_1749_4646_8157:i0",
+                        1774362942595
+                    ],
+                    [
+                        "A6965_3580_4012_7541:o0",
+                        "A2343_8640_4849_6029:i0",
+                        1774362986158
+                    ],
+                    [
+                        "A4251_8052_4302_5628:o1",
+                        "A4658_6397_3973_7341:i0",
+                        1774363785491
+                    ],
+                    [
+                        "A9057_1650_7651_8178:o0",
+                        "A2164_7850_8994_4458:i0",
+                        1774434694191
+                    ],
+                    [
+                        "A2343_8640_4849_6029:o0",
+                        "A9057_1650_7651_8178:i0",
+                        1774434706061
+                    ],
+                    [
+                        "A2343_8640_4849_6029:o0",
+                        "A6137_3312_7770_7261:i0",
+                        1774434737928
+                    ],
+                    [
+                        "A5698_6950_4533_3762:o0",
+                        "A7160_2796_6525_2561:i0",
+                        1774445791075
+                    ],
+                    [
+                        "A7160_2796_6525_2561:o0",
+                        "A7804_4279_7090_4021:i0",
+                        1774445795443
+                    ],
+                    [
+                        "A5698_6950_4533_3762:o0",
+                        "A6143_3541_4735_6494:i0",
+                        1774446092041
+                    ],
+                    [
+                        "A6143_3541_4735_6494:o0",
+                        "A7804_4279_7090_4021:i0",
+                        1774446093803
+                    ],
+                    [
+                        "A5698_6950_4533_3762:o0",
+                        "A1631_1444_2696_3798:i0",
+                        1774446299351
+                    ],
+                    [
+                        "A1631_1444_2696_3798:o0",
+                        "A7804_4279_7090_4021:i0",
+                        1774446301204
+                    ],
+                    [
+                        "A5698_6950_4533_3762:o0",
+                        "A4096_7082_1164_6752:i0",
+                        1774452019993
+                    ],
+                    [
+                        "A5698_6950_4533_3762:o0",
+                        "A7804_4279_7090_4021:i0",
+                        1774530449361
+                    ],
+                    [
+                        "A7043_8699_7944_2053:o0",
+                        "A7804_4279_7090_4021:i0",
+                        1774530550584
+                    ],
+                    [
+                        "A2537_9477_5649_8340:o0",
+                        "A2208_4082_7237_7698:i0",
+                        1774618520211
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o0",
+                        "A3101_7871_1832_9347:i0",
+                        1775053402792
+                    ],
+                    [
+                        "A3101_7871_1832_9347:o0",
+                        "A2208_4082_7237_7698:i0",
+                        1775053405223
+                    ],
+                    [
+                        "A6965_3580_4012_7541:o0",
+                        "A5662_4613_7433_5452:i0",
+                        1775574659593
+                    ],
+                    [
+                        "A9737_1749_4646_8157:o0",
+                        "A4169_5168_6300_4158:i0",
+                        1775574713680
+                    ],
+                    [
+                        "A1747_9032_5410_9564:o0",
+                        "A7689_1725_3847_7841:i0",
+                        1775574938622
+                    ],
+                    [
+                        "A4251_8052_4302_5628:o1",
+                        "A4607_6201_2450_5418:i0",
+                        1775574981428
+                    ],
+                    [
+                        "A4251_8052_4302_5628:o0",
+                        "A1085_2400_2908_2437:i0",
+                        1775575010222
+                    ],
+                    [
+                        "A3101_7871_1832_9347:o0",
+                        "A5896_7429_2100_8327:i0",
+                        1775644492919
+                    ],
+                    [
+                        "A7233_7048_4760_5401:o0",
+                        "A7804_4279_7090_4021:i0",
+                        1775652460692
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o0",
+                        "A4325_2730_1293_7561:i0",
+                        1775652734093
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o1",
+                        "A1650_2314_9906_8997:i0",
+                        1775652771923
+                    ],
+                    [
+                        "A1407_7676_3523_1387:o0",
+                        "A2536_9266_9409_6054:i0",
+                        1778148673491
+                    ],
+                    [
+                        "A7804_4279_7090_4021:o1",
+                        "A4607_6201_2450_5418:i0",
+                        1778150340449
+                    ],
+                    [
+                        "A6048_5965_6698_6890:o0",
+                        "A4198_5075_2419_6672:i0",
+                        1778765630485
+                    ],
+                    [
+                        "A5332_5196_7524_1576:o0",
+                        "A2536_9266_9409_6054:i0",
+                        1780922694666
+                    ]
+                ]
+            },
+            "Children": [
+                {
+                    "Name": "A7804_4279_7090_4021",
+                    "Type": "IfElseBranchActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_2###",
+                        "EditorComment": "",
+                        "mixedcondition": [
+                            {
+                                "object": "A7233_7048_4760_5401",
+                                "field": "AssessmentSettingsId",
+                                "operator": "!empty",
+                                "value": "",
+                                "joiner": 0
+                            }
+                        ]
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A7804_4279_7090_4021",
+                        "type": "complex",
+                        "position": {
+                            "x": 786,
+                            "y": 360
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 135
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o0",
+                                "title": "true",
+                                "type": "output",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o1",
+                                "title": "false",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "complex",
+                            "title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_2###",
+                            "colorIndex": 3,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "CONDITION",
+                            "updated": 1780922701151,
+                            "published": 1780922701151,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
+                        }
+                    }
+                },
+                {
+                    "Name": "A3101_7871_1832_9347",
+                    "Type": "CrmGetCallAssessmentActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "AssessmentSettingsId": [
+                            "{=A7233_7048_4760_5401:AssessmentSettingsId}"
+                        ],
+                        "Transcription": "{=A7233_7048_4760_5401:Transcription}",
+                        "ActivityId": "{=A7233_7048_4760_5401:ActivityId}",
+                        "UserId": "{=A7233_7048_4760_5401:UserId}",
+                        "LowBorder": "{=Constant:lowBorder}",
+                        "HighBorder": "{=Constant:highBorder}",
+                        "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_3###",
+                        "EditorComment": ""
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A3101_7871_1832_9347",
+                        "type": "simple",
+                        "position": {
+                            "x": 1158,
+                            "y": 420
+                        },
+                        "dimensions": {
+                            "width": 300,
+                            "height": 58
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o0",
+                                "title": "",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_4###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "QUANTITY",
+                            "updated": 1780922701151,
+                            "published": 1780922701151,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
+                        }
+                    }
+                },
+                {
+                    "Name": "A4607_6201_2450_5418",
+                    "Type": "CrmGetCallAssessmentActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "AssessmentSettingsId": [],
+                        "Transcription": "{=A7233_7048_4760_5401:Transcription}",
+                        "ActivityId": "{=A7233_7048_4760_5401:ActivityId}",
+                        "UserId": "{=A7233_7048_4760_5401:UserId}",
+                        "LowBorder": "{=Constant:lowBorder}",
+                        "HighBorder": "{=Constant:highBorder}",
+                        "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_4###",
+                        "EditorComment": ""
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A4607_6201_2450_5418",
+                        "type": "simple",
+                        "position": {
+                            "x": 1158,
+                            "y": 540
+                        },
+                        "dimensions": {
+                            "width": 300,
+                            "height": 58
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o0",
+                                "title": "",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_4###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "QUANTITY",
+                            "updated": 1780922701151,
+                            "published": 1780922701151,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
+                        }
+                    }
+                },
+                {
+                    "Name": "A7233_7048_4760_5401",
+                    "Type": "CrmCallAssessmentTrigger",
+                    "PresetId": null,
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_1###"
+                    },
+                    "Activated": "Y",
+                    "Node": {
+                        "id": "A7233_7048_4760_5401",
+                        "type": "trigger",
+                        "position": {
+                            "x": 357,
+                            "y": 422
+                        },
+                        "dimensions": {
+                            "width": 300,
+                            "height": 58
+                        },
+                        "ports": [
+                            {
+                                "id": "o0",
+                                "title": "",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "trigger",
+                            "title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_1###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "HANDSHAKE",
+                            "updated": 1780922701151,
+                            "published": 1780922701151,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": null
+                        }
+                    }
+                },
+                {
+                    "Name": "A2536_9266_9409_6054",
+                    "Type": "SetupTemplateActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "blocks": [
+                            {
+                                "items": [
+                                    {
+                                        "itemType": "title",
+                                        "text": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TEXT_1###"
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "lowBorder",
+                                        "name": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_2###",
+                                        "constantType": "int",
+                                        "description": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_DESCRIPTION_2###",
+                                        "multiple": false,
+                                        "required": true,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": "30"
+                                    },
+                                    {
+                                        "itemType": "constant",
+                                        "id": "highBorder",
+                                        "name": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_NAME_3###",
+                                        "constantType": "int",
+                                        "description": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_DESCRIPTION_3###",
+                                        "multiple": false,
+                                        "required": false,
+                                        "options": [],
+                                        "settings": [],
+                                        "default": "80"
+                                    }
+                                ]
+                            }
+                        ],
+                        "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_5###",
+                        "EditorComment": ""
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A2536_9266_9409_6054",
+                        "type": "services",
+                        "position": {
+                            "x": 342,
+                            "y": 577
+                        },
+                        "dimensions": {
+                            "width": 260,
+                            "height": 96
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o0",
+                                "title": "",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "services",
+                            "title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_5###",
+                            "colorIndex": 8,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "SETTINGS",
+                            "updated": 1780922701151,
+                            "published": 1780922701151,
+                            "shouldShowAuxPorts": false,
+                            "contentBlockColor": -1
+                        }
+                    }
+                },
+                {
+                    "Name": "A5332_5196_7524_1576",
+                    "Type": "AiAgentStartTrigger",
+                    "PresetId": null,
+                    "Properties": {
+                        "Title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_6###"
+                    },
+                    "Activated": "Y",
+                    "Node": {
+                        "id": "A5332_5196_7524_1576",
+                        "type": "trigger",
+                        "dimensions": {
+                            "width": 300,
+                            "height": 58
+                        },
+                        "position": {
+                            "x": -66,
+                            "y": 584
+                        },
+                        "ports": [
+                            {
+                                "id": "o0",
+                                "title": "",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "colorIndex": 0,
+                            "icon": "AI_ROBOT",
+                            "title": "###BIZPROC_NODES_BITRIX_CRM_CALL_ASSESSMENT_TITLE_6###",
+                            "type": "trigger",
+                            "shouldShowAuxPorts": false,
+                            "updated": 1780922701151,
+                            "published": 1780922701151
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}

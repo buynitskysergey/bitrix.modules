@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Integration\AI\Operation\Autostart;
 
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Copilot\Pipeline\TargetResolver;
 use Bitrix\Crm\Integration\AI\AIManager;
@@ -11,6 +12,7 @@ use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\AutoLauncher\ChannelAutoStartStrategyFactory;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\CallChannelSettings;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\ChatChannelSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioRegistry;
 
 /**
  * @todo migrate to PipelineExecutor
@@ -41,6 +43,7 @@ final class AutoLauncher
 				|| AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment)
 				|| AIManager::isEnabledInGlobalSettings(GlobalSetting::AnalyzeCommunication)
 				|| AIManager::isEnabledInGlobalSettings(GlobalSetting::Summarize)
+				|| AIManager::isCallTranscriptionEngineConfigured()
 			)
 		;
 	}
@@ -54,10 +57,10 @@ final class AutoLauncher
 		if ($strategy === null)
 		{
 			$logger->warning(
-				'{date}: Autostart strategy not found for channel "{channelType}" and activity: {activity}' . PHP_EOL,
+				'{date}: Autostart strategy not found for channel "{channelType}" and activity: {activityId}' . PHP_EOL,
 				[
 					'channelType' => $channelType,
-					'activity' => $activityFields,
+					'activityId' => (int)($activityFields['ID'] ?? 0),
 				],
 			);
 
@@ -75,10 +78,10 @@ final class AutoLauncher
 		catch (\Throwable $exception)
 		{
 			$logger->error(
-				'{date}: Autostart error for channel "{channelType}" and activity: {activity}: {error}' . PHP_EOL,
+				'{date}: Autostart error for channel "{channelType}" and activity: {activityId}: {error}' . PHP_EOL,
 				[
 					'channelType' => $channelType,
-					'activity' => $activityFields,
+					'activityId' => (int)($activityFields['ID'] ?? 0),
 					'error' => $exception->getMessage(),
 				],
 			);
@@ -93,6 +96,7 @@ final class AutoLauncher
 		{
 			Call::getId() => CallChannelSettings::CHANNEL_TYPE,
 			OpenLine::getId() => ChatChannelSettings::CHANNEL_TYPE,
+			Email::getId() => AutomationScenarioRegistry::CHANNEL_EMAIL,
 			default => '',
 		};
 	}

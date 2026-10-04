@@ -64,15 +64,7 @@ class DealInvoiceStatistics extends DealDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'INVOICE_SUM';
-		}
-
-		if(!in_array($name, self::getAllowedSelectNames(), true))
-		{
-			$name = 'INVOICE_SUM';
-		}
+		$name = $this->sanitizeSelectName($name, 'INVOICE_SUM');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -374,7 +366,7 @@ class DealInvoiceStatistics extends DealDataSource
 		);
 	}
 
-	private static function getAllowedSelectNames()
+	protected function getAllowedSelectNames()
 	{
 		return array(
 			'INVOICE_SUM',

@@ -1685,7 +1685,7 @@ class CReport
 			}
 			elseif ($match !== '')
 			{
-				$expression[] = "'".$match."'";
+				$expression[] = "'".$DB->ForSql($match)."'";
 			}
 		}
 

@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Kanban\Entity;
 use Bitrix\Crm\Filter\ItemDataProvider;
 use Bitrix\Crm\Item\SmartInvoice as SmartInvoiceItem;
 use Bitrix\Crm\Kanban\Entity\Deadlines\DeadlinesStageManager;
+use Bitrix\Crm\Search\SearchEnvironment;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
@@ -39,6 +40,14 @@ class SmartInvoiceDeadlines extends SmartInvoice
 
 	public function fillStageTotalSums(array $filter, array $runtime, array &$stages): void
 	{
+		if (isset($filter['SEARCH_CONTENT']))
+		{
+			SearchEnvironment::prepareSearchFilter($this->getTypeId(), $filter, [
+				'ENABLE_PHONE_DETECTION' => false,
+			]);
+			unset($filter['SEARCH_CONTENT']);
+		}
+
 		ItemDataProvider::processStageSemanticFilter($filter, $filter);
 		unset($filter[ItemDataProvider::FIELD_STAGE_SEMANTIC]);
 		foreach ($stages as &$stage)

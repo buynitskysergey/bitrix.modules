@@ -78,6 +78,8 @@ abstract class Model implements \ArrayAccess, IErrorable
 
 		if(!$aliases)
 		{
+			$this->setExtraAttributes($attributes);
+
 			return $this;
 		}
 		ksort($attributes);

@@ -2,8 +2,10 @@
 
 use Bitrix\Bizproc;
 use Bitrix\Bizproc\Debugger\Workflow\DebugWorkflow;
+use Bitrix\Bizproc\Internal\Entity\WorkflowTemplate\VersionChoice;
 use Bitrix\Bizproc\Internal\Service\Container;
 use Bitrix\Bizproc\Internal\Service\Debugger\DebugSessionServiceInterface;
+use Bitrix\Bizproc\Public\Service\WorkflowTemplate\PilotVersionResolver;
 use Bitrix\Bizproc\Workflow\Entity\WorkflowInstanceTable;
 use Bitrix\Main;
 
@@ -32,7 +34,7 @@ class CBPRuntime
 
 	public const REST_ACTIVITY_PREFIX = 'rest_';
 
-	public const ACTIVITY_API_VERSION = 3;
+	public const ACTIVITY_API_VERSION = 4;
 
 	private $isStarted = false;
 	/** @var CBPRuntime $instance*/
@@ -44,6 +46,7 @@ class CBPRuntime
 	private array $workflows = [];
 	private $workflowChains = [];
 	private DebugSessionServiceInterface|null $debugSessionService = null;
+	private ?PilotVersionResolver $pilotVersionResolver = null;
 
 	/*********************  SINGLETON PATTERN  **************************************************/
 
@@ -206,6 +209,11 @@ class CBPRuntime
 		{
 			throw new Exception("workflowTemplateId");
 		}
+		if (!is_array($workflowParameters))
+		{
+			$workflowParameters = [$workflowParameters];
+		}
+		$workflowParameters = $this->normalizeTemplateWorkflowParameters($workflowTemplateId, $workflowParameters);
 
 		$arDocumentId = CBPHelper::ParseDocumentId($documentId);
 
@@ -225,7 +233,12 @@ class CBPRuntime
 			$this->StartRuntime();
 		}
 
-		$workflowId = $workflowParameters[CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID] ?? static::generateWorkflowId();
+		$workflowId = $workflowParameters[CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID] ?? null;
+		if (!static::isValidWorkflowId($workflowId))
+		{
+			$workflowId = static::generateWorkflowId();
+			unset($workflowParameters[CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID]);
+		}
 
 		if ($parentWorkflow)
 		{
@@ -240,8 +253,23 @@ class CBPRuntime
 
 		$loader = CBPWorkflowTemplateLoader::GetLoader();
 
+		$versionChoice = $this->chooseTemplateVersion(
+			$workflowTemplateId,
+			$workflowParameters,
+			$workflowId,
+			!empty($parentWorkflow),
+		);
+
 		/** @var CBPCompositeActivity $rootActivity */
-		[$rootActivity, $workflowVariablesTypes, $workflowParametersTypes] = $loader->LoadWorkflow($workflowTemplateId);
+		[$rootActivity, $workflowVariablesTypes, $workflowParametersTypes] = $versionChoice->executableFields === null
+			? $loader->LoadWorkflow($workflowTemplateId)
+			: $loader->loadWorkflowFromArray($versionChoice->executableFields)
+		;
+		$workflowParameters = $this->revalidateChangedVersionParameters(
+			$workflowParameters,
+			$workflowParametersTypes,
+			$arDocumentId,
+		);
 		foreach ($workflowParametersTypes as $parameterName => $parametersProperty)
 		{
 			if (!array_key_exists($parameterName, $workflowParameters))
@@ -262,11 +290,7 @@ class CBPRuntime
 
 		$workflow->initialize($rootActivity, $arDocumentId, $workflowParameters, $workflowVariablesTypes, $workflowParametersTypes, $workflowTemplateId);
 
-		$starterUserId = 0;
-		if (isset($workflowParameters[CBPDocument::PARAM_TAGRET_USER]))
-		{
-			$starterUserId = (int)CBPHelper::stripUserPrefix($workflowParameters[CBPDocument::PARAM_TAGRET_USER]);
-		}
+		$starterUserId = static::starterUserIdOf($workflowParameters);
 
 		$this->getStateService()->addWorkflow($workflowId, $workflowTemplateId, $arDocumentId, $starterUserId);
 
@@ -275,11 +299,131 @@ class CBPRuntime
 		return $workflow;
 	}
 
+	private function normalizeTemplateWorkflowParameters(int $workflowTemplateId, array $workflowParameters): array
+	{
+		$templateParameters = $workflowParameters[$workflowTemplateId] ?? null;
+		if (!is_array($templateParameters))
+		{
+			return $workflowParameters;
+		}
+
+		unset($workflowParameters[$workflowTemplateId]);
+
+		return array_replace($workflowParameters, $templateParameters);
+	}
+
+	/**
+	 * Which version of the template acts for the employee starting it.
+	 */
+	private function chooseTemplateVersion(
+		int $workflowTemplateId,
+		array $workflowParameters,
+		string $workflowId,
+		bool $isChildWorkflow,
+	): VersionChoice
+	{
+		$surface = static::manualStartSurfaceOf($workflowParameters);
+
+		return $this->getPilotVersionResolver()->resolve(
+			$workflowTemplateId,
+			static::starterUserIdOf($workflowParameters),
+			$surface,
+			$isChildWorkflow || ($surface === null && static::isAutomaticStart($workflowParameters)),
+			$workflowId,
+		);
+	}
+
+	private function getPilotVersionResolver(): PilotVersionResolver
+	{
+		return $this->pilotVersionResolver ??= new PilotVersionResolver();
+	}
+
+	private function revalidateChangedVersionParameters(
+		array $workflowParameters,
+		array $templateParameters,
+		array $documentId,
+	): array
+	{
+		$preparedToken = $workflowParameters[VersionChoice::PARAMETER_SCHEMA_TOKEN] ?? null;
+		unset($workflowParameters[VersionChoice::PARAMETER_SCHEMA_TOKEN]);
+
+		if (
+			!is_string($preparedToken)
+			|| hash_equals(VersionChoice::parameterSchemaToken($templateParameters), $preparedToken)
+		)
+		{
+			return $workflowParameters;
+		}
+
+		$documentType = $this->getDocumentService()->GetDocumentType($documentId);
+		if (!is_array($documentType))
+		{
+			throw new Exception('Unable to resolve workflow document type');
+		}
+
+		$errors = [];
+		$validatedParameters = CBPWorkflowTemplateLoader::checkWorkflowParameters(
+			$templateParameters,
+			$workflowParameters,
+			$documentType,
+			$errors,
+		);
+		if ($errors)
+		{
+			throw new CBPWorkflowTemplateValidationException(
+				implode('. ', array_column($errors, 'message')),
+				$errors,
+			);
+		}
+
+		return array_replace($workflowParameters, $validatedParameters);
+	}
+
+	private static function manualStartSurfaceOf(array $workflowParameters): ?string
+	{
+		$surface = $workflowParameters[CBPDocument::PARAM_MANUAL_START_SURFACE] ?? null;
+		$surface = is_string($surface) ? trim($surface) : '';
+
+		return $surface === '' ? null : $surface;
+	}
+
+	/**
+	 * A start the portal performs on its own: a document event, an automation, a script or a trigger.
+	 * Such a start asks no question about the version and, unlike a manual start that lost its mark,
+	 * is no case for the diagnostics either: otherwise every robot of the portal would leave a record
+	 * behind.
+	 *
+	 * A start carrying the mark stays a manual one whatever its event type: the manual start by a
+	 * trigger button of the scheme runs the event scenario.
+	 */
+	private static function isAutomaticStart(array $workflowParameters): bool
+	{
+		$eventType = (int)($workflowParameters[CBPDocument::PARAM_DOCUMENT_EVENT_TYPE] ?? CBPDocumentEventType::None);
+
+		return $eventType !== CBPDocumentEventType::None && $eventType !== CBPDocumentEventType::Manual;
+	}
+
+	private static function starterUserIdOf(array $workflowParameters): int
+	{
+		if (!isset($workflowParameters[CBPDocument::PARAM_TAGRET_USER]))
+		{
+			return 0;
+		}
+
+		return (int)CBPHelper::stripUserPrefix($workflowParameters[CBPDocument::PARAM_TAGRET_USER]);
+	}
+
 	public function createDebugWorkflow(int $templateId, array $documentId, $workflowParameters = [])
 	{
 		$complexDocumentId = CBPHelper::ParseDocumentId($documentId);
 
-		$workflowId = $workflowParameters[CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID] ?? static::generateWorkflowId();
+		$workflowId = $workflowParameters[CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID] ?? null;
+		if (!static::isValidWorkflowId($workflowId))
+		{
+			$workflowId = static::generateWorkflowId();
+			unset($workflowParameters[CBPDocument::PARAM_PRE_GENERATED_WORKFLOW_ID]);
+		}
+
 		$workflow = new DebugWorkflow($workflowId, $this);
 
 		$loader = CBPWorkflowTemplateLoader::GetLoader();
@@ -415,6 +559,16 @@ class CBPRuntime
 		return uniqid('', true);
 	}
 
+	/**
+	 * The only source of truth about the workflow id format: it must match what generateWorkflowId()
+	 * produces. Change the two together, and do not repeat the pattern anywhere else.
+	 * The D modifier is required: without it $ would also match before a trailing newline.
+	 */
+	public static function isValidWorkflowId(mixed $workflowId): bool
+	{
+		return is_string($workflowId) && preg_match('/^[0-9a-f]{13}\d\.\d{8}$/D', $workflowId) === 1;
+	}
+
 	/*******************  SERVICES  *********************************************************/
 
 	/**
@@ -545,6 +699,15 @@ class CBPRuntime
 		}
 
 		return false;
+	}
+
+	/**
+	 * The single point every consumer must use to tell a trigger from an ordinary activity.
+	 * The `Trigger` name suffix is not a contract and must not be checked instead.
+	 */
+	public function isTriggerActivity(string $activityCode): bool
+	{
+		return Container::instance()->getActivitySearcherService()->isTriggerActivity($activityCode);
 	}
 
 	public function getActivityDescription($code, $lang = false): ?array

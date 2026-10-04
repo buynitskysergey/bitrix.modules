@@ -60,7 +60,10 @@ class MailboxSettings extends Controller implements AccessCheckControllerInterfa
 	)]
 	public function getDirectoriesSettingsAction(int $mailboxId): array
 	{
-		$result = (new MailboxDirectorySettingsService())->getSettings($mailboxId);
+		$result = (new MailboxDirectorySettingsService())->getSettings(
+			$mailboxId,
+			MailboxAccess::hasCurrentUserAccessToEditMailbox($mailboxId),
+		);
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -81,7 +84,11 @@ class MailboxSettings extends Controller implements AccessCheckControllerInterfa
 	)]
 	public function loadDirectoryChildrenAction(int $mailboxId, string $dirMd5): array
 	{
-		$result = (new MailboxDirectorySettingsService())->loadChildren($mailboxId, $dirMd5);
+		$result = (new MailboxDirectorySettingsService())->loadChildren(
+			$mailboxId,
+			$dirMd5,
+			MailboxAccess::hasCurrentUserAccessToEditMailbox($mailboxId),
+		);
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -111,7 +118,15 @@ class MailboxSettings extends Controller implements AccessCheckControllerInterfa
 			return [];
 		}
 
-		return [];
+		$stage = $result->getData()['migrationStage'] ?? null;
+
+		/*
+			Only a mailbox whose new physical source is waiting for these roles reports a
+			stage, and it is the stage as of this save: the operation is handed on after the
+			response, so the client rereads the state of the mailbox instead of treating this
+			value as the current one.
+		*/
+		return $stage === null ? [] : ['migrationStage' => $stage];
 	}
 
 	public function saveFolderSortModeAction(int $mailboxId, string $mode): void

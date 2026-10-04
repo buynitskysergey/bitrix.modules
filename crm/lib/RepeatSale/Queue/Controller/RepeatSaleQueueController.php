@@ -19,15 +19,56 @@ final class RepeatSaleQueueController
 {
 	use Singleton;
 
+	private const LOCK_NAME_PREFIX = 'crm_rs_queue_';
+
+	// the guarded section is a select plus a single insert, so a real wait is far below a second;
+	// waiting longer makes no sense either - the same work is queued again by the next run
+	private const LOCK_TIMEOUT = 1;
+
 	public function add(QueueItem $queueItem): ?AddResult
 	{
 		$hash = $queueItem->getHash();
-		if ($hash === null || !$this->hasItemInQueue($queueItem))
+		if ($hash === null)
 		{
 			return RepeatSaleQueueTable::add($this->getFields($queueItem));
 		}
 
-		return null;
+		$connection = Application::getConnection();
+		$lockName = $this->getLockName($queueItem->getJobId(), $hash);
+		$pool = Application::getInstance()->getConnectionPool();
+
+		$pool->useMasterOnly(true);
+		try
+		{
+			if (!$connection->lock($lockName, self::LOCK_TIMEOUT))
+			{
+				// the same work is being queued by another process right now
+				return null;
+			}
+
+			try
+			{
+				if ($this->hasItemInQueue($queueItem))
+				{
+					return null;
+				}
+
+				return RepeatSaleQueueTable::add($this->getFields($queueItem));
+			}
+			finally
+			{
+				$connection->unlock($lockName);
+			}
+		}
+		finally
+		{
+			$pool->useMasterOnly(false);
+		}
+	}
+
+	private function getLockName(int $jobId, string $hash): string
+	{
+		return self::LOCK_NAME_PREFIX . $jobId . '_' . $hash;
 	}
 
 	private function hasItemInQueue(QueueItem $queueItem): bool

@@ -60,6 +60,7 @@ class ConnectionPool
 			));
 		}
 
+		$parameters['name'] = $name;
 		$connection = new $className($parameters);
 
 		$this->connections[$name] = $connection;

@@ -234,7 +234,7 @@ class WorktimeRecordManager
 	{
 		if ($this->schedule && $this->schedule->isFlextime())
 		{
-			return $this->record->getRecordedStartTimestamp() + 9 * 3600;
+			return $this->record->getRecordedStartTimestamp() + 12 * 3600;
 		}
 
 		$shift = $this->buildShiftForAutoClose();
@@ -257,7 +257,7 @@ class WorktimeRecordManager
 
 		$previousShiftDateTime = clone $recordStartDateTime;
 		$previousShiftDateTime->sub(new \DateInterval('P1D'));
-		$previousShiftWithDate = new ShiftWithDate($shift, $this->schedule, $previousShiftDateTime);
+		$previousShiftWithDate = new ShiftWithDate($shift, $this->schedule, $previousShiftDateTime, (int)$this->record->getUserId());
 		if (
 			$recordStartDateTime->getTimestamp() >= $previousShiftWithDate->getDateTimeStart()->getTimestamp()
 			&& $recordStartDateTime->getTimestamp() <= $previousShiftWithDate->getDateTimeEnd()->getTimestamp()
@@ -266,7 +266,7 @@ class WorktimeRecordManager
 			return $previousShiftWithDate->getDateTimeEnd()->getTimestamp();
 		}
 
-		return (new ShiftWithDate($shift, $this->schedule, $recordStartDateTime))
+		return (new ShiftWithDate($shift, $this->schedule, $recordStartDateTime, (int)$this->record->getUserId()))
 			->getDateTimeEnd()
 			->getTimestamp()
 		;

@@ -14,7 +14,7 @@ final class ProviderAccessRestriction
 
 	public static function isFeatureEnabled(): bool
 	{
-		return Option::get('mail', self::FEATURE_OPTION_NAME, 'N') === 'Y';
+		return Option::get('mail', self::FEATURE_OPTION_NAME, 'Y') === 'Y';
 	}
 
 	public static function isRestricted(?string $serviceName, ?string $email): bool

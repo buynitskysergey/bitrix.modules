@@ -81,6 +81,8 @@ class ToDo extends Base implements EventRegistrarInterface
 			return new Result();
 		}
 
+		self::normalizeCalendarLocation($fields);
+
 		if ($action === self::ACTION_UPDATE)
 		{
 			$prevDescription = trim($params['PREVIOUS_FIELDS']['DESCRIPTION'] ?? '');
@@ -93,50 +95,39 @@ class ToDo extends Base implements EventRegistrarInterface
 			$fields['SETTINGS']['COLOR'] = ColorSettingsProvider::getDefaultColorId();
 		}
 
-		if ($action === self::ACTION_ADD || $action === self::ACTION_UPDATE)
-		{
-			$calendarEventId = $fields['CALENDAR_EVENT_ID'] ?? 0;
-			if ($calendarEventId > 0)
-			{
-				$calendarEvent = \Bitrix\Crm\Integration\Calendar::getEvent($calendarEventId);
-				if (is_array($calendarEvent))
-				{
-					$attendeesEntityList = $calendarEvent['attendeesEntityList'] ?? [];
-					$fields['SETTINGS']['USERS'] = array_map(static fn($item) => $item['id'], $attendeesEntityList);
+		return new Result();
+	}
 
-					if (
-						!empty($calendarEvent['LOCATION'])
-						&& Loader::includeModule('calendar')
-					)
-					{
-						$location = \Bitrix\Calendar\Rooms\Util::parseLocation($calendarEvent['LOCATION']);
-						if ($location['room_id'] > 0)
-						{
-							$fields['LOCATION'] = $location['str'];
-							$fields['SETTINGS']['LOCATION'] = $location['str'];
-						}
-						else
-						{
-							$fields['LOCATION'] = '';
-							$fields['SETTINGS']['ADDRESS_FORMATTED'] = $location['str'];
-						}
-					}
-					else
-					{
-						if (isset($fields['SETTINGS']['LOCATION']))
-						{
-							unset($fields['SETTINGS']['LOCATION']);
-						}
-						if (isset($fields['SETTINGS']['ADDRESS_FORMATTED']))
-						{
-							unset($fields['SETTINGS']['ADDRESS_FORMATTED']);
-						}
-					}
-				}
-			}
+	private static function normalizeCalendarLocation(array &$fields): void
+	{
+		if (!array_key_exists('LOCATION', $fields))
+		{
+			return;
 		}
 
-		return new Result();
+		if (!empty($fields['LOCATION']) && Loader::includeModule('calendar'))
+		{
+			$location = \Bitrix\Calendar\Rooms\Util::parseLocation($fields['LOCATION']);
+			if ($location['room_id'] > 0)
+			{
+				$fields['LOCATION'] = $location['str'];
+				$fields['SETTINGS']['LOCATION'] = $location['str'];
+				unset($fields['SETTINGS']['ADDRESS_FORMATTED']);
+			}
+			else
+			{
+				$fields['LOCATION'] = '';
+				$fields['SETTINGS']['ADDRESS_FORMATTED'] = $location['str'];
+				unset($fields['SETTINGS']['LOCATION']);
+			}
+
+			return;
+		}
+
+		unset(
+			$fields['SETTINGS']['LOCATION'],
+			$fields['SETTINGS']['ADDRESS_FORMATTED'],
+		);
 	}
 
 	protected static function getPreparedDescription(array $arFields): string
@@ -240,6 +231,14 @@ class ToDo extends Base implements EventRegistrarInterface
 
 	public static function skipCalendarSync(array $activityFields, array $options = []): bool
 	{
+		// Already bound event: date sync is authorized by BaseActivity::save() against the event
+		// itself, so section availability must never drop the sync here.
+		if (!empty($activityFields['CALENDAR_EVENT_ID']))
+		{
+			return false;
+		}
+
+		// New event creation: section availability gates whether a new calendar event is created.
 		$context = $options['CONTEXT'] ?? null;
 		if (!($context instanceof Context) || $context->getScope() !== Context::SCOPE_AUTOMATION)
 		{
@@ -266,11 +265,6 @@ class ToDo extends Base implements EventRegistrarInterface
 			{
 				return true;
 			}
-		}
-
-		if (!empty($activityFields['CALENDAR_EVENT_ID']))
-		{
-			return false;
 		}
 
 		return (bool) ($options['SKIP_CURRENT_CALENDAR_EVENT'] ?? true);
@@ -306,16 +300,6 @@ class ToDo extends Base implements EventRegistrarInterface
 	protected static function appendPrevDescription(array $fields, array &$updateFields): void
 	{
 		$updateFields['ENRICHED_DESCRIPTION'] = self::getPreparedDescription($fields);
-
-		$calendarEventId = $fields['CALENDAR_EVENT_ID'] ?? null;
-		if ($calendarEventId > 0)
-		{
-			$calendarEvent = \Bitrix\Crm\Integration\Calendar::getEvent($calendarEventId);
-			if (is_array($calendarEvent))
-			{
-				$updateFields['PREV_ENRICHED_DESCRIPTION'] = $calendarEvent['DESCRIPTION'];
-			}
-		}
 	}
 
 	public static function getActivityTitle(array $activity): string

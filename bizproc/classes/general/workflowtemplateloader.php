@@ -2,7 +2,14 @@
 
 use Bitrix\Bizproc\Workflow\Entity\WorkflowDurationStatTable;
 use Bitrix\Bizproc\Workflow\Entity\WorkflowInstanceTable;
+use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\PilotVersionRepository;
+use Bitrix\Bizproc\Internal\Service\Activity\ChildValidationContext;
+use Bitrix\Bizproc\Internal\Service\Container as BizprocContainer;
+use Bitrix\Bizproc\Internal\Service\Pilot\PilotPresence;
+use Bitrix\Bizproc\Internal\Service\Pilot\RestrictedTemplateArea;
+use Bitrix\Bizproc\Internal\Service\Pilot\SettingsFreezeGate;
 use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\AutoExecuteFilter;
+use Bitrix\Bizproc\Public\Provider\PilotVisibilityProvider;
 use Bitrix\Bizproc\Workflow\Template\Converter\NodesToTemplate;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\Bizproc\Api\Enum\Template\WorkflowTemplateType;
@@ -11,6 +18,7 @@ use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventManager;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Repository\Exception\PersistenceException;
 
 define("BP_EI_DIRECTION_EXPORT", 0);
 define("BP_EI_DIRECTION_IMPORT", 1);
@@ -80,7 +88,20 @@ class CBPWorkflowTemplateLoader
 		return true;
 	}
 
-	public function validateTemplate($arActivity, $user, &$activityNames = null, $isBranchActive = true)
+	/**
+	 * @param array|null $documentType Document type of the template being validated
+	 *     ([moduleId, entity, documentType]). The composition of the children of a node is checked against the
+	 *     catalog of its actions, and that catalog depends on the document context: an action locked in this
+	 *     context is out of it ({@see CBPActivity::validateChild()}). Null keeps the context-free catalog, so a
+	 *     caller that does not know the type of the template restricts nothing it did not restrict before.
+	 */
+	public function validateTemplate(
+		$arActivity,
+		$user,
+		&$activityNames = null,
+		$isBranchActive = true,
+		?array $documentType = null,
+	)
 	{
 		if ($activityNames === null)
 		{
@@ -129,15 +150,23 @@ class CBPWorkflowTemplateLoader
 		{
 			$bFirst = true;
 
+			$activityDocumentType = $this->resolveActivityDocumentType($arActivity, $documentType);
+
 			$childrenErrors = [];
 			foreach ($arActivity['Children'] as $arChildActivity)
 			{
 				if (!isset($arChildActivity['Activated']) || $arChildActivity['Activated'] !== 'N')
 				{
-					$childErrors = CBPActivity::callStaticMethod(
-						$arActivity['Type'],
-						'ValidateChild',
-						[$arChildActivity['Type'], $bFirst, $arChildActivity]
+					// The document context of the node reaches the verdict published, not passed: the signature
+					// of ValidateChild is a legacy contract and cannot take a parameter
+					// ({@see \Bitrix\Bizproc\Internal\Service\Activity\ChildValidationContext}).
+					$childErrors = ChildValidationContext::withDocumentType(
+						$activityDocumentType,
+						static fn() => CBPActivity::callStaticMethod(
+							$arActivity['Type'],
+							'ValidateChild',
+							[$arChildActivity['Type'], $bFirst, $arChildActivity]
+						),
 					);
 
 					foreach ($childErrors as $i => $e)
@@ -158,7 +187,8 @@ class CBPWorkflowTemplateLoader
 					$arChildActivity,
 					$user,
 					$activityNames,
-					($isBranchActive && (!isset($arChildActivity['Activated']) || $arChildActivity['Activated'] !== 'N'))
+					($isBranchActive && (!isset($arChildActivity['Activated']) || $arChildActivity['Activated'] !== 'N')),
+					$documentType,
 				);
 				if ($validateErrors)
 				{
@@ -170,6 +200,67 @@ class CBPWorkflowTemplateLoader
 		}
 
 		return $errors;
+	}
+
+	/**
+	 * Document type the template being saved belongs to: the fields carry it whenever they change it, and an
+	 * update that carries only the template itself keeps the type already stored. Without it the validation of
+	 * the children of a node would ask the context-free action catalog while the editor offered the contextual
+	 * one, and an action locked in this very context would pass ({@see self::validateTemplate()}).
+	 *
+	 * @param array $arFields Fields being saved, with the document type already parsed into its three parts.
+	 * @param int $id Id of the template on an update, 0 while it is being added.
+	 */
+	private function resolveTemplateDocumentType(array $arFields, int $id): ?array
+	{
+		if (isset($arFields['MODULE_ID'], $arFields['ENTITY'], $arFields['DOCUMENT_TYPE']))
+		{
+			return [$arFields['MODULE_ID'], $arFields['ENTITY'], $arFields['DOCUMENT_TYPE']];
+		}
+
+		if ($id <= 0)
+		{
+			return null;
+		}
+
+		$row = self::getList([], ['ID' => $id], false, false, ['DOCUMENT_TYPE'])->fetch();
+		$storedType = is_array($row) ? ($row['DOCUMENT_TYPE'] ?? null) : null;
+
+		return is_array($storedType) && count($storedType) === 3 ? array_values($storedType) : null;
+	}
+
+	/**
+	 * Document context one activity is validated in: the type the activity itself works on - the document of
+	 * the event of a trigger, the type a node class fixes - and the type of the template when it publishes
+	 * none. The very resolution the settings panel and its save-time validation use, so a child the panel
+	 * accepted is not rejected here
+	 * ({@see \Bitrix\Bizproc\Internal\Service\Activity\ComplexActivityService::getPublishedDocumentTypeForNode()}).
+	 *
+	 * Asked only about an activity served by the unified panel - the only verdict reading the context - so no
+	 * other activity pays for the class-declared and per-instance lookups behind it.
+	 */
+	private function resolveActivityDocumentType(array $arActivity, ?array $documentType): ?array
+	{
+		$activityType = (string)($arActivity['Type'] ?? '');
+		if ($activityType === '')
+		{
+			return $documentType;
+		}
+
+		$container = BizprocContainer::instance();
+		$description = $container->getActivitySearcherService()->searchByCode($activityType);
+		if ($description === null || !$description->isServedByUnifiedPanel())
+		{
+			return $documentType;
+		}
+
+		$activityProperties = is_array($arActivity['Properties'] ?? null) ? $arActivity['Properties'] : [];
+
+		return $container
+			->getComplexActivityService()
+			->getPublishedDocumentTypeForNode($activityType, $activityProperties)
+			?? $documentType
+		;
 	}
 
 	protected function parseFields(&$arFields, $id = 0, $systemImport = false, $validationRequired = true)
@@ -236,9 +327,19 @@ class CBPWorkflowTemplateLoader
 					if ($validationRequired)
 					{
 						$activityNames = [];
+						$documentType = $this->resolveTemplateDocumentType($arFields, $id);
 						foreach ($arFields['TEMPLATE'] as $rawTemplate)
 						{
-							array_push($errors, ...$this->ValidateTemplate($rawTemplate, $userTmp, $activityNames));
+							array_push(
+								$errors,
+								...$this->ValidateTemplate(
+									$rawTemplate,
+									$userTmp,
+									$activityNames,
+									true,
+									$documentType,
+								),
+							);
 						}
 					}
 
@@ -315,7 +416,14 @@ class CBPWorkflowTemplateLoader
 		WorkflowTemplateSettingsTable::deleteSettingsByFilter(['=TEMPLATE_ID' => $templateId]);
 	}
 
-	public static function update($id, $fields, $systemImport = false, $validationRequired = true)
+	public static function update(
+		$id,
+		$fields,
+		$systemImport = false,
+		$validationRequired = true,
+		bool $deferCacheInvalidation = false,
+		bool $publishesCommonVersion = false,
+	)
 	{
 		$loader = CBPWorkflowTemplateLoader::GetLoader();
 		$templateType = $loader->getTemplateType($fields, $id);
@@ -329,11 +437,98 @@ class CBPWorkflowTemplateLoader
 
 		$fields['UPDATED_BY'] = (int)CurrentUser::get()->getId();
 
-		$returnId = $loader->UpdateTemplate($id, $fields, $systemImport, $validationRequired);
-		$loader->updateTemplateSettings($id, $fields);
-		self::cleanTemplateCache($returnId);
+		$templateId = (int)$id;
+		if ($templateId <= 0)
+		{
+			throw new CBPArgumentNullException('id');
+		}
+
+		$connection = \Bitrix\Main\Application::getConnection();
+		$connection->startTransaction();
+		try
+		{
+			if (!(new PilotVersionRepository())->lockTemplateForUpdate($templateId))
+			{
+				throw new PersistenceException("Workflow template {$templateId} was not found");
+			}
+
+			self::guardFrozenSettings($templateId, $fields, $publishesCommonVersion);
+
+			$returnId = $loader->UpdateTemplate($templateId, $fields, $systemImport, $validationRequired);
+			$loader->updateTemplateSettings($templateId, $fields);
+
+			$connection->commitTransaction();
+		}
+		catch (\Throwable $exception)
+		{
+			self::rollbackTransaction($connection);
+
+			throw $exception;
+		}
+
+		if (!$deferCacheInvalidation)
+		{
+			self::invalidateCachesAfterUpdate($returnId, $fields);
+		}
 
 		return $returnId;
+	}
+
+	private static function guardFrozenSettings(
+		int $templateId,
+		array $fields,
+		bool $publishesCommonVersion,
+	): void
+	{
+		if (!array_key_exists('CONSTANTS', $fields))
+		{
+			return;
+		}
+		if ($publishesCommonVersion && array_key_exists('TEMPLATE', $fields))
+		{
+			return;
+		}
+
+		$refusal = (new SettingsFreezeGate())->findRefusal($templateId);
+		if ($refusal === null)
+		{
+			return;
+		}
+
+		throw new CBPWorkflowTemplateValidationException(
+			$refusal->getMessage(),
+			[[
+				'message' => $refusal->getMessage(),
+				'code' => $refusal->getCode(),
+			]],
+		);
+	}
+
+	public static function invalidateCachesAfterUpdate(int $templateId, array $fields): void
+	{
+		self::cleanTemplateCache($templateId);
+
+		if (array_key_exists('TEMPLATE', $fields))
+		{
+			$presence = new PilotPresence();
+			$presence->synchronize();
+			$presence->invalidate();
+
+			$restrictedArea = new RestrictedTemplateArea();
+			$restrictedArea->synchronize();
+			$restrictedArea->invalidate();
+		}
+	}
+
+	private static function rollbackTransaction(\Bitrix\Main\DB\Connection $connection): void
+	{
+		try
+		{
+			$connection->rollbackTransaction();
+		}
+		catch (\Bitrix\Main\DB\TransactionException)
+		{
+		}
 	}
 
 	public function setTemplateType(array &$fields, ?string $templateType = null)
@@ -613,7 +808,7 @@ class CBPWorkflowTemplateLoader
 
 		if (CBPActivity::includeActivityFile($code))
 		{
-			$instance = CBPActivity::createInstance($code, $name);
+			$instance = CBPActivity::createInstance($code, $name, $activityFormatted);
 			if ($instance)
 			{
 				$instance->setActivated($activated);
@@ -804,7 +999,12 @@ class CBPWorkflowTemplateLoader
 		return $ar;
 	}
 
-	public static function getDocumentTypeStates($documentType, $autoExecute = -1, $stateName = "")
+	/**
+	 * @param int|null $visibleForUserId narrows the result to the templates this employee may see. Absent by
+	 *  default: the same states feed the automatic start and the permissions of a document, and both must
+	 *  keep seeing every template of the type.
+	 */
+	public static function getDocumentTypeStates($documentType, $autoExecute = -1, $stateName = "", ?int $visibleForUserId = null)
 	{
 		$arFilter = array("DOCUMENT_TYPE" => $documentType);
 		$autoExecute = intval($autoExecute);
@@ -830,7 +1030,30 @@ class CBPWorkflowTemplateLoader
 
 			static::$typesStates[$cacheKey] = $result;
 		}
-		return static::$typesStates[$cacheKey];
+
+		if ($visibleForUserId === null)
+		{
+			return static::$typesStates[$cacheKey];
+		}
+
+		return static::narrowStatesToVisible(static::$typesStates[$cacheKey], $visibleForUserId);
+	}
+
+	/**
+	 * Drops the templates the employee may not see. The narrowing is done over the result of the cache and
+	 * never over the cache itself: the employee is not part of its key, so a set narrowed once and stored
+	 * there would be handed to the next employee as his own.
+	 */
+	private static function narrowStatesToVisible(array $states, int $visibleForUserId): array
+	{
+		if (!$states)
+		{
+			return $states;
+		}
+
+		$visibleIds = (new PilotVisibilityProvider())->filterVisibleIds($visibleForUserId, array_keys($states));
+
+		return array_intersect_key($states, array_flip($visibleIds));
 	}
 
 	public static function getTemplateState($workflowTemplateId, $stateName = "")
@@ -1121,6 +1344,31 @@ class CBPWorkflowTemplateLoader
 		return true;
 	}
 
+	public static function checkImportedTemplateActivities(array $template, CBPWorkflowTemplateUser $user): \Bitrix\Main\Result
+	{
+		$result = new \Bitrix\Main\Result();
+
+		try
+		{
+			$isValid = self::WalkThroughWorkflowTemplate(
+				$template,
+				["CBPWorkflowTemplateLoader", "ImportTemplateChecker"],
+				$user
+			);
+
+			if ($isValid !== true)
+			{
+				$result->addError(new \Bitrix\Main\Error('Imported template activities check failed'));
+			}
+		}
+		catch (\Throwable $e)
+		{
+			$result->addError(new \Bitrix\Main\Error($e->getMessage()));
+		}
+
+		return $result;
+	}
+
 	public static function importTemplate($id, $documentType, $autoExecute, $name, $description, $datum, $systemCode = null, $systemImport = false)
 	{
 
@@ -1262,6 +1510,7 @@ class CBPWorkflowTemplateLoader
 	{
 		$this->prepareTemplatesSelect($select);
 		$this->prepareTemplatesFilter($filter);
+		$this->prepareTemplatesOrder($order);
 
 		if (is_array($group) && empty($group))
 		{
@@ -1392,6 +1641,48 @@ class CBPWorkflowTemplateLoader
 	}
 
 	/**
+	 * Sanitizes the requested sort order against the entity map.
+	 *
+	 * The legacy CBPHelper::PrepareSql() implementation silently ignored any sort
+	 * field/direction that was not part of the whitelist. The ORM query, on the
+	 * contrary, throws Main\ArgumentException ("Unknown field definition") for an
+	 * unknown field and for an invalid direction. Untrusted input (e.g. the grid
+	 * "by"/"order" URL parameters) must not be able to trigger a fatal, so we drop
+	 * unknown fields and normalize the direction, restoring the tolerant behavior.
+	 */
+	protected function prepareTemplatesOrder(array &$order): void
+	{
+		if (empty($order))
+		{
+			return;
+		}
+
+		$entity = WorkflowTemplateTable::getEntity();
+
+		$orderableFields = [];
+		foreach ($entity->getScalarFields() as $field)
+		{
+			$orderableFields[mb_strtoupper($field->getName())] = $field->getName();
+		}
+
+		$preparedOrder = [];
+		foreach ($order as $fieldName => $direction)
+		{
+			$upperName = mb_strtoupper((string)$fieldName);
+			if (!isset($orderableFields[$upperName]))
+			{
+				continue;
+			}
+
+			$preparedOrder[$orderableFields[$upperName]] =
+				mb_strtoupper(trim((string)$direction)) === 'DESC' ? 'DESC' : 'ASC'
+			;
+		}
+
+		$order = $preparedOrder;
+	}
+
+	/**
 	 * @param array $fields
 	 * @param bool $isSystemImport
 	 * @return int
@@ -1466,7 +1757,9 @@ class CBPWorkflowTemplateLoader
 			return $id;
 		}
 
-		return $id;
+		throw new PersistenceException(
+			"Unable to update workflow template {$id}: ". implode('; ', $result->getErrorMessages()),
+		);
 	}
 
 	private function prepareTplFields(array $fields): array

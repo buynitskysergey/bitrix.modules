@@ -51,7 +51,7 @@ final class FieldsStructure extends Structure
 					continue;
 				}
 
-				$itemValue = FieldsConverter::convertValueByType($fields[$item]->getPropertyType(), $itemValue);
+				$itemValue = FieldsConverter::convertValueByDtoField($fields[$item], $itemValue);
 
 				$structure->items[$item] = $itemValue;
 			}

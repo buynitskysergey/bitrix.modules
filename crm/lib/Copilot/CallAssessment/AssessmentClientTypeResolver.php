@@ -47,6 +47,7 @@ final class AssessmentClientTypeResolver
 			ClientType::Existing => CallAssessment\Enum\ClientType::IN_WORK,
 			ClientType::PreviouslyContacted => CallAssessment\Enum\ClientType::REPEATED_APPROACH,
 			ClientType::WithSale => CallAssessment\Enum\ClientType::RETURN_CUSTOMER,
+			ClientType::Unrecognised => CallAssessment\Enum\ClientType::ANY,
 			default => null,
 		};
 	}

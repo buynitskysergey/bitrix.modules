@@ -8,15 +8,28 @@ use Bitrix\Crm\Copilot\Pipeline\PipelineExecutor;
 use Bitrix\Crm\Copilot\Pipeline\StepContext;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
-use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
-use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\ChatChannelSettings;
-use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\ScenarioOverrideResolver;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioRegistry;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\GlobalFeatureReader;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
-use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Main\DI\ServiceLocator;
 
 final class ChatAutoStartStrategy extends BaseChannelAutoStartStrategy
 {
+	private readonly ScenarioOverrideResolver $scenarioOverrideResolver;
+
+	public function __construct(
+		int $activityOperation,
+		array $activityFields,
+		GlobalFeatureReader $featureReader = new GlobalFeatureReader(),
+	)
+	{
+		parent::__construct($activityOperation, $activityFields, $featureReader);
+
+		$this->scenarioOverrideResolver = new ScenarioOverrideResolver();
+	}
+
 	public function run(array $changedFields = []): void
 	{
 		$fillFieldsSettings = $this->getFillFieldsSettings();
@@ -27,33 +40,23 @@ final class ChatAutoStartStrategy extends BaseChannelAutoStartStrategy
 			return;
 		}
 
-		$fillFieldsSettingsChat = $fillFieldsSettings->getChannelSettings(ChatChannelSettings::CHANNEL_TYPE);
-		if (!$fillFieldsSettingsChat instanceof ChatChannelSettings)
-		{
-			$this->logger->debug('{date}: Unable to get chat autostart operation: launch options not found' . PHP_EOL);
-
-			return;
-		}
-
-		$scenario = $this->detectLaunchScenario($fillFieldsSettingsChat);
+		$scenario = $this->detectLaunchScenario($fillFieldsSettings);
 		if ($scenario === Scenario::UNDEFINED_SCENARIO)
 		{
 			return;
 		}
 
+		$activityId = (int)($this->activityFields['ID'] ?? null);
 		$this->logger->info(
-			'{date}: Trying to autostart operation after completing the open line dialog.'
-			. ' Autostart fill fields settings {fillFieldsSettings}, scenario {scenario},'
-			. ' changed fields {changedFields}, new activity state {activity}' . PHP_EOL,
+			'{date}: Trying to autostart operation after completing the open line dialog,'
+			. ' activity {activityId}, scenario {scenario}, changed fields {changedFieldsKeys}' . PHP_EOL,
 			[
-				'fillFieldsSettings' => $fillFieldsSettingsChat,
+				'activityId' => $activityId,
 				'scenario' => $scenario,
-				'activity' => $this->activityFields,
-				'changedFields' => $changedFields,
+				'changedFieldsKeys' => array_keys($changedFields),
 			],
 		);
 
-		$activityId = (int)($this->activityFields['ID'] ?? null);
 		if (!$this->isLaunchPossible($activityId))
 		{
 			$this->logger->debug('{date}: Unable to autostart operation: AI operation in CRM is not possible' . PHP_EOL);
@@ -77,62 +80,57 @@ final class ChatAutoStartStrategy extends BaseChannelAutoStartStrategy
 		);
 	}
 
-	private function detectLaunchScenario(ChatChannelSettings $chatSettings): string
+	private function detectLaunchScenario(FillFieldsSettings $settings): string
 	{
-		$isFillFieldsEnabled = AIManager::isEnabledInGlobalSettings(GlobalSetting::FillItemFromCall);
-		$isAnalyzeCommunicationEnabled = AIManager::isEnabledInGlobalSettings(GlobalSetting::AnalyzeCommunication);
-		$isSummarizeEnabled = AIManager::isEnabledInGlobalSettings(GlobalSetting::Summarize);
+		$channel = AutomationScenarioRegistry::CHANNEL_CHAT;
+		$fillFieldsActive = $this->scenarioOverrideResolver->isScenarioActive($settings, AutomationScenarioRegistry::SCENARIO_FILL_FIELDS, $channel, 0);
+		$summarizeActive = $this->scenarioOverrideResolver->isScenarioActive($settings, AutomationScenarioRegistry::SCENARIO_SUMMARIZE, $channel, 0);
+		$analyzeActive = $this->scenarioOverrideResolver->isScenarioActive($settings, AutomationScenarioRegistry::SCENARIO_ANALYZE_COMMUNICATION, $channel, 0);
 
-		$shouldAutostartFillFields = $chatSettings->shouldAutostart(FillItemFieldsFromCallTranscription::TYPE_ID);
-		$shouldAutostartAnalyzeCommunication = $chatSettings->shouldAutostart(AnalyzeCommunication::TYPE_ID);
-		$shouldAutostartSummarize = $chatSettings->shouldAutostart(SummarizeCallTranscription::TYPE_ID);
-
-		if (
-			!$shouldAutostartFillFields
-			&& !$shouldAutostartAnalyzeCommunication
-			&& !$shouldAutostartSummarize
-		)
+		if (!$fillFieldsActive && !$summarizeActive && !$analyzeActive)
 		{
 			return Scenario::UNDEFINED_SCENARIO;
 		}
 
-		$isFirstChat = !$chatSettings->isAutostartOnlyFirstChat() || $this->isFirstOpenLineActivityForItem();
+		$isAutomationAllowed = $this->featureReader->isPortalAutomationAllowed();
+		if (!$isAutomationAllowed)
+		{
+			return Scenario::UNDEFINED_SCENARIO;
+		}
 
-		return self::resolveLaunchScenarioByOperationTypes(
-			$chatSettings->getOperationTypes(),
-			$isFirstChat,
-			$isFillFieldsEnabled,
-			$isAnalyzeCommunicationEnabled,
-			$isSummarizeEnabled,
-		);
-	}
+		$isFillFieldsEnabled = AIManager::isEnabledInGlobalSettings(GlobalSetting::FillItemFromCall);
+		$isAnalyzeCommunicationEnabled = AIManager::isEnabledInGlobalSettings(GlobalSetting::AnalyzeCommunication);
+		$isSummarizeEnabled = AIManager::isEnabledInGlobalSettings(GlobalSetting::Summarize);
 
-	private static function resolveLaunchScenarioByOperationTypes(
-		array $operationTypes,
-		bool $isFirstChat,
-		bool $isFillFieldsEnabled,
-		bool $isAnalyzeCommunicationEnabled,
-		bool $isSummarizeEnabled,
-	): string
-	{
+		$isFirstChatActivityWithFiles = null;
+		$isFirstChatFor = function (string $scenarioCode) use ($settings, $channel, &$isFirstChatActivityWithFiles): bool {
+			if (!$this->scenarioOverrideResolver->isFirstOnlyMode($settings, $scenarioCode, $channel))
+			{
+				return true;
+			}
+
+			$isFirstChatActivityWithFiles ??= $this->isFirstOpenLineActivityForItem();
+
+			return $isFirstChatActivityWithFiles;
+		};
+
 		$shouldFillFieldsStart = $isFillFieldsEnabled
 			&& $isSummarizeEnabled
-			&& in_array(FillItemFieldsFromCallTranscription::TYPE_ID, $operationTypes, true)
-			&& $isFirstChat
+			&& $fillFieldsActive
+			&& $isFirstChatFor(AutomationScenarioRegistry::SCENARIO_FILL_FIELDS)
 		;
-
 		$shouldAnalyzeCommunicationStart = $isAnalyzeCommunicationEnabled
-			&& in_array(AnalyzeCommunication::TYPE_ID, $operationTypes, true)
-			&& $isFirstChat
+			&& $analyzeActive
+			&& $isFirstChatFor(AutomationScenarioRegistry::SCENARIO_ANALYZE_COMMUNICATION)
 		;
-
 		$shouldSummarizeStart = !$shouldFillFieldsStart
 			&& $isSummarizeEnabled
-			&& in_array(SummarizeCallTranscription::TYPE_ID, $operationTypes, true)
-			&& $isFirstChat
+			&& $summarizeActive
+			&& $isFirstChatFor(AutomationScenarioRegistry::SCENARIO_SUMMARIZE)
 		;
 
 		return self::resolveLaunchScenario(
+			$isAutomationAllowed,
 			$shouldFillFieldsStart,
 			$shouldAnalyzeCommunicationStart,
 			$shouldSummarizeStart,
@@ -140,11 +138,17 @@ final class ChatAutoStartStrategy extends BaseChannelAutoStartStrategy
 	}
 
 	private static function resolveLaunchScenario(
+		bool $isAutomationAllowed,
 		bool $shouldFillFieldsStart,
 		bool $shouldAnalyzeCommunicationStart,
 		bool $shouldSummarizeStart,
 	): string
 	{
+		if (!$isAutomationAllowed)
+		{
+			return Scenario::UNDEFINED_SCENARIO;
+		}
+
 		$enabledCount = (int)$shouldFillFieldsStart
 			+ (int)$shouldAnalyzeCommunicationStart
 			+ (int)$shouldSummarizeStart

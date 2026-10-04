@@ -159,8 +159,8 @@ class MessageSearch
 	/** @throws SystemException */
 	public function getMessageContent(int $messageId, int $userId): array
 	{
-		$message = Message::getWithAccessCheck($messageId, $userId);
-		if ($message === null)
+		$message = $this->loadAccessibleMessageRow($messageId, $userId);
+		if ($message === null || !$this->isWithinActiveGeneration($messageId, (int)($message['MAILBOX_ID'] ?? 0)))
 		{
 			throw new SystemException('Message not found or access denied.');
 		}
@@ -185,7 +185,8 @@ class MessageSearch
 	 */
 	public function getMessageContentCompact(int $messageId, int $userId): array
 	{
-		if ($this->resolveAccessibleMessage($messageId, $userId) === null)
+		$access = $this->resolveAccessibleMessage($messageId, $userId);
+		if ($access === null)
 		{
 			throw new SystemException('Message not found or access denied.');
 		}
@@ -199,7 +200,10 @@ class MessageSearch
 				'ID', 'SUBJECT', 'FIELD_FROM', 'FIELD_TO', 'FIELD_CC',
 				'FIELD_DATE', 'BODY_CAPPED', 'BODY_LEN',
 			],
-			'filter' => ['=ID' => $messageId],
+			'filter' => array_merge(
+				['=ID' => $messageId],
+				QueryBuilder::generationScopeFilter([(int)$access['MAILBOX_ID']], 'MESSAGE_UID.'),
+			),
 			'limit' => 1,
 		])->fetchAll();
 
@@ -245,7 +249,7 @@ class MessageSearch
 			->fetch()
 		;
 
-		if (!$row)
+		if (!$row || !$this->isWithinActiveGeneration($messageId, (int)($row['MAILBOX_ID'] ?? 0)))
 		{
 			return null;
 		}
@@ -283,6 +287,40 @@ class MessageSearch
 		];
 	}
 
+	/**
+	 * The whole message row a caller of {@see getMessageContent()} is allowed to read, or
+	 * null when it is not. The access rules of that entry are the shared ones, tokens and
+	 * entity bindings included.
+	 */
+	protected function loadAccessibleMessageRow(int $messageId, int $userId): ?array
+	{
+		return Message::getWithAccessCheck($messageId, $userId);
+	}
+
+	/**
+	 * Whether the message is reachable through a placement of the ACTIVE source generation
+	 * of its mailbox.
+	 *
+	 * Asked on its own by the entries that read a message row instead of building a scoped
+	 * query of their own: a letter the previous physical source left behind is no fallback
+	 * source of quotable text either. A mailbox that has never been switched is not asked
+	 * about at all, so its reads keep the shape and the cost they had.
+	 */
+	private function isWithinActiveGeneration(int $messageId, int $mailboxId): bool
+	{
+		$scope = QueryBuilder::generationScopeFilter([$mailboxId], '');
+		if ($scope === [])
+		{
+			return true;
+		}
+
+		return (bool)MailMessageUidTable::getList([
+			'select' => ['ID'],
+			'filter' => array_merge(['=MAILBOX_ID' => $mailboxId, '=MESSAGE_ID' => $messageId], $scope),
+			'limit' => 1,
+		])->fetch();
+	}
+
 	protected function resolveAccessibleMessage(int $messageId, int $userId): ?array
 	{
 		if ($userId <= 0)
@@ -308,7 +346,7 @@ class MessageSearch
 	 * Mailbox deletion first flips ACTIVE to 'N' and only a deferred agent removes the messages and
 	 * the access codes, so without ACTIVE/SERVER_TYPE the owner keeps reading a deleted mailbox.
 	 */
-	private function hasActiveMailboxAccess(int $mailboxId, int $userId): bool
+	protected function hasActiveMailboxAccess(int $mailboxId, int $userId): bool
 	{
 		if ($mailboxId <= 0 || $userId <= 0)
 		{
@@ -501,12 +539,15 @@ class MessageSearch
 
 	private static function buildVisibleThreadFilter(array $threadMessageIds, int $mailboxId): array
 	{
-		return [
-			'@ID' => $threadMessageIds,
-			'=MAILBOX_ID' => $mailboxId,
-			'==MESSAGE_UID.DELETE_TIME' => 0,
-			'!@MESSAGE_UID.IS_OLD' => MailMessageUidTable::HIDDEN_STATUSES,
-		];
+		return array_merge(
+			[
+				'@ID' => $threadMessageIds,
+				'=MAILBOX_ID' => $mailboxId,
+				'==MESSAGE_UID.DELETE_TIME' => 0,
+				'!@MESSAGE_UID.IS_OLD' => MailMessageUidTable::HIDDEN_STATUSES,
+			],
+			QueryBuilder::generationScopeFilter([$mailboxId], 'MESSAGE_UID.'),
+		);
 	}
 
 	/**
@@ -536,11 +577,14 @@ class MessageSearch
 				self::buildReceiveDateField('RECEIVE_DATE', aggregated: false),
 			],
 			'select' => ['ID', 'MAILBOX_ID'],
-			'filter' => [
-				'@ID' => $messageIds,
-				'==MESSAGE_UID.DELETE_TIME' => 0,
-				'!@MESSAGE_UID.IS_OLD' => MailMessageUidTable::HIDDEN_STATUSES,
-			],
+			'filter' => array_merge(
+				[
+					'@ID' => $messageIds,
+					'==MESSAGE_UID.DELETE_TIME' => 0,
+					'!@MESSAGE_UID.IS_OLD' => MailMessageUidTable::HIDDEN_STATUSES,
+				],
+				QueryBuilder::generationScopeFilterOfMessages($messageIds, 'MESSAGE_UID.'),
+			),
 			'order' => ['RECEIVE_DATE' => 'DESC', 'ID' => 'DESC'],
 			'limit' => self::MAX_THREAD_CANDIDATES,
 		])->fetchAll();

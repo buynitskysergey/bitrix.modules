@@ -94,6 +94,11 @@ class CRestProvider extends IRestService
 					'user.option.get' => array(__CLASS__, 'userOptionGet'),
 					'user.option.set' => array(__CLASS__, 'userOptionSet'),
 
+					CRestUtil::METHOD_DOWNLOAD => array(
+						\Bitrix\Rest\Internal\Service\DeferredBatch\ResultDownloader::class,
+						'download',
+					),
+
 					CRestUtil::EVENTS => array(
 						'OnAppUninstall' => array(
 							'rest',

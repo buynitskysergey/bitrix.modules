@@ -53,7 +53,7 @@ class NotifyChecklistFilesAdded extends AbstractNotify
 		return [
 			'#USER#' => $this->formatUser($this->triggeredBy),
 			'#FILES_COUNT#' => $this->fileCount,
-			'#CHECKLIST_NAME#' => $this->checklistName,
+			'#CHECKLIST_NAME#' => $this->getChecklistTitleForActionLink($this->checklistName),
 			'#ACTION_LINK#' => $actionLink,
 		];
 	}

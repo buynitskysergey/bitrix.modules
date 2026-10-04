@@ -7,7 +7,6 @@ namespace Bitrix\Mail\Internal\Service\Attachment;
 use Bitrix\Disk;
 use Bitrix\Mail\Helper\MailboxAccess;
 use Bitrix\Mail\Internals\MailMessageAttachmentTable;
-use Bitrix\Mail\MailMessageTable;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\Response\Zip;
 use Bitrix\Main\Engine\UrlManager;
@@ -27,6 +26,12 @@ class ArchiveService
 
 	/** Spelled out: createByController() would name the action after the class path, not the api alias. */
 	private const DOWNLOAD_ACTION = 'mail.api.attachment.downloadArchive';
+
+	public function __construct(
+		private readonly ActiveMessageLocator $activeMessageLocator = new ActiveMessageLocator(),
+	)
+	{
+	}
 
 	public function getMessageArchiveUrl(int $messageId, int $userId): Result
 	{
@@ -109,7 +114,7 @@ class ArchiveService
 			return $result->addError(new Error('Invalid request.', self::ERROR_INVALID_REQUEST));
 		}
 
-		$message = MailMessageTable::getConsistentById($messageId, ['ID', 'MAILBOX_ID']);
+		$message = $this->activeMessageLocator->find($messageId);
 
 		if (
 			$message === null

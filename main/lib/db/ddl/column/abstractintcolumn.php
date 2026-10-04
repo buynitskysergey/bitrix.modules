@@ -16,13 +16,13 @@ abstract class AbstractIntColumn extends AbstractColumn
 		$this->size = $size;
 	}
 
-	public function autoincrement(): self
+	public function autoincrement(): static
 	{
 		$this->autoincrement = true;
 		return $this;
 	}
 
-	public function unsigned(): self
+	public function unsigned(): static
 	{
 		$this->unsigned = true;
 		return $this;

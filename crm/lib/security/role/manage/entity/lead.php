@@ -12,10 +12,12 @@ class Lead implements PermissionEntity
 {
 	private function permissions(): array
 	{
+		$inheritDescription = PermissionAttrPresets::stageInheritDescription(CCrmOwnerType::Lead, null, null);
+
 		return array_merge(
-			PermissionAttrPresets::crmEntityPresetAutomation(),
+			PermissionAttrPresets::crmEntityPresetAutomation(true, $inheritDescription),
 			PermissionAttrPresets::crmEntityKanbanHideSum(),
-			PermissionAttrPresets::crmStageTransition(CCrmStatus::GetStatusListEx('STATUS'))
+			PermissionAttrPresets::crmStageTransition(CCrmStatus::GetStatusListEx('STATUS'), $inheritDescription)
 		);
 	}
 

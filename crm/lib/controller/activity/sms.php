@@ -294,6 +294,18 @@ class Sms extends Base
 
 	private function getConfig(int $entityTypeId, int $entityId): array
 	{
+		if ($entityId <= 0 || !\CCrmOwnerType::IsDefined($entityTypeId))
+		{
+			return [];
+		}
+
+		$userPermissions = Container::getInstance()->getUserPermissions();
+
+		if (!$userPermissions->item()->canReadItemIdentifier(new ItemIdentifier($entityTypeId, $entityId)))
+		{
+			return [];
+		}
+
 		$config = SmsManager::getEditorConfig($entityTypeId, $entityId);
 
 		if (empty($config['communications']))
@@ -304,8 +316,17 @@ class Sms extends Base
 			if ($item && $item->hasField(Item::FIELD_NAME_CONTACT_BINDINGS))
 			{
 				$contacts = $item->getContacts();
+				$userPermissions->item()->preloadPermissionAttributes(
+					\CCrmOwnerType::Contact,
+					array_map(static fn($contact) => $contact->getId(), $contacts),
+				);
 				foreach ($contacts as $contact)
 				{
+					if (!$userPermissions->item()->canRead(\CCrmOwnerType::Contact, $contact->getId()))
+					{
+						continue;
+					}
+
 					$config['communications'][] = [
 						'entityId' => $contact->getId(),
 						'entityTypeId' => \CCrmOwnerType::Contact,
@@ -316,7 +337,7 @@ class Sms extends Base
 				if ($item->hasField(Item::FIELD_NAME_COMPANY))
 				{
 					$company = $item->getCompany();
-					if ($company)
+					if ($company && $userPermissions->item()->canRead(\CCrmOwnerType::Company, $company->getId()))
 					{
 						$config['communications'][] = [
 							'entityId' => $company->getId(),

@@ -27,6 +27,7 @@ Loader::registerAutoLoadClasses(
 		"bitrix\\disk\\userconfiguration" => "lib/configuration.php",
 		"bitrix\\disk\\folder" => "lib/folder.php",
 		"bitrix\\disk\\specificfolder" => "lib/folder.php",
+		"bitrix\\disk\\controller\\filepicker" => "lib/Controller/FilePicker.php",
 	)
 );
 

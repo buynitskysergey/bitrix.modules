@@ -1,4 +1,7 @@
-<?
+<?php
+
+use Bitrix\Main\Web\Uri;
+
 IncludeModuleLangFile(__FILE__);
 
 class CCrmExternalSaleImport
@@ -144,15 +147,12 @@ class CCrmExternalSaleImport
 		{
 			$request = array(
 				"METHOD" => "GET",
-				"PATH" =>  CHTTP::urlAddParams(
-					$this->path,
-					array(
+				"PATH" =>  (string)(new Uri($this->path))->addParams(array(
 						"type" => "crm",
 						"mode" => "init",
 						"version" => "2.09",
 						"sessid" => $sessid
-					)
-				)
+				))
 			);
 
 			$response = $this->proxy->Send($request);
@@ -178,7 +178,7 @@ class CCrmExternalSaleImport
 		$this->serverSessionID = "";
 		$request = array(
 			"METHOD" => "GET",
-			"PATH" =>  CHTTP::urlAddParams($this->path, array("type" => "crm", "mode" => "checkauth"))
+			"PATH" =>  (string)(new Uri($this->path))->addParams(array("type" => "crm", "mode" => "checkauth"))
 		);
 
 		$response = $this->proxy->Send($request);
@@ -1805,7 +1805,7 @@ class CCrmExternalSaleImport
 
 			$request = array(
 				"METHOD" => "GET",
-				"PATH" => CHTTP::urlAddParams($this->path, $arFilter),
+				"PATH" => (string)(new Uri($this->path))->addParams($arFilter),
 				"HEADERS" => array()
 			);
 		}

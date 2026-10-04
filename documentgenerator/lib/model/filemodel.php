@@ -4,6 +4,7 @@ namespace Bitrix\DocumentGenerator\Model;
 
 use Bitrix\Main\Entity\DataManager;
 use Bitrix\Main;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\ORM\Event;
 
 abstract class FileModel extends DataManager
@@ -29,7 +30,10 @@ abstract class FileModel extends DataManager
 		{
 			if(array_key_exists($name, $newFields) && $newFields[$name] != $oldFields[$name])
 			{
-				static::$filesToDelete[] = $oldFields[$name];
+				static::$filesToDelete[] = [
+					'fileId' => $oldFields[$name],
+					'entityClass' => static::class,
+				];
 			}
 		}
 		return new Main\Entity\EventResult();
@@ -48,7 +52,10 @@ abstract class FileModel extends DataManager
 		{
 			if($data[$name])
 			{
-				static::$filesToDelete[] = $data[$name];
+				static::$filesToDelete[] = [
+					'fileId' => $data[$name],
+					'entityClass' => static::class,
+				];
 			}
 		}
 		return $result;
@@ -81,14 +88,38 @@ abstract class FileModel extends DataManager
 	protected static function deleteFiles()
 	{
 		$result = new Main\Entity\EventResult();
-		foreach(static::$filesToDelete as $fileId)
+		$logger = null;
+		foreach(static::$filesToDelete as $fileToDelete)
 		{
+			if (!is_array($fileToDelete))
+			{
+				continue;
+			}
+
+			$fileId = (int)($fileToDelete['fileId'] ?? 0);
+			$entityClass = (string)($fileToDelete['entityClass'] ?? '');
 			if($fileId > 0)
 			{
 				$deleteResult = FileTable::delete($fileId);
 				if(!$deleteResult->isSuccess())
 				{
-					$result->setErrors($deleteResult->getErrors());
+					foreach ($deleteResult->getErrors() as $error)
+					{
+						$result->addError($error);
+					}
+
+					$logger ??= (new LoggerFactory())->createById(
+						'documentgenerator.Default',
+						isCheckEnabledFromRegistry: false
+					);
+					$logger->error(
+						'Could not delete file {fileId} queued by {entityClass}. Errors: {errors}',
+						[
+							'fileId' => $fileId,
+							'entityClass' => $entityClass,
+							'errors' => implode('; ', $deleteResult->getErrorMessages()),
+						]
+					);
 				}
 			}
 		}

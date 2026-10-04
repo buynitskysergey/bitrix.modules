@@ -1,4 +1,11 @@
 <?
+$commandToken = getenv("BITRIX_SMTPD_COMMAND_TOKEN");
+if (isset($_SERVER["REQUEST_METHOD"]) && ($commandToken === false || $commandToken === ""))
+{
+	http_response_code(404);
+	exit;
+}
+
 $_SERVER['DOCUMENT_ROOT'] = __DIR__;
 $_SERVER['DOCUMENT_ROOT'] = mb_substr($_SERVER['DOCUMENT_ROOT'], 0, mb_strlen($_SERVER['DOCUMENT_ROOT']) - mb_strlen("/bitrix/modules/mail"));
 
@@ -13,7 +20,7 @@ ob_end_clean();
 if (!CModule::IncludeModule('mail'))
 	die('Mail module is not installed');
 
-CSMTPServer::Run();
+CSMTPServer::Run($commandToken === false || $commandToken === '' ? false : $commandToken);
 
 require($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/main/include/epilog_after.php');
 ?>

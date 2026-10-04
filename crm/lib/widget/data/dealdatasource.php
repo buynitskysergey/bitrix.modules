@@ -4,6 +4,7 @@ use Bitrix\Main;
 use Bitrix\Crm\Widget\Filter;
 use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Category\DealCategory;
+use Bitrix\Main\Web\Uri;
 
 abstract class DealDataSource extends DataSource
 {
@@ -142,21 +143,10 @@ abstract class DealDataSource extends DataSource
 		$filterParams = self::externalizeFilter($filter);
 		foreach($filterParams as $k => $v)
 		{
-			if(!is_array($v))
-			{
-				$urlParams[$k] = $v;
-			}
-			else
-			{
-				$qty = count($v);
-				for($i = 0; $i < $qty; $i++)
-				{
-					$urlParams["{$k}[{$i}]"] = $v[$i];
-				}
-			}
+			$urlParams[$k] = $v;
 		}
 
-		return \CHTTP::urlAddParams(self::getEntityListPath(), $urlParams);
+		return (string)(new Uri(self::getEntityListPath()))->addParams($urlParams);
 	}
 	/**
 	 * Extract details page URL params from request.

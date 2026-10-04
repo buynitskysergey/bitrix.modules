@@ -3,8 +3,13 @@
 namespace Bitrix\Mail\Helper;
 
 use Bitrix\Mail;
-use Bitrix\Mail\Helper\Enum\MailboxStatus;
 use Bitrix\Mail\Helper\Mailbox\MailboxSyncManager;
+use Bitrix\Mail\Internal\Entity\SourceGeneration\Context;
+use Bitrix\Mail\Internal\Service\SourceGeneration\ContextResolver;
+use Bitrix\Mail\Internal\Service\Mailbox\MailboxEmailOccupancyService;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
+use Bitrix\Mail\Internal\Service\SourceGeneration\Matching\MessageMatcher;
+use Bitrix\Mail\Internal\Service\SourceGeneration\MigrationMessageImporter;
 use Bitrix\Mail\Internals\MessageUploadQueueTable;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Mail\MailMessageUidTable;
@@ -35,14 +40,38 @@ abstract class Mailbox
 		'mail.ru',
 	];
 
+	/*
+		Why a run of the synchronization refused to start. It answers with a count of
+		letters, so all of these look alike from the outside - a caller that must not go
+		on without a completed pass reads the reason through getLastSyncRefusal().
+	*/
+	public const SYNC_REFUSAL_LICENSE_DENIED = 'LICENSE_DENIED';
+	public const SYNC_REFUSAL_SYNC_LOCKED = 'SYNC_LOCKED';
+	public const SYNC_REFUSAL_TIME_QUOTA = 'TIME_QUOTA';
+	public const SYNC_REFUSAL_DB_LOCK_LOST = 'DB_LOCK_LOST';
+	public const SYNC_REFUSAL_GENERATION_DENIED = 'GENERATION_DENIED';
+
+	/**
+	 * @var array uids of the last existence check whose request the mail server answered with an error, so
+	 *      that nothing is known about them. Filled by the check and read right after it; an implementation
+	 *      that never fills it is taken to have answered for the whole sample, as it was before.
+	 */
+	protected array $unansweredUidsOfLastCheck = [];
+
 	protected $dirsMd5WithCounter;
 	protected $mailbox;
 	protected $dirsHelper;
+	protected ?string $dirsHelperScopeKey = null;
 	protected $filters;
 	protected $session;
 	protected $startTime, $syncTimeout, $checkpoint;
 	protected $syncParams = [];
 	protected $errors, $warnings;
+	private ?string $lastSyncRefusal = null;
+	private bool $mailboxLockHeldByCaller = false;
+	protected ?Context $generationContext = null;
+	protected ?MessageMatcher $messageMatcher = null;
+	protected ?MigrationMessageImporter $migrationImporter = null;
 	protected $lastSyncResult = [
 		'newMessages' => 0,
 		'newMessagesNotify' => 0,
@@ -113,6 +142,50 @@ abstract class Mailbox
 		return static::rawInstance(array('=ID' => (int) $id, '=ACTIVE' => 'Y'), $throw);
 	}
 
+	/**
+	 * Creates the sync engine of one concrete source generation of a mailbox.
+	 *
+	 * The generation table is the source of truth for the IMAP credentials, and only the
+	 * ACTIVE generation is projected into the connection fields of b_mail_mailbox. So an
+	 * engine that has to talk to another generation of the same mailbox (a PREPARING one
+	 * being imported) receives its connection snapshot here and works under the trusted
+	 * context of that generation.
+	 *
+	 * @param array $connection The snapshot of the generation: SERVER, PORT, USE_TLS, LOGIN,
+	 *                          PASSWORD, SERVICE_ID. Nothing else of the mailbox row changes.
+	 * @return \Bitrix\Mail\Helper\Mailbox|false
+	 * @throws \Exception
+	 */
+	public static function createGenerationInstance(int $mailboxId, Context $context, array $connection)
+	{
+		if ($context->mailboxId !== $mailboxId)
+		{
+			throw new Main\ArgumentException('The generation context belongs to another mailbox', 'context');
+		}
+
+		$mailbox = static::prepareMailbox(['=ID' => $mailboxId, '=ACTIVE' => 'Y']);
+		if (empty($mailbox))
+		{
+			return false;
+		}
+
+		foreach (['SERVICE_ID', 'SERVER', 'PORT', 'USE_TLS', 'LOGIN', 'PASSWORD'] as $field)
+		{
+			if (isset($connection[$field]))
+			{
+				$mailbox[$field] = $connection[$field];
+			}
+		}
+
+		$instance = static::instance($mailbox);
+		if ($instance instanceof Mailbox)
+		{
+			$instance->setGenerationContext($context);
+		}
+
+		return $instance;
+	}
+
 	public function getDirsMd5WithCounter($mailboxId)
 	{
 		if($this->dirsMd5WithCounter)
@@ -140,7 +213,7 @@ abstract class Mailbox
 		}
 
 		$directoriesWithCounter = [];
-		$res = Mail\Internals\MailboxDirectoryTable::query()
+		$query = Mail\Internals\MailboxDirectoryTable::query()
 			->whereIn('ID', array_keys($countersById))
 			->setSelect([
 				'ID',
@@ -148,7 +221,17 @@ abstract class Mailbox
 				'MESSAGE_COUNT',
 			])
 			->where('MAILBOX_ID', $mailboxId)
-			->exec();
+		;
+
+		$generationIds = $this->peekGenerationScope()->getGenerationIds();
+		if ($generationIds !== null)
+		{
+			// The map is keyed by the folder path hash, and a folder of a retained generation
+			// answers to the same hash as the folder serving the user now
+			$query->whereIn('GENERATION_ID', $generationIds);
+		}
+
+		$res = $query->exec();
 		while ($item = $res->fetch())
 		{
 			$id = $item['ID'];
@@ -468,6 +551,159 @@ abstract class Mailbox
 		return 0;
 	}
 
+	/**
+	 * Returns the source generation context of this helper run, resolving it once (TPL-01).
+	 * Regular entries get the ACTIVE generation of the mailbox.
+	 *
+	 * @throws Main\SystemException
+	 */
+	public function getGenerationContext(): Context
+	{
+		if ($this->generationContext === null)
+		{
+			$this->generationContext = (new ContextResolver())->resolveForSync($this->mailbox);
+		}
+
+		return $this->generationContext;
+	}
+
+	/**
+	 * Injects a trusted context (the migration import entry resolves a concrete
+	 * PREPARING generation). Allowed only before the default context is resolved.
+	 *
+	 * @throws Main\ArgumentException
+	 * @throws Main\InvalidOperationException
+	 */
+	public function setGenerationContext(Context $context): void
+	{
+		if ($context->mailboxId !== $this->getMailboxId())
+		{
+			throw new Main\ArgumentException('The generation context belongs to another mailbox', 'context');
+		}
+
+		if ($this->generationContext !== null)
+		{
+			throw new Main\InvalidOperationException('The generation context of this run is already resolved');
+		}
+
+		$this->generationContext = $context;
+	}
+
+	/**
+	 * Hands the matcher of the caller to this run, before it starts. An orchestrator that
+	 * has already completed the candidate fingerprints of the mailbox shares what it knows
+	 * that way, instead of letting the run rebuild the same walk over the history.
+	 */
+	public function useMessageMatcher(MessageMatcher $matcher): void
+	{
+		$this->messageMatcher = $matcher;
+	}
+
+	/**
+	 * The matcher of the messages of an imported generation against the local
+	 * history (ALG-01). One instance per run: it remembers the mailboxes whose
+	 * candidate fingerprints are already built.
+	 */
+	protected function getMessageMatcher(): MessageMatcher
+	{
+		return $this->messageMatcher ??= new MessageMatcher();
+	}
+
+	/**
+	 * The persistence of a migration import (DATA-01): the physical row, the
+	 * matching result and the fingerprints of one imported letter are closed by it.
+	 */
+	protected function getMigrationImporter(): MigrationMessageImporter
+	{
+		return $this->migrationImporter ??= new MigrationMessageImporter($this->getMessageMatcher());
+	}
+
+	/**
+	 * Whether the sync lock of the mailbox is free at this very moment, asked of the database.
+	 * A migration holds this lock over the final synchronization of the source it retains, and
+	 * that is the guarantee it rests on: no letter of the retained source lands after the hand
+	 * over.
+	 */
+	private function isSyncLockFree(): bool
+	{
+		$lock = (int)Main\Application::getConnection()->queryScalar(sprintf(
+			'SELECT SYNC_LOCK FROM b_mail_mailbox WHERE ID = %u',
+			(int)$this->mailbox['ID'],
+		));
+
+		return time() - $lock >= static::getTimeout();
+	}
+
+	/**
+	 * The generation scope of the physical queries of this run (folders, uid
+	 * lookups by coordinates, queues). Forces the context resolution: sync flows
+	 * call it after the entry guard has already validated the context.
+	 *
+	 * @throws Main\SystemException
+	 */
+	protected function getGenerationScope(): GenerationScope
+	{
+		return GenerationScope::fromContext($this->getGenerationContext());
+	}
+
+	/**
+	 * The generation scope of this run without forcing the context resolution:
+	 * read-only paths (directory helpers, status counters) must not fail on a
+	 * stale pointer before their own guards do. Equals getGenerationScope() for
+	 * a run whose context is already resolved or injected.
+	 */
+	protected function peekGenerationScope(): GenerationScope
+	{
+		return $this->generationContext !== null
+			? GenerationScope::fromContext($this->generationContext)
+			: GenerationScope::forMailbox((int)$this->mailbox['ID'])
+		;
+	}
+
+	/**
+	 * Validates the generation context of a regular sync entry before any IMAP call.
+	 * An unknown or stale generation, or a context without full access, aborts the run.
+	 */
+	protected function checkSyncGenerationContext(): bool
+	{
+		try
+		{
+			$context = $this->getGenerationContext();
+		}
+		catch (Main\SystemException $exception)
+		{
+			$this->registerGenerationContextError(
+				new Main\Error($exception->getMessage(), 'MAIL_SOURCE_GENERATION_INVALID'),
+			);
+
+			return false;
+		}
+
+		if (!$context->canWrite())
+		{
+			$this->registerGenerationContextError(new Main\Error(
+				sprintf(
+					'The source generation %u (%s) of the mailbox %u does not accept a regular sync',
+					$context->generationId,
+					$context->status,
+					$context->mailboxId,
+				),
+				'MAIL_SOURCE_GENERATION_DENIED',
+			));
+
+			return false;
+		}
+
+		return true;
+	}
+
+	private function registerGenerationContextError(Main\Error $error): void
+	{
+		$this->errors->setError($error);
+		// quickSync reports a failed dir sync through the warnings collection
+		$this->warnings->setError($error);
+	}
+
 	/*
 	Additional check that the quota has not been exceeded
 	since the actual creation of the mailbox instance in php
@@ -529,29 +765,83 @@ abstract class Mailbox
 				'MSG_UID',
 				'DIR_MD5',
 			),
-			'filter' => array_merge([
+			'filter' => $this->getGenerationScope()->apply(array_merge([
 				'=MAILBOX_ID' => $this->mailbox['ID'],
 				'=IS_OLD' => \Bitrix\Mail\MailMessageUidTable::LOST,
-			], $additionalFilters),
+			], $additionalFilters)),
 			'limit' => $count,
 		]);
 	}
 
-	private function removeOldUnderloadedMessages(int $limit, array $additionalFilters = []): bool
+	/**
+	 * @param array|null $additionalFilters null when the borders of the dir are unknown: the removal
+	 * has nothing to narrow it down to the dir and to the interval the server holds, while the row it
+	 * deletes is the only trace of a letter whose body is not downloaded yet.
+	 */
+	private function removeOldUnderloadedMessages(int $limit, ?array $additionalFilters = []): bool
 	{
+		if ($additionalFilters === null)
+		{
+			return false;
+		}
+
 		$resyncTime = new Main\Type\DateTime();
 		$resyncTime->add('- '.static::INCOMPLETE_MESSAGE_REMOVE_TIMEOUT.' seconds');
 
 		return MailMessageUidTable::deleteList(
-			array_merge([
+			$this->getGenerationScope()->apply(array_merge([
 				'=MAILBOX_ID' => $this->mailbox['ID'],
 				'=MESSAGE_ID' => '0',
 				'=IS_OLD' => \Bitrix\Mail\MailMessageUidTable::DOWNLOADED,
 				'<=DATE_INSERT' => $resyncTime,
-			], $additionalFilters),
+			], $additionalFilters)),
 			limit: $limit,
 			sendEvent: false
 		);
+	}
+
+	/**
+	 * The dirs holding a row the consistency run has work with, by the md5 of the dir path.
+	 *
+	 * Asked in one query for the whole mailbox and asked first, because the borders of a dir are
+	 * learned from the server - a SELECT and a FETCH per dir - and they are needed by one thing only:
+	 * narrowing the removal down to the dir and to the interval the server holds. A dir with nothing
+	 * to remove and nothing to recover needs no borders, and a mailbox in order has no such dirs at
+	 * all: an underloaded row is a download that broke off, a lost row is a letter the sync could not
+	 * name. Asking the server about every dir of every run to find that out costs the run its clock.
+	 *
+	 * @return array<string, true>
+	 */
+	private function getDirsWithConsistencyWork(): array
+	{
+		$resyncTime = new Main\Type\DateTime();
+		$resyncTime->add('- '.static::INCOMPLETE_MESSAGE_REMOVE_TIMEOUT.' seconds');
+
+		$rows = MailMessageUidTable::getList([
+			'select' => ['DIR_MD5'],
+			'filter' => $this->getGenerationScope()->apply([
+				'=MAILBOX_ID' => $this->mailbox['ID'],
+				[
+					'LOGIC' => 'OR',
+					[
+						'=MESSAGE_ID' => '0',
+						'=IS_OLD' => MailMessageUidTable::DOWNLOADED,
+						'<=DATE_INSERT' => $resyncTime,
+					],
+					['=IS_OLD' => MailMessageUidTable::LOST],
+				],
+			]),
+			'group' => ['DIR_MD5'],
+		]);
+
+		$dirs = [];
+
+		while ($row = $rows->fetch())
+		{
+			$dirs[$row['DIR_MD5']] = true;
+		}
+
+		return $dirs;
 	}
 
 	private function syncIncompleteMessages(Main\ORM\Query\Result $messages): void
@@ -588,13 +878,31 @@ abstract class Mailbox
 
 	public function restoringConsistency(): void
 	{
-		$dirsSync = $this->getDirsHelper()->getSyncDirsOrderByTime();
+		$dirsWithWork = $this->getDirsWithConsistencyWork();
+		$dirsSync = $dirsWithWork === [] ? [] : $this->getDirsHelper()->getSyncDirsOrderByTime();
 
 		foreach ($dirsSync as $dir)
 		{
+			if (!isset($dirsWithWork[$dir->getDirMd5()]))
+			{
+				continue;
+			}
+
+			if ($this->isTimeQuotaExceeded())
+			{
+				// The dirs left keep their work for the next hit: the letters of the mailbox come first
+				break;
+			}
+
 			$messageInFolderFilter = $this->getMessageInFolderFilter($dir);
 			$this->removeOldUnderloadedMessages(static::NUMBER_OF_INCOMPLETE_MESSAGES_TO_REMOVE, $messageInFolderFilter);
-			$this->syncIncompleteMessages($this->getLostMessages(static::NUMBER_OF_BROKEN_MESSAGES_TO_RESYNCHRONIZE, $messageInFolderFilter));
+
+			// The recovery below only reads rows and queues their letters for a resync, so unknown borders
+			// cost it nothing but the narrowing: leaving it out would keep lost letters lost instead
+			$this->syncIncompleteMessages($this->getLostMessages(
+				static::NUMBER_OF_BROKEN_MESSAGES_TO_RESYNCHRONIZE,
+				$messageInFolderFilter ?? [],
+			));
 		}
 
 
@@ -764,17 +1072,69 @@ abstract class Mailbox
 		return $finalResult;
 	}
 
+	/**
+	 * One pass of the synchronization under the mailbox lock the caller already holds and
+	 * goes on holding afterwards.
+	 *
+	 * The hand-over of a mailbox to another physical source keeps the mailbox to itself
+	 * from the final synchronization of the retained source to the switch, so the pass must
+	 * neither refuse itself on that very lock nor release it at the end.
+	 *
+	 * @see sync()
+	 */
+	public function syncUnderHeldMailboxLock($syncCounters = true)
+	{
+		$this->mailboxLockHeldByCaller = true;
+
+		try
+		{
+			return $this->sync($syncCounters);
+		}
+		finally
+		{
+			$this->mailboxLockHeldByCaller = false;
+		}
+	}
+
+	/**
+	 * Why the last {@see sync()} refused to start, null when it ran.
+	 *
+	 * The refusals are told apart by the SYNC_REFUSAL_* codes of this class: the returned
+	 * count of letters cannot tell them apart, and the signature of sync() is relied upon
+	 * far outside this domain.
+	 */
+	public function getLastSyncRefusal(): ?string
+	{
+		return $this->lastSyncRefusal;
+	}
+
+	/**
+	 * Whether the license of the portal lets this mailbox synchronize at all.
+	 */
+	protected function isSyncAllowedByLicense(): bool
+	{
+		return LicenseManager::isSyncAvailable()
+			&& LicenseManager::checkTheMailboxForSyncAvailability(
+				(int)$this->mailbox['ID'],
+				(int)$this->mailbox['USER_ID'],
+			)
+		;
+	}
+
 	public function sync($syncCounters = true)
 	{
 		global $DB;
+
+		$this->lastSyncRefusal = null;
 
 		/*
 			Setting a new time for an attempt to synchronize the mailbox
 			through the agent for users with a free tariff
 		*/
-		if (!LicenseManager::isSyncAvailable() || !LicenseManager::checkTheMailboxForSyncAvailability((int)$this->mailbox['ID'], (int)$this->mailbox['USER_ID']))
+		if (!$this->isSyncAllowedByLicense())
 		{
 			$this->mailbox['OPTIONS']['next_sync'] = time() + 3600 * 24;
+			$this->lastSyncRefusal = static::SYNC_REFUSAL_LICENSE_DENIED;
 
 			return 0;
 		}
@@ -782,8 +1142,10 @@ abstract class Mailbox
 		/*
 		Do not start synchronization if no more than static::getTimeout() have passed since the previous one
 		*/
-		if (time() - $this->mailbox['SYNC_LOCK'] < static::getTimeout())
+		if (!$this->mailboxLockHeldByCaller && time() - $this->mailbox['SYNC_LOCK'] < static::getTimeout())
 		{
+			$this->lastSyncRefusal = static::SYNC_REFUSAL_SYNC_LOCKED;
+
 			return 0;
 		}
 
@@ -795,6 +1157,32 @@ abstract class Mailbox
 		*/
 		if ($this->isTimeQuotaExceeded())
 		{
+			$this->lastSyncRefusal = static::SYNC_REFUSAL_TIME_QUOTA;
+
+			return 0;
+		}
+
+		// An unknown or stale generation must fail before any IMAP call
+		if (!$this->checkSyncGenerationContext())
+		{
+			$this->mailbox['OPTIONS']['next_sync'] = time() + 3600;
+			$this->lastSyncRefusal = static::SYNC_REFUSAL_GENERATION_DENIED;
+
+			return false;
+		}
+
+		/*
+			The lock is asked of the database again and not taken from this instance: the value it holds
+			was loaded when the instance was created, and the three calls below already change the data
+			of the mailbox - the outgoing upload, the consistency repair and the resync of the start
+			page. An instance with a stale snapshot would run all three beside a synchronization that
+			holds the lock, and lose the exchange below afterwards, having changed the mailbox anyway.
+			Refusing here changes no outcome for anyone: the exchange would have failed as well.
+		*/
+		if (!$this->mailboxLockHeldByCaller && !$this->isSyncLockFree())
+		{
+			$this->lastSyncRefusal = static::SYNC_REFUSAL_SYNC_LOCKED;
+
 			return 0;
 		}
 
@@ -813,8 +1201,10 @@ abstract class Mailbox
 		If the time record for blocking synchronization has not been added to the table,
 		we will have to abort synchronization
 		*/
-		if (!$DB->query($lockSql)->affectedRowsCount())
+		if (!$this->mailboxLockHeldByCaller && !$DB->query($lockSql)->affectedRowsCount())
 		{
+			$this->lastSyncRefusal = static::SYNC_REFUSAL_DB_LOCK_LOST;
+
 			return 0;
 		}
 
@@ -834,11 +1224,11 @@ abstract class Mailbox
 			allow messages that were left to be moved to be deleted
 			*/
 			MailMessageUidTable::updateList(
-				[
+				$this->getGenerationScope()->apply([
 					'=MAILBOX_ID' => $this->mailbox['ID'],
 					'=MSG_UID' => 0,
 					'=IS_OLD' => 'M',
-				],
+				]),
 				[
 					'IS_OLD' => 'R',
 				],
@@ -874,16 +1264,30 @@ abstract class Mailbox
 
 		$optionsValue = $this->mailbox['OPTIONS'];
 
-		$unlockSql = sprintf(
-			"UPDATE b_mail_mailbox SET SYNC_LOCK = %d, OPTIONS = '%s' WHERE ID = %u AND SYNC_LOCK = %u",
-			$syncUnlock,
-			$DB->forSql(serialize($optionsValue)),
-			$this->mailbox['ID'],
-			$this->mailbox['SYNC_LOCK']
-		);
-		if ($DB->query($unlockSql)->affectedRowsCount())
+		if ($this->mailboxLockHeldByCaller)
 		{
+			// The lock belongs to the caller until it gives it back: only the options are stored
+			$DB->query(sprintf(
+				"UPDATE b_mail_mailbox SET OPTIONS = '%s' WHERE ID = %u",
+				$DB->forSql(serialize($optionsValue)),
+				$this->mailbox['ID']
+			));
+
 			$this->mailbox['SYNC_LOCK'] = $syncUnlock;
+		}
+		else
+		{
+			$unlockSql = sprintf(
+				"UPDATE b_mail_mailbox SET SYNC_LOCK = %d, OPTIONS = '%s' WHERE ID = %u AND SYNC_LOCK = %u",
+				$syncUnlock,
+				$DB->forSql(serialize($optionsValue)),
+				$this->mailbox['ID'],
+				$this->mailbox['SYNC_LOCK']
+			);
+			if ($DB->query($unlockSql)->affectedRowsCount())
+			{
+				$this->mailbox['SYNC_LOCK'] = $syncUnlock;
+			}
 		}
 
 		$lastSyncResult = $this->getLastSyncResult();
@@ -957,6 +1361,12 @@ abstract class Mailbox
 			return true;
 		}
 
+		// Zeroing MESSAGE_ID is a full mutation: only the active generation accepts it
+		if (!$this->checkSyncGenerationContext())
+		{
+			return false;
+		}
+
 		$startTime = time();
 
 		if (time() - $this->mailbox['SYNC_LOCK'] < static::getTimeout())
@@ -989,16 +1399,18 @@ abstract class Mailbox
 		$entity = MailMessageUidTable::getEntity();
 		$connection = $entity->getConnection();
 
+		$scope = $this->getGenerationScope();
+
 		$whereConditionForOldMessages = sprintf(
 			' (%s)',
 			ORM\Query\Query::buildFilterSql(
 				$entity,
-				array(
+				$scope->apply(array(
 					'=MAILBOX_ID' => $this->mailbox['ID'],
 					'>MESSAGE_ID' => 0,
 					'<INTERNALDATE' => Main\Type\Date::createFromTimestamp(Mailbox\SyncPeriodBoundary::dayStartUtcMinusDays(Mail\Helper\LicenseManager::getSyncOldLimit())),
 					'!=IS_OLD' => 'Y',
-				)
+				))
 			)
 		);
 
@@ -1011,12 +1423,13 @@ abstract class Mailbox
 					'ID',
 					'MAILBOX_ID',
 					'MESSAGE_ID',
+					'GENERATION_ID',
 				])
-				->setFilter([
+				->setFilter($scope->apply([
 					'=MAILBOX_ID' => $this->mailbox['ID'],
 					'>MESSAGE_ID' => 0,
 					'<INTERNALDATE' => \Bitrix\Main\Type\Date::createFromTimestamp(Mailbox\SyncPeriodBoundary::dayStartUtcMinusDays(\Bitrix\Mail\Helper\LicenseManager::getSyncOldLimit())),
-				])
+				]))
 				->whereNotExists(
 					new \Bitrix\Main\DB\SqlExpression("
 						SELECT 1
@@ -1042,6 +1455,8 @@ abstract class Mailbox
 						'ID' => $id,
 						'MAILBOX_ID' => (int)$oldMessage['MAILBOX_ID'],
 						'MESSAGE_ID' => (int)$oldMessage['MESSAGE_ID'],
+						// The queue row inherits the generation of the uid row it replaces
+						'GENERATION_ID' => (int)$oldMessage['GENERATION_ID'],
 					]
 				);
 
@@ -1054,11 +1469,11 @@ abstract class Mailbox
 			}
 
 			\Bitrix\Mail\MailMessageUidTable::updateList(
-				[
+				$scope->apply([
 					'!=MESSAGE_ID' => 0,
 					'=MAILBOX_ID' => $this->mailbox['ID'],
 					'@ID' => $oldMessageIds,
-				],
+				]),
 				[
 					'MESSAGE_ID' => 0,
 				],
@@ -1068,7 +1483,7 @@ abstract class Mailbox
 			$connection->queryExecute(
 				$sqlHelper->getInsertIgnore(
 					\Bitrix\Mail\Internals\MessageDeleteQueueTable::getTableName(),
-					'(ID, MAILBOX_ID, MESSAGE_ID)',
+					'(ID, MAILBOX_ID, MESSAGE_ID, GENERATION_ID)',
 					'VALUES ' . implode(', ', $messageAsStringForSql)
 				)
 			);
@@ -1114,9 +1529,61 @@ abstract class Mailbox
 		return $result;
 	}
 
+	/**
+	 * Drops the rows the sync has already seen as gone from the physical source.
+	 * Belongs to the regular cleanup, so a prepared generation never participates.
+	 *
+	 * @return bool False when the pass is not over: the rows left beyond the deletion limit
+	 *              are for the next visit of the cleanup agent.
+	 */
+	public function dismissRemoteMessages(): bool
+	{
+		if (!$this->checkSyncGenerationContext())
+		{
+			return false;
+		}
+
+		$filter = $this->getGenerationScope()->apply([
+			'=MAILBOX_ID' => $this->mailbox['ID'],
+			'!=MESSAGE_ID' => 0,
+			'=IS_OLD' => MailMessageUidTable::REMOTE,
+		]);
+
+		/*
+			A mailbox emptied on the server can hold any number of rows, so regular cleanup
+			removes its remote placements in limited passes.
+		*/
+		$deleted = MailMessageUidTable::deleteList(
+			$filter,
+			[],
+			static::MESSAGE_DELETION_LIMIT_AT_A_TIME,
+			sendEvent: false,
+		);
+
+		if (!$deleted)
+		{
+			return true;
+		}
+
+		// Asked after a deletion only: that is where the limit may have cut the pass short
+		$remaining = MailMessageUidTable::query()
+			->setSelect(['ID'])
+			->setFilter($filter)
+			->setLimit(1)
+			->fetch()
+		;
+
+		return empty($remaining);
+	}
+
 	public function dismissDeletedUidMessages()
 	{
 		global $DB;
+
+		if (!$this->checkSyncGenerationContext())
+		{
+			return false;
+		}
 
 		$startTime = time();
 
@@ -1145,16 +1612,17 @@ abstract class Mailbox
 			return false;
 		}
 
-		$minSyncTime = Mail\MailboxDirectory::getMinSyncTime($this->mailbox['ID']);
+		$scope = $this->getGenerationScope();
+		$minSyncTime = Mail\MailboxDirectory::getMinSyncTime($this->mailbox['ID'], $scope);
 
 		MailMessageUidTable::deleteList(
-			[
+			$scope->apply([
 				'=MAILBOX_ID'  => $this->mailbox['ID'],
 				'!=MESSAGE_ID' => 0,
 				'>DELETE_TIME' => 0,
 				/*The values in the tables are still used to delete related items (example: attachments):*/
 				'<DELETE_TIME' => $minSyncTime,
-			],
+			]),
 			[],
 			static::MESSAGE_DELETION_LIMIT_AT_A_TIME
 		);
@@ -1173,10 +1641,21 @@ abstract class Mailbox
 
 	public function cleanup()
 	{
+		if (!$this->checkSyncGenerationContext())
+		{
+			return false;
+		}
+
+		$scope = $this->getGenerationScope();
+
 		do
 		{
 			$res = Mail\Internals\MessageDeleteQueueTable::getList(array(
 				'runtime' => array(
+					/*
+						Deliberately not generation-scoped: a logical message survives while any
+						retained generation still holds a placement of it.
+					*/
 					new ORM\Fields\Relations\Reference(
 						'MESSAGE_UID',
 						'Bitrix\Mail\MailMessageUidTable',
@@ -1187,9 +1666,9 @@ abstract class Mailbox
 					),
 				),
 				'select' => array('MESSAGE_ID', 'UID' => 'MESSAGE_UID.ID'),
-				'filter' => array(
+				'filter' => $scope->apply(array(
 					'=MAILBOX_ID' => $this->mailbox['ID'],
-				),
+				)),
 				'limit' => 100,
 			));
 
@@ -1200,13 +1679,13 @@ abstract class Mailbox
 
 				if (empty($item['UID']))
 				{
-					\CMailMessage::delete($item['MESSAGE_ID']);
+					\CMailMessage::delete($item['MESSAGE_ID'], (int)$this->mailbox['ID']);
 				}
 
-				Mail\Internals\MessageDeleteQueueTable::deleteList(array(
+				Mail\Internals\MessageDeleteQueueTable::deleteList($scope->apply(array(
 					'=MAILBOX_ID' => $this->mailbox['ID'],
 					'=MESSAGE_ID' => $item['MESSAGE_ID'],
-				));
+				)));
 
 				if ($this->isTimeQuotaExceeded() || time() - $this->checkpoint > 60)
 				{
@@ -1219,7 +1698,18 @@ abstract class Mailbox
 		return true;
 	}
 
-	protected function listMessages($params = array(), $fetch = true)
+	/**
+	 * The rows of the mailbox this run works with. The callers ask by physical coordinates - dir hash,
+	 * UIDVALIDITY, uid - and those belong to the source generation that issued them, so the generation
+	 * scope of the run is part of the filter by default. Without it a row of a retained generation
+	 * answers for the uid the active source is being asked about and its letter never arrives.
+	 *
+	 * @param bool $withGenerationScope The declared way out for the one caller that does not mean the
+	 *        generation of the run: the lookup of the logical identity of a letter by its header hash,
+	 *        which a letter keeps across a change of the source of the mailbox. That caller carries a
+	 *        scope of its own {@see Imap::searchExistingMessagesByHeaderInDataBase()}.
+	 */
+	protected function listMessages($params = array(), $fetch = true, bool $withGenerationScope = true)
 	{
 		$filter = array(
 			'=MAILBOX_ID' => $this->mailbox['ID'],
@@ -1230,7 +1720,7 @@ abstract class Mailbox
 			$filter = array_merge((array) $params['filter'], $filter);
 		}
 
-		$params['filter'] = $filter;
+		$params['filter'] = $withGenerationScope ? $this->peekGenerationScope()->apply($filter) : $filter;
 
 		$result = MailMessageUidTable::getList($params);
 
@@ -1246,14 +1736,14 @@ abstract class Mailbox
 				'ID',
 				'MESSAGE_ID' => 'UID_TABLE.MESSAGE_ID',
 			],
-			'filter'=> [
+			'filter'=> $this->getGenerationScope()->apply([
 				'=SYNC_STAGE' => -1,
 				'=SYNC_LOCK' => 0,
 				'=MAILBOX_ID'=> $this->mailbox['ID'],
 				'=UID_TABLE.IS_OLD' => MailMessageUidTable::DOWNLOADED,
 				'=UID_TABLE.DELETE_TIME' => 0,
 				'=UID_TABLE.MESSAGE_TABLE.MSG_ID' => $idFromHeaderMessage,
-			],
+			]),
 			'limit' => 1,
 		]);
 	}
@@ -1355,6 +1845,8 @@ abstract class Mailbox
 				[
 					'IS_OLD' => $messageStatus,
 					'MAILBOX_ID'  => $this->mailbox['ID'],
+					// New physical rows always belong to the generation of the current context
+					'GENERATION_ID' => $this->getGenerationContext()->generationId,
 					'SESSION_ID'  => $this->session,
 					'TIMESTAMP_X' => $now,
 				]
@@ -1376,6 +1868,8 @@ abstract class Mailbox
 				'HEADER_MD5' => $addFields['HEADER_MD5'],
 				'SESSION_ID' => $addFields['SESSION_ID'],
 				'TIMESTAMP_X' => $addFields['TIMESTAMP_X'],
+				// the row is observed alive on the server again, so the soft deletion mark is dropped
+				'DELETE_TIME' => 0,
 			]);
 
 			return true;
@@ -1387,27 +1881,41 @@ abstract class Mailbox
 	protected function updateMessagesRegistry(array $filter, array $fields, $mailData = array())
 	{
 		return MailMessageUidTable::updateList(
-			array_merge(
+			$this->getGenerationScope()->apply(array_merge(
 				$filter,
 				array(
 					'!=IS_OLD' => 'Y',
 					'=MAILBOX_ID' => $this->mailbox['ID'],
 				)
-			),
+			)),
 			$fields,
 			$mailData
 		);
 	}
 
-	protected function unregisterMessages($filter, $eventData = [], $ignoreDeletionCheck = false)
+	/**
+	 * @param bool $keptAliveRows - reports back whether the guard kept any row of the sample from being
+	 *        deleted. A caller that has to come back for the rest of the batch reads it; the answer of the
+	 *        method stays the count of the deleted rows for everyone else, and nothing left to delete is
+	 *        answered with nothing at all - a count of zero to every caller of the two.
+	 */
+	protected function unregisterMessages(
+		$filter,
+		$eventData = [],
+		$ignoreDeletionCheck = false,
+		bool &$keptAliveRows = false,
+	)
 	{
-		$messageExistInTheOriginalMailbox = false;
 		$messagesForRemove = [];
+		$aliveMessages = [];
+		$unansweredMessages = [];
 		$filterForCheck = [];
+		$scope = $this->getGenerationScope();
+		$keptAliveRows = false;
 
 		if(!$ignoreDeletionCheck)
 		{
-			$filterForCheck = array_merge(
+			$filterForCheck = $scope->apply(array_merge(
 				$filter,
 				MailMessageUidTable::getPresetRemoveFilters(),
 				[
@@ -1420,9 +1928,9 @@ abstract class Mailbox
 					*/
 					'!=MESSAGE_ID'  => 0,
 				]
-			);
+			));
 
-			$messagesForRemove = MailMessageUidTable::getList([
+			$messagesForRemove = $this->listMessages([
 				'select' => [
 					'ID',
 					'MAILBOX_ID',
@@ -1437,78 +1945,119 @@ abstract class Mailbox
 				],
 				'filter' => $filterForCheck,
 				'limit' => 100,
-			])->fetchAll();
+			]);
 
-			if (!empty($messagesForRemove))
-			{
-				if (isset($messagesForRemove[0]['DIR_MD5']))
-				{
-					$dirMD5 = $messagesForRemove[0]['DIR_MD5'];
-					$dirPath = $this->getDirsHelper()->getDirPathByHash($dirMD5);
-					$UIDs = array_map(
-						function ($item) {
-							return $item['MSG_UID'];
-						},
-						$messagesForRemove
-					);
-
-					$messageExistInTheOriginalMailbox = $this->checkMessagesForExistence($dirPath, $UIDs);
-				}
-			}
+			$aliveMessages = $this->selectMessagesAliveInTheOriginalMailbox($messagesForRemove, $unansweredMessages);
 		}
 
-		if($messageExistInTheOriginalMailbox === false)
+		if (empty($aliveMessages))
 		{
-			return MailMessageUidTable::deleteListSoft(
+			return $this->deleteMessagesRegistry($filter);
+		}
+
+		$keptAliveRows = true;
+
+		/*
+			The mail server answers for a part of the sample, so the filter is no longer taken at its word:
+			only the rows it reached and the server disowned are removed. The rest of what the filter covers -
+			the messages beyond the sample among them - waits for a pass of its own, where it will be asked
+			about in its turn.
+		*/
+		$deadIds = array_diff(
+			array_column($messagesForRemove, 'ID'),
+			array_column($aliveMessages, 'ID'),
+			array_column($unansweredMessages, 'ID'),
+		);
+
+		if (empty($deadIds))
+		{
+			return null;
+		}
+
+		return $this->deleteMessagesRegistry(
+			array_merge(
+				$filter,
+				[
+					'@ID' => array_values($deadIds),
+				]
+			)
+		);
+	}
+
+	/**
+	 * Rows of the sample whose messages are still in the mailbox on the mail server. Only the folder of
+	 * the first row is asked about, so the answer covers the sample as far as it lies in that folder.
+	 *
+	 * @param array $unansweredMessages - reports back the rows the mail server was asked about and said
+	 *        nothing of: a request of theirs ended with an error, and an error tells a deletion from a
+	 *        message the request never reached no better than silence does.
+	 */
+	private function selectMessagesAliveInTheOriginalMailbox(
+		array $messagesForRemove,
+		array &$unansweredMessages = [],
+	): array
+	{
+		$unansweredMessages = [];
+
+		if (empty($messagesForRemove) || !isset($messagesForRemove[0]['DIR_MD5']))
+		{
+			return [];
+		}
+
+		$dirPath = $this->getDirsHelper()->getDirPathByHash($messagesForRemove[0]['DIR_MD5']);
+
+		// an implementation of the check that knows nothing of failed requests leaves the list empty
+		$this->unansweredUidsOfLastCheck = [];
+
+		$aliveUids = $this->checkMessagesForExistence(
+			$dirPath,
+			array_column($messagesForRemove, 'MSG_UID')
+		);
+
+		// an implementation written before the list contract answers with a single uid or with false
+		if (!is_array($aliveUids))
+		{
+			$aliveUids = empty($aliveUids) ? [] : [$aliveUids];
+		}
+
+		$unansweredMessages = self::selectMessagesByUids($messagesForRemove, $this->unansweredUidsOfLastCheck);
+
+		return self::selectMessagesByUids($messagesForRemove, $aliveUids);
+	}
+
+	/** @return array rows of the sample whose uid the list names */
+	private static function selectMessagesByUids(array $messagesForRemove, array $uids): array
+	{
+		$uids = array_map('intval', $uids);
+
+		return array_values(
+			array_filter(
+				$messagesForRemove,
+				static function ($message) use ($uids)
+				{
+					return isset($message['MSG_UID']) && in_array((int)$message['MSG_UID'], $uids, true);
+				}
+			)
+		);
+	}
+
+	/**
+	 * The scope lives here and not in the callers: the deletion of the registry answers to a filter built
+	 * by the run, and a row of a retained generation names a physical source the mailbox has left - the
+	 * run has no business judging it, whatever the filter happens to cover.
+	 */
+	protected function deleteMessagesRegistry(array $filter)
+	{
+		return MailMessageUidTable::deleteListSoft(
+			$this->getGenerationScope()->apply(
 				array_merge(
 					$filter,
 					[
 						'=MAILBOX_ID' => $this->mailbox['ID'],
 					]
 				)
-			);
-		}
-		else
-		{
-			$messageForLog = isset($messagesForRemove[0]) ? $messagesForRemove[0] : [];
-
-			/*
-				For the log, we take a message from the entire sample,
-				which was definitely deleted by mistake.
-			*/
-			foreach($messagesForRemove as $message)
-			{
-				if(isset($message['MSG_UID']) && (int)$message['MSG_UID'] === (int)$messageExistInTheOriginalMailbox)
-				{
-					$messageForLog = $message;
-					break;
-				}
-			}
-
-			if(isset($messageForLog['INTERNALDATE']) && $messageForLog['INTERNALDATE'] instanceof Main\Type\DateTime)
-			{
-				$messageForLog['INTERNALDATE'] = $messageForLog['INTERNALDATE']->getTimestamp();
-			}
-			if(isset($messageForLog['DATE_INSERT']) && $messageForLog['DATE_INSERT'] instanceof Main\Type\DateTime)
-			{
-				$messageForLog['DATE_INSERT'] = $messageForLog['DATE_INSERT']->getTimestamp();
-			}
-
-			if(isset($filterForCheck['@ID']))
-			{
-				$filterForCheck['@ID'] = '[hidden for the log]';
-			}
-
-			/**
-			 * @TODO Enable logs by option on the portal.
-			 * AddMessage2Log(array_merge($eventData,[
-			 *		'filter' => $filterForCheck,
-			 *		'message-data' => $messageForLog,
-			 * ]));
-			 */
-
-			return false;
-		}
+			)
+		);
 	}
 
 	protected function linkMessage($uid, $id)
@@ -1553,6 +2102,7 @@ abstract class Mailbox
 		Mail\Internals\MessageUploadQueueTable::add(array(
 			'ID' => $messageUid,
 			'MAILBOX_ID' => $this->mailbox['ID'],
+			'GENERATION_ID' => $this->getGenerationContext()->generationId,
 		));
 
 		\CAgent::addAgent(
@@ -1626,11 +2176,11 @@ abstract class Mailbox
 					'UPLOAD_STAGE' => 'UPLOAD_QUEUE.SYNC_STAGE',
 					'UPLOAD_ATTEMPTS' => 'UPLOAD_QUEUE.ATTEMPTS',
 				),
-				'filter' => array(
+				'filter' => $this->peekGenerationScope()->apply(array(
 					'>=UPLOAD_QUEUE.SYNC_STAGE' => 0,
 					'<UPLOAD_QUEUE.SYNC_LOCK' => time() - static::getTimeout(),
 					'<UPLOAD_QUEUE.ATTEMPTS' => 5,
-				),
+				)),
 				'order' => array(
 					'UPLOAD_QUEUE.SYNC_LOCK' => 'ASC',
 					'UPLOAD_QUEUE.SYNC_STAGE' => 'ASC',
@@ -1739,10 +2289,7 @@ abstract class Mailbox
 				$excerpt['__FIELD_REPLY_TO'] = $parsedHeader->getHeader('REPLY-TO');
 				$excerpt['__FIELD_TO'] = $parsedHeader->getHeader('TO');
 				$excerpt['__FIELD_CC'] = $parsedHeader->getHeader('CC');
-				$excerpt['__FIELD_BCC'] = join(', ', array_merge(
-					(array) $parsedHeader->getHeader('X-Original-Rcpt-to'),
-					(array) $parsedHeader->getHeader('BCC')
-				));
+				$excerpt['__FIELD_BCC'] = Message::getBccFromParsedHeader($parsedHeader);
 			}
 
 			$excerpt[$field] = explode(',', $excerpt[$field]);
@@ -1802,6 +2349,7 @@ abstract class Mailbox
 		$context = new Main\Mail\Context();
 		$context->setCategory(Main\Mail\Context::CAT_EXTERNAL);
 		$context->setPriority(Main\Mail\Context::PRIORITY_NORMAL);
+		$this->applySenderIdentity($context, (int) $excerpt['MAILBOX_ID']);
 
 		$eventManager = \Bitrix\Main\EventManager::getInstance();
 		$eventKey = $eventManager->addEventHandler(
@@ -1836,6 +2384,12 @@ abstract class Mailbox
 
 		if ($excerpt['UPLOAD_STAGE'] < 2 && !$success)
 		{
+			$sendingError = $this->getContextSendingError($context);
+			if ($sendingError !== null)
+			{
+				$this->completeOutgoingWithError($excerpt, $sendingError);
+			}
+
 			return false;
 		}
 
@@ -1899,6 +2453,63 @@ abstract class Mailbox
 		}
 
 		return;
+	}
+
+	private function getContextSendingError(object $context): ?Main\Error
+	{
+		return method_exists($context, 'getSendingError') ? $context->getSendingError() : null;
+	}
+
+	private function completeOutgoingWithError(array $excerpt, Main\Error $error): void
+	{
+		Mail\Internals\MessageUploadQueueTable::update(
+			[
+				'ID' => $excerpt['ID'],
+				'MAILBOX_ID' => $excerpt['MAILBOX_ID'],
+			],
+			[
+				'SYNC_LOCK' => 0,
+				'ATTEMPTS' => 5,
+			],
+		);
+
+		$options = is_array($excerpt['__OPTIONS'] ?? null) ? $excerpt['__OPTIONS'] : [];
+		$options['sendError'] = [
+			'code' => $error->getCode(),
+			'message' => $error->getMessage(),
+		];
+		Mail\MailMessageTable::update((int)$excerpt['__ID'], ['OPTIONS' => $options]);
+	}
+
+	public static function getPermanentSendError(array $message): ?Main\Error
+	{
+		$options = is_array($message['OPTIONS'] ?? null) ? $message['OPTIONS'] : [];
+		$sendError = is_array($options['sendError'] ?? null) ? $options['sendError'] : [];
+		$message = trim((string)($sendError['message'] ?? ''));
+		if ($message === '')
+		{
+			return null;
+		}
+
+		return new Main\Error($message, (string)($sendError['code'] ?? ''));
+	}
+
+	/**
+	 * Tells the kernel which mailbox the message belongs to, so that the transport, the limit and the
+	 * counter are scoped to its own sender record. Older kernels keep selecting by the address.
+	 */
+	private function applySenderIdentity(Main\Mail\Context $context, int $mailboxId): void
+	{
+		if (
+			$mailboxId <= 0
+			|| !class_exists(Main\Mail\Sender\Identity::class)
+			|| !method_exists($context, 'setSenderIdentity')
+		)
+		{
+			return;
+		}
+
+		$context->setSenderIdentity(Main\Mail\Sender\Identity::fromMailbox($mailboxId));
 	}
 
 	public function resyncMessage(array &$excerpt)
@@ -2174,6 +2785,11 @@ abstract class Mailbox
 		$this->resortTree($message);
 	}
 
+	/**
+	 * @param string $dirPath
+	 * @param array $UIDs
+	 * @return array uids of the messages still present in the folder on the mail server
+	 */
 	abstract public function checkMessagesForExistence($dirPath ='INBOX',$UIDs = []);
 	abstract public function resyncIsOldStatus();
 	abstract public function syncFirstDay();
@@ -2206,14 +2822,19 @@ abstract class Mailbox
 
 	public function getDirsHelper(?int $userId = null): Mail\Helper\MailboxDirectoryHelper
 	{
+		$scope = $this->peekGenerationScope();
+
 		if ($userId !== null)
 		{
-			return new Mail\Helper\MailboxDirectoryHelper($this->mailbox['ID'], $userId);
+			return new Mail\Helper\MailboxDirectoryHelper($this->mailbox['ID'], $userId, $scope);
 		}
 
-		if (!$this->dirsHelper)
+		// An injected migration context changes the scope: rebuild the cached helper
+		$scopeKey = $scope->getCacheKey();
+		if (!$this->dirsHelper || $this->dirsHelperScopeKey !== $scopeKey)
 		{
-			$this->dirsHelper = new Mail\Helper\MailboxDirectoryHelper($this->mailbox['ID']);
+			$this->dirsHelper = new Mail\Helper\MailboxDirectoryHelper($this->mailbox['ID'], null, $scope);
+			$this->dirsHelperScopeKey = $scopeKey;
 		}
 
 		return $this->dirsHelper;
@@ -2253,6 +2874,12 @@ abstract class Mailbox
 
 	public function notifyNewMessages()
 	{
+		// A migration import moves the history the user has already been notified about
+		if ($this->generationContext?->isMigrationImport())
+		{
+			return;
+		}
+
 		if (Loader::includeModule('im'))
 		{
 			$lastSyncResult = $this->getLastSyncResult();
@@ -2423,19 +3050,26 @@ abstract class Mailbox
 		return 0;
 	}
 
+	/**
+	 * @deprecated Use \Bitrix\Mail\Internal\Service\Mailbox\MailboxEmailOccupancyService instead: it
+	 * answers the same question about one person with isAddressHeldByUser(), and the same question
+	 * about the whole portal with checkOccupancy(). The lookup behind this method moved there and no
+	 * longer depends on the site, so $lid is ignored; a mailbox waiting for its password is no longer
+	 * a match either.
+	 *
+	 * @param int $userId
+	 * @param string $email
+	 * @param string $lid
+	 * @return array|false
+	 */
 	public static function findActiveMailbox($userId, $email, $lid)
 	{
-		return Mail\MailboxTable::query()
-			->setSelect(['*'])
-			->where('EMAIL', $email)
-			->where('USER_ID', $userId)
-			->whereIn('ACTIVE', [
-				MailboxStatus::Active->value,
-				MailboxStatus::Pending->value,
-			])
-			->where('LID', $lid)
-			->setLimit(1)
-			->fetch()
-		;
+		$mailboxId = (new MailboxEmailOccupancyService())->findActiveMailboxIdOfUser((string)$email, (int)$userId);
+		if ($mailboxId === null)
+		{
+			return false;
+		}
+
+		return MailboxTable::getById($mailboxId)->fetch();
 	}
 }

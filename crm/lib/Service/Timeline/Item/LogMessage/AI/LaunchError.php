@@ -7,6 +7,7 @@ use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\FillRepeatSaleTips;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
@@ -41,7 +42,7 @@ final class LaunchError extends Base
 			TranscribeCallRecording::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_TRANSCRIBE_CALL'),
 			SummarizeCallTranscription::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_SUMMARIZE_CALl'),
 			FillItemFieldsFromCallTranscription::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_FILL_FIELDS'),
-			ScoreCall::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_SCORE_CALl'),
+			ScoreCall::TYPE_ID, ScoreCallV2::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_SCORE_CALl'),
 			FillRepeatSaleTips::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_REPEAT_SALE'),
 			AnalyzeCommunication::TYPE_ID => Loc::getMessage('CRM_TIMELINE_LOG_LAUNCH_ERROR_TITLE_ANALYZE_COMMUNICATION'),
 			default => Loc::getMessage(

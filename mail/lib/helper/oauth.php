@@ -4,6 +4,7 @@ namespace Bitrix\Mail\Helper;
 
 use Bitrix\Main;
 use Bitrix\Mail;
+use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Mail\Helper\OAuth\UserData;
 use Bitrix\Socialservices\OAuth\StateService;
@@ -21,6 +22,12 @@ abstract class OAuth
 
 	public const WEB_TYPE = 'web';
 	public const MOBILE_TYPE = 'mobile';
+
+	public const ERROR_SCENARIO_ADMIN_CONSENT = 'admin_consent';
+	public const ERROR_SCENARIO_BLOCKED_BY_ADMIN = 'blocked_by_admin';
+	public const ERROR_SCENARIO_RETRY = 'retry';
+	public const ERROR_SCENARIO_CANCELLED = 'cancelled';
+	public const ERROR_SCENARIO_GENERIC = 'generic';
 	protected UserData $publicUserData;
 	private $storedTokenRow = null;
 
@@ -623,6 +630,190 @@ abstract class OAuth
 	}
 
 	/**
+	 * Maps a provider error response to one of the ERROR_SCENARIO_* cases.
+	 *
+	 * A provider specific code found in the description wins over the top-level error code:
+	 * Microsoft keeps the latter generic and names the cause only in the description. Unknown
+	 * input falls back to the generic scenario: an unexplained failure is still a failure the
+	 * user has to be told about.
+	 *
+	 * @param string $errorCode Provider `error` parameter.
+	 * @param string $errorDescription Provider `error_description` parameter, used only to look up a provider code.
+	 * @return string One of the ERROR_SCENARIO_* constants.
+	 */
+	public static function classifyProviderError(string $errorCode, string $errorDescription = ''): string
+	{
+		// Scenarios whose text names Microsoft are reachable only by codes Microsoft alone
+		// sends: `admin_consent_required` and the AADSTS numbers below. The rest of the map is
+		// standard (RFC 6749, OpenID Connect), so any of the five providers with external
+		// authorization can send it - and for them `unauthorized_client` usually means our own
+		// application is misconfigured, not that a tenant administrator blocked access. Such a
+		// refusal therefore goes to the generic scenario, whose text names no provider.
+		// Microsoft names the real cause in the description and keeps the top-level code generic:
+		// an application awaiting administrator approval comes back as
+		// `access_denied` + `AADSTS90094: The grant requires admin permission`. Therefore a
+		// recognized provider code is resolved FIRST - read the other way round, the most common
+		// refusal of this task would pass for a user closing the window: silently, with no hint
+		// and no counter. Codes we do not know (`AADSTS65004` - the user really did decline)
+		// leave the decision to the top-level code below.
+		$scenarioByProviderCode = [
+			'65001' => self::ERROR_SCENARIO_ADMIN_CONSENT,
+			'90094' => self::ERROR_SCENARIO_ADMIN_CONSENT,
+			'900941' => self::ERROR_SCENARIO_ADMIN_CONSENT,
+			'7000112' => self::ERROR_SCENARIO_BLOCKED_BY_ADMIN,
+		];
+
+		if (preg_match('/AADSTS(\d+)/i', $errorDescription, $matches)
+			&& isset($scenarioByProviderCode[$matches[1]]))
+		{
+			return $scenarioByProviderCode[$matches[1]];
+		}
+
+		// Scenarios whose text names Microsoft are reachable only by codes Microsoft alone
+		// sends: `admin_consent_required` and the AADSTS numbers above. The rest of the map is
+		// standard (RFC 6749, OpenID Connect), so any of the five providers with external
+		// authorization can send it - and for them `unauthorized_client` usually means our own
+		// application is misconfigured, not that a tenant administrator blocked access. Such a
+		// refusal therefore goes to the generic scenario, whose text names no provider.
+		$scenarioByCode = [
+			'access_denied' => self::ERROR_SCENARIO_CANCELLED,
+			'admin_consent_required' => self::ERROR_SCENARIO_ADMIN_CONSENT,
+			'invalid_grant' => self::ERROR_SCENARIO_RETRY,
+			'interaction_required' => self::ERROR_SCENARIO_RETRY,
+			'login_required' => self::ERROR_SCENARIO_RETRY,
+		];
+
+		$code = mb_strtolower(trim($errorCode));
+
+		return $scenarioByCode[$code] ?? self::ERROR_SCENARIO_GENERIC;
+	}
+
+	/**
+	 * Returns the message shown for a scenario, or null when the scenario is silent.
+	 *
+	 * Provider wording never reaches the user: the text comes from our language files only.
+	 *
+	 * @param string $scenario One of the ERROR_SCENARIO_* constants.
+	 * @return array{title: string, text: string}|null
+	 */
+	public static function getErrorScenarioMessage(string $scenario): ?array
+	{
+		if ($scenario === self::ERROR_SCENARIO_CANCELLED)
+		{
+			return null;
+		}
+
+		// Phrase keys are spelled out, not built from the scenario id: a composed key is
+		// invisible both to a developer searching the code and to the phrase linter.
+		$phraseKeys = [
+			self::ERROR_SCENARIO_ADMIN_CONSENT => [
+				'MAIL_OAUTH_ERROR_ADMIN_CONSENT_TITLE',
+				'MAIL_OAUTH_ERROR_ADMIN_CONSENT_TEXT',
+			],
+			self::ERROR_SCENARIO_BLOCKED_BY_ADMIN => [
+				'MAIL_OAUTH_ERROR_BLOCKED_BY_ADMIN_TITLE',
+				'MAIL_OAUTH_ERROR_BLOCKED_BY_ADMIN_TEXT',
+			],
+			self::ERROR_SCENARIO_RETRY => [
+				'MAIL_OAUTH_ERROR_RETRY_TITLE',
+				'MAIL_OAUTH_ERROR_RETRY_TEXT',
+			],
+			self::ERROR_SCENARIO_GENERIC => [
+				'MAIL_OAUTH_ERROR_GENERIC_TITLE',
+				'MAIL_OAUTH_ERROR_GENERIC_TEXT',
+			],
+		];
+
+		[$titleKey, $textKey] = $phraseKeys[$scenario] ?? $phraseKeys[self::ERROR_SCENARIO_GENERIC];
+
+		return [
+			'title' => (string)Loc::getMessage($titleKey),
+			'text' => (string)Loc::getMessage($textKey),
+		];
+	}
+
+	/**
+	 * Reduces a provider error code to an identifier before it is shown or handed out.
+	 *
+	 * The value comes from the request, so without this it could carry arbitrary text into
+	 * the portal interface under the guise of an error code.
+	 *
+	 * @param string $errorCode Provider `error` parameter.
+	 * @return string
+	 */
+	private static function sanitizeProviderErrorCode(string $errorCode): string
+	{
+		return mb_substr(preg_replace('/[^A-Za-z0-9_.-]/', '', $errorCode), 0, 64);
+	}
+
+	/**
+	 * Reports a failed authorization to the opener and closes the window.
+	 *
+	 * Nothing is shown here: the window is a transport, and the reason belongs to the
+	 * connect form, which shows it as a hint next to the button. Cancelled attempts report
+	 * nothing at all: the form unblocks itself on the closed window.
+	 *
+	 * @param array $state Response data.
+	 * @param string $errorCode Provider `error` parameter.
+	 * @param string $errorDescription Provider `error_description` parameter.
+	 * @return void
+	 */
+	public function renderError(array $state, string $errorCode, string $errorDescription = ''): void
+	{
+		$this->storedUid = (string)($state['uid'] ?? '');
+
+		$scenario = self::classifyProviderError($errorCode, $errorDescription);
+		$message = self::getErrorScenarioMessage($scenario);
+
+		// The code is shown to the user and handed to the client, so it is reduced to an
+		// identifier first: a provider code looks like `admin_consent_required` or
+		// `AADSTS65001`, and anything else would be arbitrary text displayed as ours.
+		$errorCode = self::sanitizeProviderErrorCode($errorCode);
+
+		if ($message !== null && $errorCode !== '')
+		{
+			// The hint renders the text as markup (ui.tour sets innerHTML), so the provider
+			// code: the only value here that comes from outside - is escaped as html.
+			$message['text'] .= '<br>' . Loc::getMessage(
+				'MAIL_OAUTH_ERROR_CODE',
+				['#CODE#' => htmlspecialcharsbx($errorCode)]
+			);
+		}
+		?>
+
+		<script>
+
+			(function() {
+
+				var targetWindow = window.opener;
+
+				<?php if ($message !== null): ?>
+					if (targetWindow && targetWindow.BX && targetWindow.BX.onCustomEvent)
+					{
+						targetWindow.BX.onCustomEvent(
+							'OnMailOAuthBError',
+							[
+								'<?=\CUtil::jsEscape($this->getStoredUid()) ?>',
+								'<?=\CUtil::jsEscape($scenario) ?>',
+								'<?=\CUtil::jsEscape($message['title']) ?>',
+								'<?=\CUtil::jsEscape($message['text']) ?>',
+								'<?=\CUtil::jsEscape($errorCode) ?>'
+							]
+						);
+					}
+				<?php endif; ?>
+
+				// Let the opener handle the event before the window goes away.
+				setTimeout(function() { window.close(); }, 100);
+
+			})();
+
+		</script>
+
+		<?php
+	}
+
+	/**
 	 * Handles service response
 	 *
 	 * @param array $state Response data.
@@ -667,5 +858,11 @@ abstract class OAuth
 				header('Location: bitrix24://?'.$params);
 			}
         }
+		else
+		{
+			// The provider returned a code but the token exchange did not produce tokens:
+			// without this branch the response body stays empty and the user sees a blank window.
+			$this->renderError($state, 'token_exchange_failed');
+		}
     }
 }

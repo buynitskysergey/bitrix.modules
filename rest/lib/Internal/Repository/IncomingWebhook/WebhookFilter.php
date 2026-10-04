@@ -13,7 +13,10 @@ final class WebhookFilter
 	private ?array $scopes = null;
 	/** @var array<string, string|null>|null */
 	private ?array $attributes = null;
+	/** @var array<string, string|null>|null */
+	private ?array $excludedAttributes = null;
 	private ?PasswordType $type = null;
+	private ?bool $active = null;
 
 	public function userId(?int $userId): self
 	{
@@ -25,6 +28,13 @@ final class WebhookFilter
 	public function type(?PasswordType $type): self
 	{
 		$this->type = $type;
+
+		return $this;
+	}
+
+	public function active(?bool $active): self
+	{
+		$this->active = $active;
 
 		return $this;
 	}
@@ -50,6 +60,17 @@ final class WebhookFilter
 		return $this;
 	}
 
+	/**
+	 * @param array<string, string|null>|null $attributes exclude webhooks carrying every one of these external
+	 *        attributes; map of code => required value (a null value matches any value)
+	 */
+	public function withoutExternalAttributes(?array $attributes): self
+	{
+		$this->excludedAttributes = ($attributes === null || $attributes === []) ? null : $attributes;
+
+		return $this;
+	}
+
 	public function getUserId(): ?int
 	{
 		return $this->userId;
@@ -58,6 +79,11 @@ final class WebhookFilter
 	public function getType(): ?PasswordType
 	{
 		return $this->type;
+	}
+
+	public function getActive(): ?bool
+	{
+		return $this->active;
 	}
 
 	/**
@@ -74,5 +100,13 @@ final class WebhookFilter
 	public function getExternalAttributes(): ?array
 	{
 		return $this->attributes;
+	}
+
+	/**
+	 * @return array<string, string|null>|null
+	 */
+	public function getExcludedExternalAttributes(): ?array
+	{
+		return $this->excludedAttributes;
 	}
 }

@@ -7,6 +7,7 @@ use Bitrix\Disk\Driver;
 use Bitrix\Disk\Infrastructure\Controller\HtmlViewerRefusalResponse;
 use Bitrix\Disk\Internal\Service\HtmlViewerService;
 use Bitrix\Disk\Internal\Service\MarkdownRenderService;
+use Bitrix\Disk\Internal\Service\TiffPreviewService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Main;
@@ -34,6 +35,10 @@ final class AttachedObject extends Engine\Controller
 				new Main\Engine\ActionFilter\CloseSession(),
 			]
 		];
+		$configureActions['showTiffPreview'] = $configureActions['showMarkdown'];
+		$configureActions['showTiffPreview']['+prefilters'][] = new Main\Engine\ActionFilter\HttpMethod([
+			Main\Engine\ActionFilter\HttpMethod::METHOD_GET,
+		]);
 
 		return $configureActions;
 	}
@@ -162,8 +167,25 @@ final class AttachedObject extends Engine\Controller
 			return;
 		}
 
+		if (Disk\Integration\TransformerManager::transformToView($file))
+		{
+			return [
+				'previewGeneration' => [
+					'status' => Disk\View\Base::TRANSFORM_STATUS_SUCCESS,
+					'data' => [
+						'pullTag' => Disk\Integration\TransformerManager::subscribe(
+							$file->getId(),
+							$this->getCurrentUser()->getId(),
+						),
+					],
+				],
+			];
+		}
+
 		return [
-			'previewGeneration' => $file->getView()->transformOnOpen($file),
+			'previewGeneration' => [
+				'status' => Disk\View\Base::TRANSFORM_STATUS_NOT_ALLOWED,
+			],
 		];
 	}
 
@@ -231,5 +253,23 @@ final class AttachedObject extends Engine\Controller
 	public function showHtmlAction(Disk\AttachedObject $attachedObject): Main\HttpResponse
 	{
 		return ServiceLocator::getInstance()->get(HtmlViewerService::class)->showByAttachedObject($attachedObject);
+	}
+
+	public function showTiffPreviewAction(
+		Disk\AttachedObject $attachedObject,
+		?string $previewToken = null,
+	): array|Response\BFile|null
+	{
+		$result = (new TiffPreviewService())->getByAttachedObject($attachedObject, $previewToken);
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		$data = $result->getData();
+
+		return $data['response'] ?? $data;
 	}
 }

@@ -60,24 +60,32 @@ final class ExtractFormFields extends AbstractPayload implements CalcMarkersInte
 			&& $data['TYPE'] === DateType::USER_TYPE_ID
 		)
 		{
-			$inputFormat = 'd.m.Y'; // AI return value format DD.MM.YYYY (see 'extract_form_fields' prompt)
 			if ($data['MULTIPLE'] && is_array($value))
 			{
 				return array_map(
-					static fn($item) =>is_string($item)
-						? DateTime::tryParse($item, $inputFormat)
+					static fn($item) => is_string($item)
+						? self::parseDate($item)
 						: null,
 					$value
 				);
 			}
 
 			return is_string($value)
-				? DateTime::tryParse($value, $inputFormat)
+				? self::parseDate($value)
 				: null
 			;
 		}
 
 		return $value;
+	}
+
+	private static function parseDate(string $value): ?DateTime
+	{
+		$inputFormat = 'd.m.Y'; // AI return value format DD.MM.YYYY (see 'extract_form_fields' prompt)
+		$date = DateTime::tryParse($value, $inputFormat);
+
+		// the payload keeps a calendar date, so its string form must not be shifted to the acting user's timezone
+		return $date?->disableUserTime();
 	}
 
 	public function getPayloadCode(): string

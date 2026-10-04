@@ -482,27 +482,41 @@ class WorktimeAgentManager
 
 	private function buildNextExecForAutoClosingAgent(WorktimeRecordManager $recordManager, $recordStopUtcTimestamp)
 	{
+		$schedule = $recordManager->getSchedule();
 		if (
 			\Bitrix\Timeman\Integration\Stafftrack\CheckIn::isCheckInStartEnabled()
-			&& $recordManager->getSchedule()->isFixed()
+			&& ($schedule->isFixed() || $schedule->isFlextime())
 		)
 		{
 			return $this->buildStartOfNextDayByUserTime(
-				$recordManager->getRecord()->getRecordedStartTimestamp(),
+				$this->buildAutoClosingAgentAnchor($schedule, $recordManager->getRecord(), $recordStopUtcTimestamp),
 				$recordManager->getRecord()->getUserId()
 			);
 		}
 
-		return TimeHelper::getInstance()->createUserDateTimeFromFormat(
-			'U',
-			$recordStopUtcTimestamp,
-			$recordManager->getRecord()->getUserId()
-		);
+		// The absolute stop instant fires NEXT_EXEC as-is; read it in the employee's real IANA zone
+		// (date-aware), not the legacy "offset as of now" synthetic zone.
+		return (new \DateTime('@' . $recordStopUtcTimestamp))
+			->setTimezone(TimeHelper::getInstance()->getUserDateTimeZone($recordManager->getRecord()->getUserId()));
+	}
+
+	private function buildAutoClosingAgentAnchor(Schedule $schedule, WorktimeRecord $record, $recordStopUtcTimestamp): int
+	{
+		// Flextime anchors midnight on the target stop (openTime + 12h) shifted back one second, so a
+		// 12:00 start whose 12h elapse exactly at midnight lands on THAT midnight, not the next one.
+		// Fixed keeps anchoring on the start of day.
+		return $schedule->isFlextime()
+			? $recordStopUtcTimestamp - 1
+			: (int)$record->getRecordedStartTimestamp();
 	}
 
 	private function buildStartOfNextDayByUserTime($timestamp, $userId)
 	{
-		$startOfNextDay = TimeHelper::getInstance()->createUserDateTimeFromFormat('U', $timestamp, $userId);
+		// Start of the next LOCAL day in the employee's real IANA zone on the event date (date-aware):
+		// midnight is resolved through the live DST-aware zone, so the boundary does not drift by an hour
+		// across a DST transition.
+		$startOfNextDay = (new \DateTime('@' . $timestamp))
+			->setTimezone(TimeHelper::getInstance()->getUserDateTimeZone((int)$userId));
 		$startOfNextDay->setTime(0, 0, 0);
 		$startOfNextDay->add(new \DateInterval('P1D'));
 

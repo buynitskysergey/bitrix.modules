@@ -7,7 +7,7 @@ namespace Bitrix\Vibecodeconnector\Internal\Service\PublicKey;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\CloudEndpointProvider;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\EndpointResolver;
 
-final class CloudSharedKeyRefresher
+final class CloudSharedKeyRefresher implements CloudSharedKeyProvider
 {
 	private const CLOUD_ISS = 'vibecode';
 
@@ -19,12 +19,14 @@ final class CloudSharedKeyRefresher
 	) {
 	}
 
-	public function refresh(): void
+	public function refresh(): string
 	{
 		$pem = $this->fetcherFactory
 			->make($this->sourceSettings->getSource())
 			->fetch(new EndpointResolver($this->cloudEndpointProvider->getCloudUrl()), self::CLOUD_ISS);
 
 		$this->keyStore->set($pem);
+
+		return $pem;
 	}
 }

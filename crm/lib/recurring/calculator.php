@@ -23,6 +23,7 @@ class Calculator
 	private static $instance = null;
 	private $params = [];
 	private $startDate = null;
+	private $currentDate = null;
 
 	/**
 	 * @return Calculator
@@ -52,6 +53,11 @@ class Calculator
 		$this->startDate = $date;
 	}
 
+	public function setCurrentDate(?Date $date): void
+	{
+		$this->currentDate = $date === null ? null : clone $date;
+	}
+
 	/**
 	 * @param array $params
 	 */
@@ -65,12 +71,14 @@ class Calculator
 	 */
 	public function calculateDate()
 	{
+		$currentDate = $this->currentDate === null ? null : clone $this->currentDate;
+		$this->currentDate = null;
 		$period = $this->params[self::FIELD_PERIOD_NAME];
 		$startDate = clone($this->startDate);
 		switch($period)
 		{
 			case static::SALE_TYPE_DAY_OFFSET:
-				return DateType\Day::calculateDate($this->params, $startDate);
+				return DateType\Day::calculateDate($this->params, $startDate, $currentDate);
 			case static::SALE_TYPE_WEEK_OFFSET:
 				return DateType\Week::calculateDate($this->params, $startDate);
 			case static::SALE_TYPE_MONTH_OFFSET:

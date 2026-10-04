@@ -14,6 +14,8 @@ use Bitrix\HumanResources\Access\Rule\StructureBaseRule;
 
 final class StructureAccessController extends BaseAccessController
 {
+	private array $ruleHandlers = [];
+
 	public function __construct(int $userId)
 	{
 		parent::__construct($userId);
@@ -37,14 +39,12 @@ final class StructureAccessController extends BaseAccessController
 	{
 		$params[StructureBaseRule::PERMISSION_ID_KEY] = StructureActionDictionary::getActionPermissionMap()[$action] ?? null;
 
-		static $ruleHandler = [];
-
-		if (!isset($ruleHandler[$action]))
+		if (!isset($this->ruleHandlers[$action]))
 		{
-			$ruleHandler[$action] = $this->ruleFactory->createFromAction($action, $this);
+			$this->ruleHandlers[$action] = $this->ruleFactory->createFromAction($action, $this);
 		}
 
-		$rule = $ruleHandler[$action] ?? null;
+		$rule = $this->ruleHandlers[$action] ?? null;
 
 		if (!$rule)
 		{

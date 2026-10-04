@@ -9,9 +9,11 @@ use Bitrix\HumanResources\Item\HcmLink\FieldValue;
 use Bitrix\HumanResources\Item\HcmLink\Job;
 use Bitrix\HumanResources\Item\HcmLink\Person;
 use Bitrix\HumanResources\Service\Container;
+use Bitrix\HumanResources\Service\HcmLink\PinService;
 use Bitrix\HumanResources\Type\HcmLink\FieldEntityType;
 use Bitrix\HumanResources\Type\HcmLink\FieldType;
 use Bitrix\HumanResources\Type\HcmLink\JobStatus;
+use Bitrix\HumanResources\Type\HcmLink\JobType;
 use Bitrix\HumanResources\Type\HcmLink\PlacementType;
 use Bitrix\HumanResources\Type\HcmLink\RestEventType;
 use Bitrix\Main\Application;
@@ -675,30 +677,72 @@ class HcmLink extends IRestService
 		$employeeRepository = Container::getHcmLinkEmployeeRepository();
 		$jobRepository = Container::getHcmLinkJobRepository();
 
-		$companyUuid = $query['company'];
-		$data = $query['data'];
+		$companyUuid = (string)($query['company'] ?? '');
+		$data = $query['data'] ?? null;
 
 		$job = null;
 		try
 		{
-			if (is_array($query['job'] ?? null))
+			if (is_numeric($query['job']['id'] ?? null))
 			{
-				$jobResult = self::jobUpdate($query['job'], $start, $restServer);
+				$job = $jobRepository->getById((int)$query['job']['id']);
+			}
+
+			$shouldDeferJobUpdate
+				= is_array($query['job'] ?? null)
+				&& in_array(
+					$job?->type,
+					[JobType::PIN_REQUEST, JobType::SALARY_VACATION_REQUEST],
+					true,
+				);
+
+			if (is_array($query['job'] ?? null) && !$shouldDeferJobUpdate)
+			{
+				if ($job === null)
+				{
+					throw new ArgumentException("Job not found");
+				}
+
+				$jobResult = self::updateLoadedJob($job, $query['job']);
 				if ($jobResult !== true)
 				{
 					return $jobResult;
 				}
 			}
 
-			if (is_numeric($query['job']['id'] ?? null))
+			// Company is resolved by its 1C code (GUID) or, for the direct salary/vacation
+			// flow, by the CRM company id; as a last resort, from the job that initiated the
+			// exchange, so a missing/foreign "company" never reaches the repository as null.
+			$company = $job !== null
+				? $companyRepository->getById($job->companyId)
+				: null;
+			if ($company === null && $companyUuid !== '')
 			{
-				$job = $jobRepository->getById((int)$query['job']['id']);
+				$company = $companyRepository->getByUnique($companyUuid);
+				if ($company === null && is_numeric($companyUuid))
+				{
+					$company = $companyRepository->getByCompanyId((int)$companyUuid)->getFirst();
+				}
 			}
-
-			$company = $companyRepository->getByUnique($companyUuid);
+			if ($company === null && $job !== null)
+			{
+				$company = $companyRepository->getById($job->companyId);
+			}
 			if (is_null($company))
 			{
 				throw new ObjectNotFoundException("Company not found");
+			}
+			if (
+				$job !== null
+				&& $companyUuid !== ''
+				&& !in_array($companyUuid, [$company->code, (string)$company->myCompanyId], true)
+			)
+			{
+				throw new ArgumentException("Job does not belong to the specified company");
+			}
+			if ($job !== null && $job->companyId !== $company->id)
+			{
+				throw new ArgumentException("Job does not belong to the specified company");
 			}
 
 			$errors = [];
@@ -713,6 +757,7 @@ class HcmLink extends IRestService
 				$data = [];
 			}
 
+			$salaryVacationEmployee = null;
 			foreach ($data as $i => $fieldValue)
 			{
 				$fieldCode = $fieldValue['field'] ?? '';
@@ -730,8 +775,36 @@ class HcmLink extends IRestService
 					continue;
 				}
 
+				$isRequestedEmployee =
+					$job === null
+					|| in_array($employee->code, (array)($job->outputData['employees'] ?? []), true);
+				$isRequestedField =
+					$job === null
+					|| in_array($field->field, (array)($job->outputData['fields'] ?? []), true);
+				$isPinRequest = $job?->type === JobType::PIN_REQUEST;
+				$isSalaryVacationRequest = $job?->type === JobType::SALARY_VACATION_REQUEST;
+				if (
+					$isPinRequest
+					&& (
+						!$isRequestedEmployee
+						|| $field->field !== PinService::FIELD_CODE
+					)
+				)
+				{
+					$errors[] = "Item #{$i} does not match PIN request job '{$job->id}'";
+					continue;
+				}
+				if (
+					$isSalaryVacationRequest
+					&& (!$isRequestedEmployee || !$isRequestedField)
+				)
+				{
+					$errors[] = "Item #{$i} does not match salary/vacation request job '{$job->id}'";
+					continue;
+				}
+
 				$uniqueId = $employee->id;
-				if ($field->entityType === FieldEntityType::DOCUMENT)
+				if ($isPinRequest || $isSalaryVacationRequest)
 				{
 					$uniqueId = $job?->settingsData?->documentIdByEmployeeId[$employee->id] ?? null;
 				}
@@ -760,7 +833,56 @@ class HcmLink extends IRestService
 					$savedFieldValue->expiredAt = DateTime::createFromTimestamp(time() + $field->ttl);
 					$fieldValueRepository->update($savedFieldValue);
 				}
+				// 1C returns the PIN as a field value with the PinService::FIELD_CODE code.
+				// Deliver it immediately instead of exposing it in the common field values response.
+				if (
+					$field->field === PinService::FIELD_CODE
+					&& $isPinRequest
+				)
+				{
+					Container::getHcmLinkPinService()->deliver(
+						$employee,
+						(string)($fieldValue['value'] ?? ''),
+						$job?->id,
+					);
+				}
+				elseif ($isSalaryVacationRequest)
+				{
+					// Notify the owner once after all field values in the request are processed.
+					$salaryVacationEmployee = $employee;
+				}
 
+			}
+
+			if ($shouldDeferJobUpdate && empty($errors))
+			{
+				$requestedStatus = JobStatus::fromName(
+					strtoupper((string)($query['job']['fields']['status'] ?? '')),
+				);
+				if (
+					$requestedStatus === JobStatus::DONE
+					&& !self::isCompleteJobResponse($job)
+				)
+				{
+					$errors[] = "Job '{$job->id}' result is incomplete";
+				}
+			}
+
+			if ($shouldDeferJobUpdate && empty($errors))
+			{
+				$jobResult = self::updateLoadedJob($job, $query['job']);
+				if ($jobResult !== true)
+				{
+					return $jobResult;
+				}
+			}
+
+			if (
+				$salaryVacationEmployee !== null
+				&& $job?->status === JobStatus::DONE
+			)
+			{
+				Container::getHcmLinkPinService()->deliverDocument($salaryVacationEmployee, (int)$job->id);
 			}
 		}
 		catch (Exception $e)
@@ -789,29 +911,6 @@ class HcmLink extends IRestService
 		self::checkAuth($restServer);
 
 		$jobId = (int)($query['id'] ?? 0);
-		$request =
-			is_array($query['fields'])
-				? $query['fields']
-				: [];
-		$total =
-			isset($request['total'])
-				? (int)$request['total']
-				: null;
-		$done =
-			isset($request['sent'])
-				? (int)$request['sent']
-				: null;
-		$status =
-			isset($request['status'])
-				? JobStatus::fromName(strtoupper($request['status']))
-				: null;
-		$inputData =
-			isset($request['data']) && is_array($request['data'])
-				? $request['data']
-				: [];
-
-		$jobService = Container::getHcmLinkJobService();
-
 		try
 		{
 			$job = Container::getHcmLinkJobRepository()->getById($jobId);
@@ -819,7 +918,42 @@ class HcmLink extends IRestService
 			{
 				throw new ArgumentException("Job not found");
 			}
+		}
+		catch (Exception $e)
+		{
+			return self::formatException($e);
+		}
 
+		return self::updateLoadedJob($job, $query);
+	}
+
+	private static function updateLoadedJob(Job $job, array $query): bool|array
+	{
+		$request
+			= is_array($query['fields'])
+				? $query['fields']
+				: [];
+		$total
+			= isset($request['total'])
+				? (int)$request['total']
+				: null;
+		$done
+			= isset($request['sent'])
+				? (int)$request['sent']
+				: null;
+		$status
+			= isset($request['status'])
+				? JobStatus::fromName(strtoupper($request['status']))
+				: null;
+		$inputData
+			= isset($request['data']) && is_array($request['data'])
+				? $request['data']
+				: [];
+
+		$jobService = Container::getHcmLinkJobService();
+
+		try
+		{
 			if (!$status?->isActual())
 			{
 				throw new ArgumentException("Invalid job status");
@@ -840,6 +974,44 @@ class HcmLink extends IRestService
 		return true;
 	}
 
+	private static function isCompleteJobResponse(Job $job): bool
+	{
+		$employeeCodes = (array)($job->outputData['employees'] ?? []);
+		$fieldCodes = $job->type === JobType::PIN_REQUEST
+			? [PinService::FIELD_CODE]
+			: (array)($job->outputData['fields'] ?? []);
+
+		if (empty($employeeCodes) || empty($fieldCodes))
+		{
+			return false;
+		}
+
+		foreach ($employeeCodes as $employeeCode)
+		{
+			$employee = Container::getHcmLinkEmployeeRepository()->getByUnique($job->companyId, $employeeCode);
+			$entityId = $employee !== null
+				? ($job->settingsData?->documentIdByEmployeeId[$employee->id] ?? null)
+				: null;
+			if ($entityId === null)
+			{
+				return false;
+			}
+
+			foreach ($fieldCodes as $fieldCode)
+			{
+				$field = Container::getHcmLinkFieldRepository()->getByUnique($job->companyId, $fieldCode);
+				if (
+					$field === null
+					|| Container::getHcmLinkFieldValueRepository()->getByUnique($entityId, $field->id) === null
+				)
+				{
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
 
 	public static function getJobStatus(array $query, int $start, CRestServer $restServer)
 	{
@@ -980,6 +1152,22 @@ class HcmLink extends IRestService
 			RestEventType::onEmployeeListMapped->value => [
 				self::MODULE_ID,
 				RestEventType::onEmployeeListMapped->name,
+				[
+					self::class,
+					'onEvent',
+				],
+			],
+			RestEventType::onPinRequested->value => [
+				self::MODULE_ID,
+				RestEventType::onPinRequested->name,
+				[
+					self::class,
+					'onEvent',
+				],
+			],
+			RestEventType::onSalaryVacationRequested->value => [
+				self::MODULE_ID,
+				RestEventType::onSalaryVacationRequested->name,
 				[
 					self::class,
 					'onEvent',

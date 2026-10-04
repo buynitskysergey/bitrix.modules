@@ -47,4 +47,19 @@ class Product
 	{
 		self::$region = $region;
 	}
+
+	public static function isVkAllowedZone(?string $zone): bool
+	{
+		return is_string($zone) && $zone !== '' && in_array($zone, ['ru', 'kz', 'by', 'uz'], true);
+	}
+
+	public static function isVkAvailable(): bool
+	{
+		if (!Main\Loader::includeModule('bitrix24'))
+		{
+			return true;
+		}
+
+		return self::isVkAllowedZone(\CBitrix24::getPortalZone());
+	}
 }

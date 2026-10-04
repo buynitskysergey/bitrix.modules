@@ -3,12 +3,11 @@ namespace Bitrix\Crm;
 
 use Bitrix\Crm\Integrity\DuplicateVolatileCriterion;
 use Bitrix\Crm\Integrity\Volatile\FieldCategory;
+use Bitrix\Location\Entity\Address;
 use Bitrix\Location\Entity\Address\AddressLinkCollection;
 use Bitrix\Location\Service\AddressService;
 use Bitrix\Main;
-use Bitrix\Main\Text\Encoding;
-use \Bitrix\Sale;
-use Bitrix\Location\Entity\Address;
+use Bitrix\Sale;
 use CCrmEntitySelectorHelper;
 use CCrmOwnerType;
 
@@ -115,12 +114,46 @@ class EntityAddress
 
 	public function getList($params)
 	{
+		$checkOwnerPermissions = (bool)($params['checkOwnerPermissions'] ?? false);
+		unset($params['checkOwnerPermissions']);
+
+		if ($checkOwnerPermissions)
+		{
+			$params['filter'] = $this->applyOwnerPermissionsFilter(
+				isset($params['filter']) && is_array($params['filter']) ? $params['filter'] : []
+			);
+		}
+
 		return AddressTable::getList($params);
 	}
 
-	public function getCount($filter): int
+	public function getCount($filter, array $options = []): int
 	{
+		if ($options['checkOwnerPermissions'] ?? false)
+		{
+			$filter = $this->applyOwnerPermissionsFilter(is_array($filter) ? $filter : []);
+		}
+
 		return AddressTable::getCount($filter);
+	}
+
+	private function applyOwnerPermissionsFilter(array $filter): array
+	{
+		$restrictionFilter = (new Security\OwnerEntityListRestriction(
+			Service\Container::getInstance()->getUserPermissions()
+		))->buildFilter(
+			[CCrmOwnerType::Lead, CCrmOwnerType::Contact, CCrmOwnerType::Company],
+			'ANCHOR_TYPE_ID',
+			'ANCHOR_ID'
+		);
+
+		if ($restrictionFilter === null)
+		{
+			return $filter;
+		}
+
+		// combine via AND as a nested subfilter to avoid key conflicts with the existing filter
+		return empty($filter) ? $restrictionFilter : [$filter, $restrictionFilter];
 	}
 
 	/** @deprecated Use method of EntityAddressType */
@@ -2231,10 +2264,10 @@ class EntityAddress
 			{
 				$r = EntityRequisite::getOwnerEntityById($entityID);
 				$entityTypeID = intval($r['ENTITY_TYPE_ID']);
+				$entityID = intval($r['ENTITY_ID']);
 			}
 
-			$entityType = CCrmOwnerType::ResolveName($entityTypeID);
-			return \CCrmAuthorizationHelper::CheckCreatePermission($entityType);
+			return Security\EntityAuthorization::checkUpdatePermission($entityTypeID, $entityID);
 		}
 
 		return false;

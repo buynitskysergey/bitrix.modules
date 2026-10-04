@@ -4,6 +4,8 @@ namespace Bitrix\Crm\Copilot\CallAssessment\EntitySelector;
 
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
+use Bitrix\Crm\Copilot\CallAssessment\CriteriaLoader;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Objectify\Collection;
 use Bitrix\Main\ORM\Objectify\EntityObject;
@@ -159,15 +161,60 @@ final class CallScriptProvider extends BaseProvider
 	 */
 	private function createItemsByCollection(Collection $collection): array
 	{
-		$items = [];
+		$callAssessmentItems = [];
 
 		/** @var EntityObject $callAssessmentEntity */
 		foreach ($collection as $callAssessmentEntity)
 		{
-			$callAssessmentItem = CallAssessmentItem::createFromEntity($callAssessmentEntity);
+			$callAssessmentItems[] = CallAssessmentItem::createFromEntity($callAssessmentEntity);
+		}
+
+		$this->attachCriteria($callAssessmentItems);
+
+		$items = [];
+		foreach ($callAssessmentItems as $callAssessmentItem)
+		{
 			$items[] = (new ItemAdapter($callAssessmentItem))->addTab(self::ENTITY_ID);
 		}
 
 		return $items;
+	}
+
+	/**
+	 * @param CallAssessmentItem[] $callAssessmentItems
+	 */
+	private function attachCriteria(array $callAssessmentItems): void
+	{
+		if (!AIManager::isCallScoringV2Enabled() || empty($callAssessmentItems))
+		{
+			return;
+		}
+
+		$ids = [];
+		foreach ($callAssessmentItems as $item)
+		{
+			$id = $item->getId();
+			if ($id !== null)
+			{
+				$ids[] = $id;
+			}
+		}
+
+		if (empty($ids))
+		{
+			return;
+		}
+
+		$grouped = (new CriteriaLoader())->loadForAssessments($ids);
+		foreach ($callAssessmentItems as $item)
+		{
+			$id = $item->getId();
+			if ($id === null)
+			{
+				continue;
+			}
+
+			$item->setCriteria($grouped[$id] ?? []);
+		}
 	}
 }

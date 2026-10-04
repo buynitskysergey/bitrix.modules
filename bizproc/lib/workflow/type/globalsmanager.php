@@ -17,10 +17,10 @@ abstract class GlobalsManager
 
 	abstract public static function getObjectNameForExpressions(): string;
 
-	public static function getAll(array $parameterDocumentType = []): array
+	public static function getAll(?array $parameterDocumentType = []): array
 	{
 		// TODO: if the user is an admin then show all globals ?
-		return static::getAllAvailable($parameterDocumentType);
+		return static::getAllAvailable($parameterDocumentType ?? []);
 	}
 
 	protected static function getAllAvailable(array $parameterDocumentType = []): array

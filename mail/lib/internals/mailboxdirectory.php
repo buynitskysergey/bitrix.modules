@@ -124,6 +124,10 @@ class MailboxDirectoryTable extends DataManager
 			'SYNC_LOCK'     => [
 				'data_type' => 'integer',
 			],
+			'GENERATION_ID' => [
+				'data_type' => 'integer',
+				'default_value' => 0,
+			],
 			new Entity\BooleanField('IS_DATE_CACHED'),
 			new Entity\DatetimeField('INTERNAL_START_DATE'),
 		];

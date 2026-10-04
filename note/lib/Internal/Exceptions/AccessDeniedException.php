@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Internal\Exceptions;
 
-final class AccessDeniedException extends \RuntimeException
+use Bitrix\Note\Public\Exceptions\ObjectUnavailableInterface;
+
+final class AccessDeniedException extends \RuntimeException implements ObjectUnavailableInterface
 {
 }

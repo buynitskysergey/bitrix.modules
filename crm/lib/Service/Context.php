@@ -49,6 +49,16 @@ class Context
 		return $this->getCurrentUserId();
 	}
 
+	/**
+	 * Returns the explicitly set user id without falling back to the ambient
+	 * current user. Author resolution must rely on this value: the ambient
+	 * user of the hit is not necessarily the actor of the change.
+	 */
+	public function getExplicitUserId(): ?int
+	{
+		return $this->userId === null ? null : (int)$this->userId;
+	}
+
 	public function setScope(string $scope): self
 	{
 		$this->scope = $scope;
@@ -64,6 +74,21 @@ class Context
 		}
 
 		return static::SCOPE_MANUAL;
+	}
+
+	/**
+	 * In background (SCOPE_TASK), automation (SCOPE_AUTOMATION) and AI
+	 * (SCOPE_AI) scopes the ambient current user is the runner or the
+	 * triggering session, not necessarily the actor of the change, so author
+	 * resolution must not trust it there.
+	 */
+	public function isNonInteractiveScope(): bool
+	{
+		return in_array(
+			$this->getScope(),
+			[static::SCOPE_TASK, static::SCOPE_AUTOMATION, static::SCOPE_AI],
+			true
+		);
 	}
 
 	protected function getCurrentUserId(): int
@@ -128,7 +153,9 @@ class Context
 	{
 		if (is_array($analytics))
 		{
-			$this->analytics->setFromArray($analytics);
+			$clonedAnalytics = clone $this->analytics;
+			$clonedAnalytics->setFromArray($analytics);
+			$this->analytics = $clonedAnalytics;
 		}
 		else
 		{

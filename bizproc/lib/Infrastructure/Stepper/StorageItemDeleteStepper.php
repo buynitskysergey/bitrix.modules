@@ -43,12 +43,21 @@ class StorageItemDeleteStepper extends Main\Update\Stepper
 
 		$provider = new StorageItemProvider($storageTypeId);
 
-		$ids = $provider->getItems([
-			'filter' => $filter,
-			'select' => ['ID'],
-			'order' => ['ID' => 'ASC'],
-			'limit' => self::STEP_ROWS_LIMIT,
-		])?->getEntityIds();
+		try
+		{
+			$ids = $provider->getItems([
+				'filter' => $filter,
+				'select' => ['ID'],
+				'order' => ['CREATED_TIME' => 'ASC', 'ID' => 'ASC'],
+				'limit' => self::STEP_ROWS_LIMIT,
+			])?->getEntityIds();
+		}
+		catch (\Throwable $e)
+		{
+			$this->notifyWorkflow($workflowId, $activityName);
+
+			return self::FINISH_EXECUTION;
+		}
 
 		if (empty($ids))
 		{
@@ -78,7 +87,13 @@ class StorageItemDeleteStepper extends Main\Update\Stepper
 	{
 		if ($workflowId && $activityName)
 		{
-			\CBPSchedulerService::retrySendEventToWorkflow($workflowId, $activityName);
+			try
+			{
+				\CBPSchedulerService::retrySendEventToWorkflow($workflowId, $activityName);
+			}
+			catch (\Throwable $e)
+			{
+			}
 		}
 	}
 
@@ -86,10 +101,30 @@ class StorageItemDeleteStepper extends Main\Update\Stepper
 		int $storageTypeId,
 		array $filter = [],
 		string $workflowId = '',
-		string $activityName = ''
+		string $activityName = '',
 	): void
 	{
 		$filterJson = Json::encode($filter);
 		static::bind(0, [$storageTypeId, $filterJson, $workflowId, $activityName]);
+	}
+
+	public static function hasAgentsForStorage(int $storageTypeId): bool
+	{
+		$prefix = static::class . '::execAgent(' . $storageTypeId . ',';
+
+		$iterator = \CAgent::GetList([], [
+			'MODULE_ID' => static::$moduleId,
+			'ACTIVE' => 'Y',
+			'NAME' => $prefix . '%',
+		]);
+		while ($agent = $iterator->Fetch())
+		{
+			if (str_starts_with((string)($agent['NAME'] ?? ''), $prefix))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 }

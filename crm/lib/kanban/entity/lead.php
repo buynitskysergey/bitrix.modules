@@ -261,8 +261,26 @@ class Lead extends Entity
 	public function getPopupFields(string $viewType): array
 	{
 		$fields = parent::getPopupFields($viewType);
+
 		foreach ($fields as $i => $field)
 		{
+			if (
+				$viewType === static::VIEW_TYPE_EDIT
+				&& in_array(
+					$field['NAME'],
+					[
+						Item::FIELD_NAME_MOVED_BY,
+						'MOVED_BY_ID',
+						Item::FIELD_NAME_MOVED_TIME,
+					],
+					true
+				)
+			)
+			{
+				unset($fields[$i]);
+				continue;
+			}
+
 			if (mb_strpos($field['NAME'], 'ACTIVITY_FASTSEARCH_') === 0)
 			{
 				unset($fields[$i]);

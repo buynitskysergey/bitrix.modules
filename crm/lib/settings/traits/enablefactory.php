@@ -2,23 +2,12 @@
 
 namespace Bitrix\Crm\Settings\Traits;
 
-use Bitrix\Crm\Settings\BooleanSetting;
-
 trait EnableFactory
 {
-	/** @var BooleanSetting */
-	private $isFactoryEnabled;
-
-	private function initIsFactoryEnabledSetting(int $entityTypeId, bool $defaultValue = true): void
-	{
-		$entityTypeName = mb_strtolower(\CCrmOwnerType::ResolveName($entityTypeId));
-
-		$this->isFactoryEnabled = new BooleanSetting("{$entityTypeName}_enable_factory", $defaultValue);
-	}
-
 	/**
 	 * Return true if new interface and api through Service\Factory is used to process this entity type.
 	 *
+	 * @deprecated New API is always enabled; kept as a compatibility shim for portal customizations.
 	 * @return bool
 	 */
 	public function isFactoryEnabled(): bool
@@ -29,6 +18,7 @@ trait EnableFactory
 	/**
 	 * Set state of isFactoryEnabled setting.
 	 *
+	 * @deprecated New API is always enabled; toggling is no longer supported. Kept as a compatibility shim.
 	 * @param bool $isEnabled
 	 */
 	public function setFactoryEnabled(bool $isEnabled): void

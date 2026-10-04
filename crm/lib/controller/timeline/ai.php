@@ -2,9 +2,14 @@
 
 namespace Bitrix\Crm\Controller\Timeline;
 
+use Bitrix\Bizproc\Starter\Dto\ContextDto;
+use Bitrix\Bizproc\Starter\Enum\Scenario as BizprocScenario;
+use Bitrix\Bizproc\Starter\Starter;
+use Bitrix\Crm\Activity\Mail\CopilotThreadCollector;
+use Bitrix\Crm\Activity\Mail\Message;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Badge\Badge;
-use Bitrix\Crm\Category\EditorHelper;
 use Bitrix\Crm\Controller\Copilot\CallQualityAssessment;
 use Bitrix\Crm\Controller\ErrorCode;
 use Bitrix\Crm\Controller\Timeline\Trait\CopilotResponseLoader;
@@ -16,17 +21,22 @@ use Bitrix\Crm\Copilot\CallAssessment\PromptsChecker;
 use Bitrix\Crm\Copilot\Pipeline\PipelineExecutor;
 use Bitrix\Crm\Copilot\Pipeline\StepContext;
 use Bitrix\Crm\Copilot\PullManager;
+use Bitrix\Crm\Entity\EntityEditorOptionBuilder;
 use Bitrix\Crm\Entity\FieldDataProvider;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Dto\FillItemFieldsFromCallTranscriptionPayload;
 use Bitrix\Crm\Integration\AI\Dto\MultipleFieldFillPayload;
-use Bitrix\Crm\Integration\AI\Dto\Scoring\ScoreCallPayload;
+use Bitrix\Crm\Integration\AI\Dto\Scoring\ScoreCallV2Payload;
 use Bitrix\Crm\Integration\AI\Dto\SingleFieldFillPayload;
 use Bitrix\Crm\Integration\AI\ErrorCode as AIErrorCode;
 use Bitrix\Crm\Integration\AI\Feedback;
+use Bitrix\Crm\Integration\AI\Field\MultipleValueMerger;
 use Bitrix\Crm\Integration\AI\JobRepository;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
+use Bitrix\Crm\Integration\AI\Operation\SelectCallScoreScript;
+use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 use Bitrix\Crm\Integration\AI\Result;
 use Bitrix\Crm\Integration\StorageManager;
 use Bitrix\Crm\ItemIdentifier;
@@ -42,8 +52,11 @@ use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Error;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventResult;
+use Bitrix\Main\Loader;
 use Bitrix\Main\NotSupportedException;
+use Bitrix\Main\Text\HtmlFilter;
 use Bitrix\Main\UserField\Dispatcher;
+use Bitrix\Main\Web\Json;
 use CCrmActivity;
 use CCrmActivityDirection;
 use CCrmOwnerType;
@@ -55,8 +68,8 @@ class AI extends Activity
 
 	private const OPTION_NAME_NUMBER_OF_MANUAL_STARTS = 'timeline-copilot-button-in-call-manual-starts-v2';
 
+	protected JobRepository $jobRepository;
 	private UserPermissions $permissions;
-	private JobRepository $jobRepository;
 	private Dispatcher $dispatcher;
 
 	protected function init(): void
@@ -150,7 +163,16 @@ class AI extends Activity
 
 		if (
 			AIManager::isAiCallProcessingEnabled()
-			&& in_array($ownerTypeId, AIManager::SUPPORTED_ENTITY_TYPE_IDS, true)
+			&& (
+				// Non-fill scenarios (transcribe/summarize/scoring/analyze/full) stay limited to the
+				// classic Deal/Lead types; the extended Factory-based target set is allowed only for
+				// the fill-fields scenario. See fill-fields-any-entity.
+				in_array($ownerTypeId, AIManager::SUPPORTED_ENTITY_TYPE_IDS, true)
+				|| (
+					$scenario === Scenario::FILL_FIELDS_SCENARIO
+					&& AIManager::isEntityTypeSupported($ownerTypeId)
+				)
+			)
 		)
 		{
 			$activityProvider = $activity['PROVIDER_ID'] ?? null;
@@ -185,7 +207,7 @@ class AI extends Activity
 				return null;
 			}
 
-			if ($scenario === Scenario::CALL_SCORING_SCENARIO)
+			if (Scenario::isCallScoringScenario($scenario))
 			{
 				$checkerResult = CallAssessmentItemChecker::getInstance()
 					->setItem(ItemFactory::getByActivityId($activityId))
@@ -197,16 +219,72 @@ class AI extends Activity
 
 					return null;
 				}
+
+				if (AIManager::isCallScoringV2Enabled())
+				{
+					// Idempotent manual launch: if a scoring pipeline is already running for this
+					// activity, a repeated click must not relaunch steps or start a second workflow.
+					// Return a soft success so the client keeps showing the in-progress state.
+					if ($this->isCallScoringV2PipelineInProgress($activityId))
+					{
+						return [
+							'numberOfManualStarts' => $this->processNumberOfManualStarts(),
+						];
+					}
+
+					$preflightErrors = $this->preflightCallScoringV2Limits($activityId);
+					if ($preflightErrors !== null)
+					{
+						$this->addErrors($preflightErrors);
+
+						return null;
+					}
+
+					$triggerResult = $this->fireCallAssessmentTrigger($activityId);
+					if ($triggerResult === null || !$triggerResult->isSuccess())
+					{
+						$this->addErrors($triggerResult?->getErrors() ?? []);
+						$this->addError(AIErrorCode::getAIEngineNotFoundError());
+
+						return null;
+					}
+
+					return [
+						'numberOfManualStarts' => $this->processNumberOfManualStarts(),
+					];
+				}
 			}
 
 			$executor = ServiceLocator::getInstance()->get(PipelineExecutor::class);
+			$anchorActivityId = $activityId;
+			if ($activityProvider === Email::getId())
+			{
+				$threadId = (int)($activity['THREAD_ID'] ?? 0);
+				if ($threadId > 0)
+				{
+					$rootRow = CopilotThreadCollector::findEntityLocalRoot($threadId, $ownerTypeId, $ownerId);
+					if ($rootRow !== null)
+					{
+						$anchorActivityId = (int)$rootRow['ID'];
+					}
+				}
+			}
+
+			// Manual launch fills exactly the clicked entity (ownerTypeId/ownerId) from the timeline
+			// context; the pipeline must not re-resolve the target to a priority Deal/Lead (ALG-01).
 			$context = new StepContext(
-				activityId: $activityId,
+				activityId: $anchorActivityId,
 				userId: Container::getInstance()->getContext()->getUserId(),
 				scenarioName: $scenario,
 				isManualLaunch: true,
+				manualTarget: ItemIdentifier::createByParams($ownerTypeId, $ownerId),
 			);
-			$result = $executor->startOrResume($context->withActivityProvider($activityProvider));
+			$result = $executor->startOrResume(
+				$context
+					->withActivityProvider($activityProvider)
+					->withExtra('targetOwnerTypeId', $ownerTypeId)
+					->withExtra('targetOwnerId', $ownerId)
+			);
 			if (!$result?->isSuccess())
 			{
 				$errors = $result?->getErrors();
@@ -287,10 +365,33 @@ class AI extends Activity
 			return null;
 		}
 
-		$summary = $this->loadSummary($activityId, $jobId);
+		$resolvedActivityId = $activityId;
+		$isEmail = $activity['PROVIDER_ID'] === Email::getId();
+		if ($isEmail)
+		{
+			$threadId = (int)($activity['THREAD_ID'] ?? 0);
+			if ($threadId > 0)
+			{
+				$rootRow = CopilotThreadCollector::findEntityLocalRoot($threadId, $ownerTypeId, $ownerId);
+				if ($rootRow !== null)
+				{
+					$resolvedActivityId = (int)$rootRow['ID'];
+				}
+			}
+		}
+
+		$summary = $isEmail
+			? $this->loadSummary($resolvedActivityId, $jobId, $ownerTypeId, $ownerId)
+			: $this->loadSummary($resolvedActivityId, $jobId)
+		;
 		if (!$summary)
 		{
 			return null;
+		}
+
+		if ($isEmail && isset($summary['summary']))
+		{
+			$summary['summary'] = HtmlFilter::encode($summary['summary']);
 		}
 
 		if ($activity['PROVIDER_ID'] === OpenLine::getId())
@@ -303,6 +404,30 @@ class AI extends Activity
 				'openline' => [
 					'name' => OpenLine::getChatName($userCode),
 					'dialogId' => $communications[$activityId]['VALUE'] ?? null,
+				],
+			];
+		}
+		elseif ($activity['PROVIDER_ID'] === Email::getId())
+		{
+			$senderName = '';
+			$rootActivity = $resolvedActivityId === $activityId
+				? $activity
+				: Container::getInstance()->getActivityBroker()->getById($resolvedActivityId);
+			if ($rootActivity)
+			{
+				$from = $rootActivity['SETTINGS']['EMAIL_META']['from'] ?? null;
+				if ($from)
+				{
+					$senderName = (new \Bitrix\Main\Mail\Address($from))->getName();
+				}
+			}
+
+			$result = [
+				'aiJobResult' => $summary,
+				'emailThread' => [
+					'activityId' => $resolvedActivityId,
+					'subject' => Message::getSubjectById($resolvedActivityId),
+					'senderName' => $senderName,
 				],
 			];
 		}
@@ -572,8 +697,9 @@ class AI extends Activity
 		}
 
 		//todo move to operation?
+		$categoryId = $item->isCategoriesSupported() ? $item->getCategoryId() : null;
 		$whitelist = (new FieldDataProvider($factory->getEntityTypeId(), Context::SCOPE_AI))
-			->getDisplayedInEntityEditorFieldData($this->getCurrentUser()?->getId())
+			->getDisplayedInEntityEditorFieldData($this->getCurrentUser()?->getId(), $categoryId)
 		;
 
 		$payload = $result->getPayload();
@@ -591,6 +717,7 @@ class AI extends Activity
 			}
 		}
 
+		$multipleValueMerger = new MultipleValueMerger();
 		foreach ($payload?->multipleFields as $multipleField)
 		{
 			if (
@@ -600,12 +727,29 @@ class AI extends Activity
 				&& $item->hasField($multipleField->name)
 			)
 			{
-				$previousValue = $item->get($multipleField->name) ?? [];
-				if (is_array($previousValue))
+				$field = $factory->getFieldsCollection()->getField($multipleField->name);
+				if ($field === null)
 				{
-					$item->set($multipleField->name, array_merge($previousValue, $multipleField->aiValues));
-					$multipleField->isApplied = true;
+					continue;
 				}
+
+				$previousValue = $item->get($multipleField->name);
+				$previousValues = $multipleValueMerger->merge(
+					$field,
+					$previousValue,
+					[],
+				);
+				$newValue = $multipleValueMerger->merge(
+					$field,
+					$previousValue,
+					$multipleField->aiValues,
+				);
+				if (count($newValue) > count($previousValues))
+				{
+					$item->set($multipleField->name, $newValue);
+				}
+
+				$multipleField->isApplied = true;
 			}
 		}
 
@@ -736,7 +880,129 @@ class AI extends Activity
 		return $newNumberOfManualStarts;
 	}
 
-	private function removeEntityBadgeByOwner(ItemIdentifier $identifier): void
+	/**
+	 * Detects whether a call scoring V2 pipeline is already in flight for the activity:
+	 * any pending transcription, script selection or scoring job means a run is in progress
+	 * (started by an earlier click / workflow), so a new manual launch must be a no-op.
+	 */
+	private function isCallScoringV2PipelineInProgress(int $activityId): bool
+	{
+		$pipelineTypeIds = [
+			TranscribeCallRecording::TYPE_ID,
+			SelectCallScoreScript::TYPE_ID,
+			ScoreCallV2::TYPE_ID,
+		];
+
+		foreach ($pipelineTypeIds as $typeId)
+		{
+			if ($this->jobRepository->getPendingJobByActivity($activityId, $typeId) !== null)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Synchronously launches the SelectCallScoreScript step so that AI request-limit errors
+	 * (which carry sliderCode in customData) reach the client and trigger the limit slider —
+	 * the same UX as FILL_FIELDS_SCENARIO has via PipelineExecutor. The bizproc activity
+	 * CBPCrmGetCallAssessmentActivity reuses the pending job we create here.
+	 *
+	 * Returns the errors to surface, or null if no pre-flight action was needed / it succeeded.
+	 */
+	private function preflightCallScoringV2Limits(int $activityId): ?array
+	{
+		$transcriptionResult = $this->jobRepository->getTranscribeCallRecordingResultByActivity($activityId);
+
+		if ($transcriptionResult === null)
+		{
+			$userId = Container::getInstance()->getContext()->getUserId();
+			$launchResult = AIManager::launchCallRecordingTranscription(
+				$activityId,
+				Scenario::resolveCallScoringScenarioName(),
+				$userId,
+				isManualLaunch: true,
+			);
+
+			return $launchResult->isSuccess()
+				? null
+				: $this->filterOutDuplicateJobErrors($launchResult->getErrors())
+			;
+		}
+
+		if (!$transcriptionResult->isSuccess())
+		{
+			return null;
+		}
+
+		if ($this->jobRepository->getPendingJobByActivity($activityId, SelectCallScoreScript::TYPE_ID) !== null)
+		{
+			return null;
+		}
+
+		$transcription = (string)($transcriptionResult->getPayload()?->transcription ?? '');
+		if ($transcription === '')
+		{
+			return null;
+		}
+
+		$launchResult = AIManager::launchSelectCallScoringScript(
+			$activityId,
+			$transcription,
+			Container::getInstance()->getContext()->getUserId(),
+			isManualLaunch: true,
+		);
+
+		return $launchResult->isSuccess()
+			? null
+			: $this->filterOutDuplicateJobErrors($launchResult->getErrors())
+		;
+	}
+
+	/**
+	 * A duplicate-job error means the step is already running or already finished — a normal state for
+	 * a repeated click, not a launch failure. It must not abort the pre-flight: the caller returns
+	 * before firing the call assessment trigger, so the button would stay a no-op for as long as the
+	 * finished job row exists. The workflow activity re-runs the step on its own
+	 * (CBPCrmGetCallAssessmentActivity::launchSelectScript drops the previous job first).
+	 */
+	private function filterOutDuplicateJobErrors(array $errors): ?array
+	{
+		$blockingErrors = array_values(
+			array_filter(
+				$errors,
+				static fn(Error $error) => $error->getCode() !== AIErrorCode::JOB_ALREADY_EXISTS,
+			),
+		);
+
+		return $blockingErrors ?: null;
+	}
+
+	/**
+	 * Manual scenario launch from the timeline does not pick a specific assessment script —
+	 * we pass AssessmentSettingsId=0 and let the bizproc activity (SelectCallScoreScript) auto-select.
+	 */
+	private function fireCallAssessmentTrigger(int $activityId): ?\Bitrix\Main\Result
+	{
+		if (!Loader::includeModule('bizproc'))
+		{
+			return null;
+		}
+
+		return Starter::getByScenario(BizprocScenario::onEvent)
+			->setContext(new ContextDto('crm'))
+			->addEvent('CrmCallAssessmentTrigger', [], [
+				'ActivityId' => $activityId,
+				'AssessmentSettingsId' => 0,
+				'UserId' => Container::getInstance()->getContext()->getUserId(),
+			])
+			->start()
+		;
+	}
+
+	protected function removeEntityBadgeByOwner(ItemIdentifier $identifier): void
 	{
 		$currentUserId = (int)$this->getCurrentUser()?->getId();
 		$assignedById = Container::getInstance()
@@ -751,15 +1017,12 @@ class AI extends Activity
 
 	private function makeEditorId(int $entityTypeId, ?int $categoryId = null): string
 	{
-		$sourceFormId = match ($entityTypeId)
-		{
-			CCrmOwnerType::Lead => 'lead_details',
-			CCrmOwnerType::Deal => 'deal_details',
-			default => throw new ArgumentException('Unknown entity type'),
-		};
-
-		return (new EditorHelper($entityTypeId))
-			->getEditorConfigId($categoryId, $sourceFormId, false)
+		// Universal card-editor config id for any Factory-based entity, including smart processes.
+		// For Deal/Lead this yields the same ids as before ('deal_details'/'lead_details',
+		// with the '_c_{categoryId}' suffix for categorized deals) — full parity.
+		return (new EntityEditorOptionBuilder($entityTypeId))
+			->setCategoryId($categoryId)
+			->build()
 		;
 	}
 
@@ -771,7 +1034,7 @@ class AI extends Activity
 			return null;
 		}
 
-		$elementIds = unserialize($activity['STORAGE_ELEMENT_IDS'], ['allowed_classes' => false]);
+		$elementIds = unserialize((string)($activity['STORAGE_ELEMENT_IDS'] ?? ''), ['allowed_classes' => false]);
 		if (
 			!is_array($elementIds)
 			|| empty($elementIds)
@@ -865,10 +1128,21 @@ class AI extends Activity
 			return;
 		}
 
-		/** @var ScoreCallPayload $payload */
+		/** @var ScoreCallV2Payload $payload */
 		$payload = $callScoringResult->getPayload();
 		$data['callQuality']['RECOMMENDATIONS'] = $payload?->recommendations;
-		$data['callQuality']['SUMMARY'] = $payload?->overallSummary;
+
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			$data['callQuality']['SUMMARY'] = empty($payload?->criteriaScores) ? null : $payload->criteriaScores;
+		}
+		else
+		{
+			$data['callQuality']['SUMMARY'] = !empty($payload?->criteriaScores)
+				? Json::encode($payload->criteriaScores)
+				: null
+			;
+		}
 
 		if (empty($data['callQuality']['RECOMMENDATIONS']))
 		{
@@ -887,10 +1161,12 @@ class AI extends Activity
 	): array
 	{
 		$json = [];
+		$multipleValueMerger = new MultipleValueMerger();
 
 		//todo move to operation?
+		$categoryId = $item->isCategoriesSupported() ? $item->getCategoryId() : null;
 		$whitelist = (new FieldDataProvider($factory->getEntityTypeId(), Context::SCOPE_AI))
-			->getDisplayedInEntityEditorFieldData($this->getCurrentUser()?->getId())
+			->getDisplayedInEntityEditorFieldData($this->getCurrentUser()?->getId(), $categoryId)
 		;
 
 		foreach (array_merge($payload->singleFields, $payload->multipleFields) as $dtoField)
@@ -914,13 +1190,16 @@ class AI extends Activity
 			}
 			elseif ($dtoField instanceof MultipleFieldFillPayload)
 			{
-				if (is_array($item->get($dtoField->name)))
+				$currentValue = $item->get($dtoField->name);
+				$currentValues = $multipleValueMerger->merge($field, $currentValue, []);
+				$newValue = $multipleValueMerger->merge(
+					$field,
+					$currentValue,
+					$dtoField->aiValues,
+				);
+				if (count($newValue) === count($currentValues))
 				{
-					$newValue = array_merge($dtoField->aiValues, $item->get($dtoField->name));
-				}
-				else
-				{
-					$newValue = $dtoField->aiValues;
+					continue;
 				}
 			}
 			else

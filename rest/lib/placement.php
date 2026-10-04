@@ -311,6 +311,105 @@ class PlacementTable extends Main\Entity\DataManager
 		return array_values($placementHandlers);
 	}
 
+	public static function getAccessibleHandlerIds($placement, ?int $userId = null): array
+	{
+		$userId ??= (int)(Internal\Entity\CurrentUser::getInstance()->getId() ?? self::DEFAULT_USER_ID_VALUE);
+
+		$cacheManager = Main\Application::getInstance()->getManagedCache();
+		$cacheId = static::getAccessibleHandlerCacheId($placement, $userId);
+
+		$candidates = [];
+		if ($cacheManager->read(static::CACHE_TTL, $cacheId, static::CACHE_DIR))
+		{
+			$candidates = $cacheManager->get($cacheId);
+		}
+		else
+		{
+			$handlersQueryResult = static::getHandlers($placement, $userId);
+			while ($handler = $handlersQueryResult->fetch())
+			{
+				$candidates[] = [
+					'ID' => (int)$handler['ID'],
+					'APP_ID' => $handler['APP_ID'],
+					'INSTALLED' => $handler['INSTALLED'],
+					'APP_ACCESS' => $handler['APP_ACCESS'],
+				];
+			}
+
+			$cacheManager->set($cacheId, $candidates);
+		}
+
+		$ids = [];
+		if (empty($candidates))
+		{
+			return $ids;
+		}
+
+		$isUserFieldPlacement = ($placement === Api\UserFieldType::PLACEMENT_UF_TYPE);
+		$userAccessCodes = null;
+		$isAdmin = null;
+
+		foreach ($candidates as $candidate)
+		{
+			if ($candidate['INSTALLED'] !== AppTable::INSTALLED)
+			{
+				continue;
+			}
+
+			if (!$isUserFieldPlacement)
+			{
+				$appAccess = (string)($candidate['APP_ACCESS'] ?? '');
+				if ($appAccess !== '')
+				{
+					$userAccessCodes ??= static::getUserAccessCodes($userId);
+					$isAdmin ??= CRestUtil::isAdmin($userId);
+
+					if (!static::isAccessGrantedByCodes($appAccess, $userAccessCodes, $isAdmin))
+					{
+						continue;
+					}
+				}
+			}
+
+			$ids[] = (int)$candidate['ID'];
+		}
+
+		return $ids;
+	}
+
+	/**
+	 * Access codes of the given user, with the same semantics as \CUser::GetAccessCodes().
+	 */
+	private static function getUserAccessCodes(int $userId): array
+	{
+		if ($userId <= 0)
+		{
+			return ['G2'];
+		}
+
+		$codes = \CAccess::GetUserCodesArray($userId);
+		$codes[] = 'AU';
+
+		return $codes;
+	}
+
+	private static function isAccessGrantedByCodes(string $appAccess, array $userAccessCodes, bool $isAdmin): bool
+	{
+		$rights = explode(',', $appAccess);
+
+		if (in_array('G2', $rights, true))
+		{
+			return true;
+		}
+
+		if (!empty(array_intersect($rights, $userAccessCodes)))
+		{
+			return true;
+		}
+
+		return $isAdmin;
+	}
+
 	/**
 	 * Return default placements title
 	 * @param int $placementId
@@ -441,6 +540,11 @@ class PlacementTable extends Main\Entity\DataManager
 	protected static function getPlacementCacheId($placement, int $userId): string
 	{
 		return 'rest_placement_list|' . $placement . '|' . LANGUAGE_ID . '|user_' . $userId;
+	}
+
+	protected static function getAccessibleHandlerCacheId($placement, int $userId): string
+	{
+		return 'rest_placement_access_ids|' . $placement . '|user_' . $userId;
 	}
 
 	protected static function checkUniq(Main\Entity\Event $event, $add = false)

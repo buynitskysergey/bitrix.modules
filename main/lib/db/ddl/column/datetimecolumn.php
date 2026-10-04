@@ -9,13 +9,13 @@ class DateTimeColumn extends AbstractColumn
 	private bool $currentTimestampAsDefault = false;
 	private bool $currentTimestampOnUpdate = false;
 
-	public function defaultCurrentTimestamp(): self
+	public function defaultCurrentTimestamp(): static
 	{
 		$this->currentTimestampAsDefault = true;
 		return $this;
 	}
 
-	public function currentTimestampOnUpdate(): self
+	public function currentTimestampOnUpdate(): static
 	{
 		$this->currentTimestampOnUpdate = true;
 		return $this;

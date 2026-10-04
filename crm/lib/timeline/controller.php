@@ -12,9 +12,6 @@ use Bitrix\Main\Type\DateTime;
 
 class Controller
 {
-	/** @var int|null */
-	protected static $defaultAuthorId;
-
 	/**
 	 * Get an instance of the controller
 	 *
@@ -153,26 +150,35 @@ class Controller
 
 	protected static function getDefaultAuthorId()
 	{
-		if (is_null(static::$defaultAuthorId))
-		{
-			$user = \CUser::GetList(
-				'ID',
-				'ASC',
-				['GROUPS_ID' => [1], 'ACTIVE' => 'Y'],
-				['FIELDS' => ['ID'], 'NAV_PARAMS' => ['nTopCount' => 1]]
-			)->fetch();
-
-			static::$defaultAuthorId = is_array($user) ? (int)$user['ID'] : 0;
-		}
-
-		return static::$defaultAuthorId;
+		return \Bitrix\Crm\Service\SystemUser::getDefaultAuthorId();
 	}
 
 	protected static function getCurrentOrDefaultAuthorId(): int
 	{
-		$currentUserId = Container::getInstance()->getContext()->getUserId();
+		$context = Container::getInstance()->getContext();
 
-		return ($currentUserId > 0) ? $currentUserId : (int)static::getDefaultAuthorId();
+		// 1. The explicitly set context user (delivered by the caller — an explicit
+		//    parameter or a local background context) wins.
+		// 2. Otherwise the ambient current user is trusted only for interactive
+		//    request scopes: in background, automation and AI scopes the current
+		//    user is the runner or the triggering session, not necessarily the
+		//    actor, so we skip it and use the system author.
+		$resolved = (int)($context->getExplicitUserId() ?? 0);
+		if ($resolved > 0)
+		{
+			return $resolved;
+		}
+
+		if (!$context->isNonInteractiveScope())
+		{
+			$currentUserId = $context->getUserId();
+			if ($currentUserId > 0)
+			{
+				return $currentUserId;
+			}
+		}
+
+		return (int)static::getDefaultAuthorId();
 	}
 
 	/**

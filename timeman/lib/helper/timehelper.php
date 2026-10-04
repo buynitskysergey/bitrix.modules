@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\Timeman\Helper;
 
+use Bitrix\Main\Config;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Type;
 
@@ -14,6 +15,13 @@ class TimeHelper
 	private $formattedOffsets = [];
 	/** @var array */
 	private $usersUtcOffsets = [];
+	/**
+	 * Request-scoped cache of the stable effective IANA time zone id per user.
+	 * The IANA id (unlike a date-specific offset) is stable, so it is safe to keep for the request.
+	 * Date-specific offsets are never cached: they are derived on demand via getOffsetAt().
+	 * @var array<int, string>
+	 */
+	private $effectiveTimeZoneIds = [];
 
 	/**
 	 * @return static
@@ -30,6 +38,288 @@ class TimeHelper
 	public function getServerUtcOffset()
 	{
 		return date('Z');
+	}
+
+	/**
+	 * Server-zone absolute UTC offset (seconds) at the given instant, date-aware (honours DST), replacing
+	 * the fixed-"now" date('Z') / date('Z') as a server anchor.
+	 *
+	 * Unlike getServerUtcOffset() this method accepts an explicit timestamp so callers that already know
+	 * the absolute event instant can derive the server-side offset for that exact moment without depending
+	 * on the current wall-clock. Extracted from the duplicates in timeman_user.php, timeman_report_full.php
+	 * and timeman.php so all three share a single implementation.
+	 *
+	 * @param int $timestamp Unix seconds (UTC)
+	 * @return int seconds, signed
+	 */
+	public function getServerOffsetAt(int $timestamp): int
+	{
+		$serverZone = new \DateTimeZone($this->getDefaultServerTimezoneName());
+
+		return (new \DateTime('@' . $timestamp))->setTimezone($serverZone)->getOffset();
+	}
+
+	/**
+	 * Resolves the effective IANA time zone id for the user (ALG-01).
+	 *
+	 * Source of truth is the IANA TIME_ZONE, never the deprecated TIME_ZONE_OFFSET:
+	 *  - if the time zone feature is disabled (OptionEnabled()/Enabled()) -> server default zone;
+	 *  - for the current user -> runtime TIME_ZONE, then browser-auto cookie;
+	 *  - for any other user -> ONLY persisted b_user.TIME_ZONE (no CTimeZone::GetOffset(other),
+	 *    whose deprecated branch falls back to TIME_ZONE_OFFSET);
+	 *  - fallback: portal main.default_time_zone, then server default.
+	 *
+	 * The resolved IANA id is stable, so it is cached per request. Date-specific offsets are not.
+	 *
+	 * @param int $userId
+	 * @return string
+	 */
+	public function resolveEffectiveTimeZoneId(int $userId): string
+	{
+		if (isset($this->effectiveTimeZoneIds[$userId]))
+		{
+			return $this->effectiveTimeZoneIds[$userId];
+		}
+
+		$timeZoneId = $this->calculateEffectiveTimeZoneId($userId);
+		$this->effectiveTimeZoneIds[$userId] = $timeZoneId;
+
+		return $timeZoneId;
+	}
+
+	/**
+	 * Same effective-IANA resolution as resolveEffectiveTimeZoneId() but for a persisted TIME_ZONE that
+	 * the caller already has in hand (e.g. loaded once via a grid query), so it performs NO per-user
+	 * b_user read. This avoids the getPersistedTimeZoneId() -> CUser::GetList() fan-out (N+1, Q-1) when a
+	 * collection of "other" users must be resolved. The result is seeded into the same request-scoped
+	 * cache, so subsequent resolveEffectiveTimeZoneId($userId) calls for those users hit the cache and
+	 * issue no extra queries.
+	 *
+	 * The fallback chain is identical to resolveEffectiveTimeZoneId(): feature-enabled -> the supplied
+	 * persisted zone -> portal default -> server default, with the same isValidIanaTimeZoneId() gate, so
+	 * for the same inputs both methods return the same zone. For the current user the runtime resolution
+	 * still takes precedence (the caller's persisted value may be stale vs the live runtime/cookie zone).
+	 *
+	 * @param int $userId
+	 * @param string $persistedTimeZoneId persisted b_user.TIME_ZONE already known to the caller
+	 * @return string
+	 */
+	public function resolveEffectiveTimeZoneIdFromPersisted(int $userId, string $persistedTimeZoneId): string
+	{
+		// Current-user check MUST precede the cache read: the grid or another caller may have seeded the
+		// cache with the persisted zone for a user who is also the current user. If we served that cached
+		// persisted value, the runtime/cookie priority documented in the docblock would be silently ignored.
+		// resolveEffectiveTimeZoneId() re-derives from the runtime source and re-seeds the cache correctly.
+		if ($userId === $this->getCurrentUserId())
+		{
+			return $this->resolveEffectiveTimeZoneId($userId);
+		}
+
+		if (isset($this->effectiveTimeZoneIds[$userId]))
+		{
+			return $this->effectiveTimeZoneIds[$userId];
+		}
+
+		$timeZoneId = $this->isTimeZoneFeatureEnabled()
+			? $this->resolvePersistedZoneWithFallback($persistedTimeZoneId)
+			: $this->getDefaultServerTimezoneName();
+		$this->effectiveTimeZoneIds[$userId] = $timeZoneId;
+
+		return $timeZoneId;
+	}
+
+	private function calculateEffectiveTimeZoneId(int $userId): string
+	{
+		if (!$this->isTimeZoneFeatureEnabled())
+		{
+			return $this->getDefaultServerTimezoneName();
+		}
+
+		if ($userId === $this->getCurrentUserId())
+		{
+			$timeZoneId = $this->getCurrentUserRuntimeTimeZoneId();
+		}
+		else
+		{
+			$timeZoneId = $this->getPersistedTimeZoneId($userId);
+		}
+
+		return $this->resolvePersistedZoneWithFallback($timeZoneId);
+	}
+
+	/**
+	 * Applies the shared portal-default -> server-default fallback (with the IANA validity gate) to an
+	 * already-resolved candidate zone id. Extracted so resolveEffectiveTimeZoneId() and
+	 * resolveEffectiveTimeZoneIdFromPersisted() stay byte-for-byte identical in their fallback behavior.
+	 */
+	private function resolvePersistedZoneWithFallback(string $timeZoneId): string
+	{
+		if ($timeZoneId === '' || !$this->isValidIanaTimeZoneId($timeZoneId))
+		{
+			$timeZoneId = $this->getPortalDefaultTimeZoneId();
+		}
+		if ($timeZoneId === '' || !$this->isValidIanaTimeZoneId($timeZoneId))
+		{
+			$timeZoneId = $this->getDefaultServerTimezoneName();
+		}
+
+		return $timeZoneId;
+	}
+
+	protected function isTimeZoneFeatureEnabled(): bool
+	{
+		return \CTimeZone::OptionEnabled() && \CTimeZone::Enabled();
+	}
+
+	protected function getPortalDefaultTimeZoneId(): string
+	{
+		return (string)Config\Option::get('main', 'default_time_zone', '');
+	}
+
+	/**
+	 * Real DateTimeZone built from the effective IANA id (NOT a synthetic '+HH:MM' zone).
+	 * This zone carries DST rules, so derived offsets are date-aware.
+	 *
+	 * @param int $userId
+	 * @return \DateTimeZone
+	 */
+	public function getUserDateTimeZone(int $userId): \DateTimeZone
+	{
+		return new \DateTimeZone($this->resolveEffectiveTimeZoneId($userId));
+	}
+
+	/**
+	 * Date-aware ABSOLUTE UTC offset of the user's zone at the given instant (ALG-02).
+	 *
+	 * @param int $userId
+	 * @param int $timestamp ABSOLUTE point in time = UTC Unix-seconds (e.g. RECORDED_*_TIMESTAMP),
+	 *                        NOT wall-time and NOT seconds-of-day. Callers holding a DateTime pass $dt->getTimestamp().
+	 * @return int absolute UTC offset in seconds (the same semantics as START_OFFSET/STOP_OFFSET)
+	 */
+	public function getOffsetAt(int $userId, int $timestamp): int
+	{
+		$dateTime = new \DateTime('@' . $timestamp);
+		$dateTime->setTimezone($this->getUserDateTimeZone($userId));
+
+		return $dateTime->getOffset();
+	}
+
+	/**
+	 * Inverse direction of getOffsetAt (ALG-02): builds an absolute UTC timestamp from the user's
+	 * wall-time on the event date, expressed in the user's real IANA zone.
+	 *
+	 * DST policy (resolved by the DateTime constructor in the real zone):
+	 *  - gap (spring-forward, the local time does not exist): forward-shift as-is;
+	 *  - fold (fall-back, the local time is ambiguous): deterministic PHP DateTime default
+	 *    (zone-dependent, NOT "always first occurrence"); pinned by a regression test.
+	 *
+	 * @param int $userId
+	 * @param string $date date of the event in 'Y-m-d' format
+	 * @param int $seconds wall-seconds from midnight of the event date
+	 * @return int absolute UTC timestamp
+	 */
+	public function buildTimestampFromWallTime(int $userId, string $date, int $seconds): int
+	{
+		$time = str_pad((string)$this->getHours($seconds), 2, '0', STR_PAD_LEFT)
+			. ':' . str_pad((string)$this->getMinutes($seconds), 2, '0', STR_PAD_LEFT)
+			. ':' . str_pad((string)$this->getSeconds($seconds), 2, '0', STR_PAD_LEFT);
+
+		$dateTime = new \DateTime($date . ' ' . $time, $this->getUserDateTimeZone($userId));
+
+		return $dateTime->getTimestamp();
+	}
+
+	/**
+	 * Reconstructs a historical DateTime "as it was recorded" from the absolute timestamp and the
+	 * stored snapshot offset. This is the only NEW legitimate caller of createTimezoneByOffset()
+	 * (some retained legacy methods still call it until they are migrated in P5): the snapshot offset
+	 * is a frozen historical fact, so a synthetic fixed-offset zone is correct here.
+	 *
+	 * @param int $timestamp absolute UTC Unix-seconds of the recorded instant
+	 * @param int $snapshotOffset absolute UTC offset stored at recording time (START_OFFSET/STOP_OFFSET)
+	 * @return \DateTime
+	 */
+	public function reconstructHistoricalDateTime(int $timestamp, int $snapshotOffset): \DateTime
+	{
+		$dateTime = new \DateTime('@' . $timestamp);
+		$dateTime->setTimezone($this->createTimezoneByOffset($snapshotOffset));
+
+		return $dateTime;
+	}
+
+	protected function getCurrentUserId(): int
+	{
+		global $USER;
+
+		return is_object($USER) ? (int)$USER->GetID() : 0;
+	}
+
+	protected function getCurrentUserRuntimeTimeZoneId(): string
+	{
+		global $USER;
+
+		if (!is_object($USER))
+		{
+			return '';
+		}
+
+		$timeZoneId = (string)$USER->GetParam('TIME_ZONE');
+		if ($timeZoneId === '' && \CTimeZone::IsAutoTimeZone($USER->GetParam('AUTO_TIME_ZONE')))
+		{
+			$cookie = \CTimeZone::getTzCookie();
+			if ($cookie !== null)
+			{
+				$timeZoneId = $cookie;
+			}
+		}
+
+		return $timeZoneId;
+	}
+
+	/**
+	 * Reads the persisted IANA TIME_ZONE of another user from b_user.
+	 * Deliberately does NOT call CTimeZone::GetOffset($otherUser): its deprecated branch falls back
+	 * to TIME_ZONE_OFFSET, which this contract must never return.
+	 */
+	protected function getPersistedTimeZoneId(int $userId): string
+	{
+		$user = \CUser::GetList(
+			'id',
+			'asc',
+			['ID_EQUAL_EXACT' => $userId],
+			['FIELDS' => ['TIME_ZONE']]
+		)->Fetch();
+
+		return is_array($user) ? (string)$user['TIME_ZONE'] : '';
+	}
+
+	/**
+	 * Accepts ONLY real IANA timezone identifiers (live timezone-aware resolution, ALG-01).
+	 *
+	 * `new \DateTimeZone($id)` is intentionally NOT used as the validator: PHP also accepts
+	 * fixed-offset strings ('+03:00', '-05:00', '+0300'), 'GMT+3' and legacy abbreviations
+	 * ('CEST', 'MSK'), none of which carry DST rules. Letting such a value through would break the
+	 * P1 invariant (live calculations must run through a real DST-aware zone, never a synthetic
+	 * '+HH:MM'). We therefore require an exact, case-sensitive match against the canonical IANA
+	 * list, ALL_WITH_BC so backward-compatible aliases (e.g. 'Europe/Kiev') are preserved.
+	 *
+	 * Synthetic fixed-offset zones remain legitimate ONLY for historical reconstruction
+	 * (see reconstructHistoricalDateTime()/createTimezoneByOffset()), never here.
+	 */
+	private function isValidIanaTimeZoneId(string $timeZoneId): bool
+	{
+		if ($timeZoneId === '')
+		{
+			return false;
+		}
+
+		static $ianaIds = null;
+		if ($ianaIds === null)
+		{
+			$ianaIds = array_flip(timezone_identifiers_list(\DateTimeZone::ALL_WITH_BC));
+		}
+
+		return isset($ianaIds[$timeZoneId]);
 	}
 
 	public function getTimeRegExp($ignoreAmPmMode = false)
@@ -50,6 +340,24 @@ class TimeHelper
 		}
 		return ($leadingHourZero ? str_pad($this->getHours($seconds), 2, 0, STR_PAD_LEFT) : $this->getHours($seconds))
 			   . ':' . str_pad($this->getMinutes($seconds), 2, 0, STR_PAD_LEFT);
+	}
+
+	/**
+	 * Single source of truth for a signed "+/-HH:MM" UTC-offset label.
+	 *
+	 * The numeric part is built from the ABSOLUTE offset and the sign is prepended exactly once (zero
+	 * carries no sign), so callers never end up with a double "--HH:MM" by combining a separate sign
+	 * helper with convertSecondsToHoursMinutes() - the latter already emits its own leading "-" for a
+	 * negative argument. Both the record report hint and RecordFormHelper's "(UTC ...)" label reuse this.
+	 *
+	 * @param int $offsetSeconds signed absolute UTC offset in seconds
+	 * @return string e.g. "+04:00", "-03:30", "00:00" for zero
+	 */
+	public function formatSignedOffset(int $offsetSeconds): string
+	{
+		$sign = $offsetSeconds === 0 ? '' : ($offsetSeconds > 0 ? '+' : '-');
+
+		return $sign . $this->convertSecondsToHoursMinutes(abs($offsetSeconds));
 	}
 
 	public function convertSecondsToHoursMinutesAmPm($seconds)
@@ -210,6 +518,11 @@ class TimeHelper
 		return $this->formattedOffsets[$offsetSeconds];
 	}
 
+	/**
+	 * Legacy absolute UTC offset "as of now".
+	 * @deprecated Use the date-aware getOffsetAt($userId, $timestamp) instead. Kept for historical
+	 *             compatibility with consumers not yet migrated (see P5).
+	 */
 	public function getUserUtcOffset($userId)
 	{
 		$userId = (int)$userId;
@@ -221,33 +534,24 @@ class TimeHelper
 		return $this->usersUtcOffsets[$userId];
 	}
 
+	/**
+	 * Legacy delta user-server offset "as of now".
+	 *
+	 * Kept for historical compatibility only; new calculations must use the date-aware
+	 * getOffsetAt()/getUserDateTimeZone() contract instead. The long-lived persistent CPHPCache
+	 * (~365 days) that made this value DST-incompatible has been removed: the value is now only
+	 * request-scoped (and can still be bulk-preloaded via setTimezoneOffsets()).
+	 *
+	 * @param int|null $userId
+	 * @return int
+	 */
 	public function getUserToServerOffset($userId = null)
 	{
 		$userId = ($userId === null ? -1 : (int) $userId);
 
-		$cacheTtl = (defined('BX_COMP_MANAGED_CACHE') ? 3153600 : 3600 * 24);
-		$cacheId = 'time_zone_'.$userId;
-		$cacheDir = '/timeman/timezone/'.substr(md5($userId), -2).'/'.$userId;
-
-		$cache = new \CPHPCache;
-		if ($cache->initCache($cacheTtl, $cacheId, $cacheDir))
+		if (!isset($this->timezoneOffsets[$userId]))
 		{
-			$this->timezoneOffsets[$userId] = $cache->getVars();
-		}
-		else
-		{
-			global $CACHE_MANAGER;
-
-			$cache->startDataCache();
-
-			$CACHE_MANAGER->startTagCache($cacheDir);
-
 			$this->timezoneOffsets[$userId] = (int) \CTimeZone::getOffset($userId, true);
-
-			$CACHE_MANAGER->registerTag('USER_NAME_'. $userId);
-			$CACHE_MANAGER->endTagCache();
-
-			$cache->endDataCache($this->timezoneOffsets[$userId]);
 		}
 
 		return $this->timezoneOffsets[$userId];
@@ -265,6 +569,12 @@ class TimeHelper
 		return $dateTime;
 	}
 
+	/**
+	 * Legacy synthetic '+HH:MM' zone built from the "as of now" offset (no DST rules).
+	 * @deprecated Use getUserDateTimeZone($userId) for a real DST-aware DateTimeZone(IANA).
+	 *             Synthetic zones are legitimate only for historical reconstruction
+	 *             (see reconstructHistoricalDateTime()).
+	 */
 	public function getUserTimezone($userId)
 	{
 		$userOffset = $this->getUserUtcOffset($userId);
@@ -340,8 +650,19 @@ class TimeHelper
 			$dateFormat = $format;
 		}
 
+		// Parse only the calendar date (time 00:00 is implied) and rebuild midnight of that
+		// date directly in the user's real IANA zone, so the offset is date-aware (DST-correct).
 		$ts = $this->buildTimestampByFormattedDateForServer($formattedDate, $dateFormat);
-		return $ts > 0 ? $ts - $this->getUserToServerOffset($userId) : null;
+		if ($ts <= 0)
+		{
+			return null;
+		}
+		// $ts is server-midnight produced by MakeTimeStamp()/mktime() in the SERVER zone, so the
+		// calendar date must be read back in that same zone (date()), NOT in UTC (gmdate()):
+		// on a server with a positive UTC offset gmdate() would roll the date back one day.
+		$date = date('Y-m-d', $ts);
+
+		return $this->buildTimestampFromWallTime((int)$userId, $date, 0);
 	}
 
 	public function buildTimestampByFormattedDateForServer($formattedDate, $dateFormat = false)
@@ -380,6 +701,13 @@ class TimeHelper
 		$dateTime->setTime($this->getHours($seconds), $this->getMinutes($seconds), $this->getSeconds($seconds));
 	}
 
+	/**
+	 * Builds a synthetic fixed-offset DateTimeZone ('+HH:MM'), which carries NO DST rules.
+	 * @internal The only NEW legitimate caller is historical reconstruction from a frozen snapshot
+	 *           offset (reconstructHistoricalDateTime()); some retained legacy methods still call it
+	 *           until they are migrated in P5. Do not use for live timezone-aware calculations in new
+	 *           code; use getUserDateTimeZone()/getOffsetAt() instead.
+	 */
 	public function createTimezoneByOffset($offsetSeconds)
 	{
 		$offsetSeconds = (int)$offsetSeconds;

@@ -4,7 +4,7 @@ namespace Bitrix\Crm\Activity\Mail;
 
 use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\ActivityTable;
-use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Security\PermissionToken;
 use Bitrix\Disk\File;
 use Bitrix\Main\Error;
 use Bitrix\Main\LoaderException;
@@ -13,6 +13,7 @@ use Bitrix\Mail\Helper\Dto\MailMessageChain;
 use Bitrix\Mail\Helper\Dto\MailMessage;
 use Bitrix\Main\ErrorCollection;
 use Bitrix\Main\NotImplementedException;
+use Bitrix\Main\Type\Date;
 use Bitrix\Mobile\UI;
 use Bitrix\UI\EntitySelector\ItemCollection;
 use Bitrix\UI\EntitySelector\Item;
@@ -23,12 +24,70 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 {
 	protected const PERMISSION_READ = 1;
 	protected const SUPPORTED_ACTIVITY_TYPE = 'CRM_EMAIL';
+	private const READ_ACCESS_NONE = 0;
+	private const READ_ACCESS_PROVIDER = 1;
+	private const READ_ACCESS_TOKEN = 2;
 
 	public ErrorCollection $errorCollection;
+	private ?string $permissionToken;
 
-	public function __construct()
+	public function __construct(?string $permissionToken = null)
 	{
 		$this->errorCollection = new ErrorCollection();
+		$this->permissionToken = $permissionToken ?: null;
+	}
+
+	private function canReadActivityByToken(int $activityId): bool
+	{
+		if ($this->permissionToken === null || $activityId <= 0)
+		{
+			return false;
+		}
+
+		return PermissionToken::canViewActivity(
+			$this->permissionToken,
+			$activityId,
+			\CCrmSecurityHelper::getCurrentUserId(),
+		);
+	}
+
+	private function hasReadPermission(array $activity): bool
+	{
+		$provider = \CCrmActivity::getActivityProvider($activity);
+
+		return $provider && $provider::checkReadPermission($activity, \CCrmSecurityHelper::getCurrentUserId());
+	}
+
+	private function resolveReadAccess(array $activity): int
+	{
+		if ($this->hasReadPermission($activity))
+		{
+			return self::READ_ACCESS_PROVIDER;
+		}
+
+		if ($this->canReadActivityByToken((int)($activity['ID'] ?? 0)))
+		{
+			return self::READ_ACCESS_TOKEN;
+		}
+
+		return self::READ_ACCESS_NONE;
+	}
+
+	private function canUpdateActivity(array $activity): bool
+	{
+		$provider = \CCrmActivity::getActivityProvider($activity);
+
+		return $provider && $provider::checkUpdatePermission($activity, \CCrmSecurityHelper::getCurrentUserId());
+	}
+
+	private function isReadOnlyActivity(array $activity): bool
+	{
+		if ($this->resolveReadAccess($activity) !== self::READ_ACCESS_PROVIDER)
+		{
+			return true;
+		}
+
+		return !$this->canUpdateActivity($activity);
 	}
 
 	protected function replaceAttachmentPlaceholderWithUrl(string $body, int $imageId, string $url): string
@@ -62,12 +121,13 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			'ID',
 			'TYPE_ID',
 			'PROVIDER_ID',
+			'RESPONSIBLE_ID',
 			'OWNER_TYPE_ID',
 			'OWNER_ID',
 		];
 
 		$activities = ActivityTable::getList([
-			'select' => array_merge($select, $requiredFieldsForChecks),
+			'select' => array_unique(array_merge($select, $requiredFieldsForChecks)),
 			'filter' => $filters,
 			'order' => $order,
 			'limit' => $limit,
@@ -103,15 +163,12 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			return false;
 		}
 
-		$ownerTypeId = $activity['OWNER_TYPE_ID'];
-		$ownerId = $activity['OWNER_ID'];
-
-		if ($permission === self::PERMISSION_READ)
+		if (
+			($permission === self::PERMISSION_READ)
+			&& $this->resolveReadAccess($activity) !== self::READ_ACCESS_NONE
+		)
 		{
-			if (\CCrmActivity::CheckReadPermission($ownerTypeId, $ownerId))
-			{
-				return true;
-			}
+			return true;
 		}
 
 		return false;
@@ -119,10 +176,25 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 
 	protected function getHeaderMessage(array $activity): array
 	{
-		$headerResult = Message::getHeader($activity);
+		$headerResult = Message::getHeader(
+			$activity,
+			true,
+			$this->permissionToken,
+			true
+		);
 		$this->errorCollection->add($headerResult->getErrors());
 
 		return $headerResult->getData();
+	}
+
+	private function filterProviderReadableActivities(array $activities): array
+	{
+		return array_values(
+			array_filter(
+				$activities,
+				fn ($activity) => $this->hasReadPermission($activity)
+			)
+		);
 	}
 
 	/**
@@ -153,15 +225,6 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 
 	private function getMessageBody($id): ?string
 	{
-		$userPermissions = \CCrmPerms::GetCurrentUserPermissions();
-
-		if (!Container::getInstance()->getUserPermissions($userPermissions->GetUserID())->entityType()->canReadSomeItemsInCrm())
-		{
-			$this->errorCollection[] = new Error(Loc::getMessage('CRM_LIB_MESSAGE_CHAIN_PROVIDER_PERMISSION_DENIED'));
-
-			return null;
-		}
-
 		$body = null;
 
 		$activities = $this->getActivities(
@@ -342,7 +405,7 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			$list->add(new Item([
 				'id' => (string)$contact['id'],
 				'customData'=>  [
-					'isUser' => $isUser,
+					'isUser' => (bool)($contact['isUser'] ?? $isUser),
 					'typeName' => (string)($contact['typeName'] ?? ''),
 					'typeNameId' => (string)($contact['typeNameId'] ?? ''),
 					'name' => (string)$contact['name'],
@@ -352,6 +415,48 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 		}
 
 		return $list;
+	}
+
+	private function getActivityTimestamp(array $activity): int
+	{
+		$startTime = $activity['START_TIME'] ?? null;
+
+		return $startTime instanceof Date
+			? $startTime->getTimestamp()
+			: 0
+		;
+	}
+
+	private function buildMessageFromActivity(array $item, bool $loadContent): MailMessage
+	{
+		$message = new MailMessage();
+		$message->id = (int)$item['ID'];
+		$message->subject = (string)($item['SUBJECT'] ?? '');
+		$message->date = $this->getActivityTimestamp($item);
+		$message->ownerTypeId = (int)$item['OWNER_TYPE_ID'];
+		$message->ownerId = (int)$item['OWNER_ID'];
+		$message->ownerType = \CCrmOwnerType::ResolveName($item['OWNER_TYPE_ID']);
+		$message->direction = (int)$item['DIRECTION'];
+
+		$header = $this->getHeaderMessage($item);
+
+		$message->availableSenders = $this->convertToMailContactList($header['accessMailboxesForSending'] ?? [], true);
+		$message->employees = $this->convertToMailContactList($header['employeeEmails'] ?? [], true);
+		$message->from = $this->convertToMailContactList($header['from'] ?? []);
+		$message->replyTo = $this->convertToMailContactList($header['replyTo'] ?? []);
+		$message->cc = $this->convertToMailContactList($header['cc'] ?? []);
+		$message->bcc = $this->convertToMailContactList($header['bcc'] ?? []);
+		$message->to = $this->convertToMailContactList($header['to'] ?? []);
+
+		if ($loadContent)
+		{
+			$activityId = (int)$item['ID'];
+			$message->body = $this->cleanCharset($this->getMessageBody($activityId));
+			$message->attachments = $this->getAttachmentsWithMessageId($activityId)['FILES'];
+			$message->body = $this->replaceAttachmentPlaceholders($message->body, $message->attachments);
+		}
+
+		return $message;
 	}
 
 	/**
@@ -364,23 +469,21 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 	{
 		$mailMessageChain = new MailMessageChain();
 
-		$userPermissions = \CCrmPerms::GetCurrentUserPermissions();
-
-		if (!Container::getInstance()->getUserPermissions($userPermissions->GetUserID())->entityType()->canReadSomeItemsInCrm())
-		{
-			$this->errorCollection[] = new Error(Loc::getMessage('CRM_LIB_MESSAGE_CHAIN_PROVIDER_PERMISSION_DENIED'));
-
-			return $mailMessageChain;
-		}
+		$select = [
+			'SETTINGS',
+			'PARENT_ID',
+			'THREAD_ID',
+			'SUBJECT',
+			'START_TIME',
+			'DIRECTION',
+		];
 
 		$activities = $this->getActivities(
 			[
 				'ID' => $messageId,
 			],
 			self::SUPPORTED_ACTIVITY_TYPE,
-			[
-				'THREAD_ID',
-			],
+			$select,
 			limit: 1
 		);
 
@@ -398,22 +501,26 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			return $mailMessageChain;
 		}
 
-		if (!$this->checkActivityPermission(self::PERMISSION_READ, $activities))
+		$readAccess = $this->resolveReadAccess($activity);
+		if ($readAccess === self::READ_ACCESS_NONE)
 		{
 			$this->errorCollection[] = new Error(Loc::getMessage('CRM_LIB_MESSAGE_CHAIN_PROVIDER_PERMISSION_DENIED'));
 
 			return $mailMessageChain;
 		}
 
+		if ($readAccess === self::READ_ACCESS_TOKEN)
+		{
+			$mailMessageChain->list[] = $this->buildMessageFromActivity($activity, true);
+			$mailMessageChain->properties = [
+				'lastIncomingId' => null,
+				'readOnly' => true,
+			];
+
+			return $mailMessageChain;
+		}
+
 		$threadId = $activity['THREAD_ID'];
-		$select = [
-			'SETTINGS',
-			'PARENT_ID',
-			'THREAD_ID',
-			'SUBJECT',
-			'START_TIME',
-			'DIRECTION',
-		];
 
 		$order = [
 			'START_TIME' => 'DESC',
@@ -444,56 +551,31 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			$order
 		);
 
-		$chainActivities = array_merge($messageBeforeCurrent, $messageAfterCurrent);
+		$chainActivities = $this->filterProviderReadableActivities(array_merge($messageBeforeCurrent, $messageAfterCurrent));
 
 		/*
 			We need to sort the messages by time again.
 			For example, message number 5 may be a response to the first message, not the fourth.
 		*/
 		usort($chainActivities, function($a, $b) {
-			return $b['START_TIME']->getTimestamp() <=> $a['START_TIME']->getTimestamp();
+			return $this->getActivityTimestamp($b) <=> $this->getActivityTimestamp($a);
 		});
 
 		$lastIncomingId = null;
 		$lastIncomingKey = null;
 
-		foreach ($chainActivities as $index => $item)
+		foreach ($chainActivities as $item)
 		{
-			$message = new MailMessage();
-			$message->id = (int)$item['ID'];
-			$message->subject = $item['SUBJECT'];
-			$message->date =  $item['START_TIME']->getTimestamp();
-			$message->ownerTypeId = (int)$item['OWNER_TYPE_ID'];
-			$message->ownerId = (int)$item['OWNER_ID'];
-			$message->ownerType = \CCrmOwnerType::ResolveName($item['OWNER_TYPE_ID']);
-			$message->direction = (int)$item['DIRECTION'];
-
-			$header = $this->getHeaderMessage($item);
-
-			$message->availableSenders = $this->convertToMailContactList($header['accessMailboxesForSending'] ?? [], true);
-			$message->employees = $this->convertToMailContactList($header['employeeEmails'] ?? [], true);
-			$message->from = $this->convertToMailContactList($header['from'] ?? []);
-			$message->replyTo = $this->convertToMailContactList($header['replyTo'] ?? []);
-			$message->cc = $this->convertToMailContactList($header['cc'] ?? []);
-			$message->bcc = $this->convertToMailContactList($header['bcc'] ?? []);
-			$message->to = $this->convertToMailContactList($header['to'] ?? []);
-
-			if ((int)$item['ID'] === $messageId)
-			{
-				/*
-				 * Load the body only for the selected message in the chain
-				 */
-				$message->body = $this->cleanCharset($this->getMessageBody($messageId));
-				$message->attachments = $this->getAttachmentsWithMessageId($messageId)['FILES'];
-				$message->body = $this->replaceAttachmentPlaceholders($message->body, $message->attachments);
-			}
+			$isCurrent = (int)$item['ID'] === $messageId;
+			$message = $this->buildMessageFromActivity($item, $isCurrent);
 
 			$mailMessageChain->list[] = $message;
+			$messageKey = array_key_last($mailMessageChain->list);
 
 			if (is_null($lastIncomingId) && $message->direction === MailMessage::DIRECTION_INCOMING)
 			{
 				$lastIncomingId = (int)$item['ID'];
-				$lastIncomingKey = $index;
+				$lastIncomingKey = $messageKey;
 			}
 		}
 
@@ -502,8 +584,8 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 		 */
 		if (
 			!is_null($lastIncomingKey)
-			&& !isset($mailMessageChain->list[$lastIncomingKey])
-			&& $lastIncomingKey !== $messageId
+			&& isset($mailMessageChain->list[$lastIncomingKey])
+			&& $lastIncomingId !== $messageId
 		)
 		{
 			$mailMessageChain->list[$lastIncomingKey]->body = $this->cleanCharset($this->getMessageBody($lastIncomingId));
@@ -513,6 +595,7 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 
 		$mailMessageChain->properties = [
 			'lastIncomingId' => $lastIncomingId,
+			'readOnly' => $this->isReadOnlyActivity($activity),
 		];
 
 		return $mailMessageChain;

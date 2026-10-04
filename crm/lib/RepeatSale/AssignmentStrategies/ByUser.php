@@ -23,7 +23,7 @@ final class ByUser extends Base
 	{
 		if (empty($this->assignmentIds))
 		{
-			return 1;
+			return null;
 		}
 
 		$indexedArray = array_values($this->assignmentIds);

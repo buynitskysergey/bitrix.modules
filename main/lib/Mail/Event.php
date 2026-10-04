@@ -24,10 +24,16 @@ class Event
 
 	/**
 	 * @param array $data
+	 * @param Sender\Identity|null $senderIdentity Sender the message is sent on behalf of.
+	 * @param Context|null $context Mail context applied within this call.
 	 * @return string
 	 * @throws Main\ArgumentTypeException
 	 */
-	public static function sendImmediate(array $data)
+	public static function sendImmediate(
+		array $data,
+		?Sender\Identity $senderIdentity = null,
+		?Context $context = null,
+	)
 	{
 		if (!static::onBeforeEventAdd($data))
 		{
@@ -36,7 +42,7 @@ class Event
 
 		$data["ID"] = 0;
 
-		return static::handleEvent($data);
+		return static::handleEvent($data, $senderIdentity, $context);
 	}
 
 	/**
@@ -155,10 +161,17 @@ class Event
 
 	/**
 	 * @param array $arEvent
+	 * @param Sender\Identity|null $senderIdentity Sender the message is sent on behalf of.
+	 * @param Context|null $context Mail context applied within this call.
+	 * The deferred queue carries neither identity nor context, so queued events use the defaults.
 	 * @return string
 	 * @throws Main\ArgumentTypeException
 	 */
-	public static function handleEvent(array $arEvent)
+	public static function handleEvent(
+		array $arEvent,
+		?Sender\Identity $senderIdentity = null,
+		?Context $context = null,
+	)
 	{
 		if (!isset($arEvent['FIELDS']) && isset($arEvent['C_FIELDS']))
 		{
@@ -274,12 +287,17 @@ class Event
 				$eventMessage['FILE'][] = $arAttachmentDb['FILE_ID'];
 			}
 
-			$context = new Context();
+			$messageContext = $context !== null ? clone $context : new Context();
+			if ($senderIdentity)
+			{
+				$messageContext->setSenderIdentity($senderIdentity);
+			}
+
 			$arFields = $arEvent['FIELDS'];
 
 			foreach (GetModuleEvents("main", "OnBeforeEventSend", true) as $event)
 			{
-				if (ExecuteModuleEventEx($event, [&$arFields, &$eventMessage, $context, &$arResult]) === false)
+				if (ExecuteModuleEventEx($event, [&$arFields, &$eventMessage, $messageContext, &$arResult]) === false)
 				{
 					continue 2;
 				}
@@ -319,7 +337,7 @@ class Event
 				'TRACK_CLICK' => $trackClick,
 				'LINK_PROTOCOL' => Config\Option::get("main", "mail_link_protocol"),
 				'LINK_DOMAIN' => $serverName,
-				'CONTEXT' => $context,
+				'CONTEXT' => $messageContext,
 			]);
 			if ($result)
 			{

@@ -6,14 +6,13 @@ use Bitrix\Crm\Item;
 use Bitrix\Crm\RepeatSale\AssignmentStrategies;
 use Bitrix\Crm\RepeatSale\Segment\AssignmentType;
 use Bitrix\Crm\RepeatSale\Segment\Collector\Factory;
-use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
 use Bitrix\Crm\RepeatSale\Segment\Data\SegmentDataInterface;
 use Bitrix\Crm\RepeatSale\Segment\SegmentCode;
-use Bitrix\Crm\RepeatSale\Segment\SegmentItem;
 use Bitrix\Crm\RepeatSale\Service\Context;
 use Bitrix\Crm\RepeatSale\Service\Operation;
 use Bitrix\Main\ArgumentOutOfRangeException;
 use Bitrix\Main\Error;
+use Bitrix\Main\UserTable;
 
 abstract class BaseHandler
 {
@@ -24,6 +23,8 @@ abstract class BaseHandler
 	protected int $limit = 50;
 	protected int $offset = 0;
 	protected int $minimumDaysAfterLastClosedEntity = 0;
+
+	private ?array $activeFallbackUserIds = null;
 
 	public function __construct(
 		protected readonly string $segmentCode,
@@ -157,28 +158,25 @@ abstract class BaseHandler
 		$lastAssignmentId = $this->lastAssignmentId;
 		$strategyObtainingAssignmentId = null;
 
-		if ($this->context)
+		$segmentItem = $this->context?->getSegmentItem();
+		if ($segmentItem)
 		{
-			$segmentId = $this->context->getSegmentId();
-			$entity = RepeatSaleSegmentController::getInstance()->getById($segmentId, true);
-			if ($entity)
-			{
-				$segmentItem = SegmentItem::createFromEntity($entity);
-				$assignmentType = AssignmentType::from($entity->getAssignmentTypeId());
-
-				$strategyObtainingAssignmentId = AssignmentStrategies\Factory::getStrategy(
-					$assignmentType,
-					$segmentItem,
-					$this->entityTypeId,
-					$items,
-				);
-			}
+			$strategyObtainingAssignmentId = AssignmentStrategies\Factory::getStrategy(
+				AssignmentType::from($segmentItem->getAssignmentTypeId()),
+				$segmentItem,
+				$this->entityTypeId,
+				$items,
+			);
 		}
 
 		foreach ($items as $item)
 		{
-			$assignmentUserId = $strategyObtainingAssignmentId?->getAssignmentUserId($item, $lastAssignmentId) ?? $item->getAssignedById();
-			$assignmentUserId ??= 1;
+			$assignmentUserId = $strategyObtainingAssignmentId?->getAssignmentUserId($item, $lastAssignmentId);
+			if ($assignmentUserId === null)
+			{
+				$fallbackUserId = (int)$item->getAssignedById();
+				$assignmentUserId = $this->isActiveFallbackUser($items, $fallbackUserId) ? $fallbackUserId : 1;
+			}
 
 			$this->getOperation($item, $assignmentUserId)->launch();
 
@@ -188,6 +186,58 @@ abstract class BaseHandler
 		$segmentData->setLastAssignmentId($lastAssignmentId);
 
 		return $result;
+	}
+
+	/**
+	 * Fallback users of the whole portion are resolved by a single query on the first actual need.
+	 */
+	private function isActiveFallbackUser(array $items, int $userId): bool
+	{
+		if ($userId <= 0)
+		{
+			return false;
+		}
+
+		$this->activeFallbackUserIds ??= $this->selectActiveUserIds($this->collectFallbackUserIds($items));
+
+		return isset($this->activeFallbackUserIds[$userId]);
+	}
+
+	private function collectFallbackUserIds(array $items): array
+	{
+		$userIds = [];
+		foreach ($items as $item)
+		{
+			$userId = (int)$item->getAssignedById();
+			if ($userId > 0)
+			{
+				$userIds[$userId] = true;
+			}
+		}
+
+		return array_keys($userIds);
+	}
+
+	private function selectActiveUserIds(array $userIds): array
+	{
+		if (empty($userIds))
+		{
+			return [];
+		}
+
+		$activeUserIds = [];
+		$rows = UserTable::query()
+			->setSelect(['ID'])
+			->whereIn('ID', $userIds)
+			->where('ACTIVE', 'Y')
+			->exec()
+		;
+		while ($row = $rows->fetch())
+		{
+			$activeUserIds[(int)$row['ID']] = true;
+		}
+
+		return $activeUserIds;
 	}
 
 	abstract protected function getOperation(Item $item, int $lastAssignmentId): Operation;

@@ -78,6 +78,14 @@ class NodeMemberService
 		$sourceNode = $nodeMember->node;
 		$sourceRoleId = (int)($nodeMember->roles[0] ?? 0);
 
+		// A roleless cross-node move must not carry a HEAD/DEPUTY role over to the target node:
+		// reset it to the target node's default role so the source node's head slot is released
+		// and OnMemberUpdated reports the role transition.
+		if ($role === null && $nodeMember->nodeId !== $node->id)
+		{
+			$role = $this->resolveDefaultRoleForNode($node);
+		}
+
 		if ($role)
 		{
 			if (!$this->isRoleCorrectForNode($node, $role))
@@ -302,6 +310,7 @@ class NodeMemberService
 					NodeMemberRole::Head,
 					NodeMemberRole::DeputyHead,
 				),
+				withVirtualUsers: true,
 			))
 			->getAll()
 		;
@@ -542,6 +551,7 @@ class NodeMemberService
 						depthLevel: DepthLevel::NONE,
 					),
 					roleFilter: RoleFilter::fromRole($headRole),
+					withVirtualUsers: true,
 				),
 			)
 			->getAll()
@@ -670,6 +680,21 @@ class NodeMemberService
 	private function isRoleCorrectForNode(Item\Node $node, Item\Role $role): bool
 	{
 		return in_array($role->xmlId, NodeMemberRole::allowedValuesForNodeType($node->type), true);
+	}
+
+	private function resolveDefaultRoleForNode(Item\Node $node): ?Item\Role
+	{
+		$roleHelperService = Container::getRoleHelperService();
+		$roleId = NodeMemberRole::defaultForNodeType($node->type) === NodeMemberRole::TeamEmployee
+			? $roleHelperService->getTeamEmployeeRoleId()
+			: $roleHelperService->getEmployeeRoleId()
+		;
+		if ($roleId === null)
+		{
+			return null;
+		}
+
+		return $roleHelperService->getById($roleId);
 	}
 	//endregion
 }

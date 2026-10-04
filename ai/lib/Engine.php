@@ -8,18 +8,21 @@ use Bitrix\AI\Engine\Enum\Category;
 use Bitrix\AI\Engine\IEngine;
 use Bitrix\AI\Engine\IQueue;
 use Bitrix\AI\Engine\IQueueOptional;
+use Bitrix\AI\Enum\VibePlusLimitState;
 use Bitrix\AI\Image\ImageReference;
 use Bitrix\AI\Facade\Analytics;
 use Bitrix\AI\Facade\Bitrix24;
 use Bitrix\AI\Facade\Portal;
 use Bitrix\AI\Facade\User;
 use Bitrix\AI\Limiter\Enums\ErrorLimit;
+use Bitrix\AI\Limiter\Exception\SharedMonthlyPoolLimitExceededException;
 use Bitrix\AI\Limiter\LimitControlService;
 use Bitrix\AI\Limiter\ReserveRequest;
 use Bitrix\AI\Limiter\Usage;
 use Bitrix\AI\Payload\IPayload;
 use Bitrix\AI\Services\BitrixGptAgreementService;
 use Bitrix\AI\Services\CopilotAccessCheckerService;
+use Bitrix\AI\Services\VibePlusUpsellService;
 use Bitrix\Ui\Public\Services\Copilot\CopilotNameService;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\CurrentUser;
@@ -864,7 +867,16 @@ class Engine
 				return;
 			}
 
-			$consumptionId = $limitControlService->commitRequest($reservedRequest);
+			try
+			{
+				$consumptionId = $limitControlService->commitRequest($reservedRequest);
+			}
+			catch (SharedMonthlyPoolLimitExceededException)
+			{
+				$this->throwErrorLimit($reservedRequest);
+
+				return;
+			}
 
 			$this->engine->setConsumptionId($consumptionId);
 		}
@@ -1009,15 +1021,38 @@ class Engine
 			$customData['showSliderWithMsg'] = false;
 		}
 
-		$isWestZone = Portal::isWestZone();
-
-		if (
+		$isPlainLimitError =
 			$errorCode === self::ERRORS['LIMIT_IS_EXCEEDED']
 			&& empty($customData['msgForIm'])
 			&& $suffixErrorCode !== '_BAAS'
 			&& $suffixErrorCode !== '_BAAS_RATE_LIMIT'
-			&& $isWestZone
-		)
+		;
+
+		// The Vibe+ states are west-only, and the zone is asked here rather than left to the gate:
+		// the monetization model is resolved from the controller group name, while isWestZone() reads
+		// the license region, and on a portal with an empty group name the two disagree - the model
+		// says Vibe+, the region falls back to 'ru'. Such a zone stays non-west, as it was before.
+		$isWestZoneLimit = $isPlainLimitError && $this->isWestZone();
+
+		// Vibe+ portals get one of the three limit states; the message and the promoter both come
+		// from the service, so this path and the cloud mapper cannot diverge.
+		$vibePlusMessage = $isWestZoneLimit ? $this->getVibePlusUpsellService()->resolveLimitMessage() : null;
+
+		if ($vibePlusMessage !== null)
+		{
+			$customData['msgForIm'] = $vibePlusMessage->msgForIm;
+			$customData['showSliderWithMsg'] = false;
+			$customData['vibePlusLimitState'] = $vibePlusMessage->state->name;
+
+			if (
+				$vibePlusMessage->state === VibePlusLimitState::BuyWithDemo
+				|| $vibePlusMessage->state === VibePlusLimitState::BuyWithoutDemo
+			)
+			{
+				$customData['sliderCode'] = $vibePlusMessage->sliderCode;
+			}
+		}
+		elseif ($isWestZoneLimit)
 		{
 			$customData['msgForIm'] = Loc::getMessage(
 				'AI_ENGINE_ERROR_LIMIT_IS_EXCEEDED_WITH_MORE',
@@ -1034,6 +1069,16 @@ class Engine
 				$customData
 			),
 		);
+	}
+
+	protected function getVibePlusUpsellService(): VibePlusUpsellService
+	{
+		return new VibePlusUpsellService();
+	}
+
+	protected function isWestZone(): bool
+	{
+		return Portal::isWestZone();
 	}
 
 	private function getLimitControlService(): LimitControlService

@@ -80,6 +80,66 @@ final class CacheManager
 		return self::$isCacheDisabled;
 	}
 
+	public static function delete(string $key): void
+	{
+		if (self::isCacheDisabled())
+		{
+			return;
+		}
+
+		$cache = Application::getInstance()->getManagedCache();
+		$cache->clean(self::getCacheKey($key), self::CACHE_DIR);
+	}
+
+	public static function getWithDir(string $key, string $initDir): mixed
+	{
+		if (self::isCacheDisabled())
+		{
+			return null;
+		}
+
+		$cacheKey = self::getCacheKey($key);
+		$cache = Application::getInstance()->getManagedCache();
+		if ($cache->read(self::CACHE_TTL, $cacheKey, $initDir))
+		{
+			return $cache->get($cacheKey);
+		}
+
+		return null;
+	}
+
+	public static function setWithDir(string $key, mixed $value, string $initDir, int $ttl = self::CACHE_TTL): bool
+	{
+		if (self::isCacheDisabled())
+		{
+			return true;
+		}
+
+		$cacheKey = self::getCacheKey($key);
+		$cache = Application::getInstance()->getManagedCache();
+		$cache->read($ttl, $cacheKey, $initDir);
+		$cache->setImmediate($cacheKey, $value);
+
+		return true;
+	}
+
+	public static function deleteWithDir(string $key, string $initDir): void
+	{
+		if (self::isCacheDisabled())
+		{
+			return;
+		}
+
+		$cache = Application::getInstance()->getManagedCache();
+		$cache->clean(self::getCacheKey($key), $initDir);
+	}
+
+	public static function cleanDirectory(string $initDir): void
+	{
+		$cache = Application::getInstance()->getManagedCache();
+		$cache->cleanDir($initDir);
+	}
+
 	public static function cleanAll(): void
 	{
 		$cache = Application::getInstance()->getManagedCache();

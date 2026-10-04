@@ -7,6 +7,9 @@ namespace Bitrix\Disk\Controller\Integration;
 use Bitrix\Disk\AttachedObject;
 use Bitrix\Disk\Document\Flipchart\BoardService;
 use Bitrix\Disk\Document\Flipchart\Configuration;
+use Bitrix\Disk\Document\Flipchart\DocumentDownloadUrlService;
+use Bitrix\Disk\Document\Flipchart\DualMode\PilotLog;
+use Bitrix\Disk\Document\Flipchart\DualMode\ServiceProfileResolver;
 use Bitrix\Disk\Document\Flipchart\SessionManager;
 use Bitrix\Disk\Document\Flipchart\WebhookEventType;
 use Bitrix\Disk\Document\Models\DocumentService;
@@ -559,25 +562,29 @@ final class Flipchart extends Controller implements JwtHolder
 		/** @var User $userModel */
 		$userModel = User::buildFromRow($userRow);
 
-		$documentUrl = $this->getActionUri(
-			'getDocument',
-			[
-				'sessionId' => $session->getExternalHash(),
-				'userId' => $session->getUserId(),
-			],
-			true,
-		);
-
-		if (Configuration::isForceHttpForDocumentUrl())
-		{
-			$documentUrl = str_replace('https://', 'http://', (string)$documentUrl);
-		}
+		$documentUrl = (new DocumentDownloadUrlService())->build($session, applyLegacyHttpDowngrade: true);
 
 		if (
 			($session->isEdit() && !$session->canUserEdit($currentUser))
 			|| ($session->isView() && !$session->canUserRead($currentUser))
 		)
 		{
+			return $this->getErrorPageResponse();
+		}
+
+		// The same decision the editor component makes: without it the component throws instead, and
+		// executeComponent() swallows that on an ordinary request, leaving an empty slider in place of
+		// this error page.
+		if (ServiceProfileResolver::createFromOptions()->resolveForEditor($session->getObject()) === null)
+		{
+			PilotLog::error(
+				'Board service profile is not resolved: {entryPoint}, object {objectId}',
+				[
+					'entryPoint' => 'viewDocumentAction',
+					'objectId' => (int)$session->getObjectId(),
+				],
+			);
+
 			return $this->getErrorPageResponse();
 		}
 

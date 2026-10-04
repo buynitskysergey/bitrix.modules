@@ -153,6 +153,10 @@ class EntityViewSettings
 			{
 				$entityTypeName = $matches[1];
 				$entityTypeID = \CCrmOwnerType::ResolveID($entityTypeName);
+				if($entityTypeID === \CCrmOwnerType::Lead && !Crm\Settings\LeadSettings::isEnabled())
+				{
+					return SITE_DIR . "crm/" . mb_strtolower(\CCrmOwnerType::DealName) . "/?redirect_to";
+				}
 				if($entityTypeID === \CCrmOwnerType::Lead
 					|| $entityTypeID === \CCrmOwnerType::Contact
 					|| $entityTypeID === \CCrmOwnerType::Company

@@ -35,6 +35,7 @@ use Bitrix\Main\Validation\Engine\AutoWire\ValidationParameter;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Mail\MailMessageUidTable;
 use Bitrix\Mail\Helper\Message;
+use Bitrix\Mail\Internal\Service\SourceGeneration\MigrationActionGuard;
 use Bitrix\Main;
 use Bitrix\Intranet;
 use Bitrix\HumanResources\Service\Container;
@@ -278,6 +279,22 @@ class MailboxConnecting extends Controller
 		return $data;
 	}
 
+	/**
+	 * The one path of the edit screen that goes to the OAuth provider. The form asks for it after it is
+	 * drawn, so a slow or a revoked token delays a picture and a prefilled hint instead of the screen.
+	 */
+	public function getOauthUserAction(int $mailboxId): ?array
+	{
+		if (!MailboxAccess::hasCurrentUserAccessToEditMailbox($mailboxId))
+		{
+			$this->addError(new Error(Loc::getMessage('MAIL_MAILBOX_CONNECTING_ERROR_HAS_NOT_PERMISSION')));
+
+			return null;
+		}
+
+		return (new MailboxConnector())->getOAuthUserProfile($mailboxId);
+	}
+
 	public function getSettingsConfigAction(): array
 	{
 		return MailboxSettingsConfig::getClientConfig();
@@ -467,6 +484,7 @@ class MailboxConnecting extends Controller
 		$replaceWithTheCurrentUserName = Loader::includeModule('humanresources');
 
 		$previousSeenMailboxId = (int)\CUserOptions::getOption('mail', 'previous_seen_mailbox_id', 0);
+		$signaturesAvailable = Helper\Config\Feature::isMobileSignaturesAvailable();
 
 		foreach ($mailboxesFullData as $mailbox)
 		{
@@ -486,6 +504,7 @@ class MailboxConnecting extends Controller
 					'ID' => $mailboxId,
 					'COUNTER' => $mailboxesCounters[$mailboxId]['UNSEEN'],
 					'CAN_EDIT_SETTINGS' => MailboxAccess::hasCurrentUserAccessToEditMailbox($mailboxId),
+					'SIGNATURES_AVAILABLE' => $signaturesAvailable,
 				];
 
 			if ($previousSeenMailboxId === 0)
@@ -710,6 +729,21 @@ class MailboxConnecting extends Controller
 	 */
 	public function syncMailboxAction(int $id, ?string $dir = null, bool $onlySyncCurrent = false): array
 	{
+		if (!MailboxAccess::hasCurrentUserAnyAccessToMailbox($id))
+		{
+			$this->addError(new Error('Access to the mailbox is denied', 403));
+
+			return [];
+		}
+
+		$guard = (new MigrationActionGuard())->check($id);
+		if (!$guard->isSuccess())
+		{
+			$this->errorCollection->add($guard->getErrors());
+
+			return [];
+		}
+
 		$result = \Bitrix\Mail\Helper\Mailbox::quickSync($id, $dir, $onlySyncCurrent);
 		$this->errorCollection = $result->getErrorCollection();
 
@@ -728,10 +762,24 @@ class MailboxConnecting extends Controller
 			return ['mailboxes' => []];
 		}
 
+		$mailboxes = \Bitrix\Mail\MailboxTable::getUserMailboxes($userId);
+		$mailboxIds = array_map(
+			static fn (array $mailbox): int => (int)$mailbox['ID'],
+			$mailboxes,
+		);
+		$guardResults = (new MigrationActionGuard())->checkMany($mailboxIds);
+
 		$results = [];
-		foreach (\Bitrix\Mail\MailboxTable::getUserMailboxes($userId) as $mailbox)
+		foreach ($mailboxes as $mailbox)
 		{
 			$id = (int)$mailbox['ID'];
+			$guard = $guardResults[$id];
+			if (!$guard->isSuccess())
+			{
+				$this->errorCollection->add($guard->getErrors());
+				continue;
+			}
+
 			$result = \Bitrix\Mail\Helper\Mailbox::quickSync($id);
 			$results[$id] = $result->getData();
 

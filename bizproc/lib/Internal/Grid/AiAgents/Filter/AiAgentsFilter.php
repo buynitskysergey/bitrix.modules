@@ -12,9 +12,6 @@ class AiAgentsFilter extends Filter
 {
 	private Options $filterOptions;
 	private ?AiAgentsFilterSettings $filterSettings = null;
-	protected $uiFilterServiceFields = [
-		'LAUNCHED_BY',
-	];
 
 	public function __construct(
 		string $ID,

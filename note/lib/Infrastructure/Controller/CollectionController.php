@@ -13,6 +13,8 @@ use Bitrix\Note\Internal\Access\AccessController;
 use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Model\Collection;
+use Bitrix\Note\Internal\Model\FavoriteTable;
+use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Public\Command\ArchiveCollectionCommand;
 use Bitrix\Note\Public\Command\CreateCollectionCommand;
 use Bitrix\Note\Public\Command\DeleteCollectionCommand;
@@ -82,9 +84,27 @@ class CollectionController extends Controller
 		$this->registerSidebarPullWatches($items);
 
 		return [
-			'items' => $items,
+			// [TPL-01] Additive star flag: one batch read per page, never one read per row.
+			'items' => $this->attachFavoriteFlag($items),
 			'nextCursor' => $batch['nextCursor'],
 		];
+	}
+
+	private function attachFavoriteFlag(array $items): array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		$ids = array_map(static fn(array $item): int => (int)($item['id'] ?? 0), $items);
+		$favoriteIds = array_flip(
+			(new FavoriteRepository())->findFavoriteEntityIds($userId, FavoriteTable::ENTITY_TYPE_COLLECTION, $ids),
+		);
+
+		foreach ($items as &$item)
+		{
+			$item['isFavorite'] = isset($favoriteIds[(int)($item['id'] ?? 0)]);
+		}
+		unset($item);
+
+		return $items;
 	}
 
 	private function registerSidebarPullWatches(array $items): void

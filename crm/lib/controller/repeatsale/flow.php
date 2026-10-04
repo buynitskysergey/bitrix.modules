@@ -147,12 +147,12 @@ final class Flow extends Base
 				->setAssignmentUserIds([$userId])
 			;
 
-			if (!$isForceMode && in_array($segmentItem->getCode(), $defaultEnableSegments, true))
-			{
-				$segmentItem->setIsEnabled(true);
-			}
-
 			$segmentController->update($segmentItem->getId(), $segmentItem);
+		}
+
+		if (!$isForceMode)
+		{
+			(new SegmentManager())->enableSegmentsByCodes($defaultEnableSegments);
 		}
 	}
 

@@ -29,6 +29,11 @@ final class ErrorCode
 	public const OPERATION_TYPE_NOT_SUPPORTED = 'OPERATION_TYPE_NOT_SUPPORTED';
 	public const OPERATION_IS_PENDING = 'OPERATION_IS_PENDING';
 	public const PAYLOAD_IS_EMPTY_ERROR_CODE = 'PAYLOAD_IS_EMPTY';
+	public const CALL_ASSESSMENT_AGENT_RESTORE_IN_PROGRESS = 'CALL_ASSESSMENT_AGENT_RESTORE_IN_PROGRESS';
+	public const CALL_ASSESSMENT_AGENT_SYSTEM_TEMPLATE_MISSING = 'CALL_ASSESSMENT_AGENT_SYSTEM_TEMPLATE_MISSING';
+	public const CALL_ASSESSMENT_AGENT_SYSTEM_TEMPLATE_REJECTED = 'CALL_ASSESSMENT_AGENT_SYSTEM_TEMPLATE_REJECTED';
+	public const CALL_ASSESSMENT_AGENT_LAUNCH_FAILED = 'CALL_ASSESSMENT_AGENT_LAUNCH_FAILED';
+	public const CALL_ASSESSMENT_AGENT_INVARIANT_NOT_CONFIRMED = 'CALL_ASSESSMENT_AGENT_INVARIANT_NOT_CONFIRMED';
 
 	public static function getAINotAvailableError(): Error
 	{
@@ -196,11 +201,76 @@ final class ErrorCode
 		);
 	}
 
+	public static function getInvalidPayloadMarkersForSelectCallScoreScriptError(): Error
+	{
+		return new Error(
+			Loc::getMessage('CRM_INTEGRATION_AI_ERROR_WRONG_SELECT_CALL_SCORE_PAYLOAD_MARKERS'),
+			self::INVALID_ARG_VALUE,
+		);
+	}
+
+	public static function getInvalidPayloadMarkersForScoreCallV2Error(): Error
+	{
+		return new Error(
+			Loc::getMessage('CRM_INTEGRATION_AI_ERROR_WRONG_SCORE_CALL_V2_PAYLOAD_MARKERS'),
+			self::INVALID_ARG_VALUE,
+		);
+	}
+
 	public static function getNotEnoughMessagesError(): Error
 	{
 		return new Error(
 			Loc::getMessage('CRM_INTEGRATION_AI_ERROR_NOT_ENOUGH_MESSAGES'),
 			self::INVALID_ARG_VALUE
+		);
+	}
+
+	/**
+	 * Codes of the call assessment agent restore scenario. Their consumers are background and installation paths,
+	 * they never reach a user response, so the messages stay technical - as in getInvalidPayloadError() above.
+	 */
+	public static function getAgentRestoreInProgressError(): Error
+	{
+		return new Error(
+			'Call assessment agent restore is already in progress',
+			self::CALL_ASSESSMENT_AGENT_RESTORE_IN_PROGRESS
+		);
+	}
+
+	public static function getAgentSystemTemplateMissingError(): Error
+	{
+		return new Error(
+			'Call assessment agent system template is not found',
+			self::CALL_ASSESSMENT_AGENT_SYSTEM_TEMPLATE_MISSING
+		);
+	}
+
+	/**
+	 * Unlike the missing template, this one exists but may not be copied: the restore refuses it instead of
+	 * launching a graph it cannot vouch for. The synchronization cannot cure this state, an administrator has to.
+	 */
+	public static function getAgentSystemTemplateRejectedError(): Error
+	{
+		return new Error(
+			'Call assessment agent system template may not be copied: it is edited by hand or its system code is'
+				. ' ambiguous',
+			self::CALL_ASSESSMENT_AGENT_SYSTEM_TEMPLATE_REJECTED
+		);
+	}
+
+	public static function getAgentLaunchFailedError(): Error
+	{
+		return new Error(
+			'Call assessment agent copy launch failed',
+			self::CALL_ASSESSMENT_AGENT_LAUNCH_FAILED
+		);
+	}
+
+	public static function getAgentInvariantNotConfirmedError(): Error
+	{
+		return new Error(
+			'Call assessment agent copy is still missing after a successful launch',
+			self::CALL_ASSESSMENT_AGENT_INVARIANT_NOT_CONFIRMED
 		);
 	}
 

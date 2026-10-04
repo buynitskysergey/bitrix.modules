@@ -36,11 +36,6 @@ class Company extends Service\Factory
 		return false;
 	}
 
-	public function isRecyclebinEnabled(): bool
-	{
-		return CompanySettings::getCurrent()->isRecycleBinEnabled();
-	}
-
 	public function isDeferredCleaningEnabled(): bool
 	{
 		return CompanySettings::getCurrent()->isDeferredCleaningEnabled();
@@ -51,39 +46,9 @@ class Company extends Service\Factory
 		return false;
 	}
 
-	public function isUseInUserfieldEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isCrmTrackingEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isStagesSupported(): bool
-	{
-		return false;
-	}
-
 	public function isNewRoutingForListEnabled(): bool
 	{
 		return false;
-	}
-
-	public function isBizProcSupported(): bool
-	{
-		return true;
-	}
-
-	public function isObserversEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isMultiFieldsEnabled(): bool
-	{
-		return true;
 	}
 
 	public function getDataClass(): string
@@ -317,16 +282,6 @@ class Company extends Service\Factory
 
 	//region categories
 
-	/**
-	 * Returns true if this entity supports categories.
-	 *
-	 * @return bool
-	 */
-	public function isCategoriesSupported(): bool
-	{
-		return true;
-	}
-
 	public function createCategory(array $data = []): Category
 	{
 		$object = ItemCategoryTable::createObject($data);
@@ -544,11 +499,6 @@ class Company extends Service\Factory
 	protected function getStatisticsFacade(): ?Statistics\OperationFacade
 	{
 		return new Statistics\OperationFacade\Company();
-	}
-
-	public function isCountersEnabled(): bool
-	{
-		return true;
 	}
 
 	public function isCommunicationRoutingSupported(): bool

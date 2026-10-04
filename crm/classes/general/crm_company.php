@@ -69,20 +69,13 @@ class CAllCrmCompany
 
 	/**
 	 * Returns true if this class should invoke Service\Operation instead old API.
-	 * For a start it will return false by default. Please use this period to test your customization on compatibility with new API.
-	 * Later it will return true by default.
-	 * In several months this class will be declared as deprecated and old code will be deleted completely.
 	 *
+	 * @deprecated New API is always used; kept as a compatibility shim for portal customizations.
 	 * @return bool
 	 */
 	public function isUseOperation(): bool
 	{
-		return static::isFactoryEnabled();
-	}
-
-	private static function isFactoryEnabled(): bool
-	{
-		return Crm\Settings\CompanySettings::getCurrent()->isFactoryEnabled();
+		return true;
 	}
 
 	private function getCompatibilityAdapter(): Crm\Entity\Compatibility\Adapter
@@ -1281,7 +1274,7 @@ class CAllCrmCompany
 			$arFields['IS_MY_COMPANY'] = 'N';
 		}
 
-		if ($this->isUseOperation() && ($arFields['IS_MY_COMPANY'] !== 'Y'))
+		if ($arFields['IS_MY_COMPANY'] !== 'Y')
 		{
 			return $this->getCompatibilityAdapter()->performAdd($arFields, $options);
 		}
@@ -1810,7 +1803,7 @@ class CAllCrmCompany
 			$isMyCompany = false;
 		}
 
-		if ($this->isUseOperation() && !$isMyCompany)
+		if (!$isMyCompany)
 		{
 			return $this->getCompatibilityAdapter()->performUpdate($ID, $arFields, $arOptions);
 		}
@@ -2549,7 +2542,7 @@ class CAllCrmCompany
 		}
 
 		$isMyCompanyFlag = $arFields['IS_MY_COMPANY'] ?? 'N';
-		if ($this->isUseOperation() && ($isMyCompanyFlag !== 'Y'))
+		if ($isMyCompanyFlag !== 'Y')
 		{
 			return $this->getCompatibilityAdapter()->performDelete($ID, $arOptions);
 		}

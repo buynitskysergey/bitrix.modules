@@ -7,6 +7,7 @@ namespace Bitrix\Bizproc\Infrastructure\Controller;
 use Bitrix\Bizproc\Api\Enum\ErrorMessage;
 use Bitrix\Bizproc\Internal\Exception\ErrorBuilder;
 use Bitrix\Bizproc\Internal\Exception\Exception;
+use Bitrix\Bizproc\Internal\Service\StorageActivity\StorageActivityService;
 use Bitrix\Bizproc\Public\Command\StorageField\StorageFieldDto;
 use Bitrix\Bizproc\Public\Provider\StorageFieldProvider;
 use Bitrix\Bizproc\Public\Service\StorageField\FieldService;
@@ -161,6 +162,16 @@ class StorageField extends Controller
 
 			return null;
 		}
+	}
+
+	/**
+	 * Filtering and return field maps of a single storage for the storage activity settings dialog.
+	 *
+	 * @return array{filterFields: array, returnFields: array}
+	 */
+	public function getActivityFieldsMapAction(int $storageId): array
+	{
+		return StorageActivityService::getActivityFieldsMaps($storageId);
 	}
 
 	public function addAction(StorageFieldDto $storageFieldDto): Entity\StorageField\StorageField|array|null

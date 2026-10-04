@@ -90,24 +90,9 @@ class CBPHelper
 
 			if ($userId > 0)
 			{
-				$db = CUser::GetList(
-					"LAST_NAME",
-					"asc",
-					["ID_EQUAL_EXACT" => $userId],
-					[
-						"NAV_PARAMS" => false,
-						'FIELDS'=> [
-							'ID',
-							'LOGIN',
-							'EMAIL',
-							'NAME',
-							'LAST_NAME',
-							'SECOND_NAME',
-						],
-					],
-				);
+				$arUser = Bizproc\Internal\Service\User\UserProvider::get($userId);
 
-				if ($arUser = $db->Fetch())
+				if ($arUser)
 				{
 					if ($formatFunction)
 					{
@@ -1939,17 +1924,22 @@ class CBPHelper
 	{
 		static $cache = [];
 
-		if (isset($cache[$code]))
-		{
-			return $cache[$code];
-		}
-
-		if (!$code || !str_starts_with($code, 'group_'))
+		if (!is_string($code) || !str_starts_with($code, 'group_'))
 		{
 			return false;
 		}
 
 		$code = mb_strtoupper(mb_substr($code, mb_strlen('group_')));
+		if ($code === '')
+		{
+			return false;
+		}
+
+		if (array_key_exists($code, $cache))
+		{
+			return $cache[$code];
+		}
+
 		$userService = CBPRuntime::getRuntime()->getUserService();
 
 		if (str_starts_with($code, 'G'))

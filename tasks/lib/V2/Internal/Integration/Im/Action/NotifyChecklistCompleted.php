@@ -42,7 +42,7 @@ class NotifyChecklistCompleted extends AbstractNotify
 
 		return [
 			'#USER#' => $this->formatUser($this->triggeredBy),
-			'#CHECKLIST_NAME#' => $this->checklistName,
+			'#CHECKLIST_NAME#' => $this->getChecklistTitleForActionLink($this->checklistName),
 			'#ACTION_LINK#' => $actionLink,
 		];
 	}

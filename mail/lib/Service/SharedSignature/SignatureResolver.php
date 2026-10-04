@@ -16,6 +16,8 @@ use Bitrix\Mail\Internals\SharedSignatureTable;
 use Bitrix\Mail\Internals\UserSignatureTable;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Main\Loader;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Join;
 
 /**
  * Resolves the effective signature set for a given mailbox.
@@ -132,14 +134,12 @@ class SignatureResolver
 			'filter' => ['=ID' => $signatureId],
 			'limit' => 1,
 		])->fetch();
-
 		if ($row)
 		{
 			$isShared = (string)$row['SCOPE'] === SharedSignatureTable::SCOPE_SHARED;
 			$isVisible = $isShared
 				? in_array($signatureId, $assignedSharedSignatureIds, true)
-				: (int)$row['OWNER_ID'] === $userId
-			;
+				: (int)$row['OWNER_ID'] === $userId;
 
 			if ($isVisible)
 			{
@@ -232,6 +232,282 @@ class SignatureResolver
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Resolves all available signatures and the default for a set of senders in one batch.
+	 *
+	 * @param array<int, array{key: string, email: string, name: string, mailboxId: int}> $senders
+	 * @return array{
+	 *     signatures: array<int, array{id: int, signature: string, scope: string, senderKey: string|null}>,
+	 *     senders: array<int, array{
+	 *         key: string,
+	 *         email: string,
+	 *         name: string,
+	 *         availableSignatureIds: int[],
+	 *         selectedSignatureId: int|null,
+	 *     }>,
+	 * }
+	 */
+	public function resolveForSenders(int $ownerUserId, array $senders): array
+	{
+		if ($ownerUserId <= 0)
+		{
+			return ['signatures' => [], 'senders' => []];
+		}
+
+		$ownerSignatures = $this->loadOwnerSignatures($ownerUserId);
+		$availableSignatures = [];
+		foreach ($ownerSignatures as $signature)
+		{
+			$availableSignatures[(int)$signature['id']] = $signature;
+		}
+
+		if (empty($senders))
+		{
+			return ['signatures' => array_values($availableSignatures), 'senders' => []];
+		}
+
+		$mailboxIds = array_values(array_unique(array_filter(array_map(
+			static fn(array $sender): int => (int)($sender['mailboxId'] ?? 0),
+			$senders,
+		))));
+		$sharedSignaturesByMailbox = $this->getAssignedSharedSignaturesForMailboxes($mailboxIds);
+		$choices = $this->choiceStorage->getAllChoices($ownerUserId);
+
+		$resolvedSenders = [];
+		foreach ($senders as $sender)
+		{
+			$senderKey = (string)$sender['key'];
+			$emailKey = AssignmentResolver::normalizeSenderKey((string)$sender['email']);
+			$ownerGroups = $this->groupOwnerSignaturesForSender($ownerSignatures, $senderKey, $emailKey);
+			$sharedSignatures = $sharedSignaturesByMailbox[(int)$sender['mailboxId']] ?? [];
+
+			$availableSignatureIds = [];
+			foreach (array_merge(...array_values($ownerGroups)) as $signature)
+			{
+				$signatureId = (int)$signature['id'];
+				$availableSignatureIds[$signatureId] = true;
+				$availableSignatures[$signatureId] = $signature;
+			}
+			foreach ($sharedSignatures as $signature)
+			{
+				$signatureId = (int)$signature['ID'];
+				$availableSignatureIds[$signatureId] = true;
+				$availableSignatures[$signatureId] = [
+					'id' => $signatureId,
+					'signature' => (string)$signature['SIGNATURE'],
+					'scope' => SharedSignatureTable::SCOPE_SHARED,
+					'senderKey' => null,
+				];
+			}
+
+			$availableSignatureIds = array_keys($availableSignatureIds);
+			$selectedSignatureId = $this->resolveSelectedSignatureId(
+				$choices[$senderKey] ?? null,
+				$availableSignatureIds,
+				$sharedSignatures,
+				$ownerGroups,
+			);
+
+			$resolvedSenders[] = [
+				'key' => $senderKey,
+				'email' => (string)$sender['email'],
+				'name' => (string)$sender['name'],
+				'availableSignatureIds' => $availableSignatureIds,
+				'selectedSignatureId' => $selectedSignatureId,
+			];
+		}
+
+		return [
+			'signatures' => array_values($availableSignatures),
+			'senders' => $resolvedSenders,
+		];
+	}
+
+	/**
+	 * @return array<int, array{
+	 *     id: int,
+	 *     signature: string,
+	 *     scope: string,
+	 *     senderKey: string|null,
+	 *     senderKeys: string[],
+	 *     hasAssignments: bool,
+	 *     hasGeneralSenderAssignment: bool,
+	 * }>
+	 */
+	protected function loadOwnerSignatures(int $ownerUserId): array
+	{
+		$rows = SharedSignatureTable::query()
+			->setSelect(['ID', 'SIGNATURE'])
+			->where('OWNER_ID', $ownerUserId)
+			->where('SCOPE', SharedSignatureTable::SCOPE_OWNER)
+			->setOrder(['ID' => 'DESC'])
+			->fetchAll()
+		;
+		$signatureIds = array_map(static fn(array $row): int => (int)$row['ID'], $rows);
+		$assignmentsBySignature = [];
+		if (!empty($signatureIds))
+		{
+			$assignments = SharedSignatureAssignmentTable::query()
+				->setSelect(['ID', 'SIGNATURE_ID', 'TARGET_TYPE', 'TARGET_VALUE'])
+				->whereIn('SIGNATURE_ID', $signatureIds)
+				->setOrder(['ID' => 'ASC'])
+				->exec()
+			;
+			while ($assignment = $assignments->fetch())
+			{
+				$signatureId = (int)$assignment['SIGNATURE_ID'];
+				$assignmentsBySignature[$signatureId]['hasAssignments'] = true;
+				if ((string)$assignment['TARGET_TYPE'] !== SharedSignatureAssignmentTable::TARGET_SENDER)
+				{
+					continue;
+				}
+
+				$senderKey = AssignmentResolver::normalizeSenderKey((string)($assignment['TARGET_VALUE'] ?? ''));
+				if ($senderKey === '')
+				{
+					$assignmentsBySignature[$signatureId]['hasGeneralSenderAssignment'] = true;
+				}
+				else
+				{
+					$assignmentsBySignature[$signatureId]['senderKeys'][$senderKey] = true;
+				}
+			}
+		}
+
+		$result = [];
+		foreach ($rows as $row)
+		{
+			$signatureId = (int)$row['ID'];
+			$senderKeys = array_keys($assignmentsBySignature[$signatureId]['senderKeys'] ?? []);
+			$result[$signatureId] = [
+				'id' => $signatureId,
+				'signature' => (string)($row['SIGNATURE'] ?? ''),
+				'scope' => SharedSignatureTable::SCOPE_OWNER,
+				'senderKey' => $senderKeys[0] ?? null,
+				'senderKeys' => $senderKeys,
+				'hasAssignments' => (bool)($assignmentsBySignature[$signatureId]['hasAssignments'] ?? false),
+				'hasGeneralSenderAssignment' => (bool)(
+					$assignmentsBySignature[$signatureId]['hasGeneralSenderAssignment'] ?? false
+				),
+			];
+		}
+
+		foreach ($this->getPersonalSignatureRows($ownerUserId) as $row)
+		{
+			$signatureId = (int)($row['ID'] ?? 0);
+			if ($signatureId <= 0 || isset($result[$signatureId]))
+			{
+				continue;
+			}
+
+			$senderKey = AssignmentResolver::normalizeSenderKey((string)($row['SENDER'] ?? ''));
+			$result[$signatureId] = [
+				'id' => $signatureId,
+				'signature' => (string)($row['SIGNATURE'] ?? ''),
+				'scope' => SharedSignatureTable::SCOPE_OWNER,
+				'senderKey' => $senderKey !== '' ? $senderKey : null,
+				'senderKeys' => $senderKey !== '' ? [$senderKey] : [],
+				'hasAssignments' => false,
+				'hasGeneralSenderAssignment' => false,
+			];
+		}
+
+		return array_values($result);
+	}
+
+	/**
+	 * @param array<int, array{
+	 *     id: int,
+	 *     signature: string,
+	 *     scope: string,
+	 *     senderKey: string|null,
+	 *     senderKeys?: string[],
+	 *     hasAssignments?: bool,
+	 *     hasGeneralSenderAssignment?: bool,
+	 * }> $signatures
+	 * @return array{exact: array, email: array, general: array}
+	 */
+	private function groupOwnerSignaturesForSender(array $signatures, string $senderKey, string $emailKey): array
+	{
+		$groups = ['exact' => [], 'email' => [], 'general' => []];
+		foreach ($signatures as $signature)
+		{
+			$senderKeys = $signature['senderKeys'] ?? [];
+			if (empty($senderKeys) && ($signature['senderKey'] ?? null) !== null && $signature['senderKey'] !== '')
+			{
+				$senderKeys = [$signature['senderKey']];
+			}
+
+			if (in_array($senderKey, $senderKeys, true))
+			{
+				$groups['exact'][] = $signature;
+			}
+			elseif (in_array($emailKey, $senderKeys, true))
+			{
+				$groups['email'][] = $signature;
+			}
+			elseif (
+				($signature['hasGeneralSenderAssignment'] ?? false)
+				|| (empty($senderKeys) && !($signature['hasAssignments'] ?? false))
+			)
+			{
+				$groups['general'][] = $signature;
+			}
+		}
+
+		return $groups;
+	}
+
+	/**
+	 * @param int[] $availableSignatureIds
+	 * @param array<int, array{ID: int, SIGNATURE: string, ASSIGNED_AT: int|null}> $sharedSignatures
+	 * @param array{exact: array, email: array, general: array} $ownerGroups
+	 */
+	private function resolveSelectedSignatureId(
+		mixed $rawChoice,
+		array $availableSignatureIds,
+		array $sharedSignatures,
+		array $ownerGroups,
+	): ?int
+	{
+		$choice = is_scalar($rawChoice) ? self::decodeChoice((string)$rawChoice) : null;
+		$latestAssignedAt = (int)($sharedSignatures[0]['ASSIGNED_AT'] ?? 0);
+		if (
+			$choice !== null
+			&& in_array($choice['id'], $availableSignatureIds, true)
+			&& (empty($sharedSignatures) || $choice['time'] > $latestAssignedAt)
+		)
+		{
+			return $choice['id'];
+		}
+
+		if (!empty($sharedSignatures))
+		{
+			return (int)$sharedSignatures[0]['ID'];
+		}
+
+		foreach (['exact', 'email', 'general'] as $group)
+		{
+			if (!empty($ownerGroups[$group]))
+			{
+				return (int)$ownerGroups[$group][0]['id'];
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @return array{id: int, time: int}|null
+	 */
+	private static function decodeChoice(string $raw): ?array
+	{
+		[$id, $time] = array_pad(explode(':', $raw, 2), 2, '0');
+		$id = (int)$id;
+
+		return $id > 0 ? ['id' => $id, 'time' => (int)$time] : null;
 	}
 
 	/**
@@ -524,6 +800,15 @@ class SignatureResolver
 		return SharedSignatureAssignmentTable::getList([
 			'select' => ['ID', 'SIGNATURE_ID', 'TARGET_TYPE', 'TARGET_ID', 'IS_FLAT', 'DATE_CREATE'],
 			'filter' => $filter,
+			'runtime' => [
+				new Reference(
+					'SIGNATURE',
+					SharedSignatureTable::class,
+					Join::on('this.SIGNATURE_ID', 'ref.ID')
+						->where('ref.SCOPE', SharedSignatureTable::SCOPE_SHARED),
+					['join_type' => 'INNER'],
+				),
+			],
 		])->fetchAll();
 	}
 

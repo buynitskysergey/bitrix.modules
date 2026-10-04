@@ -271,6 +271,7 @@ class Add extends Operation
 			AddEvent::createDefault($this->getItem()->getEntityTypeId())
 				->setSection(Dictionary::SECTION_UNKNOWN)
 				->setStatus($result->isSuccess() ? Dictionary::STATUS_SUCCESS : Dictionary::STATUS_ERROR)
+				->setActorId($this->getAnalyticsActorId())
 				->buildEvent()
 				->send()
 			;
@@ -285,6 +286,7 @@ class Add extends Operation
 		$status = $result->isSuccess() ? Dictionary::STATUS_SUCCESS : Dictionary::STATUS_ERROR;
 		$event
 			->setStatus($status)
+			->setActorId($this->getAnalyticsActorId())
 			->buildEvent()
 			->send()
 		;

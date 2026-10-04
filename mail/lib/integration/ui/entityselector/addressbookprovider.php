@@ -46,6 +46,7 @@ class AddressBookProvider extends BaseProvider
 	public function setPreinstalledItems($items, $updateData = false): void
 	{
 		$this->preinstalledItems = [];
+		$contacts = $updateData ? self::loadContactsByEmail($items) : [];
 
 		foreach ($items as $item)
 		{
@@ -59,17 +60,15 @@ class AddressBookProvider extends BaseProvider
 
 			if ($updateData)
 			{
-				global $USER;
+				$contact = $contacts[self::normalizeEmail($email)] ?? self::getEmptyContact();
 
-				$contact = MailContactTable::getContactByEmail($email, $USER->getId());
-
-				$item['name'] = $contact['NAME'];
-				$item['entityId'] = $contact['ID'];
-
-				if($contact['ID'] === 0)
+				if ($contact['ID'] === 0)
 				{
 					continue;
 				}
+
+				$item['name'] = $contact['NAME'];
+				$item['entityId'] = $contact['ID'];
 			}
 
 			$name = self::buildName($item['name']) ?: $email;
@@ -94,6 +93,70 @@ class AddressBookProvider extends BaseProvider
 				]
 			);
 		}
+	}
+
+	/**
+	 * Mail contacts of the current user behind the given addresses, read in a single query and keyed
+	 * by the normalized address, the way MailContactTable::getContactByEmail() looks one up.
+	 *
+	 * @return array<string, array{NAME: string, ID: int}>
+	 */
+	private static function loadContactsByEmail(array $items): array
+	{
+		$emails = [];
+
+		foreach ($items as $item)
+		{
+			$email = self::normalizeEmail((string)($item['email'] ?? ''));
+
+			if ($email !== '' && check_email($email))
+			{
+				$emails[$email] = true;
+			}
+		}
+
+		if (empty($emails))
+		{
+			return [];
+		}
+
+		$rows = MailContactTable::getList(
+			[
+				'filter' => [
+					'=USER_ID' => self::getCurrentUserId(),
+					'@EMAIL' => array_keys($emails),
+				],
+				'select' => ['ID', 'NAME', 'EMAIL'],
+			]
+		)->fetchAll();
+
+		$contacts = [];
+
+		foreach ($rows as $row)
+		{
+			$contacts[self::normalizeEmail((string)$row['EMAIL'])] = [
+				'NAME' => $row['NAME'],
+				'ID' => (int)$row['ID'],
+			];
+		}
+
+		return $contacts;
+	}
+
+	private static function normalizeEmail(string $email): string
+	{
+		return trim(mb_strtolower($email));
+	}
+
+	/**
+	 * @return array{NAME: string, ID: int}
+	 */
+	private static function getEmptyContact(): array
+	{
+		return [
+			'NAME' => '',
+			'ID' => 0,
+		];
 	}
 
 	public function getPreinstalledItems(): array

@@ -21,6 +21,7 @@ final readonly class Preferences implements \JsonSerializable
 		public array $channelsSort = [],
 		#[Validatable(iterable: true)]
 		public array $channelsLastUsedFrom = [],
+		public bool $saveFlowOptOut = false,
 	)
 	{
 	}
@@ -37,7 +38,11 @@ final readonly class Preferences implements \JsonSerializable
 			static fn(array $item) => ChannelLastUsedFrom::fromArray($item),
 		);
 
-		return new self($channelsSortItems, $channelsLastUsedFromItems);
+		return new self(
+			$channelsSortItems,
+			$channelsLastUsedFromItems,
+			($fields['saveFlowOptOut'] ?? null) === true,
+		);
 	}
 
 	private static function normalizeItems(mixed $value): array
@@ -77,6 +82,7 @@ final readonly class Preferences implements \JsonSerializable
 		return [
 			'channelsSort' => $this->channelsSort,
 			'channelsLastUsedFrom' => $this->channelsLastUsedFrom,
+			'saveFlowOptOut' => $this->saveFlowOptOut,
 		];
 	}
 }

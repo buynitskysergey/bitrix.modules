@@ -124,9 +124,12 @@ class PaymentTable extends Main\Entity\DataManager
 				'validation' => array(__CLASS__, 'validatePsStatusMessage'),
 				'title' => Loc::getMessage('ORDER_PAYMENT_ENTITY_PS_STATUS_MESSAGE_FIELD'),
 			),
-			'PS_SUM' => array(
-				'data_type' => 'float',
-				'title' => Loc::getMessage('ORDER_PAYMENT_ENTITY_PS_SUM_FIELD'),
+			new Main\Entity\FloatField(
+				'PS_SUM',
+				[
+					'scale' => 8,
+					'title' => Loc::getMessage('ORDER_PAYMENT_ENTITY_PS_SUM_FIELD'),
+				]
 			),
 			'PS_CURRENCY' => array(
 				'data_type' => 'string',
@@ -171,15 +174,19 @@ class PaymentTable extends Main\Entity\DataManager
 			),
 			new Main\Entity\FloatField(
 				'SUM',
-				array(
+				[
 					'default_value' => '0.0000',
 					'required' => true,
-				)
+					'scale' => 8,
+				]
 			),
-			'PRICE_COD' => array(
-				'data_type' => 'float',
-				'required' => false,
-				'title' => Loc::getMessage('ORDER_PAYMENT_ENTITY_PRICE_COD_FIELD'),
+			new Main\Entity\FloatField(
+				'PRICE_COD',
+				[
+					'required' => false,
+					'scale' => 8,
+					'title' => Loc::getMessage('ORDER_PAYMENT_ENTITY_PRICE_COD_FIELD'),
+				]
 			),
 			'CURRENCY' => array(
 				'data_type' => 'string',

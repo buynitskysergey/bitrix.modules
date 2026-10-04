@@ -22,7 +22,7 @@ class CMailbox extends CAllMailBox
 
 		$mt = microtime(true);
 		$dbr = $connection->query("
-			SELECT MS.ID
+			SELECT MS.ID, MS.MAILBOX_ID
 			FROM
 				b_mail_message MS
 				INNER JOIN b_mail_mailbox MB ON MS.MAILBOX_ID = MB.ID
@@ -32,7 +32,7 @@ class CMailbox extends CAllMailBox
 		");
 		while ($ar = $dbr->fetch())
 		{
-			CMailMessage::Delete($ar["ID"]);
+			CMailMessage::Delete($ar["ID"], (int)$ar["MAILBOX_ID"]);
 			if (microtime(true) - $mt > 10 * 1000)
 				break;
 		}

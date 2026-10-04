@@ -23,6 +23,27 @@ abstract class BaseTrigger extends \CBPActivity implements \IBPTriggerActivity, 
 		&$errors,
 	): bool
 	{
+		return static::applyPropertiesDialogValues(
+			$documentType,
+			$activityName,
+			$workflowTemplate,
+			$workflowParameters,
+			$workflowVariables,
+			$currentValues,
+			$errors,
+		);
+	}
+
+	protected static function applyPropertiesDialogValues(
+		$documentType,
+		$activityName,
+		&$workflowTemplate,
+		&$workflowParameters,
+		&$workflowVariables,
+		$currentValues,
+		&$errors,
+	): bool
+	{
 		$currentValues = is_array($currentValues) ? $currentValues : [];
 		$errors = [];
 		$properties = [];
@@ -129,16 +150,32 @@ abstract class BaseTrigger extends \CBPActivity implements \IBPTriggerActivity, 
 	{
 		$configurator = parent::createConfigurator();
 
+		return $configurator
+			->setDocumentComplexType(new DocumentComplexType(...$this->getEventDocumentComplexType()))
+			->setSection($this->getSection())
+		;
+	}
+
+	/**
+	 * Document type of the event this trigger reacts to, as `[moduleId, entity, documentType]`; the `Workflow`
+	 * pseudo-type when the event carries no document of its own. Instance-level on purpose: a trigger of one
+	 * class serves several document types, resolving its own from its properties.
+	 *
+	 * The same value the configurator carries, and thereby the very one
+	 * {@see \Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTriggerTable::upsert()} registers the
+	 * trigger by. Reachable apart from the configurator because the editor asks for the document type alone
+	 * ({@see \Bitrix\Bizproc\Internal\Service\Activity\ComplexActivityService::getPublishedDocumentTypeForNode()})
+	 * and must not be made to build the section of a trigger to learn it.
+	 */
+	public function getEventDocumentComplexType(): array
+	{
 		//temporary
 		if (static::getModuleId())
 		{
 			Loader::includeModule(static::getModuleId());
 		}
 
-		return $configurator
-			->setDocumentComplexType(new DocumentComplexType(...$this->getDocumentComplexType()))
-			->setSection($this->getSection())
-		;
+		return $this->getDocumentComplexType();
 	}
 
 	protected static function getModuleId(): ?string

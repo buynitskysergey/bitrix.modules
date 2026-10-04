@@ -2,13 +2,19 @@
 
 namespace Bitrix\Crm\Service\Timeline\Item\Activity;
 
+use Bitrix\Crm\Activity\Mail\CopilotThreadCollector;
 use Bitrix\Crm\Activity\Mail\Message;
+use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\Operation\Scenario;
+use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Service;
-use Bitrix\Crm\Service\Timeline\Item\Activity;
+use Bitrix\Crm\Service\Timeline\Item\AIActivity;
+use Bitrix\Crm\Service\Timeline\Item\AIActivityService;
 use Bitrix\Crm\Service\Timeline\Layout\Action;
 use Bitrix\Crm\Service\Timeline\Layout\Action\JsEvent;
 use Bitrix\Crm\Service\Timeline\Layout\Action\Redirect;
 use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock;
+use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\ActionBar\ActionBarItem;
 use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\ContentBlockFactory;
 use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\ContentBlockWithTitle;
 use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\LineOfTextBlocks;
@@ -21,10 +27,17 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Web\Uri;
 use CCrmActivityDirection;
 
-class Email extends Activity
+class Email extends AIActivity
 {
 	private const TIMELINE_SHORT_LIMIT_LENGTH = 57;
 	private const TIMELINE_LONG_LIMIT_LENGTH = 155;
+
+	private bool $rootActivityIdResolved = false;
+	private ?int $rootActivityIdCache = null;
+	private ?AIActivityService $rootAnchoredAIService = null;
+
+	/** @var array<string, int|null> */
+	private static array $sharedRootActivityIdCache = [];
 
 	final protected function getActivityTypeId(): string
 	{
@@ -74,12 +87,10 @@ class Email extends Activity
 			case CCrmActivityDirection::Incoming:
 				if ($this->isScheduled())
 				{
-					return $logo->setAdditionalIconCode('arrow-incoming');
+					return $logo->setAdditionalIconCode('mail-incoming');
 				}
-				else
-				{
-					return $logo->setAdditionalIconCode('done');
-				}
+
+				return $logo->setAdditionalIconCode('done');
 			case CCrmActivityDirection::Outgoing:
 				return $logo->setAdditionalIconCode('arrow-outgoing');
 		}
@@ -89,19 +100,22 @@ class Email extends Activity
 	protected function getHeader()
 	{
 		$activityId = $this->getAssociatedEntityModel()->get('ID');
+		$userId = $this->getContext()->getUserId();
 
 		static $associatedActivityId;
+		static $associatedUserId;
 		static $header;
 
-		if (is_null($header) || $activityId !== $associatedActivityId)
+		if (is_null($header) || $activityId !== $associatedActivityId || $userId !== $associatedUserId)
 		{
 			$associatedActivityId = $activityId;
+			$associatedUserId = $userId;
 			$header = Message::getHeader([
 				'OWNER_TYPE_ID' => (int)$this->getAssociatedEntityModel()->get('OWNER_TYPE_ID'),
 				'OWNER_ID' => (int)$this->getAssociatedEntityModel()->get('OWNER_ID'),
 				'ID' => $this->getAssociatedEntityModel()->get('ID'),
 				'SETTINGS' => $this->getAssociatedEntityModel()->get('SETTINGS'),
-			])->getData();
+			], userId: $userId)->getData();
 		}
 		return $header;
 	}
@@ -263,6 +277,12 @@ class Email extends Activity
 			$result['shortBody'] = $shortBodyBlock;
 		}
 
+		$actionBarBlock = $this->buildAiActionBar();
+		if ($actionBarBlock->isFilled())
+		{
+			$result['aiActionBar'] = $actionBarBlock->setScopeWeb();
+		}
+
 		return $result;
 	}
 
@@ -271,6 +291,91 @@ class Email extends Activity
 		return ((new JsEvent('Email::OpenMessage'))->addActionParamInt('threadId',
 			$this->getActivityId())->addActionParamString('componentTitle',
 			Loc::getMessage('CRM_TIMELINE_EMAIL_MESSAGE_COMPONENT_TITLE')));
+	}
+
+	protected function getScenarios(): array
+	{
+		if ($this->isAIScope() && $this->getAIService()->isFieldsFillingWrong())
+		{
+			return [
+				Scenario::CONFIRM_FIELDS_SCENARIO,
+				Scenario::SUMMARIZE_SCENARIO,
+				Scenario::ANALYZE_COMMUNICATION_SCENARIO,
+				Scenario::FULL_SCENARIO,
+			];
+		}
+
+		return [
+			Scenario::SUMMARIZE_SCENARIO,
+			Scenario::FILL_FIELDS_SCENARIO,
+			Scenario::ANALYZE_COMMUNICATION_SCENARIO,
+			Scenario::FULL_SCENARIO,
+		];
+	}
+
+	protected function canShowAIActions(): bool
+	{
+		return true;
+	}
+
+	protected function createViewCopilotSummaryItem(array $list): ?ActionBarItem
+	{
+		$activityId = $this->getRootActivityIdForActions();
+		$languageTitle = $this->getAIService()->withSummarizeActivityId($this->getSummarizeActivityId())->getAILanguage(SummarizeCallTranscription::TYPE_ID);
+		$barItemAction = (new JsEvent('Email::ShowCopilotSummary'))
+			->addActionParamInt('activityId', $activityId)
+			->addActionParamInt('ownerTypeId', $this->getContext()->getEntityTypeId())
+			->addActionParamInt('ownerId', $this->getContext()->getEntityId())
+			->addActionParamString('languageTitle', $languageTitle)
+			->addActionParamArray('summarizeTranscriptionList', $list)
+		;
+		$barItem = (new ActionBarItem())
+			->setSize(ActionBarItem::SIZE_SM)
+			->setDesign(ActionBarItem::DESIGN_AI)
+			->setAction($barItemAction)
+			->setText(
+				Loc::getMessage(
+					'CRM_TIMELINE_BLOCK_EMAIL_ACTION_BAR_COPILOT_SUMMARY',
+					['#COPILOT_NAME#' => AIManager::getCopilotName()]
+				)
+			)
+		;
+		if (count($list) > 1)
+		{
+			$barItem->setIsDropdown(true);
+		}
+
+		return $barItem;
+	}
+
+	protected function getAIService(): AIActivityService
+	{
+		if ($this->rootAnchoredAIService === null)
+		{
+			$service = parent::getAIService()->withEmailScope();
+			if ($service->isAIScope())
+			{
+				$rootId = $this->resolveRootActivityId();
+				$service = $service
+					->withSummarizeActivityId($rootId)
+					->withResultActivityId($rootId)
+				;
+			}
+
+			$this->rootAnchoredAIService = $service;
+		}
+
+		return $this->rootAnchoredAIService;
+	}
+
+	protected function getSummarizeActivityId(): int
+	{
+		return $this->resolveRootActivityId();
+	}
+
+	protected function getRootActivityIdForActions(): int
+	{
+		return $this->resolveRootActivityId();
 	}
 
 	public function getButtons(): array
@@ -284,10 +389,13 @@ class Email extends Activity
 			$type = Button::TYPE_SECONDARY;
 		}
 
-		return [
-			'openButton' => (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_EMAIL_OPEN'), $type))->setAction(($this->getTitleAction())),
-			'scheduleButton' => $this->getScheduleButton('Email::Schedule'),
-		];
+		return array_merge(
+			[
+				'openButton' => (new Button(Loc::getMessage('CRM_TIMELINE_BUTTON_EMAIL_OPEN'), $type))->setAction(($this->getTitleAction())),
+				'scheduleButton' => $this->getScheduleButton('Email::Schedule'),
+			],
+			$this->getAIButtons(),
+		);
 	}
 
 	public function getMenuItems(): array
@@ -303,7 +411,14 @@ class Email extends Activity
 			$items['view']->setScopeWeb();
 		}
 
-		return $items;
+		return array_merge($items, $this->getAIMenuItems());
+	}
+
+	public function getTags(): ?array
+	{
+		$tags = [];
+
+		return array_merge($tags, $this->getAITags());
 	}
 
 	protected function getDeleteConfirmationText(): string
@@ -318,25 +433,12 @@ class Email extends Activity
 		return $this->isScheduled();
 	}
 
-	public function needShowNotes(): bool
-	{
-		return true;
-	}
-
 	private function getBody()
 	{
-		$activityId = $this->getAssociatedEntityModel()->get('ID');
-
-		static $associatedActivityId;
-		static $messageBody;
-
-		if (is_null($messageBody) || $activityId !== $associatedActivityId)
-		{
-			$associatedActivityId = $activityId;
-			return Message::getMessageBody($this->getAssociatedEntityModel()->get('ID'))->getData();
-		}
-
-		return $messageBody;
+		return Message::getMessageBody(
+			$this->getAssociatedEntityModel()->get('ID'),
+			$this->getContext()->getUserId(),
+		)->getData();
 	}
 
 	private function buildShortBodyBlock(): ?ContentBlock
@@ -421,6 +523,41 @@ class Email extends Activity
 	public function handlePunctuation(string $item): string
 	{
 		$result = trim(str_replace(['.', '!', '?', '&nbsp;', "\t"], ['. ', '! ', '? ', '', ' '], $item));
+
 		return (string)preg_replace("/\h{2,}/u", " ", $result) ?? '';
+	}
+
+	private function resolveRootActivityId(): int
+	{
+		if ($this->rootActivityIdResolved)
+		{
+			return $this->rootActivityIdCache ?? $this->getActivityId();
+		}
+
+		$this->rootActivityIdResolved = true;
+
+		$activityId = $this->getActivityId();
+		$threadId = (int)($this->getAssociatedEntityModel()?->get('THREAD_ID') ?? 0);
+		if ($threadId <= 0)
+		{
+			return $activityId;
+		}
+
+		$ownerTypeId = $this->getContext()->getEntityTypeId();
+		$ownerId = $this->getContext()->getEntityId();
+		$cacheKey = $threadId . '-' . $ownerTypeId . '-' . $ownerId;
+		if (array_key_exists($cacheKey, self::$sharedRootActivityIdCache))
+		{
+			$this->rootActivityIdCache = self::$sharedRootActivityIdCache[$cacheKey];
+
+			return $this->rootActivityIdCache ?? $activityId;
+		}
+
+		$rootRow = CopilotThreadCollector::findEntityLocalRoot($threadId, $ownerTypeId, $ownerId);
+
+		$this->rootActivityIdCache = $rootRow !== null ? (int)$rootRow['ID'] : null;
+		self::$sharedRootActivityIdCache[$cacheKey] = $this->rootActivityIdCache;
+
+		return $this->rootActivityIdCache ?? $activityId;
 	}
 }

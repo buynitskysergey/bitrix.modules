@@ -10,6 +10,7 @@ use Bitrix\AiAssistant\Definition\Dto\SystemPromptDto;
 use Bitrix\AiAssistant\Definition\Dto\UsesToolsDto;
 use Bitrix\HumanResources\Access\Model\UserModel;
 use Bitrix\HumanResources\Access\Permission\PermissionDictionary;
+use Bitrix\HumanResources\Access\Permission\PermissionHelper;
 use Bitrix\HumanResources\Access\Permission\PermissionVariablesDictionary;
 use Bitrix\HumanResources\Config\Storage;
 use Bitrix\HumanResources\Integration\AiAssistant\Tools\Department\DepartmentAddMembersTool;
@@ -80,13 +81,12 @@ class DepartmentAgent extends BaseAgent
 			return true;
 		}
 
-		$permissionValue = $user->getPermission(PermissionDictionary::HUMAN_RESOURCES_STRUCTURE_VIEW);
-		if ($permissionValue === PermissionVariablesDictionary::VARIABLE_NONE)
-		{
-			return false;
-		}
+		$value = PermissionHelper::getPermissionValue(
+			PermissionDictionary::HUMAN_RESOURCES_STRUCTURE_VIEW,
+			$userId,
+		)->getFirst()?->value ?? PermissionVariablesDictionary::VARIABLE_NONE;
 
-		return true;
+		return $value !== PermissionVariablesDictionary::VARIABLE_NONE;
 	}
 
 	public function canRun(int $userId): bool

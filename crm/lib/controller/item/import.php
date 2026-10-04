@@ -27,6 +27,7 @@ use Bitrix\Main\DI\Exception\ServiceNotFoundException;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\ActionFilter\Attribute\Rule\DisablePrefilters;
 use Bitrix\Main\Engine\ActionFilter\Csrf;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\JsonPayload;
 use Bitrix\Main\Engine\Response\AjaxJson;
 use Bitrix\Main\Engine\Response\Json as JsonResponse;
@@ -35,6 +36,7 @@ use Bitrix\Main\ObjectNotFoundException;
 use Bitrix\Main\Request;
 use Bitrix\Main\Web\Json;
 use JsonSerializable;
+use Psr\Log\LoggerInterface;
 
 final class Import extends Base
 {
@@ -43,6 +45,7 @@ final class Import extends Base
 	private readonly DownloadFileUrlBuilder $downloadUrlBuilder;
 	private readonly ErrorFactory $errors;
 	private readonly FileFactory $fileFactory;
+	private readonly LoggerInterface $logger;
 
 	private const IMPORT_LIMIT = 20;
 	private const PREVIEW_TABLE_ROW_LIMIT = 5;
@@ -63,6 +66,7 @@ final class Import extends Base
 		$this->errors = $serviceLocator->get(ErrorFactory::class);
 
 		$this->permissions = Container::getInstance()->getUserPermissions();
+		$this->logger = Container::getInstance()->getLogger('Import');
 	}
 
 	#[DisablePrefilters([ Csrf::class ])]
@@ -70,23 +74,55 @@ final class Import extends Base
 	{
 		if (!$this->permissions->entityType()->canImportItems($entityTypeId))
 		{
+			$this->logger->error(
+				'Download example: user has no import permission',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+				],
+			);
+
 			return null;
 		}
 
 		if (!Json::validate($importSettingsJson))
 		{
+			$this->logger->error(
+				'Download example: import settings json is invalid',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+				],
+			);
+
 			return null;
 		}
 
 		$importSettings = Json::decode($importSettingsJson);
 		if (!is_array($importSettings))
 		{
+			$this->logger->error(
+				'Download example: import settings json is not an array',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+				],
+			);
+
 			return null;
 		}
 
 		$entity = $this->entityFactory->createEntity($entityTypeId, $importSettings);
 		if (!$entity instanceof ImportEntityInterface\HasExampleFileInterface)
 		{
+			$this->logger->error(
+				'Download example: import entity with example file was not found',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+				],
+			);
+
 			return null;
 		}
 
@@ -98,12 +134,30 @@ final class Import extends Base
 	{
 		if (!$this->permissions->entityType()->canImportItems($entityTypeId))
 		{
+			$this->logger->error(
+				'Download import result file: user has no import permission',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+				],
+			);
+
 			return null;
 		}
 
 		$filepath = $this->fileFactory->getTemporaryFile($importFileId, $rawType);
 		if ($filepath === null)
 		{
+			$this->logger->error(
+				'Download import result file: temporary result file was not found',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+					'importFileId' => $importFileId,
+					'rawType' => $rawType,
+				],
+			);
+
 			return null;
 		}
 
@@ -118,24 +172,49 @@ final class Import extends Base
 			return null;
 		}
 
-		if (!$this->permissions->entityType()->canImportItems($entity->getSettings()->getEntityTypeId()))
-		{
-			$this->addError(ErrorCode::getAccessDeniedError());
-
-			return null;
-		}
+		$this->logger->info(
+			'Configure import settings: uploading source file to temporary storage',
+			[
+				'userId' => (int)CurrentUser::get()->getId(),
+				'importSettings' => $entity->getSettings()->toArray(),
+			],
+		);
 
 		$uploadResult = $this->fileFactory->uploadImportFile($entity->getSettings());
 		if (!$uploadResult->isSuccess())
 		{
+			$this->logger->error(
+				'Configure import settings: source file was not uploaded to temporary storage',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $entity->getSettings()->toArray(),
+				],
+			);
+
 			$this->addErrors($uploadResult->getErrors());
 
 			return null;
 		}
 
+		$this->logger->info(
+			'Configure import settings: preparing import file reader',
+			[
+				'userId' => (int)CurrentUser::get()->getId(),
+				'importSettings' => $entity->getSettings()->toArray(),
+			],
+		);
+
 		$reader = $this->fileFactory->getImportFileReader($entity->getSettings());
 		if ($reader === null)
 		{
+			$this->logger->error(
+				'Configure import settings: reader is not available after source file upload',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $entity->getSettings()->toArray(),
+				],
+			);
+
 			$this->addError($this->errors->getImportFileNotSupportedError());
 
 			return null;
@@ -212,6 +291,14 @@ final class Import extends Base
 
 		if ($entity->getSettings()->getImportFileId() === null)
 		{
+			$this->logger->error(
+				'Import: import file id is missing in settings',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $entity->getSettings()->toArray(),
+				],
+			);
+
 			$this->addError($this->errors->getImportFileNotFoundError());
 
 			return null;
@@ -220,6 +307,14 @@ final class Import extends Base
 		$reader = $this->fileFactory->getImportFileReader($entity->getSettings());
 		if ($reader === null)
 		{
+			$this->logger->error(
+				'Import: import file reader is not available',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $entity->getSettings()->toArray(),
+				],
+			);
+
 			$this->addError($this->errors->getImportFileNotSupportedError());
 
 			return null;
@@ -231,8 +326,17 @@ final class Import extends Base
 		}
 
 		$currentLine = $payload->getData()['currentLine'] ?? null;
-		if (!is_numeric($currentLine) && (int)$currentLine < 0)
+		if (!is_numeric($currentLine) || (int)$currentLine < 0)
 		{
+			$this->logger->error(
+				'Import: current line is invalid',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importSettings' => $entity->getSettings()->toArray(),
+					'currentLine' => $currentLine,
+				],
+			);
+
 			$this->addError($this->errors->getCurrentLineNotFoundError());
 
 			return null;
@@ -246,7 +350,37 @@ final class Import extends Base
 			limit: self::IMPORT_LIMIT,
 		);
 
+		$this->logger->info(
+			'Import: processing import file chunk',
+			[
+				'userId' => (int)CurrentUser::get()->getId(),
+				'currentLine' => (int)$currentLine,
+				'limit' => self::IMPORT_LIMIT,
+			],
+		);
+
 		$importResult = (new ImportOperation($options))->launch();
+
+		if ($importResult->isSuccess())
+		{
+			$this->logger->info(
+				'Import: chunk processed successfully',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importResult' => $importResult->toArray(),
+				],
+			);
+		}
+		else
+		{
+			$this->logger->error(
+				'Import: chunk processed with row errors',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'importResult' => $importResult->toArray(),
+				],
+			);
+		}
 
 		$errorsPreviewTable = null;
 		$downloadFailImportFileUrl = null;
@@ -336,6 +470,13 @@ final class Import extends Base
 		$entityTypeId = $importSettingsRaw['entityTypeId'] ?? null;
 		if ($entityTypeId === null)
 		{
+			$this->logger->error(
+				'Import entity initialization: entity type id is missing in import settings',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+				],
+			);
+
 			$this->addError(ErrorCode::getEntityTypeNotSupportedError());
 
 			return null;
@@ -343,6 +484,14 @@ final class Import extends Base
 
 		if (!$this->permissions->entityType()->canImportItems($entityTypeId))
 		{
+			$this->logger->error(
+				'Import entity initialization: user has no import permission',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+				],
+			);
+
 			$this->addError(ErrorCode::getAccessDeniedError());
 
 			return null;
@@ -351,6 +500,15 @@ final class Import extends Base
 		$entity = $this->entityFactory->createEntity($entityTypeId, $importSettingsRaw);
 		if ($entity === null)
 		{
+			$this->logger->error(
+				'Import entity initialization: entity factory did not create import entity',
+				[
+					'userId' => (int)CurrentUser::get()->getId(),
+					'entityTypeId' => $entityTypeId,
+					'importSettingsRaw' => $importSettingsRaw,
+				],
+			);
+
 			$this->addError(ErrorCode::getEntityTypeNotSupportedError());
 
 			return null;

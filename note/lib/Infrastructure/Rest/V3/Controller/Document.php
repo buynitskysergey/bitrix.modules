@@ -22,6 +22,7 @@ use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Exceptions\ParentDocumentMismatchException;
 use Bitrix\Note\Internal\Model\Document as DocumentEntity;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Public\Command\ArchiveDocumentCommand;
@@ -60,6 +61,7 @@ class Document extends RestController
 	public function getAction(GetRequest $request): GetResponse
 	{
 		$id = (int)$request->id;
+		$this->assertNotMainDocument($id);
 		$document = $this->readDocument($id);
 
 		// view_document for the REST read; readDocument throws on missing/forbidden, so this fires only on success.
@@ -87,13 +89,19 @@ class Document extends RestController
 		$parentId = isset($dto->parentId) ? $dto->parentId : null;
 		$markdown = isset($dto->markdown) ? (string)$dto->markdown : '';
 
+		// A main document is never a valid parent - it lives outside the document tree.
+		if ($parentId !== null && (new DocumentRepository())->isMainDocument((int)$parentId))
+		{
+			throw new InvalidParentException();
+		}
+
 		// Byte-precise limit (UTF-8): char-based Length cannot express it, so it stays here.
 		if ($markdown !== '' && strlen($markdown) > DocumentLimits::MAX_MARKDOWN_BYTES)
 		{
 			throw new MarkdownTooLargeException(DocumentLimits::MAX_MARKDOWN_BYTES);
 		}
 
-		// Non-empty markdown → finalised MD doc; otherwise default to YJS (collaborative).
+		// Non-empty markdown -> finalised MD doc; otherwise default to YJS (collaborative).
 		$contentFormat = $markdown !== ''
 			? DocumentTable::CONTENT_FORMAT_MD
 			: DocumentTable::CONTENT_FORMAT_YJS;
@@ -128,6 +136,7 @@ class Document extends RestController
 	public function updateAction(UpdateDocumentRequest $request): GetResponse
 	{
 		$id = (int)$request->id;
+		$this->assertNotMainDocument($id);
 
 		$items = $request->fields->getItems();
 		$hasTitle = array_key_exists('title', $items);
@@ -206,6 +215,8 @@ class Document extends RestController
 
 	public function archiveAction(ArchiveDocumentRequest $request): UpdateResponse
 	{
+		$this->assertNotMainDocument((int)$request->id);
+
 		$ownership = (new DocumentProvider())->getOwnershipInfo($request->id);
 		if ($ownership === null)
 		{
@@ -233,6 +244,7 @@ class Document extends RestController
 	public function deleteAction(DeleteRequest $request): DeleteResponse
 	{
 		$id = (int)$request->id;
+		$this->assertNotMainDocument($id);
 
 		$ownership = (new DocumentProvider())->getOwnershipInfo($id);
 		if ($ownership === null)
@@ -257,6 +269,19 @@ class Document extends RestController
 		}
 
 		return new DeleteResponse(true);
+	}
+
+	/**
+	 * External REST callers must not reach a collection's main document. It is exposed
+	 * only through the collection's markdownDescription field, never as a standalone
+	 * document. Treated as "not found" so existence is not leaked.
+	 */
+	private function assertNotMainDocument(int $id): void
+	{
+		if ($id > 0 && (new DocumentRepository())->isMainDocument($id))
+		{
+			throw new EntityNotFoundException($id);
+		}
 	}
 
 	private function readDocument(int $id): DocumentReadDto

@@ -50,7 +50,6 @@ class CAllTimeManEntry
 	{
 		global $DB, $USER;
 
-		$tz_diff = 0;
 		if ($action == 'UPDATE')
 		{
 			$dbRes = CTimeManEntry::GetList([], ['ID' => $arFields['ID']]);
@@ -59,7 +58,11 @@ class CAllTimeManEntry
 				return false;
 			}
 
-			$tz_diff = (MakeTimeStamp($arEntry['DATE_START']) % 86400) - $arEntry['TIME_START'];
+			// DATE_* is recomputed date-aware from the new user-local TIME_* on the EVENT DATE in the
+			// employee's real IANA zone (INV-COORD), replacing the legacy server-offset tz_diff. TIME_*
+			// are seconds-from-midnight in the employee zone; the calendar date of the event is read from
+			// the existing absolute instant in that same zone, so DST is honored on the event date.
+			$userId = (int)($arEntry['USER_ID'] ?? 0);
 
 			if (
 				isset($arFields["DATE_START"])
@@ -76,8 +79,9 @@ class CAllTimeManEntry
 					}
 					else
 					{
+						$startEventDate = self::resolveEventDateInUserZone($arEntry['DATE_START'], $userId);
 						$arFields['DATE_START'] = ConvertTimeStamp(
-							MakeTimeStamp($arEntry['DATE_START']) + $arFields['TIME_START'] - $arEntry['TIME_START'] - $tz_diff,
+							self::buildUserWallTimestamp($userId, $startEventDate, (int)$arFields['TIME_START']),
 							'FULL'
 						);
 					}
@@ -93,15 +97,19 @@ class CAllTimeManEntry
 					{
 						if ($arEntry['DATE_FINISH'])
 						{
+							$finishEventDate = self::resolveEventDateInUserZone($arEntry['DATE_FINISH'], $userId);
 							$arFields['DATE_FINISH'] = ConvertTimeStamp(
-								MakeTimeStamp($arEntry['DATE_FINISH']) + $arFields['TIME_FINISH'] - $arEntry['TIME_FINISH'] - $tz_diff,
+								self::buildUserWallTimestamp($userId, $finishEventDate, (int)$arFields['TIME_FINISH']),
 								'FULL'
 							);
 						}
 						else
 						{
+							// No prior DATE_FINISH: keep the start's calendar day in the employee zone and
+							// place the finish wall-time on it (legacy quirk #3 — finish derived from start).
+							$finishEventDate = self::resolveEventDateInUserZone($arFields['DATE_START'], $userId);
 							$arFields['DATE_FINISH'] = ConvertTimeStamp(
-								MakeTimeStamp($arFields['DATE_START']) - $arFields['TIME_START'] + $arFields['TIME_FINISH'],
+								self::buildUserWallTimestamp($userId, $finishEventDate, (int)$arFields['TIME_FINISH']),
 								'FULL'
 							);
 						}
@@ -131,14 +139,18 @@ class CAllTimeManEntry
 			}
 		}
 
-		//ts_start and ts_finish are with correct time but for server timezone offset
+		// TIME_* are seconds-from-midnight in the EMPLOYEE's real IANA zone, date-aware at the event
+		// instant (INV-COORD): TIME = (absoluteTs + userOffsetAt(absoluteTs)) % 86400. This replaces the
+		// legacy server-offset base ((ts + date('Z')) % 86400). The user id is taken from $arFields on ADD
+		// and from the existing record on UPDATE.
+		$timeUserId = (int)($arFields['USER_ID'] ?? ($arEntry['USER_ID'] ?? 0));
 		if ($ts_start > 0 && !isset($arFields['TIME_START']))
 		{
-			$arFields['TIME_START'] = (($ts_start + date('Z')) % 86400);
+			$arFields['TIME_START'] = self::calculateUserDaySeconds($ts_start, $timeUserId);
 		}
 		if ($ts_finish > 0 && !isset($arFields['TIME_FINISH']))
 		{
-			$arFields['TIME_FINISH'] = (($ts_finish + date('Z')) % 86400);
+			$arFields['TIME_FINISH'] = self::calculateUserDaySeconds($ts_finish, $timeUserId);
 		}
 
 		if ($action == 'ADD' || isset($arFields['ACTIVE']))
@@ -164,9 +176,14 @@ class CAllTimeManEntry
 			$arFields['TIME_LEAKS'] = self::clampDaySeconds(intval($arEntry['TIME_LEAKS']));
 		}
 
+		// DURATION canon (ALG-03): real elapsed working time from the absolute instants
+		// ($ts_finish - $ts_start) minus breaks, NOT the wall-clock (TIME_FINISH - TIME_START) difference.
+		// When the user offset shifts inside the day (DST) the wall-clock formula diverges from elapsed by
+		// (STOP_OFFSET - START_OFFSET); the absolute base is offset-agnostic and handles overnight implicitly
+		// (DATE_FINISH already carries the next day). correctDuration() clamps [0, 86400].
 		if ($ts_start > 0 && $ts_finish > 0 && $arFields['PAUSED'] != 'Y' && !isset($arFields['DURATION']))
 		{
-			$arFields['DURATION'] = self::correctDuration($arFields['TIME_FINISH'] - $arFields['TIME_START'] - $arFields['TIME_LEAKS']);
+			$arFields['DURATION'] = self::correctDuration($ts_finish - $ts_start - $arFields['TIME_LEAKS']);
 		}
 
 		if (isset($arFields['DURATION']))
@@ -178,7 +195,7 @@ class CAllTimeManEntry
 			&& $arFields['PAUSED'] != 'Y'
 		)
 		{
-			$arFields['DURATION'] = self::correctDuration($arFields['TIME_FINISH'] - $arFields['TIME_START'] - $arFields['TIME_LEAKS']);
+			$arFields['DURATION'] = self::correctDuration($ts_finish - $ts_start - $arFields['TIME_LEAKS']);
 		}
 
 		if (isset($arFields['TIME_LEAKS_ADD']))
@@ -949,5 +966,52 @@ class CAllTimeManEntry
 		}
 
 		return $seconds;
+	}
+
+	/**
+	 * Seconds-from-midnight of an absolute instant in the EMPLOYEE's real IANA zone, date-aware (ALG-02):
+	 * (absoluteTs + userOffsetAt(absoluteTs)) % 86400. Replaces the legacy server-offset base
+	 * ((ts + date('Z')) % 86400). See INV-COORD (TIME_* coordinate base = user-IANA).
+	 *
+	 * @param int $absoluteTimestamp absolute Unix-seconds (= MakeTimeStamp() of the server-zone DATE_*)
+	 * @param int $userId
+	 * @return int
+	 */
+	private static function calculateUserDaySeconds(int $absoluteTimestamp, int $userId): int
+	{
+		$offset = TimeHelper::getInstance()->getOffsetAt($userId, $absoluteTimestamp);
+
+		return ($absoluteTimestamp + $offset) % 86400;
+	}
+
+	/**
+	 * Calendar date ('Y-m-d') of a server-zone DATE_* string read back in the EMPLOYEE's real IANA zone,
+	 * so the recompute of DATE_* from a new user-local TIME_* lands on the correct event day (DST-aware).
+	 *
+	 * @param string $serverDateTime server-zone datetime string (DATE_START/DATE_FINISH)
+	 * @param int $userId
+	 * @return string date in 'Y-m-d'
+	 */
+	private static function resolveEventDateInUserZone(string $serverDateTime, int $userId): string
+	{
+		$absoluteTimestamp = (int)MakeTimeStamp($serverDateTime);
+		$dateTime = (new \DateTime('@' . $absoluteTimestamp))
+			->setTimezone(TimeHelper::getInstance()->getUserDateTimeZone($userId));
+
+		return $dateTime->format('Y-m-d');
+	}
+
+	/**
+	 * Absolute Unix timestamp of a wall-time (seconds-from-midnight) on a calendar date in the EMPLOYEE's
+	 * real IANA zone (ALG-02 inverse). Used to recompute server-zone DATE_* from a new user-local TIME_*.
+	 *
+	 * @param int $userId
+	 * @param string $eventDate date in 'Y-m-d'
+	 * @param int $daySeconds wall seconds-from-midnight in the employee zone
+	 * @return int absolute Unix timestamp
+	 */
+	private static function buildUserWallTimestamp(int $userId, string $eventDate, int $daySeconds): int
+	{
+		return TimeHelper::getInstance()->buildTimestampFromWallTime($userId, $eventDate, $daySeconds);
 	}
 }

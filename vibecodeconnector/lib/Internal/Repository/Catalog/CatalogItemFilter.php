@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Internal\Repository\Catalog;
 
 use Bitrix\Main\ORM\Query\Filter\ConditionTree;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemAccessType;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemType;
 
@@ -30,7 +31,8 @@ final class CatalogItemFilter
 	private bool $includeDeactivated = false;
 	private ?string $pairingIss = null;
 	private ?bool $hiddenState = null;
-	private ?bool $notOpenedByUser = null;
+	private ?bool $notViewedByUser = null;
+	private ?DateTime $viewSession = null;
 	private ?ConditionTree $where = null;
 
 	public function id(?int $id): self
@@ -150,16 +152,32 @@ final class CatalogItemFilter
 		return $this->hiddenState;
 	}
 
-	public function notOpenedByUser(?bool $notOpenedByUser): self
+	public function notViewedByUser(?bool $notViewedByUser): self
 	{
-		$this->notOpenedByUser = $notOpenedByUser;
+		$this->notViewedByUser = $notViewedByUser;
 
 		return $this;
 	}
 
-	public function getNotOpenedByUser(): ?bool
+	public function getNotViewedByUser(): ?bool
 	{
-		return $this->notOpenedByUser;
+		return $this->notViewedByUser;
+	}
+
+	/**
+	 * Keeps items marked as viewed since the given moment inside the "not viewed"
+	 * predicate, so a listing that marks what it serves stays stable while paging.
+	 */
+	public function viewSession(?DateTime $viewSession): self
+	{
+		$this->viewSession = $viewSession;
+
+		return $this;
+	}
+
+	public function getViewSession(): ?DateTime
+	{
+		return $this->viewSession;
 	}
 
 	public function where(?ConditionTree $where): self

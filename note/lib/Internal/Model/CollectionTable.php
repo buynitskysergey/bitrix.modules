@@ -11,6 +11,7 @@ use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Fields\BooleanField;
 use Bitrix\Main\ORM\Fields\StringField;
 use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
+use Bitrix\Main\Text\Emoji;
 use Bitrix\Main\Type\DateTime;
 
 /**
@@ -71,13 +72,16 @@ class CollectionTable extends DataManager
 					'autocomplete' => true,
 				],
 			),
-			new StringField(
+			// Emoji-safe storage: encode 4-byte UTF-8 to :hex: on save, decode on fetch (see DocumentTable).
+			(new StringField(
 				'NAME',
 				[
 					'required' => true,
 					'validation' => [__CLASS__, 'validateName'],
 				],
-			),
+			))
+				->addSaveDataModifier([Emoji::class, 'encode'])
+				->addFetchDataModifier([Emoji::class, 'decode']),
 			new IntegerField(
 				'CREATED_BY',
 				[

@@ -32,6 +32,12 @@ final class TranscribeCallRecording extends AbstractOperation
 	public const TYPE_ID = 1;
 	public const CONTEXT_ID = 'transcribe_call_recording';
 
+	// launch provenance: marks a transcription requested by the repeat-sale gate (step I.5) so these
+	// launches can be told apart from transcriptions of other scenarios in the operation-progress log
+	public const LAUNCH_SOURCE_REPEAT_SALE = 'repeat_sale';
+
+	private ?string $launchSource = null;
+
 	public const SUPPORTED_TARGET_ENTITY_TYPE_IDS = [
 		CCrmOwnerType::Activity,
 	];
@@ -51,6 +57,23 @@ final class TranscribeCallRecording extends AbstractOperation
 	)
 	{
 		parent::__construct($target, $userId, $parentJobId);
+	}
+
+	public function setLaunchSource(?string $launchSource): self
+	{
+		$this->launchSource = $launchSource;
+
+		return $this;
+	}
+
+	protected function logOperationLaunched(string $hash, ?int $parentJobId): void
+	{
+		parent::logOperationLaunched($hash, $parentJobId);
+
+		if ($this->launchSource === self::LAUNCH_SOURCE_REPEAT_SALE)
+		{
+			self::logOperationProgress('repeatSaleTranscriptionLaunched', $this->target, $hash, $parentJobId);
+		}
 	}
 
 	public static function isAccessGranted(int $userId, ItemIdentifier $target): bool
@@ -227,17 +250,21 @@ final class TranscribeCallRecording extends AbstractOperation
 	protected static function notifyAboutJobError(
 		Result $result,
 		bool $withSyncBadges = true,
-		bool $withSendAnalytics = true
+		bool $withSendAnalytics = true,
+		?ItemIdentifier $target = null
 	): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();
-		$nextTarget = (new TargetResolver())->findTarget($activityId);
-		if ($nextTarget)
+		// Prefer the clicked entity carried across the async boundary (ERR-002/AC-030). The auto path and
+		// legacy single-target callers pass no target and keep resolving the priority Deal/Lead via findTarget.
+		// Gating on the resolved target (not findTarget alone) lets a contact-only manual launch get the badge.
+		$badgeTarget = $target ?? (new TargetResolver())->findTarget($activityId);
+		if ($badgeTarget)
 		{
 			if ($withSyncBadges)
 			{
 				Controller::getInstance()->onLaunchError(
-					$nextTarget,
+					$badgeTarget,
 					$activityId,
 					[
 						'OPERATION_TYPE_ID' => self::TYPE_ID,
@@ -247,7 +274,7 @@ final class TranscribeCallRecording extends AbstractOperation
 					$result->getUserId(),
 				);
 
-				self::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_VALUE);
+				self::syncBadges($activityId, Badge\Type\AiCallFieldsFillingResult::ERROR_PROCESS_VALUE, $badgeTarget);
 			}
 
 			self::notifyTimelinesAboutActivityUpdate($activityId);

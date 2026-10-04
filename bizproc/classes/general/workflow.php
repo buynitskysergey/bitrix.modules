@@ -2,6 +2,7 @@
 
 use Bitrix\Bizproc;
 use Bitrix\Bizproc\Internal\Entity\Workflow\ExecutionPayload;
+use Bitrix\Bizproc\Public\Activity\BaseComplexActivity;
 use Bitrix\Bizproc\Workflow\Entity\WorkflowFilterTable;
 use Bitrix\Bizproc\Workflow\Entity\WorkflowUserTable;
 use Bitrix\Main;
@@ -22,6 +23,15 @@ use Bitrix\Main\Localization\Loc;
  */
 class CBPWorkflow
 {
+	private const MAX_FAULT_HANDLING_ATTEMPTS = 3;
+
+	/**
+	 * Why an activity was not executed. Both reasons share the path a deactivated activity has always
+	 * taken - closed right away, control handed on - so an unmet condition is a completion, not a fault.
+	 */
+	private const SKIP_REASON_DEACTIVATED = 'deactivated';
+	private const SKIP_REASON_CONDITION = 'condition';
+
 	private bool $isNew = false;
 	private bool $isAbandoned = false;
 	private string $instanceId;
@@ -33,6 +43,7 @@ class CBPWorkflow
 
 	protected array $activitiesQueue = [];
 	protected array $eventsQueue = [];
+	private array $faultHandlingAttempts = [];
 
 	private array $activitiesNamesMap = [];
 
@@ -461,9 +472,11 @@ class CBPWorkflow
 	{
 		$this->activitiesNamesMap[$activity->getName()] = $activity;
 
-		if ($activity instanceof \CBPCompositeActivity)
+		// The children of an activity are the ones its container holds, whatever class the activity is of:
+		// a node served by the unified settings panel owns children without being a composite activity.
+		$arSubActivities = $activity->collectNestedActivities();
+		if (is_array($arSubActivities))
 		{
-			$arSubActivities = $activity->collectNestedActivities();
 			foreach ($arSubActivities as $subActivity)
 			{
 				$this->fillNameActivityMapInternal($subActivity);
@@ -808,6 +821,9 @@ class CBPWorkflow
 				],
 			);
 
+			// The incident leaves this activity (escalation or terminate): its attempts are over.
+			unset($this->faultHandlingAttempts[$activity->getName()]);
+
 			if ($activity->parent === null)
 			{
 				$this->Terminate($e);
@@ -883,6 +899,21 @@ class CBPWorkflow
 				],
 			);
 
+			if ($item[1] === CBPActivityExecutorOperationType::HandleFault)
+			{
+				// Fault handling failed again: limit the retries, otherwise the queue loops forever.
+				$activityName = $item[0]->getName();
+				$this->faultHandlingAttempts[$activityName] = ($this->faultHandlingAttempts[$activityName] ?? 0) + 1;
+
+				if ($this->faultHandlingAttempts[$activityName] >= self::MAX_FAULT_HANDLING_ATTEMPTS)
+				{
+					Main\Application::getInstance()->getExceptionHandler()->writeToLog($e);
+					$this->terminate($e);
+
+					return false;
+				}
+			}
+
 			$this->faultActivity($item[0], $e);
 		}
 
@@ -954,7 +985,22 @@ class CBPWorkflow
 		}
 
 		$newStatus = CBPActivityExecutionStatus::Closed;
-		if ($activity->isActivated())
+		$skipReason = null;
+		if (!$activity->isActivated())
+		{
+			$skipReason = self::SKIP_REASON_DEACTIVATED;
+		}
+		else
+		{
+			$this->publishNodeFilterResults($activity);
+
+			if (!$this->isNodeConditionMet($activity))
+			{
+				$skipReason = self::SKIP_REASON_CONDITION;
+			}
+		}
+
+		if ($skipReason === null)
 		{
 			/** @var CBPTrackingService $trackingService */
 			$trackingService = $this->getService('TrackingService');
@@ -979,6 +1025,11 @@ class CBPWorkflow
 					'parent_port' => $payload?->getParentPort(),
 				],
 			);
+		}
+		else
+		{
+			$activity->markSkippedByEngine();
+			$this->writeActivitySkipTracking($activity, $skipReason);
 		}
 
 		$debugSessionService?->addTrace(
@@ -1009,6 +1060,79 @@ class CBPWorkflow
 		{
 			throw new Exception('InvalidExecutionStatus');
 		}
+	}
+
+	/**
+	 * Journals a node the engine reached but did not run, naming the reason. Whether the record is kept at
+	 * all is decided by the log settings of the portal, under the rule of the ExecuteActivity record this
+	 * one stands in for ({@see CBPTrackingService::canWrite()}). The record replaces the whole
+	 * Execute/Close pair: a skipped node journals no CloseActivity ({@see CBPActivity::markSkippedByEngine()}),
+	 * otherwise the newer close record reads as "completed" and unbalances the level pairing of the dump.
+	 */
+	private function writeActivitySkipTracking(CBPActivity $activity, string $skipReason): void
+	{
+		/** @var CBPTrackingService $trackingService */
+		$trackingService = $this->getService('TrackingService');
+		$trackingService->write(
+			$this->getInstanceId(),
+			CBPTrackingType::SkipActivity,
+			$activity->getName(),
+			$activity->executionStatus,
+			$activity->executionResult,
+			$activity->getTitle(),
+			self::getSkipReasonNote($skipReason),
+		);
+	}
+
+	private static function getSkipReasonNote(string $skipReason): string
+	{
+		$phraseId = match ($skipReason)
+		{
+			self::SKIP_REASON_DEACTIVATED => 'BPCGWF_SKIP_NOTE_DEACTIVATED',
+			self::SKIP_REASON_CONDITION => 'BPCGWF_SKIP_NOTE_CONDITION',
+			// A reason added later must not break the log of a running process over a missing phrase.
+			default => null,
+		};
+
+		return $phraseId === null ? '' : (Loc::getMessage($phraseId) ?? '');
+	}
+
+	/**
+	 * Publishes what the filter of the node selected into the properties of that node. Done before the
+	 * condition is evaluated - the condition may compare a field of what the filter selected, which is the
+	 * order a complex node has always had.
+	 */
+	private function publishNodeFilterResults(CBPActivity $activity): void
+	{
+		// A complex activity publishes the selection from its own execute(); doing it here as well would
+		// make the resolver query it a second time.
+		if (!$activity instanceof BaseComplexActivity)
+		{
+			BaseComplexActivity::initializeFilterResultPropertiesOf($activity);
+		}
+	}
+
+	/**
+	 * Whether the condition of the node is met. An empty condition and an absent property mean the same
+	 * thing and cost a single array read.
+	 *
+	 * Fails closed: `MixedCondition` is a condition of the module, not an activity of the template, and a
+	 * portal missing it can evaluate no condition at all - running the node would ignore what the user
+	 * configured.
+	 */
+	private function isNodeConditionMet(CBPActivity $activity): bool
+	{
+		$condition = $activity->getRawPropertyValue(
+			Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider::CONDITION_PROPERTY,
+		);
+		if (!is_array($condition) || $condition === [])
+		{
+			return true;
+		}
+
+		return $this->runtime->includeActivityFile('MixedCondition')
+			&& (new CBPMixedCondition($condition))->evaluate($activity)
+		;
 	}
 
 	/**
@@ -1123,16 +1247,12 @@ class CBPWorkflow
 			return;
 		}
 
-		/** @var CBPTrackingService $trackingService */
-		$trackingService = $this->getService("TrackingService");
-		$trackingService->write(
-			$this->getInstanceId(),
-			CBPTrackingType::FaultActivity,
+		$this->writeFaultTracking(
 			$activity->getName(),
 			$activity->executionStatus,
 			$activity->executionResult,
 			$activity->getTitle(),
-			($exception ? ($exception->getCode() ? "[" . $exception->getCode() . "] " : '') . $exception->getMessage() : ""),
+			$exception,
 		);
 
 		$newStatus = $activity->handleFault($exception);
@@ -1154,6 +1274,52 @@ class CBPWorkflow
 		elseif ($newStatus !== CBPActivityExecutionStatus::Faulting)
 		{
 			throw new Exception("InvalidExecutionStatus");
+		}
+
+		// Fault handled: reset the counter, the next incident gets a fresh budget.
+		unset($this->faultHandlingAttempts[$activity->getName()]);
+	}
+
+	/**
+	 * Best effort tracking write on the fault path: a journal failure here must not
+	 * fault the workflow again, otherwise HandleFault loops forever. The failure and
+	 * the original activity exception are written to the file log instead.
+	 */
+	private function writeFaultTracking(
+		string $activityName,
+		int $executionStatus,
+		int $executionResult,
+		string $title,
+		?Exception $activityException,
+	): void
+	{
+		try
+		{
+			/** @var CBPTrackingService $trackingService */
+			$trackingService = $this->getService("TrackingService");
+			$trackingService->write(
+				$this->getInstanceId(),
+				CBPTrackingType::FaultActivity,
+				$activityName,
+				$executionStatus,
+				$executionResult,
+				$title,
+				(
+					$activityException
+						? ($activityException->getCode() ? "[" . $activityException->getCode() . "] " : '')
+							. $activityException->getMessage()
+						: ""
+				),
+			);
+		}
+		catch (Throwable $trackingException)
+		{
+			$exceptionHandler = Main\Application::getInstance()->getExceptionHandler();
+			$exceptionHandler->writeToLog($trackingException);
+			if ($activityException !== null)
+			{
+				$exceptionHandler->writeToLog($activityException);
+			}
 		}
 	}
 
@@ -1198,16 +1364,12 @@ class CBPWorkflow
 
 		if ($e)
 		{
-			/** @var CBPTrackingService $trackingService */
-			$trackingService = $this->getService("TrackingService");
-			$trackingService->write(
-				$this->instanceId,
-				CBPTrackingType::FaultActivity,
+			$this->writeFaultTracking(
 				"none",
 				CBPActivityExecutionStatus::Faulting,
 				CBPActivityExecutionResult::Faulted,
-				Loc::getMessage('BPCGWF_EXCEPTION_TITLE'),
-				($e->getCode() ? "[" . $e->getCode() . "] " : '') . $e->getMessage(),
+				Loc::getMessage('BPCGWF_EXCEPTION_TITLE') ?? '',
+				$e,
 			);
 		}
 	}

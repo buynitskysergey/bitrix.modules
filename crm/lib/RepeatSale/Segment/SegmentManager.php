@@ -23,6 +23,36 @@ final class SegmentManager
 		];
 	}
 
+	public function enableSegmentsByCodes(array $codes): void
+	{
+		if (empty($codes))
+		{
+			return;
+		}
+
+		$segmentController = RepeatSaleSegmentController::getInstance();
+		$segments = $segmentController->getList([
+			'select' => ['*', 'ASSIGNMENT_USERS.USER_ID'],
+			'filter' => [
+				'=CODE' => $codes,
+			],
+			'limit' => 0, // for all segments
+		]);
+
+		foreach ($segments as $segment)
+		{
+			$segmentItem = SegmentItem::createFromEntity($segment);
+
+			// enabling a segment always clears the auto-disable memory, otherwise a later
+			// subscription renewal would re-enable it against a manual choice.
+			$segmentItem
+				->setIsEnabled(true)
+				->setIsAutoDisabled(false)
+			;
+			$segmentController->update($segmentItem->getId(), $segmentItem);
+		}
+	}
+
 	public static function onCategoryDelete(CategoryIdentifier $categoryIdentifier): void
 	{
 		$entityTypeId = $categoryIdentifier->getEntityTypeId();

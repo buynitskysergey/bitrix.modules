@@ -60,10 +60,7 @@ class LeadActivityStatistics extends LeadDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'CALL_QTY';
-		}
+		$name = $this->sanitizeSelectName($name, 'CALL_QTY');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -265,6 +262,10 @@ class LeadActivityStatistics extends LeadDataSource
 				'context' => DataContext::ENTITY
 			),
 		);
+	}
+	protected function getAllowedSelectNames()
+	{
+		return array('CALL_QTY', 'MEETING_QTY', 'EMAIL_QTY', 'TOTAL');
 	}
 	/** @return array */
 	public function prepareEntityListFilter(array $filterParams)

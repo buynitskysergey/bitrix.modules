@@ -21,7 +21,6 @@ class QuoteSettings
 	{
 		$this->isOpened = new BooleanSetting('quote_opened_flag', true);
 		$this->enableViewEvent = new BooleanSetting('quote_enable_view_event', true);
-		$this->initIsFactoryEnabledSetting(\CCrmOwnerType::Quote);
 		$this->initIsUseNumberInTitlePlaceholderSettings(\CCrmOwnerType::Quote);
 	}
 	/**

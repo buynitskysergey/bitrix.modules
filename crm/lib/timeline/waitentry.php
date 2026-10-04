@@ -11,10 +11,11 @@ class WaitEntry extends TimelineEntry
 	{
 		[$authorId, $created, $settings, $bindings] = self::fetchParams($params);
 		$entityId = self::fetchEntityId($params);
+		$entryCreated = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => TimelineType::WAIT,
 			'TYPE_CATEGORY_ID' => 0,
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => $authorId,
 			'ASSOCIATED_ENTITY_TYPE_ID' => \CCrmOwnerType::Wait,
 			'ASSOCIATED_ENTITY_ID' => $entityId
@@ -26,7 +27,7 @@ class WaitEntry extends TimelineEntry
 
 		$createdId = $result->getId();
 
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $entryCreated);
 		self::buildSearchContent($createdId);
 
 		return $createdId;

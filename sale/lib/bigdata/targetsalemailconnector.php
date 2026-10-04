@@ -219,9 +219,7 @@ if (Loader::includeModule('sender'))
 
 		public static function onConnectorList()
 		{
-			$arData['CONNECTOR'] = __CLASS__;
-
-			return $arData;
+			return [];
 		}
 
 	}

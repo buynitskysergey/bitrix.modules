@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Counter;
 
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main;
+use Bitrix\Main\Web\Uri;
 
 class DealCounter extends EntityCounter
 {
@@ -36,7 +37,7 @@ class DealCounter extends EntityCounter
 			$url = $this->getEntityListPath();
 		}
 
-		return \CHTTP::urlAddParams($url, $urlParams);
+		return (string)(new Uri($url))->addParams($urlParams);
 	}
 
 	protected function getEntityListPath()

@@ -25,10 +25,11 @@ class Entry extends TimelineEntry
 		$associatedEntityId = $params['SETTINGS']['ASSOCIATED_ENTITY_ID'] ?? 0;
 		/** @var Bindings $bindings */
 		$bindings = $params['BINDINGS'];
+		$entryCreated = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => static::getTypeId(),
 			'TYPE_CATEGORY_ID' => $typeCategoryId,
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => $authorId,
 			'SETTINGS' => $settings,
 			'ASSOCIATED_ENTITY_TYPE_ID' => $associatedEntityTypeId,
@@ -43,7 +44,7 @@ class Entry extends TimelineEntry
 
 		$id = (int)$result->getId();
 
-		self::registerBindings($id, $bindings->toArray());
+		self::registerBindings($id, $bindings->toArray(), $entryCreated);
 		self::buildSearchContent($id);
 
 		return $id;

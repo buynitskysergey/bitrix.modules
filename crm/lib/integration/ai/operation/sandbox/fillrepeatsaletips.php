@@ -118,6 +118,7 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 		Result $result,
 		bool $withSyncBadges = true,
 		bool $withSendAnalytics = true,
+		?ItemIdentifier $target = null,
 	): void
 	{
 		// not implemented yet

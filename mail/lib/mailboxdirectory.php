@@ -3,6 +3,7 @@
 namespace Bitrix\Mail;
 
 use Bitrix\Mail\Helper\Mailbox;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\MailboxDirectoryTable;
 use Bitrix\Main\Entity\ExpressionField;
 use Bitrix\Main\Entity\Query;
@@ -10,12 +11,18 @@ use Bitrix\Main\Result;
 
 class MailboxDirectory
 {
+	/** @var array<int, array<string, array>> mailbox id => scope cache key => dirs by path */
 	private static array $mailboxDirs = [];
 
-	public static function fetchAllDirsTypes($mailboxId)
+	private static function scope($mailboxId, ?GenerationScope $scope): GenerationScope
+	{
+		return $scope ?? GenerationScope::forMailbox((int)$mailboxId);
+	}
+
+	public static function fetchAllDirsTypes($mailboxId, ?GenerationScope $scope = null)
 	{
 		return MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'LOGIC'       => 'AND',
 				'=MAILBOX_ID' => $mailboxId,
 				[
@@ -24,21 +31,21 @@ class MailboxDirectory
 					'=IS_TRASH'   => MailboxDirectoryTable::ACTIVE,
 					'=IS_SPAM'    => MailboxDirectoryTable::ACTIVE,
 				]
-			],
+			]),
 			'select' => ['*'],
 			'order'  => ['LEVEL' => 'ASC']
 		])->fetchCollection();
 	}
 
-	public static function fetchOneLevelByParentId($mailboxId, $id, $level)
+	public static function fetchOneLevelByParentId($mailboxId, $id, $level, ?GenerationScope $scope = null)
 	{
 		$query = MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'LOGIC'       => 'AND',
 				'=MAILBOX_ID' => $mailboxId,
 				'=PARENT_ID'  => $id,
 				'=LEVEL'      => $level,
-			],
+			]),
 			'select' => ['*']
 		]);
 
@@ -52,15 +59,15 @@ class MailboxDirectory
 		return $result;
 	}
 
-	public static function fetchAllLevelByParentId($mailboxId, $path, $level)
+	public static function fetchAllLevelByParentId($mailboxId, $path, $level, ?GenerationScope $scope = null)
 	{
 		$query = MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'LOGIC'       => 'AND',
 				'=MAILBOX_ID' => $mailboxId,
 				'%=PATH'      => $path,
 				'>=LEVEL'     => $level,
-			],
+			]),
 			'select' => ['*'],
 			'order'  => ['LEVEL' => 'ASC']
 		]);
@@ -75,30 +82,30 @@ class MailboxDirectory
 		return $result;
 	}
 
-	public static function fetchOneByMailboxIdAndHash($mailboxId, $hash)
+	public static function fetchOneByMailboxIdAndHash($mailboxId, $hash, ?GenerationScope $scope = null)
 	{
 		return MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'=DIR_MD5'    => $hash
-			]
+			])
 		])->fetchObject();
 	}
 
-	public static function fetchOneOutcome($mailboxId)
+	public static function fetchOneOutcome($mailboxId, ?GenerationScope $scope = null)
 	{
 		return MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'=IS_OUTCOME' => MailboxDirectoryTable::ACTIVE
-			]
+			])
 		])->fetchObject();
 	}
 
-	public static function fetchTrashAndSpamHash($mailboxId)
+	public static function fetchTrashAndSpamHash($mailboxId, ?GenerationScope $scope = null)
 	{
 		$query = MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'LOGIC'       => 'AND',
 				'=MAILBOX_ID' => $mailboxId,
 				[
@@ -106,7 +113,7 @@ class MailboxDirectory
 					'=IS_TRASH' => MailboxDirectoryTable::ACTIVE,
 					'=IS_SPAM'  => MailboxDirectoryTable::ACTIVE,
 				]
-			]
+			])
 		]);
 
 		$result = [];
@@ -128,13 +135,13 @@ class MailboxDirectory
 		])->fetchObject();
 	}
 
-	public static function fetchOneByHash($mailboxId, $hash)
+	public static function fetchOneByHash($mailboxId, $hash, ?GenerationScope $scope = null)
 	{
 		return MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'=DIR_MD5'    => $hash
-			]
+			])
 		])->fetchObject();
 	}
 
@@ -148,7 +155,7 @@ class MailboxDirectory
 		);
 	}
 
-	public static function resetDirsTypes($mailboxId, $type)
+	public static function resetDirsTypes($mailboxId, $type, ?GenerationScope $scope = null)
 	{
 		$entity = MailboxDirectoryTable::getEntity();
 		$connection = $entity->getConnection();
@@ -161,10 +168,10 @@ class MailboxDirectory
 			])[0],
 			Query::buildFilterSql(
 				$entity,
-				[
+				self::scope($mailboxId, $scope)->apply([
 					'MAILBOX_ID' => $mailboxId,
 					$type        => MailboxDirectoryTable::ACTIVE,
-				]
+				])
 			)
 		);
 
@@ -198,7 +205,7 @@ class MailboxDirectory
 		));
 	}
 
-	public static function updateSyncDirs(array $values, $val, $mailboxId)
+	public static function updateSyncDirs(array $values, $val, $mailboxId, ?GenerationScope $scope = null)
 	{
 		$entity = MailboxDirectoryTable::getEntity();
 		$connection = $entity->getConnection();
@@ -220,11 +227,11 @@ class MailboxDirectory
 				])[0],
 				Query::buildFilterSql(
 					$entity,
-					[
+					self::scope($mailboxId, $scope)->apply([
 						'=MAILBOX_ID' => $mailboxId,
 						'@DIR_MD5'    => $batchValues,
 						'IS_DISABLED' => MailboxDirectoryTable::INACTIVE,
-					]
+					])
 				)
 			));
 		}
@@ -232,14 +239,17 @@ class MailboxDirectory
 		return $result ?? new Result();
 	}
 
-	public static function fetchAll(int $mailboxId)
+	public static function fetchAll(int $mailboxId, ?GenerationScope $scope = null)
 	{
-		if (!isset(self::$mailboxDirs[$mailboxId]))
+		$scope = self::scope($mailboxId, $scope);
+		$cacheKey = $scope->getCacheKey();
+
+		if (!isset(self::$mailboxDirs[$mailboxId][$cacheKey]))
 		{
 			$query = MailboxDirectoryTable::getList([
-				'filter' => [
+				'filter' => $scope->apply([
 					'=MAILBOX_ID' => $mailboxId
-				],
+				]),
 				'select' => ['*'],
 				/*
 					When assembling directories, we look for their parents.
@@ -256,57 +266,83 @@ class MailboxDirectory
 				$result[$row->getPath()] = $row;
 			}
 
-			self::$mailboxDirs[$mailboxId] = $result;
+			self::$mailboxDirs[$mailboxId][$cacheKey] = $result;
 		}
 
-		return self::$mailboxDirs[$mailboxId];
+		return self::$mailboxDirs[$mailboxId][$cacheKey];
 	}
 
-	public static function invalidateCache(?int $mailboxId = null): void
+	public static function invalidateCache(?int $mailboxId = null, ?int $generationId = null): void
 	{
 		if ($mailboxId === null)
 		{
 			self::$mailboxDirs = [];
+			GenerationScope::invalidateActivePointerCache();
+
+			return;
 		}
-		else
+
+		if ($generationId === null)
 		{
 			unset(self::$mailboxDirs[$mailboxId]);
+			GenerationScope::invalidateActivePointerCache($mailboxId);
+
+			return;
+		}
+
+		// Reset the cache of one generation only: drop the scopes that cover it
+		foreach (array_keys(self::$mailboxDirs[$mailboxId] ?? []) as $cacheKey)
+		{
+			if (self::cacheKeyIncludesGeneration($cacheKey, $generationId))
+			{
+				unset(self::$mailboxDirs[$mailboxId][$cacheKey]);
+			}
 		}
 	}
 
-	public static function fetchAllSyncDirs($mailboxId)
+	private static function cacheKeyIncludesGeneration(string $cacheKey, int $generationId): bool
+	{
+		if ($cacheKey === 'all')
+		{
+			return true;
+		}
+
+		return in_array((string)$generationId, explode('_', ltrim($cacheKey, 'g')), true);
+	}
+
+	public static function fetchAllSyncDirs($mailboxId, ?GenerationScope $scope = null)
 	{
 		return MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID'  => $mailboxId,
 				'=IS_SYNC'     => MailboxDirectoryTable::ACTIVE,
 				'=IS_DISABLED' => MailboxDirectoryTable::INACTIVE
-			],
+			]),
 			'select' => ['*'],
 			'order'  => ['LEVEL' => 'ASC']
 		])->fetchCollection();
 	}
 
-	public static function fetchAllDisabledDirs($mailboxId)
+	public static function fetchAllDisabledDirs($mailboxId, ?GenerationScope $scope = null)
 	{
 		return MailboxDirectoryTable::getList([
-			'filter' => [
+			'filter' => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID'  => $mailboxId,
 				'=IS_DISABLED' => MailboxDirectoryTable::ACTIVE
-			],
+			]),
 			'select' => ['*'],
 			'order'  => ['ID' => 'ASC']
 		])->fetchCollection();
 	}
 
-	public static function countMessagesSyncDirs($mailboxId)
+	public static function countMessagesSyncDirs($mailboxId, ?GenerationScope $scope = null)
 	{
 		$counter = MailboxDirectoryTable::getList([
-			'filter'  => [
+			'filter'  => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID'  => $mailboxId,
 				'=IS_SYNC'     => MailboxDirectoryTable::ACTIVE,
 				'=IS_DISABLED' => MailboxDirectoryTable::INACTIVE
-			],
+			]),
 			'select'  => ['CNT'],
 			'runtime' => [
 				new ExpressionField('CNT', 'SUM(%s)', 'MESSAGE_COUNT'),
@@ -316,13 +352,13 @@ class MailboxDirectory
 		return (int)$counter['CNT'];
 	}
 
-	public static function getMinSyncTime($mailboxId)
+	public static function getMinSyncTime($mailboxId, ?GenerationScope $scope = null)
 	{
 		$res = MailboxDirectoryTable::getList([
-			'filter'  => [
+			'filter'  => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'=IS_SYNC'    => MailboxDirectoryTable::ACTIVE,
-			],
+			]),
 			'select'  => ['MIN_SYNC_TIME'],
 			'runtime' => [
 				new ExpressionField('MIN_SYNC_TIME', 'MIN(COALESCE(%s, 0))', 'SYNC_TIME'),
@@ -332,14 +368,14 @@ class MailboxDirectory
 		return (int)$res['MIN_SYNC_TIME'];
 	}
 
-	public static function countSyncDirs($mailboxId)
+	public static function countSyncDirs($mailboxId, ?GenerationScope $scope = null)
 	{
 		$counter = MailboxDirectoryTable::getList([
-			'filter'  => [
+			'filter'  => self::scope($mailboxId, $scope)->apply([
 				'=MAILBOX_ID'  => $mailboxId,
 				'=IS_SYNC'     => MailboxDirectoryTable::ACTIVE,
 				'=IS_DISABLED' => MailboxDirectoryTable::INACTIVE
-			],
+			]),
 			'select'  => ['CNT'],
 			'runtime' => [
 				new ExpressionField('CNT', 'COUNT(*)'),

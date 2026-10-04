@@ -21,19 +21,25 @@ class EmbeddingRepository implements Main\Repository\RepositoryInterface
 		$this->mapper = $mapper ?? Main\DI\ServiceLocator::getInstance()->get(EmbeddingMapper::class);
 	}
 
-	public function getListByClientId(string $clientId, int $limit = 50, int $offset = 0): EmbeddingCollection
+	public function getListByClientId(string $clientId, int $limit = 50, int $offset = 0, ?array $userIds = null): EmbeddingCollection
 	{
-		/**
-		 * @var EO_Placement_Collection $ormCollection
-		 */
-		$ormCollection = PlacementTable::query()
+		$query = PlacementTable::query()
 			->setSelect(['*'])
 			->where('REST_APP.CLIENT_ID', $clientId)
 			->setOrder(['ID' => 'ASC'])
 			->setLimit($limit)
 			->setOffset($offset)
-			->fetchCollection()
 		;
+
+		if ($userIds !== null)
+		{
+			$query->whereIn('USER_ID', $userIds);
+		}
+
+		/**
+		 * @var EO_Placement_Collection $ormCollection
+		 */
+		$ormCollection = $query->fetchCollection();
 
 		$ormCollection->fillLangAll();
 

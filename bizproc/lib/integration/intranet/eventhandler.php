@@ -54,6 +54,8 @@ class EventHandler
 			AbsenceBaseTrigger::FIELD_USER_ID => (int)$event->getParameter('userId'),
 			AbsenceBaseTrigger::FIELD_ACTIVE_FROM => (string)$event->getParameter('activeFrom'),
 			AbsenceBaseTrigger::FIELD_ACTIVE_TO => (string)$event->getParameter('activeTo'),
+			AbsenceBaseTrigger::FIELD_ABSENCE_TYPE => $absenceType,
+			'initiatorUserId' => (int)$event->getParameter('initiatorUserId'),
 		];
 
 		switch ($absenceType)

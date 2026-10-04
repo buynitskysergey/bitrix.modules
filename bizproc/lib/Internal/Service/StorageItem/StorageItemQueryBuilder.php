@@ -229,6 +229,8 @@ final class StorageItemQueryBuilder
 	{
 		[$ormSelect, $fieldCodes] = $this->splitSelect($query->select, $lowerFieldMap);
 
+		$dataManager = Container::getStorageRecordDataManager();
+
 		$branchSelect = ['ID'];
 		foreach (array_keys($query->order) as $orderField)
 		{
@@ -242,8 +244,8 @@ final class StorageItemQueryBuilder
 		{
 			$branchFilter = new StorageItemFilter([$branch]);
 
-			$branchQuery =
-				StorageRecordTable::query()
+			$branchQuery
+				= $dataManager::query()
 					->setSelect($branchSelect)
 					->where('STORAGE_ID', $storageTypeId)
 			;
@@ -287,8 +289,8 @@ final class StorageItemQueryBuilder
 			$ids[] = (int)$row['ID'];
 		}
 
-		$resultQuery =
-			StorageRecordTable::query()
+		$resultQuery
+			= $dataManager::query()
 				->setSelect($ormSelect ?: ['ID'])
 				->where('STORAGE_ID', $storageTypeId)
 		;
@@ -519,7 +521,7 @@ final class StorageItemQueryBuilder
 				Join::on('this.ID', 'ref.RECORD_ID')
 					->where('ref.FIELD_ID', $fieldId),
 				['join_type' => $joinType],
-			)
+			),
 		);
 	}
 

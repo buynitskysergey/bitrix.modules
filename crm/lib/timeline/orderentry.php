@@ -41,7 +41,7 @@ class OrderEntry extends TimelineEntry
 		{
 			$bindings[] = ['ENTITY_TYPE_ID' => \CCrmOwnerType::Order, 'ENTITY_ID' => $entityId];
 		}
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $created);
 
 		return $createdId;
 	}

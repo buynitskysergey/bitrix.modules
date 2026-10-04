@@ -12,6 +12,7 @@ use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoCollection;
 use Bitrix\Rest\V3\Dto\DtoField;
 use Bitrix\Rest\V3\Exception\Validation\InvalidRequestFieldTypeException;
+use Bitrix\Rest\V3\Structure\FieldsValidator;
 
 class FieldTypeValidator extends DtoFieldValidator
 {
@@ -27,6 +28,11 @@ class FieldTypeValidator extends DtoFieldValidator
 		if ($value === null && $field->isNullable())
 		{
 			return true;
+		}
+
+		if ($field->getDynamicEnumProvider() !== null)
+		{
+			return FieldsValidator::validateDtoFieldValue($field, $value);
 		}
 
 		$dateTimeClass = strtolower(DateTime::class);
@@ -126,7 +132,11 @@ class FieldTypeValidator extends DtoFieldValidator
 
 			$propertyType = $value->getPropertyType();
 
-			if (is_object($value->getValue()))
+			if ($value->getDynamicEnumProvider() !== null)
+			{
+				$propertyType = (new \ReflectionClass($value->getDynamicEnumProvider()))->getShortName();
+			}
+			elseif (is_object($value->getValue()))
 			{
 				$typeReflection = new \ReflectionClass($propertyType);
 				$propertyType = $typeReflection->getShortName();

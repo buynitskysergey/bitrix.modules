@@ -117,7 +117,7 @@ class ShiftsManager
 		{
 			foreach ($this->getShiftsByDate($schedule, $date) as $shift)
 			{
-				$shift = new ShiftWithDate($shift, $schedule, $date);
+				$shift = new ShiftWithDate($shift, $schedule, $date, (int)$this->userId);
 				if ($previousShiftWithDate)
 				{
 					if ($previousShiftWithDate->isEqualsTo($shift) ||
@@ -208,7 +208,7 @@ class ShiftsManager
 		}
 		foreach ($this->buildDatesIterator($start, $this->getSearchDaysForRelevantShift($schedule)) as $date)
 		{
-			$shiftWithDate = new ShiftWithDate($shift, $schedule, $date);
+			$shiftWithDate = new ShiftWithDate($shift, $schedule, $date, (int)$this->userId);
 			if ($shiftWithDate->isEligibleToStart($start))
 			{
 				return $shiftWithDate;
@@ -240,7 +240,7 @@ class ShiftsManager
 			{
 				foreach ($this->getShiftsByDate($schedule, $date) as $shift)
 				{
-					$shiftWithDate = new ShiftWithDate($shift, $schedule, $date);
+					$shiftWithDate = new ShiftWithDate($shift, $schedule, $date, (int)$this->userId);
 
 					if (
 						$checkShiftPlan

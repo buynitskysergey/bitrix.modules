@@ -27,6 +27,10 @@ class MailboxRows extends Rows
 			$result['attrs'] = ['data-mailbox-connection-request' => 'true'];
 			$result['editable'] = false;
 		}
+		elseif (!empty($rawValue['MIGRATION_ACTIVE']))
+		{
+			$result['attrs']['data-mailbox-migration-active'] = 'Y';
+		}
 
 		return $result;
 	}

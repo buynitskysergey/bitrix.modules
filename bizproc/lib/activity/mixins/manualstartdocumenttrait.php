@@ -21,17 +21,17 @@ trait ManualStartDocumentTrait
 
 	public function execute(): int
 	{
-		$document = $this->getDocumentId();
+		$status = parent::execute();
 
 		$this->setProperties([
-			static::getReturnDocumentFieldName() => $document,
+			static::getReturnDocumentFieldName() => $this->getDocumentId(),
 		]);
 
 		$this->setPropertiesTypes([
 			static::getReturnDocumentFieldName() => $this->getReturnDocumentMapTypeForInstance(),
 		]);
 
-		return \CBPActivityExecutionStatus::Closed;
+		return $status;
 	}
 
 	protected function getReturnDocumentMapTypeForInstance(): array
@@ -44,8 +44,7 @@ trait ManualStartDocumentTrait
 		$document = static::resolveDocumentType();
 
 		return [
-			'Name' =>
-				$document
+			'Name' => $document
 					? static::getDocumentName($document)
 					: (Loc::getMessage('BP_CRM_FCT_DOCUMENT') ?? '')
 			,

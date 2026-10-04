@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\HumanResources\Internals\Service\Structure;
 
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Internals\Repository\Structure\NodeMemberRepository;
 use Bitrix\HumanResources\Internals\Repository\Structure\NodeRepository;
 use Bitrix\HumanResources\Internals\Repository\Structure\UserRepository;
@@ -204,6 +205,8 @@ class UserService
 			)
 			->setLimit($limit)
 		;
+
+		RealUserFilter::applyToUserQuery($baseQuery);
 
 		$baseQuery = $this->nodeMemberRepository->injectUserNodeSubquery($baseQuery, null);
 

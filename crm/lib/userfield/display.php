@@ -2,7 +2,7 @@
 
 namespace Bitrix\Crm\UserField;
 
-use \Bitrix\Crm\Service\Factory;
+use Bitrix\Crm\Service\Factory;
 use Bitrix\Crm\UserField\DisplayStrategy\BaseStrategy;
 use Bitrix\Crm\UserField\DisplayStrategy\DefaultStrategy;
 use Bitrix\Crm\Service\Container;

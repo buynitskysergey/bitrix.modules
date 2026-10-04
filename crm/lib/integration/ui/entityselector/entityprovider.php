@@ -45,6 +45,12 @@ abstract class EntityProvider extends BaseProvider
 	protected bool $notLinkedOnly = false;
 	private int $sourceTypeId;
 
+	protected bool $allowAllTypeItem = false;
+	protected bool $allowUnboundItem = false;
+
+	public const ALL_TYPE_ID_PREFIX = 'ALL_';
+	public const UNBOUND_ID = 'NONE';
+
 	abstract protected function getEntityTypeId(): int;
 
 	abstract protected function fetchEntryIds(array $filter): array;
@@ -97,6 +103,16 @@ abstract class EntityProvider extends BaseProvider
 			$this->sourceTypeId = (int)$options['sourceTypeId'];
 		}
 
+		if (isset($options['allowAllTypeItem']))
+		{
+			$this->allowAllTypeItem = (bool)$options['allowAllTypeItem'];
+		}
+
+		if (isset($options['allowUnboundItem']))
+		{
+			$this->allowUnboundItem = (bool)$options['allowUnboundItem'];
+		}
+
 		$this->userPermissions = Container::getInstance()->getUserPermissions();
 	}
 
@@ -123,12 +139,12 @@ abstract class EntityProvider extends BaseProvider
 
 	public function getItems(array $ids): array
 	{
-		return $this->makeItemsByIds($ids);
+		return array_merge($this->makeSyntheticItems($ids), $this->makeItemsByIds($ids));
 	}
 
 	public function getSelectedItems(array $ids): array
 	{
-		return $this->makeItemsByIds($ids);
+		return array_merge($this->makeSyntheticItems($ids), $this->makeItemsByIds($ids));
 	}
 
 	protected function getRecentItemsCount(array $recentItemsByEntityId): int
@@ -138,6 +154,11 @@ abstract class EntityProvider extends BaseProvider
 
 	public function fillDialog(Dialog $dialog): void
 	{
+		foreach ($this->makeSyntheticItems() as $syntheticItem)
+		{
+			$dialog->addItem($syntheticItem);
+		}
+
 		$itemEntityId = $this->getItemEntityId();
 		$recentItems = $this->withoutRecentItems ? $dialog->cleanRecentItems() : $dialog->getRecentItems();
 		$recentItemsByEntityId = $recentItems->getEntityItems($itemEntityId);
@@ -209,6 +230,70 @@ abstract class EntityProvider extends BaseProvider
 	protected function getEntityTypeName(): string
 	{
 		return CCrmOwnerType::ResolveName($this->getEntityTypeId());
+	}
+
+	/**
+	 * Synthetic filter items for the task list "CRM element" filter (DTO-01):
+	 * "Whole type" (ALL_{entityTypeId}) and "No CRM binding" (NONE). Disabled by default; enabled
+	 * per provider through the dialog options of the filter field, never in the entity card.
+	 *
+	 * @param array|null $ids when given (getItems/getSelectedItems), only items whose id is in $ids
+	 *     are returned; when null (fillDialog), all enabled synthetic items are returned.
+	 */
+	protected function makeSyntheticItems(?array $ids = null): array
+	{
+		$items = [];
+
+		$allTypeItem = $this->makeAllTypeItem();
+		if ($allTypeItem !== null && ($ids === null || in_array($allTypeItem->getId(), $ids, true)))
+		{
+			$items[] = $allTypeItem;
+		}
+
+		$unboundItem = $this->makeUnboundItem();
+		if ($unboundItem !== null && ($ids === null || in_array($unboundItem->getId(), $ids, true)))
+		{
+			$items[] = $unboundItem;
+		}
+
+		return $items;
+	}
+
+	protected function makeAllTypeItem(): ?Item
+	{
+		if (!$this->allowAllTypeItem || !$this->userPermissions->entityType()->canReadItems($this->getEntityTypeId()))
+		{
+			return null;
+		}
+
+		return new Item([
+			'id' => static::ALL_TYPE_ID_PREFIX . $this->getEntityTypeId(),
+			'entityId' => $this->getItemEntityId(),
+			'title' => Loc::getMessage(
+				'CRM_ENTITY_SELECTOR_ALL_TYPE_ITEM',
+				['#TYPE#' => CCrmOwnerType::GetCategoryCaption($this->getEntityTypeId())],
+			),
+			'tabs' => $this->getTabsNames(),
+			'sort' => -2,
+		]);
+	}
+
+	protected function makeUnboundItem(): ?Item
+	{
+		if (!$this->allowUnboundItem)
+		{
+			return null;
+		}
+
+		// "No CRM binding" is a cross-type item, not specific to this provider's entity, so it lives in
+		// the recents tab rather than on the entity's own tab (e.g. Deals).
+		return new Item([
+			'id' => static::UNBOUND_ID,
+			'entityId' => $this->getItemEntityId(),
+			'title' => Loc::getMessage('CRM_ENTITY_SELECTOR_UNBOUND_ITEM'),
+			'tabs' => ['recents'],
+			'sort' => -1,
+		]);
 	}
 
 	protected function makeItemsByIds(array $ids): array

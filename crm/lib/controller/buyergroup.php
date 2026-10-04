@@ -20,7 +20,7 @@ class BuyerGroup extends Controller
 	{
 		$checkResult = new Result();
 
-		if (Container::getInstance()->getUserPermissions()->product()->canRead())
+		if (!Container::getInstance()->getUserPermissions()->product()->canRead())
 		{
 			$checkResult->addError(new Error('Access Denied'));
 		}

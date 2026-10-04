@@ -14,6 +14,7 @@ use Bitrix\Main\Entity\ExpressionField;
 use Bitrix\Crm\Widget\Filter;
 use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Statistics\Entity\InvoiceSumStatisticsTable;
+use Bitrix\Main\Web\Uri;
 
 class InvoiceSumStatistics extends InvoiceDataSource
 {
@@ -398,14 +399,14 @@ class InvoiceSumStatistics extends InvoiceDataSource
 		$urlParams = array('WG' => 'Y', 'DS' => $this->getTypeName(), 'page' => '1', 'PN' => $this->getPresetName());
 
 		/** @var string $field */
-		$field = isset($params['field']) ? $params['field'] : '';
+		$field = $params['field'] ?? '';
 		if($field !== '')
 		{
 			$urlParams['FIELD'] = $field;
 		}
 
 		/** @var Filter $filter */
-		$filter = isset($params['filter']) ? $params['filter'] : null;
+		$filter = $params['filter'] ?? null;
 		if(!($filter instanceof Filter))
 		{
 			throw new Main\ObjectNotFoundException("The 'filter' is not found in params.");
@@ -414,18 +415,7 @@ class InvoiceSumStatistics extends InvoiceDataSource
 		$filterParams = self::externalizeFilter($filter);
 		foreach($filterParams as $k => $v)
 		{
-			if(!is_array($v))
-			{
-				$urlParams[$k] = $v;
-			}
-			else
-			{
-				$qty = count($v);
-				for($i = 0; $i < $qty; $i++)
-				{
-					$urlParams["{$k}[{$i}]"] = $v[$i];
-				}
-			}
+			$urlParams[$k] = $v;
 		}
 
 		if (
@@ -436,7 +426,7 @@ class InvoiceSumStatistics extends InvoiceDataSource
 			$urlParams['ENTITY_ID'] = $filter->getContextEntityID();
 		}
 
-		return \CHTTP::urlAddParams(self::getEntityListPath(), $urlParams);
+		return (string)(new Uri(self::getEntityListPath()))->addParams($urlParams);
 	}
 	/**
 	 * Prepare filter for entity list.

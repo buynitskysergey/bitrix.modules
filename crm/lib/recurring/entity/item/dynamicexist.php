@@ -8,6 +8,7 @@ use Bitrix\Crm\Model\Dynamic\RecurringTable;
 use Bitrix\Crm\Recurring\Calculator;
 use Bitrix\Crm\Recurring\Entity;
 use Bitrix\Crm\Recurring\Manager;
+use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Service\Factory;
 use Bitrix\Crm\Service\Operation;
 use Bitrix\Crm\Service\Operation\CopyResult;
@@ -25,6 +26,25 @@ use Exception;
 
 class DynamicExist extends DynamicEntity
 {
+	private const AUTOMATIC_EXPOSURE_STATE_FIELDS = [
+		'ENTITY_TYPE_ID',
+		'ITEM_ID',
+		'BASED_ID',
+		'ACTIVE',
+		'NEXT_EXECUTION',
+		'LAST_EXECUTION',
+		'IS_LIMIT',
+		'LIMIT_DATE',
+		'START_DATE',
+		'LIMIT_REPEAT',
+		'COUNTER_REPEAT',
+		'CATEGORY_ID',
+		'IS_SEND_EMAIL',
+		'EMAIL_IDS',
+		'PARAMS',
+		'CREATED_BY_ID',
+	];
+
 	private array $previousRecurringFields = [];
 	private ?Item $templateItem = null;
 
@@ -48,7 +68,7 @@ class DynamicExist extends DynamicEntity
 			$this->onAfterExpose($newItemId, $exposeResult->getData()['item'] ?? []);
 
 			$this->setFieldNoDemand('COUNTER_REPEAT', (int)$this->recurringFields['COUNTER_REPEAT'] + 1);
-			$this->setFieldNoDemand('LAST_EXECUTION', new Date());
+			$this->setFieldNoDemand('LAST_EXECUTION', $this->getCurrentDate());
 
 			if ($recalculate)
 			{
@@ -105,8 +125,8 @@ class DynamicExist extends DynamicEntity
 	{
 		$this->templateItem->setIsRecurring(false);
 
-		$this->templateItem->setBegindate($this->calculateBeginDate() ?? new Date());
-		$this->templateItem->setClosedate($this->calculateCloseDate()?? new Date());
+		$this->templateItem->setBegindate($this->calculateBeginDate() ?? $this->getCurrentDate());
+		$this->templateItem->setClosedate($this->calculateCloseDate() ?? $this->getCurrentDate());
 
 		$this->prepareTemplateItemCategoryAndStage($factory);
 	}
@@ -147,7 +167,7 @@ class DynamicExist extends DynamicEntity
 			return null;
 		}
 
-		return Entity\Dynamic::getNextDate([
+		return $this->getNextDate([
 			'MODE' => Manager::MULTIPLY_EXECUTION,
 			'MULTIPLE_TYPE' => Calculator::SALE_TYPE_CUSTOM_OFFSET,
 			'MULTIPLE_CUSTOM_TYPE' => (int)$this->getCalculateParameter('OFFSET_BEGINDATE_TYPE'),
@@ -163,7 +183,7 @@ class DynamicExist extends DynamicEntity
 			return null;
 		}
 
-		return Entity\Dynamic::getNextDate([
+		return $this->getNextDate([
 			'MODE' => Manager::MULTIPLY_EXECUTION,
 			'MULTIPLE_TYPE' => Calculator::SALE_TYPE_CUSTOM_OFFSET,
 			'MULTIPLE_CUSTOM_TYPE' => (int)$this->getCalculateParameter('OFFSET_CLOSEDATE_TYPE'),
@@ -174,9 +194,18 @@ class DynamicExist extends DynamicEntity
 	private function copyTemplateItem(Factory $factory): CopyResult
 	{
 		$templateItem = $this->templateItem;
+		$executionContext = $this->getExecutionContext();
+		$operationContext = null;
+		if ($executionContext !== null)
+		{
+			$operationContext = (new Context())
+				->setScope(Context::SCOPE_TASK)
+				->setUserId($executionContext->getOperationUserId())
+			;
+		}
 
 		$operation = $factory
-			->getCopyOperation($templateItem)
+			->getCopyOperation($templateItem, $operationContext)
 			->disableCheckAccess()
 			->disableCheckFields()
 			->disableSaveToTimeline()
@@ -242,7 +271,7 @@ class DynamicExist extends DynamicEntity
 		];
 	}
 
-	public static function load(int $id): ?self
+	public static function load(int $id, ?Entity\DynamicExecutionContext $executionContext = null): ?self
 	{
 		if ($id <= 0)
 		{
@@ -251,12 +280,62 @@ class DynamicExist extends DynamicEntity
 
 		$fields = RecurringTable::getById($id)->fetch();
 
-		if (is_array($fields))
+		return is_array($fields) ? self::createFromFields($fields, $executionContext) : null;
+	}
+
+	public static function createFromFields(
+		array $fields,
+		?Entity\DynamicExecutionContext $executionContext = null,
+	): ?self
+	{
+		$id = (int)($fields['ID'] ?? 0);
+		if ($id <= 0)
 		{
-			return (new self($fields['ID']))->initFields($fields);
+			return null;
 		}
 
-		return null;
+		return (new self($id, $executionContext))->initFields($fields);
+	}
+
+	public function hasSameAutomaticExposureState(array $selectedFields): bool
+	{
+		foreach (self::AUTOMATIC_EXPOSURE_STATE_FIELDS as $fieldName)
+		{
+			if (
+				$this->normalizeAutomaticExposureStateValue($this->recurringFields[$fieldName] ?? null)
+				!== $this->normalizeAutomaticExposureStateValue($selectedFields[$fieldName] ?? null)
+			)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private function normalizeAutomaticExposureStateValue(mixed $value): mixed
+	{
+		if ($value instanceof Date)
+		{
+			return $value->getTimestamp();
+		}
+
+		if (!is_array($value))
+		{
+			return $value;
+		}
+
+		if (!array_is_list($value))
+		{
+			ksort($value);
+		}
+
+		foreach ($value as $key => $item)
+		{
+			$value[$key] = $this->normalizeAutomaticExposureStateValue($item);
+		}
+
+		return $value;
 	}
 
 	private function initFields(array $fields = []): self
@@ -296,7 +375,7 @@ class DynamicExist extends DynamicEntity
 		}
 	}
 
-	private function onAfterExpose(int $newId, Item $item): void
+	protected function onAfterExpose(int $newId, Item $item): void
 	{
 		$eventParams = [
 			'ID' => $this->id,
@@ -474,22 +553,22 @@ class DynamicExist extends DynamicEntity
 		return $this->recurringFields['IS_SEND_EMAIL'] === 'Y' && !empty($this->recurringFields['EMAIL_IDS']);
 	}
 
-	public static function loadByItemIdentifier(ItemIdentifier $itemIdentifier): ?self
+	public static function loadByItemIdentifier(
+		ItemIdentifier $itemIdentifier,
+		?Entity\DynamicExecutionContext $executionContext = null,
+	): ?self
 	{
 		$fieldsRaw = RecurringTable::getList([
 			'filter' => [
 				'=ENTITY_TYPE_ID' => $itemIdentifier->getEntityTypeId(),
 				'=ITEM_ID' => $itemIdentifier->getEntityId(),
 			],
-			'limit' => 1
+			'limit' => 1,
 		]);
 
 		if ($fields = $fieldsRaw->fetch())
 		{
-			$dynamicObject = new self($fields['ID']);
-			$dynamicObject->initFields($fields);
-
-			return $dynamicObject;
+			return self::createFromFields($fields, $executionContext);
 		}
 
 		return null;

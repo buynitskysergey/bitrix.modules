@@ -5,15 +5,18 @@ namespace Bitrix\Crm\Integration\AI\Operation\Autostart\AutoLauncher;
 use Bitrix\Crm\Activity\IncomingChannel;
 use Bitrix\Crm\Activity\Provider\Call;
 use Bitrix\Crm\ActivityTable;
+use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItemChecker;
+use Bitrix\Crm\Copilot\CallAssessment\CriteriaLoader;
 use Bitrix\Crm\Copilot\CallAssessment\ItemFactory;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\JobRepository;
-use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\CallAssessmentRuntimePolicy;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings;
-use Bitrix\Crm\Integration\AI\Operation\Autostart\ScoreCallSettings;
-use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\ScenarioOverrideResolver;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioRegistry;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\GlobalFeatureReader;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
@@ -23,16 +26,34 @@ use Bitrix\Main\ObjectException;
 use Bitrix\Main\Type\DateTime;
 use CCrmOwnerType;
 
-final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
+class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 {
+	private readonly CallAssessmentRuntimePolicy $callAssessmentRuntimePolicy;
+	private readonly ScenarioOverrideResolver $scenarioOverrideResolver;
+	private readonly CallAutostartLaunchService $launchService;
+	private ?bool $isTranscriptionRuntimeReady = null;
+	private ?CallAssessmentItem $scoreCallAssessmentItem = null;
+	private bool $isScoreCallAssessmentItemResolved = false;
+
+	public function __construct(
+		int $activityOperation,
+		array $activityFields,
+		GlobalFeatureReader $featureReader = new GlobalFeatureReader(),
+		?CallAutostartLaunchService $launchService = null,
+	)
+	{
+		parent::__construct($activityOperation, $activityFields, $featureReader);
+
+		$this->callAssessmentRuntimePolicy = new CallAssessmentRuntimePolicy();
+		$this->scenarioOverrideResolver = new ScenarioOverrideResolver();
+		$this->launchService = $launchService ?? new CallAutostartLaunchService();
+	}
+
 	public function run(array $changedFields = []): void
 	{
-		$fillFieldsSettings = $this->getFillFieldsSettings();
-		$scoreCallSettings = AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment)
-			? $this->getScoreCallSettingsByActivity()
-			: null;
+		$fillFieldsSettings = $this->getUnifiedAutostartSettings();
 
-		if ($fillFieldsSettings === null && $scoreCallSettings === null)
+		if ($fillFieldsSettings === null)
 		{
 			$this->logger->debug('{date}: Unable to autostart operation: launch options not found' . PHP_EOL);
 
@@ -40,9 +61,19 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 		}
 
 		$direction = (int)($this->activityFields['DIRECTION'] ?? 0);
+		$automationAllowed = $this->featureReader->isPortalAutomationAllowed();
+		if (!$automationAllowed)
+		{
+			return;
+		}
+
 		if (
-			!$fillFieldsSettings?->shouldAutostart(TranscribeCallRecording::TYPE_ID, $direction)
-			&& !$scoreCallSettings?->shouldAutostart(TranscribeCallRecording::TYPE_ID, $direction)
+			!$this->isAnyCallScenarioActive(
+				$fillFieldsSettings,
+				$direction,
+				fn(): ?CallAssessmentItem => $this->resolveScoreCallAssessmentItem(),
+				$automationAllowed,
+			)
 		)
 		{
 			return;
@@ -56,12 +87,11 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 		if ($this->activityOperation === self::OPERATION_ADD)
 		{
 			$this->logger->info(
-				'{date}: Trying to autostart operation after call activity was added.'
-				. ' Autostart fill fields settings {fillFieldsSettings}, score call settings {scoreCallSettings}, activity {activity}' . PHP_EOL,
+				'{date}: Trying to autostart operation after call activity {activityId} was added,'
+				. ' assessment {assessment}' . PHP_EOL,
 				[
-					'fillFieldsSettings' => $fillFieldsSettings ?? null,
-					'scoreCallSettings' => $scoreCallSettings ?? null,
-					'activity' => $this->activityFields
+					'activityId' => $activityId,
+					'assessment' => $this->describeResolvedAssessmentItem(),
 				],
 			);
 
@@ -71,13 +101,12 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 		elseif ($this->activityOperation === self::OPERATION_UPDATE)
 		{
 			$this->logger->info(
-				'{date}: Trying to autostart operation after call activity was updated.'
-				. ' Autostart fill fields settings {fillFieldsSettings}, score call settings {scoreCallSettings}, changed fields {changedFields}, new activity state {activity}' . PHP_EOL,
+				'{date}: Trying to autostart operation after call activity {activityId} was updated,'
+				. ' assessment {assessment}, changed fields {changedFieldsKeys}' . PHP_EOL,
 				[
-					'fillFieldsSettings' => $fillFieldsSettings ?? null,
-					'scoreCallSettings' => $scoreCallSettings ?? null,
-					'activity' => $this->activityFields,
-					'changedFields' => $changedFields,
+					'activityId' => $activityId,
+					'assessment' => $this->describeResolvedAssessmentItem(),
+					'changedFieldsKeys' => array_keys($changedFields),
 				],
 			);
 
@@ -94,47 +123,184 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 		;
 		if (!$isLaunchPossible)
 		{
-			$this->logger->debug('{date}: Unable to autostart operation: AI operation in CRM is not possible' . PHP_EOL);
+			$this->logger->debug(
+				'{date}: Unable to autostart operation: AI operation in CRM is not possible,'
+				. ' assessment {assessment}' . PHP_EOL,
+				[
+					'assessment' => $this->describeResolvedAssessmentItem(),
+				],
+			);
 
 			return;
 		}
 
-		$scenario = $this->detectLaunchScenarioBySettings($fillFieldsSettings, $scoreCallSettings);
+		$launchPlan = $this->detectLaunchPlanBySettings(
+			$fillFieldsSettings,
+			fn(): ?CallAssessmentItem => $this->resolveScoreCallAssessmentItem(),
+			$automationAllowed,
+		);
+		$scenario = $launchPlan['scenario'];
 		if ($scenario !== Scenario::UNDEFINED_SCENARIO)
 		{
 			$this->logger->info(
-				'{date}: Trying to autostart operation with type {operationType} with scenario "{scenario}"' . PHP_EOL,
+				'{date}: Trying to autostart operation with type {operationType} with scenario "{scenario}",'
+				. ' assessment {assessment}' . PHP_EOL,
 				[
 					'operationType' => TranscribeCallRecording::TYPE_ID,
 					'scenario' => $scenario,
+					'assessment' => $this->describeResolvedAssessmentItem(),
 				]
 			);
 
-			AIManager::launchCallRecordingTranscription(
+			$launchResult = $this->launchService->launch(
 				$activityId,
 				$scenario,
 				$this->userId,
 				$storageTypeId,
 				max($storageElementIds),
-				false,
+				$launchPlan['shouldStartCallAssessment'],
 			);
+			if (!$launchResult->isSuccess())
+			{
+				$this->logger->error(
+					'{date}: Unable to autostart call scenario {scenario}: {errors}' . PHP_EOL,
+					[
+						'scenario' => $scenario,
+						'errors' => $launchResult->getErrorMessages(),
+					],
+				);
+			}
 		}
+	}
+
+	/**
+	 * @param callable(): ?CallAssessmentItem $callAssessmentItemProvider is called on the legacy branch only.
+	 */
+	private function isAnyCallScenarioActive(
+		?FillFieldsSettings $fillFieldsSettings,
+		int $direction,
+		callable $callAssessmentItemProvider,
+		bool $automationAllowed,
+	): bool
+	{
+		if ($fillFieldsSettings === null)
+		{
+			return false;
+		}
+
+		if (
+			$this->scenarioOverrideResolver->isAnyScenarioActive(
+				$fillFieldsSettings,
+				AutomationScenarioRegistry::CHANNEL_CALL,
+				$direction,
+			)
+		)
+		{
+			return true;
+		}
+
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			return false;
+		}
+
+		return $this->isCallAssessmentActiveByLegacyDomain(
+			$callAssessmentItemProvider(),
+			$direction,
+			$automationAllowed,
+		);
+	}
+
+	private function isCallAssessmentActiveByLegacyDomain(
+		?CallAssessmentItem $callAssessmentItem,
+		int $direction,
+		bool $automationAllowed,
+	): bool
+	{
+		return $this->callAssessmentRuntimePolicy->allows(
+			$callAssessmentItem,
+			TranscribeCallRecording::TYPE_ID,
+			$direction,
+			$automationAllowed,
+		);
 	}
 
 	private function detectLaunchScenarioBySettings(
 		?FillFieldsSettings $fillFieldsSettings,
-		?ScoreCallSettings $scoreCallSettings
+		?CallAssessmentItem $callAssessmentItem,
+		bool $automationAllowed = true,
 	): string
+	{
+		return $this->detectLaunchPlanBySettings(
+			$fillFieldsSettings,
+			static fn(): ?CallAssessmentItem => $callAssessmentItem,
+			$automationAllowed,
+		)['scenario'];
+	}
+
+	/**
+	 * @param callable(): ?CallAssessmentItem $callAssessmentItemProvider is called only where the assessment
+	 *        setting decides the plan, so a call with no active assessment scenario never looks it up.
+	 * @return array{scenario: string, shouldStartCallAssessment: bool}
+	 */
+	private function detectLaunchPlanBySettings(
+		?FillFieldsSettings $fillFieldsSettings,
+		callable $callAssessmentItemProvider,
+		bool $automationAllowed = true,
+	): array
 	{
 		$shouldFillFieldsStart = false;
 		$shouldScoreCallStart = false;
 		$shouldAnalyzeCommunicationStart = false;
 		$direction = (int)($this->activityFields['DIRECTION'] ?? 0);
 		$isFirstCallActivityWithFiles = null;
-
-		if ($fillFieldsSettings?->shouldAutostart(TranscribeCallRecording::TYPE_ID, $direction))
+		$isTranscriptionRuntimeReady = $this->isTranscriptionRuntimeReady();
+		$isTranscriptionActive = $fillFieldsSettings !== null
+			&& $this->scenarioOverrideResolver->isScenarioActive(
+				$fillFieldsSettings,
+				AutomationScenarioRegistry::SCENARIO_TRANSCRIPTION,
+				AutomationScenarioRegistry::CHANNEL_CALL,
+				$direction,
+			)
+		;
+		// Standalone transcription starts ONLY by an explicit slider override (no legacy channel default).
+		$isTranscriptionEnabledByOverride = $fillFieldsSettings !== null
+			&& $this->scenarioOverrideResolver->isScenarioEnabledByOverride(
+				$fillFieldsSettings,
+				AutomationScenarioRegistry::SCENARIO_TRANSCRIPTION,
+				AutomationScenarioRegistry::CHANNEL_CALL,
+				$direction,
+			)
+		;
+		$shouldTranscriptionOnlyStart = $isTranscriptionRuntimeReady && $isTranscriptionEnabledByOverride;
+		if (
+			$shouldTranscriptionOnlyStart
+			&& $this->scenarioOverrideResolver->isFirstOnlyMode(
+				$fillFieldsSettings,
+				AutomationScenarioRegistry::SCENARIO_TRANSCRIPTION,
+				AutomationScenarioRegistry::CHANNEL_CALL,
+			)
+		)
 		{
-			$shouldStartFillFieldsChain = !$fillFieldsSettings->isAutostartTranscriptionOnlyOnFirstCallWithRecording();
+			$isFirstCallActivityWithFiles ??= $this->isFirstCallActivityWithFilesForItem();
+			$shouldTranscriptionOnlyStart = $isFirstCallActivityWithFiles;
+		}
+
+		if (
+			$fillFieldsSettings !== null
+			&& $this->isAnyCallScenarioActive(
+				$fillFieldsSettings,
+				$direction,
+				$callAssessmentItemProvider,
+				$automationAllowed,
+			)
+		)
+		{
+			$shouldStartFillFieldsChain = !$this->scenarioOverrideResolver->isFirstOnlyMode(
+				$fillFieldsSettings,
+				AutomationScenarioRegistry::SCENARIO_FILL_FIELDS,
+				AutomationScenarioRegistry::CHANNEL_CALL,
+			);
 			if (!$shouldStartFillFieldsChain)
 			{
 				$isFirstCallActivityWithFiles ??= $this->isFirstCallActivityWithFilesForItem();
@@ -146,49 +312,123 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 				$shouldFillFieldsStart = self::shouldAutostartFillFields(
 					AIManager::isEnabledInGlobalSettings(),
 					AIManager::isEnabledInGlobalSettings(GlobalSetting::Summarize),
-					$fillFieldsSettings->shouldAutostart(
-						FillItemFieldsFromCallTranscription::TYPE_ID,
-						$direction,
-						false,
+					self::shouldAutostartCallDependentScenario(
+						$isTranscriptionRuntimeReady,
+						$isTranscriptionActive,
+						$this->scenarioOverrideResolver->isScenarioActive(
+							$fillFieldsSettings,
+							AutomationScenarioRegistry::SCENARIO_FILL_FIELDS,
+							AutomationScenarioRegistry::CHANNEL_CALL,
+							$direction,
+						),
 					),
 				);
 				$shouldAnalyzeCommunicationStart = AIManager::isEnabledInGlobalSettings(GlobalSetting::AnalyzeCommunication)
-					&& $fillFieldsSettings->shouldAutostart(
-						AnalyzeCommunication::TYPE_ID,
-						$direction,
-						false,
+					&& self::shouldAutostartCallDependentScenario(
+						$isTranscriptionRuntimeReady,
+						$isTranscriptionActive,
+						$this->scenarioOverrideResolver->isScenarioActive(
+							$fillFieldsSettings,
+							AutomationScenarioRegistry::SCENARIO_ANALYZE_COMMUNICATION,
+							AutomationScenarioRegistry::CHANNEL_CALL,
+							$direction,
+						),
 					)
 				;
 			}
 		}
 
-		if ($scoreCallSettings?->shouldAutostart(TranscribeCallRecording::TYPE_ID, $direction))
+		if (AIManager::isCallScoringV2Enabled())
 		{
-			$shouldStartScoreCallChain = !$scoreCallSettings->isAutostartTranscriptionOnlyOnFirstCallWithRecording();
-			if (!$shouldStartScoreCallChain)
+			// The setting is looked up after the scenario check on purpose: it is the expensive part of the
+			// branch, and a call with the assessment scenario switched off must not pay for it.
+			$isAssessmentScenarioActive = $fillFieldsSettings !== null
+				&& self::shouldAutostartCallDependentScenario(
+					$isTranscriptionRuntimeReady,
+					$isTranscriptionActive,
+					$this->scenarioOverrideResolver->isScenarioActive(
+						$fillFieldsSettings,
+						AutomationScenarioRegistry::SCENARIO_CALL_ASSESSMENT,
+						AutomationScenarioRegistry::CHANNEL_CALL,
+						$direction,
+					),
+				)
+			;
+			$callAssessmentItem = $isAssessmentScenarioActive ? $callAssessmentItemProvider() : null;
+			if ($callAssessmentItem !== null)
 			{
-				$isFirstCallActivityWithFiles ??= $this->isFirstCallActivityWithFilesForItem();
-				$shouldStartScoreCallChain = $isFirstCallActivityWithFiles;
-			}
+				$shouldStartScoreCallChain = !$this->scenarioOverrideResolver->isFirstOnlyMode(
+					$fillFieldsSettings,
+					AutomationScenarioRegistry::SCENARIO_CALL_ASSESSMENT,
+					AutomationScenarioRegistry::CHANNEL_CALL,
+				);
+				if (!$shouldStartScoreCallChain)
+				{
+					$isFirstCallActivityWithFiles ??= $this->isFirstCallActivityWithFilesForItem();
+					$shouldStartScoreCallChain = $isFirstCallActivityWithFiles;
+				}
 
-			if ($shouldStartScoreCallChain)
+				// The setting found here answers WHETHER the assessment starts, and that is all it is used
+				// for. WHICH setting scores the call is decided later by the script selector, over the whole
+				// candidate list the same gates admit - see ItemFactory::getCandidateIdsByActivityId().
+				$shouldScoreCallStart = $shouldStartScoreCallChain;
+			}
+		}
+		else
+		{
+			// the legacy domain decides by the setting itself, so here it is needed in any case
+			$callAssessmentItem = $callAssessmentItemProvider();
+			if ($this->callAssessmentRuntimePolicy->allows($callAssessmentItem, TranscribeCallRecording::TYPE_ID, $direction, $automationAllowed))
 			{
-				$shouldScoreCallStart = $scoreCallSettings->shouldAutostart(ScoreCall::TYPE_ID, $direction);
+				$shouldStartScoreCallChain = !$this->callAssessmentRuntimePolicy->isFirstIncomingOnly($callAssessmentItem);
+				if (!$shouldStartScoreCallChain)
+				{
+					$isFirstCallActivityWithFiles ??= $this->isFirstCallActivityWithFilesForItem();
+					$shouldStartScoreCallChain = $isFirstCallActivityWithFiles;
+				}
+
+				if ($shouldStartScoreCallChain)
+				{
+					$shouldScoreCallStart = $this->callAssessmentRuntimePolicy->allows(
+						$callAssessmentItem,
+						ScoreCall::TYPE_ID,
+						$direction,
+						$automationAllowed,
+					);
+				}
 			}
 		}
 
 		$shouldSummarizeStart = false;
+		$summarizeActive = $fillFieldsSettings !== null
+			&& self::shouldAutostartCallDependentScenario(
+				$isTranscriptionRuntimeReady,
+				$isTranscriptionActive,
+				$this->scenarioOverrideResolver->isScenarioActive(
+					$fillFieldsSettings,
+					AutomationScenarioRegistry::SCENARIO_SUMMARIZE,
+					AutomationScenarioRegistry::CHANNEL_CALL,
+					$direction,
+				),
+			)
+		;
 		if (
 			self::shouldAutostartSummarize(
 				$shouldFillFieldsStart,
 				AIManager::isEnabledInGlobalSettings(GlobalSetting::Summarize),
-				$fillFieldsSettings?->shouldAutostart(TranscribeCallRecording::TYPE_ID, $direction) ?? false,
+				$summarizeActive,
 			)
 		)
 		{
-			if ($fillFieldsSettings?->isAutostartTranscriptionOnlyOnFirstCallWithRecording())
+			$summarizeFirstOnly = $fillFieldsSettings !== null && $this->scenarioOverrideResolver->isFirstOnlyMode(
+				$fillFieldsSettings,
+				AutomationScenarioRegistry::SCENARIO_SUMMARIZE,
+				AutomationScenarioRegistry::CHANNEL_CALL,
+			);
+			if ($summarizeFirstOnly)
 			{
-				$shouldSummarizeStart = $this->isFirstCallActivityWithFilesForItem();
+				$isFirstCallActivityWithFiles ??= $this->isFirstCallActivityWithFilesForItem();
+				$shouldSummarizeStart = $isFirstCallActivityWithFiles;
 			}
 			else
 			{
@@ -196,12 +436,21 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 			}
 		}
 
-		return self::resolveLaunchScenario(
-			$shouldFillFieldsStart,
-			$shouldScoreCallStart,
-			$shouldAnalyzeCommunicationStart,
-			$shouldSummarizeStart,
-		);
+		if ($shouldFillFieldsStart || $shouldAnalyzeCommunicationStart || $shouldSummarizeStart)
+		{
+			$shouldTranscriptionOnlyStart = false;
+		}
+
+		return [
+			'scenario' => self::resolveLaunchScenario(
+				$shouldFillFieldsStart,
+				$shouldScoreCallStart,
+				$shouldAnalyzeCommunicationStart,
+				$shouldSummarizeStart,
+				$shouldTranscriptionOnlyStart,
+			),
+			'shouldStartCallAssessment' => AIManager::isCallScoringV2Enabled() && $shouldScoreCallStart,
+		];
 	}
 
 	private static function shouldAutostartFillFields(
@@ -231,11 +480,24 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 		;
 	}
 
+	private static function shouldAutostartCallDependentScenario(
+		bool $isTranscriptionRuntimeReady,
+		bool $isTranscriptionActive,
+		bool $isScenarioActive,
+	): bool
+	{
+		return $isTranscriptionRuntimeReady
+			&& $isTranscriptionActive
+			&& $isScenarioActive
+		;
+	}
+
 	private static function resolveLaunchScenario(
 		bool $shouldFillFieldsStart,
 		bool $shouldScoreCallStart,
 		bool $shouldAnalyzeCommunicationStart,
 		bool $shouldSummarizeStart = false,
+		bool $shouldTranscriptionOnlyStart = false,
 	): string
 	{
 		$enabledScenariosCount =
@@ -257,7 +519,7 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 
 		if ($shouldScoreCallStart)
 		{
-			return Scenario::CALL_SCORING_SCENARIO;
+			return Scenario::resolveCallScoringScenarioName();
 		}
 
 		if ($shouldSummarizeStart)
@@ -270,10 +532,15 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 			return Scenario::ANALYZE_COMMUNICATION_SCENARIO;
 		}
 
+		if ($shouldTranscriptionOnlyStart)
+		{
+			return Scenario::TRANSCRIBE_RECORD_SCENARIO;
+		}
+
 		return Scenario::UNDEFINED_SCENARIO;
 	}
 
-	private function isFirstCallActivityWithFilesForItem(): bool
+	protected function isFirstCallActivityWithFilesForItem(): bool
 	{
 		$activityFields = $this->activityFields;
 		$possibleTarget = $this->nextTarget;
@@ -423,21 +690,101 @@ final class CallAutoStartStrategy extends BaseChannelAutoStartStrategy
 		);
 	}
 
-	private function getScoreCallSettingsByActivity(): ?ScoreCallSettings
+	private function getUnifiedAutostartSettings(): ?FillFieldsSettings
+	{
+		$settings = $this->getFillFieldsSettings();
+		if (
+			$settings === null
+			&& $this->nextTarget
+			&& (
+				AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment)
+				|| $this->isTranscriptionRuntimeReady()
+			)
+		)
+		{
+			$settings = FillFieldsSettings::get(
+				$this->nextTarget->getEntityTypeId(),
+				$this->nextTarget->getCategoryId(),
+			);
+		}
+
+		return $settings;
+	}
+
+	private function isTranscriptionRuntimeReady(): bool
+	{
+		return $this->isTranscriptionRuntimeReady ??= $this->featureReader->isScenarioRuntimeReady(
+			AutomationScenarioRegistry::SCENARIO_TRANSCRIPTION,
+		);
+	}
+
+	private function resolveScoreCallAssessmentItem(): ?CallAssessmentItem
+	{
+		if (!$this->isScoreCallAssessmentItemResolved)
+		{
+			$this->scoreCallAssessmentItem = $this->getScoreCallAssessmentItem();
+			$this->isScoreCallAssessmentItemResolved = true;
+		}
+
+		return $this->scoreCallAssessmentItem;
+	}
+
+	/**
+	 * Diagnostics must not start the lookup on their own, so the records report only what the launch
+	 * decisions have already resolved by that point.
+	 */
+	private function describeResolvedAssessmentItem(): string
+	{
+		if (!$this->isScoreCallAssessmentItemResolved)
+		{
+			return 'not resolved';
+		}
+
+		return $this->scoreCallAssessmentItem === null
+			? 'none'
+			: (string)$this->scoreCallAssessmentItem->getId()
+		;
+	}
+
+	protected function getScoreCallAssessmentItem(): ?CallAssessmentItem
 	{
 		$activityId = (int)($this->activityFields['ID'] ?? 0);
-		if ($activityId <= 0)
+		if (
+			$activityId <= 0
+			|| !AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment)
+		)
 		{
 			return null;
 		}
 
-		$callAssessmentItem = ItemFactory::getByActivityId($activityId);
+		// The V2 script selector takes only settings with criteria, so the selection itself is limited the
+		// same way: otherwise the newest matching setting hides a ready one behind it and the autostart of
+		// the whole call is lost. A setting pinned to the call keeps its exemption there and is rejected
+		// below instead - an explicit choice must not be silently replaced by another setting.
+		$callAssessmentItem = ItemFactory::getByActivityId(
+			$activityId,
+			requireScoringCriteria: AIManager::isCallScoringV2Enabled(),
+			requireCurrentAvailability: AIManager::isCallScoringV2Enabled(),
+		);
 		$checkerResult = CallAssessmentItemChecker::getInstance()->setItem($callAssessmentItem)->run();
 		if (!$checkerResult->isSuccess())
 		{
 			return null;
 		}
 
-		return new ScoreCallSettings($callAssessmentItem?->getAutoCheckTypeId());
+		// The setting pinned to the call comes back from the selection above regardless of its criteria, and
+		// under V2 the checker accepts any enabled setting - so without this check the autostart would spend
+		// a transcription on an assessment that cannot run on the pinned setting.
+		if (AIManager::isCallScoringV2Enabled() && !$this->hasScoringCriteria($callAssessmentItem))
+		{
+			return null;
+		}
+
+		return $callAssessmentItem;
+	}
+
+	private function hasScoringCriteria(CallAssessmentItem $callAssessmentItem): bool
+	{
+		return !empty((new CriteriaLoader())->loadForAssessment($callAssessmentItem->getId()));
 	}
 }

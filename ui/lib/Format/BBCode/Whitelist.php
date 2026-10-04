@@ -6,7 +6,12 @@ final class Whitelist
 {
 	private const TAGS = ['b', 'i', 'u', 's', 'url', 'img', 'video', 'list', '*', 'p'];
 	private const MEDIA_TAGS = ['img', 'video'];
-	private const FORBIDDEN_TAGS = ['quote', 'code', 'table', 'tr', 'td', 'th', 'spoiler', 'user', 'font', 'size', 'color', 'align'];
+	/** Block half of the forbidden tags: the rest of them are inline and must not add a space. */
+	private const FORBIDDEN_BLOCK_TAGS = ['quote', 'code', 'table', 'tr', 'td', 'th', 'spoiler', 'align'];
+	private const FORBIDDEN_INLINE_TAGS = ['user', 'font', 'size', 'color'];
+
+	/** Tail of a real tag: an optional `=value` or `attr=value` up to the closing bracket. */
+	private const TAG_TAIL_PATTERN = '(?:\\s*=[^\\]]*|(?:\\s+[a-z0-9_-]+\\s*=[^\\]]*)?)\\s*\\]';
 
 	private static ?string $stripForbiddenPattern = null;
 	private static ?string $escapeBracketsPattern = null;
@@ -19,6 +24,48 @@ final class Whitelist
 	public static function getMediaTags(): array
 	{
 		return self::MEDIA_TAGS;
+	}
+
+	public static function getForbiddenBlockTags(): array
+	{
+		return self::FORBIDDEN_BLOCK_TAGS;
+	}
+
+	/**
+	 * Matches a single tag of the given list in one of the real markup forms:
+	 * `[tag]`, `[tag=value]`, `[tag attr=value]` or the closing `[/tag]`.
+	 * Free text after the tag name is not markup, so `[p.s.]` or `[b 2024]` stay untouched.
+	 * The `[*]` list marker is handled apart by the callers.
+	 * Returns a pattern without delimiters, the enclosing pattern must add the `iu` modifiers.
+	 */
+	public static function getTagPattern(array $tags): string
+	{
+		return '\\[/?(?:' . self::getTagAlternation($tags) . ')' . self::TAG_TAIL_PATTERN;
+	}
+
+	/**
+	 * Matches a whole `[tag]...[/tag]` block of the given list, opening tag in the same strict form
+	 * as getTagPattern(). The content is matched lazily, so the enclosing pattern must add the `s`
+	 * modifier on top of `iu`.
+	 */
+	public static function getPairedTagPattern(array $tags): string
+	{
+		return '\\[(?P<pairedTag>' . self::getTagAlternation($tags) . ')' . self::TAG_TAIL_PATTERN
+			. '.*?\\[/(?P=pairedTag)\\s*\\]'
+		;
+	}
+
+	private static function getTagAlternation(array $tags): string
+	{
+		return implode('|', array_map(
+			static fn(string $tag): string => preg_quote($tag, '#'),
+			array_values(array_filter($tags, static fn(string $tag): bool => $tag !== '*'))
+		));
+	}
+
+	private static function getForbiddenTags(): array
+	{
+		return array_merge(self::FORBIDDEN_BLOCK_TAGS, self::FORBIDDEN_INLINE_TAGS);
 	}
 
 	public static function getParserAllow(): array
@@ -86,10 +133,7 @@ final class Whitelist
 	{
 		if (self::$stripForbiddenPattern === null)
 		{
-			$words = implode('|', array_map(
-				static fn(string $tag): string => preg_quote($tag, '#'),
-				self::FORBIDDEN_TAGS
-			));
+			$words = self::getTagAlternation(self::getForbiddenTags());
 
 			self::$stripForbiddenPattern = "#\\[/?(?:{$words})\\b[^\\]]*\\]#iu";
 		}
@@ -122,12 +166,7 @@ final class Whitelist
 	{
 		if (self::$escapeBracketsPattern === null)
 		{
-			$words = implode('|', array_map(
-				static fn(string $tag): string => preg_quote($tag, '#'),
-				array_values(array_filter(self::TAGS, static fn(string $tag): bool => $tag !== '*'))
-			));
-
-			self::$escapeBracketsPattern = "#\\[/?(?:{$words})\\b[^\\]]*\\]|\\[\\*\\]|[\\[\\]]#iu";
+			self::$escapeBracketsPattern = '#' . self::getTagPattern(self::TAGS) . "|\\[\\*\\]|[\\[\\]]#iu";
 		}
 
 		return self::$escapeBracketsPattern;

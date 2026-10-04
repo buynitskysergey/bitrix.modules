@@ -10,4 +10,5 @@ enum AiAgentsActionType: string
 	case DELETE = 'delete';
 	case EDIT = 'edit';
 	case RESTART = 'restart';
+	case UPGRADE = 'upgrade';
 }

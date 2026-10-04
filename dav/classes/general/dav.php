@@ -141,10 +141,48 @@ echo '<?xml version="1.0" encoding="utf-8" ?>
 		}
 	}
 
+	/**
+	 * Builds a deterministic WWW-Authenticate header set for DAV challenges.
+	 * [0] is always Basic; [1] is Digest, added only when digest auth is enabled
+	 * in main settings AND supported by the current client. The session flag
+	 * BX_HTTP_DIGEST_ABSENT is intentionally not consulted here: reading it caused
+	 * the challenge scheme to flap and re-prompted for credentials on Windows.
+	 *
+	 * Pure builder: no side effects, does not emit headers.
+	 *
+	 * @param string $realm
+	 * @return string[]
+	 */
+	public static function buildWwwAuthenticateHeaders(string $realm): array
+	{
+		$headers = ['WWW-Authenticate: Basic realm="'.$realm.'"'];
+
+		if (COption::GetOptionString("main", "use_digest_auth", "N") === "Y" && static::isDigestEnabled())
+		{
+			$headers[] = 'WWW-Authenticate: Digest realm="'.$realm.'", nonce="'.uniqid('', true).'"';
+		}
+
+		return $headers;
+	}
+
 	public static function SetAuthHeader()
 	{
-		$digest = static::isDigestEnabled();
-		CHTTP::SetAuthHeader($digest);
+		// Resolve realm identically to the method-engine path (webdavserver.php).
+		$realm = defined('BX_HTTP_AUTH_REALM') ? BX_HTTP_AUTH_REALM : "Bitrix Site Manager";
+
+		// Status helper from main is fine here: it's not the challenge emission.
+		CHTTP::SetStatus('401 Unauthorized');
+
+		// Pre-prolog path emits directly via header() (no CDavResponse available).
+		// First WWW-Authenticate replaces any prior one; the rest are appended so
+		// the full multi-value challenge reaches the client.
+		$replace = true;
+		foreach (static::buildWwwAuthenticateHeaders($realm) as $header)
+		{
+			// Strip CR/LF to prevent header injection (response splitting), same as CDavResponse::sendHeader.
+			header(str_replace(["\r", "\n"], "", $header), $replace);
+			$replace = false;
+		}
 	}
 
 	public static function isDigestEnabled()
@@ -174,47 +212,17 @@ echo '<?xml version="1.0" encoding="utf-8" ?>
 		return $digest;
 	}
 
-	public static function GetWindowsVersion()
+	public static function GetWindowsVersion(): int
 	{
-		static $MODULE = 'dav';
-		static $PARAM = 'windows_version';
-		static $savedValues = null;
+		// Detect OS version strictly from the current request User-Agent.
+		// WebDAV MiniRedir / Office Discovery requests often lack "Windows NT"
+		// in UA; return 0 conservatively so digest logic stays neutral
+		// (isDigestEnabled compares with === 5, so 0 never disables digest).
+		$ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+		if (preg_match('#Windows NT (\d+)#', $ua, $matches) > 0)
+			return (int) $matches[1];
 
-		$result = '';
-		$userIP = self::GetIP();
-		if (empty($userIP))
-			return $result;
-
-		if ($savedValues === null)
-		{
-			$savedValues = @unserialize(COption::GetOptionString($MODULE, $PARAM, ''), ["allowed_classes" => false]);
-			if (!is_array($savedValues))
-				$savedValues = array();
-		}
-
-		$ua = $_SERVER['HTTP_USER_AGENT'];
-		if (preg_match('#Windows NT (\d{1})#', $ua, $matches) > 0)
-		{
-			$result = (int) $matches[1];
-			if ($result > 0)
-			{
-				if (
-					! isset($savedValues[$userIP])
-					|| ($result !== (int) $savedValues[$userIP])
-				)
-				{
-					$savedValues[$userIP] = $result;
-					COption::SetOptionString($MODULE,$PARAM,serialize($savedValues));
-				}
-			}
-		}
-		else // seems to be webdav request, try to get os from history
-		{
-			if (isset($savedValues[$userIP]))
-				$result = (int) $savedValues[$userIP];
-		}
-
-		return $result;
+		return 0;
 	}
 
 	public static function GetIP()

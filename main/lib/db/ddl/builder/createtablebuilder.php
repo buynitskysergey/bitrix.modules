@@ -50,14 +50,14 @@ class CreateTableBuilder
 		$this->addPrimaryKey('ID');
 	}
 
-	public function useDelayKeyWrite(): self
+	public function useDelayKeyWrite(): static
 	{
 		$this->delayKeyWrite = true;
 
 		return $this;
 	}
 
-	public function useDynamicRowType(): self
+	public function useDynamicRowType(): static
 	{
 		$this->dynamicRowFormat = true;
 

@@ -154,7 +154,7 @@ class Select extends Base
 			$config =  htmlspecialcharsbx(\Bitrix\Main\Web\Json::encode($config));
 
 			return <<<HTML
-				<div data-role="menu-selector" data-config="${config}"></div>
+				<div data-role="menu-selector" data-config="{$config}"></div>
 			HTML;
 		}
 		$selectorValue = null;

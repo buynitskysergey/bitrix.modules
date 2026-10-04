@@ -79,10 +79,7 @@ class DealSumStatistics extends DealDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'SUM_TOTAL';
-		}
+		$name = $this->sanitizeSelectName($name, 'SUM_TOTAL');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -425,6 +422,15 @@ class DealSumStatistics extends DealDataSource
 				)
 			)
 		);
+	}
+	protected function getAllowedSelectNames()
+	{
+		$names = array('COUNT', 'SUM_TOTAL');
+		foreach(DealSumStatisticEntry::getBindingInfos() as $bindingInfo)
+		{
+			$names[] = $bindingInfo['SLOT_NAME'];
+		}
+		return $names;
 	}
 	/**
 	 * Include language file.

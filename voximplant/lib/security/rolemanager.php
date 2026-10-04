@@ -284,6 +284,9 @@ class RoleManager
 	public static function clearRoleAccess()
 	{
 		RoleAccessTable::truncate();
+		// truncate bypasses ORM, so the cached result of loadRoleAccess() has to be dropped explicitly:
+		// otherwise an emptied set keeps being read from cache and revoked roles stay in effect.
+		RoleAccessTable::cleanCache();
 		static::$accessCodeToRole = null;
 	}
 

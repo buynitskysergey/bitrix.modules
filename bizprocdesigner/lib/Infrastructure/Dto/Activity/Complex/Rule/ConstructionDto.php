@@ -31,6 +31,7 @@ class ConstructionDto implements JsonSerializable
 				ConstructionType::IF_CONDITION->value,
 				ConstructionType::AND_CONDITION->value,
 				ConstructionType::OR_CONDITION->value => ConditionExpressionDto::fromArray($data['expression']),
+				ConstructionType::BASE_SETTINGS->value => BaseSettingsExpressionDto::fromArray($data['expression']),
 				default => throw new \InvalidArgumentException('Unknown construction type: ' . $data['type']),
 			},
 		);

@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Controller\Timeline;
 use Bitrix\Crm\Controller\Base;
 use Bitrix\Crm\Controller\ErrorCode;
 use Bitrix\Crm\FileUploader\CommentUploaderController;
+use Bitrix\Crm\Integration\Disk\AttachmentCopier;
 use Bitrix\Crm\Integration\Disk\HiddenStorage;
 use Bitrix\Crm\Integration\UI\FileUploader;
 use Bitrix\Crm\ItemIdentifier;
@@ -75,6 +76,14 @@ class Comment extends Base
 
 		if (!$this->assertValidOwner($ownerId, $ownerTypeId, false))
 		{
+			return null;
+		}
+
+		[$isBindingsExist] = $this->detectBindings($commentId, $ownerId, $ownerTypeId);
+		if (!$isBindingsExist)
+		{
+			$this->addError(ErrorCode::getNotFoundError());
+
 			return null;
 		}
 
@@ -381,54 +390,14 @@ class Comment extends Base
 		return $commentId;
 	}
 
-	protected function copy(int $commentId, int $ownerTypeId, int $ownerId, array $filesList): ?int
-	{
-		$commentData = $this->load($commentId);
-
-		$newCommentId = CommentEntry::create([
-			'CREATED' => $commentData?->getCreated(),
-			'AUTHOR_ID' => $commentData?->getAuthorId(),
-			'SETTINGS' => $commentData?->getSettings(),
-			'TEXT' => $commentData?->getComment(),
-			'FILES' => $filesList,
-			'BINDINGS' => [
-				[
-					'ENTITY_TYPE_ID' => $ownerTypeId,
-					'ENTITY_ID' => $ownerId
-				]
-			]
-		]);
-
-		$bindingDelete = $this->timelineBindingEntity::delete(array(
-			'OWNER_ID' => $commentId,
-			'ENTITY_ID' => $ownerId,
-			'ENTITY_TYPE_ID' => $ownerTypeId,
-		));
-
-		if ($bindingDelete->isSuccess())
-		{
-			CommentController::getInstance()->sendPullEventOnDelete(
-				new ItemIdentifier($ownerTypeId, $ownerId), $commentId
-			);
-
-			CommentController::getInstance()->sendPullEventOnAdd(
-				new ItemIdentifier($ownerTypeId, $ownerId), $newCommentId
-			);
-
-			$commentId = $newCommentId;
-		}
-
-		return $commentId;
-	}
-
 	protected function update(int $commentId, int $ownerTypeId, int $ownerId, string $content, array $filesList, array $bindings): ?int
 	{
-		$oldContent = $this->load($commentId)?->getComment();
-
 		if (count($bindings) > 1)
 		{
-			$commentId = $this->copy($commentId, $ownerTypeId, $ownerId, $filesList);
+			return $this->split($commentId, $ownerTypeId, $ownerId, $content, $filesList);
 		}
+
+		$oldContent = $this->load($commentId)?->getComment();
 
 		$updateResult = CommentEntry::update($commentId, [
 			'COMMENT' => $content,
@@ -451,6 +420,216 @@ class Comment extends Base
 		$this->addErrors($updateResult->getErrors());
 
 		return null;
+	}
+
+	protected function split(int $commentId, int $ownerTypeId, int $ownerId, string $content, array $filesList): ?int
+	{
+		$commentData = $this->load($commentId);
+
+		if (!$this->isBindingPersisted($commentId, $ownerTypeId, $ownerId))
+		{
+			$this->addError(ErrorCode::getNotFoundError());
+
+			return null;
+		}
+
+		[$oldAttachedIds, $newUploadValues] = $this->splitFileValues($commentId, $filesList);
+
+		$userId = Container::getInstance()->getContext()->getUserId();
+		$copier = new AttachmentCopier($ownerTypeId, $ownerId, $userId);
+
+		$copyResult = $copier->copy($oldAttachedIds);
+		$createdFileIds = $copyResult->getData()['createdFileIds'] ?? [];
+		if (!$copyResult->isSuccess())
+		{
+			$copier->deleteCopies($createdFileIds);
+			$this->addErrors($copyResult->getErrors());
+
+			return null;
+		}
+
+		$copyMap = $copyResult->getData()['map'] ?? [];
+		$finalUfValues = array_merge(array_values($copyMap), $newUploadValues);
+
+		$compensate = function (?int $newId, array $errors) use ($copier, $createdFileIds): ?int {
+			if ($newId !== null && !CommentEntry::delete($newId)->isSuccess())
+			{
+				Container::getInstance()->getLogger('Default')->error(
+					'{method}: unable to delete rolled back comment {commentId}',
+					[
+						'method' => __METHOD__,
+						'commentId' => $newId,
+					],
+				);
+			}
+			$copier->deleteCopies($createdFileIds);
+			$this->addErrors($errors);
+
+			return null;
+		};
+
+		$settings = $commentData?->getSettings();
+		$settings = is_array($settings) ? $settings : [];
+		$settings['HAS_FILES'] = empty($finalUfValues) ? 'N' : 'Y';
+
+		$newId = CommentEntry::create([
+			'CREATED' => $commentData?->getCreated(),
+			'AUTHOR_ID' => $commentData?->getAuthorId(),
+			'SETTINGS' => $settings,
+			'TEXT' => $content,
+			'FILES' => $finalUfValues,
+			'BINDINGS' => [
+				[
+					'ENTITY_TYPE_ID' => $ownerTypeId,
+					'ENTITY_ID' => $ownerId,
+				],
+			],
+		]);
+		if ($newId <= 0)
+		{
+			return $compensate(null, [new Error('Could not create comment', ErrorCode::ADDING_DISABLED)]);
+		}
+
+		$inlineMap = $copyMap;
+		foreach ($newUploadValues as $value)
+		{
+			$inlineMap[$value] = $value;
+		}
+		$newText = FileUserType::updateText(
+			$content,
+			CommentController::UF_FIELD_NAME,
+			$newId,
+			CommentController::UF_COMMENT_FILE_NAME,
+			$inlineMap,
+		);
+
+		$updateResult = CommentEntry::update($newId, ['COMMENT' => $newText]);
+		if (!$updateResult->isSuccess())
+		{
+			return $compensate($newId, $updateResult->getErrors());
+		}
+
+		$attachedIds = array_map(
+			'intval',
+			array_keys(
+				Driver::getInstance()->getUserFieldManager()->getAttachedObjectByEntity(
+					CommentController::UF_FIELD_NAME,
+					$newId,
+					CommentController::UF_COMMENT_FILE_NAME,
+				),
+			),
+		);
+		if (count($attachedIds) !== count($finalUfValues))
+		{
+			return $compensate($newId, [new Error('Attachment count mismatch after comment split')]);
+		}
+
+		if (preg_match_all('/\[DISK FILE ID\s*=\s*([^\]]*)\]/is', $newText, $matches))
+		{
+			foreach ($matches[1] as $reference)
+			{
+				if (!is_numeric($reference) || !in_array((int)$reference, $attachedIds, true))
+				{
+					return $compensate($newId, [new Error('Dangling inline attachment reference after comment split')]);
+				}
+			}
+		}
+
+		$bindingDelete = $this->timelineBindingEntity::delete([
+			'OWNER_ID' => $commentId,
+			'ENTITY_ID' => $ownerId,
+			'ENTITY_TYPE_ID' => $ownerTypeId,
+		]);
+		if (!$bindingDelete->isSuccess())
+		{
+			return $compensate($newId, $bindingDelete->getErrors());
+		}
+
+		if (Main\Application::getConnection()->getAffectedRowsCount() !== 1)
+		{
+			Container::getInstance()->getLogger('Default')->error(
+				'{method}: concurrent binding removal detected (comment {commentId}, owner {ownerTypeId}:{ownerId})',
+				[
+					'method' => __METHOD__,
+					'commentId' => $commentId,
+					'ownerTypeId' => $ownerTypeId,
+					'ownerId' => $ownerId,
+				],
+			);
+
+			return $compensate($newId, [ErrorCode::getNotFoundError()]);
+		}
+
+		$commentController = CommentController::getInstance();
+		$commentController->sendPullEventOnDelete(new ItemIdentifier($ownerTypeId, $ownerId), $commentId);
+		$commentController->sendPullEventOnAdd(new ItemIdentifier($ownerTypeId, $ownerId), $newId);
+		$commentController->onModify($newId, [
+			'COMMENT' => $content,
+			'ENTITY_TYPE_ID' => $ownerTypeId,
+			'ENTITY_ID' => $ownerId,
+			'OLD_MENTION_LIST' => CommentController::getMentionIds($commentData?->getComment()),
+		]);
+
+		return $newId;
+	}
+
+	private function splitFileValues(int $commentId, array $filesList): array
+	{
+		$newUploadValues = [];
+		$requestedAttachedIds = [];
+		foreach ($filesList as $value)
+		{
+			if (is_string($value) && str_starts_with($value, FileUserType::NEW_FILE_PREFIX))
+			{
+				$newUploadValues[] = $value;
+			}
+			elseif (is_numeric($value))
+			{
+				$requestedAttachedIds[] = (int)$value;
+			}
+		}
+
+		$oldAttachedIds = array_values(
+			array_intersect($this->getRawAttachedIds($commentId), $requestedAttachedIds),
+		);
+
+		return [$oldAttachedIds, $newUploadValues];
+	}
+
+	private function getRawAttachedIds(int $commentId): array
+	{
+		global $USER_FIELD_MANAGER;
+
+		if (!Loader::includeModule('disk'))
+		{
+			return [];
+		}
+
+		$fields = $USER_FIELD_MANAGER->GetUserFields(
+			CommentController::UF_FIELD_NAME,
+			$commentId,
+		);
+		$values = $fields[CommentController::UF_COMMENT_FILE_NAME]['VALUE'] ?? [];
+		if (!is_array($values))
+		{
+			$values = ($values === null || $values === '') ? [] : [$values];
+		}
+
+		Main\Type\Collection::normalizeArrayValuesByInt($values);
+
+		return $values;
+	}
+
+	protected function isBindingPersisted(int $commentId, int $ownerTypeId, int $ownerId): bool
+	{
+		return (bool)TimelineBindingTable::query()
+			->setSelect(['OWNER_ID'])
+			->where('OWNER_ID', $commentId)
+			->where('ENTITY_TYPE_ID', $ownerTypeId)
+			->where('ENTITY_ID', $ownerId)
+			->setLimit(1)
+			->fetch()
+		;
 	}
 
 	protected function delete(int $commentId, int $ownerTypeId, int $ownerId, array $bindings): void

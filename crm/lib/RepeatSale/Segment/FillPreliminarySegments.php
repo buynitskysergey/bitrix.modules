@@ -26,7 +26,10 @@ final class FillPreliminarySegments
 
 		$addedSegments = [];
 
-		$collection = $controller->getList();
+		$collection = $controller->getList([
+			'select' => ['CODE'],
+			'limit' => 0,
+		]);
 		$codes = $collection->getCodeList();
 
 		foreach ($this->getData() as $data)

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Infrastructure\Integration\Main;
 
-use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Loader;
 use Bitrix\Main\UI\Extension;
 use Bitrix\Vibecodeconnector\Public\Service\AvailabilityService;
@@ -21,8 +21,9 @@ final class EventHandler
 		$isAdminSection = defined('ADMIN_SECTION') && ADMIN_SECTION === true;
 		if (!$isAdminSection)
 		{
-			$availability = ServiceLocator::getInstance()->get(AvailabilityService::class);
-			if (!$availability->isEnabled())
+			$currentUserId = (int)CurrentUser::get()->getId();
+			$availabilityService = new AvailabilityService();
+			if ($currentUserId <= 0 || !$availabilityService->isEnabled())
 			{
 				return;
 			}

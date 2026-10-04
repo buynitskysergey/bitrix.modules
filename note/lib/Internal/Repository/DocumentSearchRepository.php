@@ -18,10 +18,12 @@ use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Main\Repository\RepositoryInterface;
 use Bitrix\Main\SystemException;
+use Bitrix\Main\Text\Emoji;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Entity\Search\SearchIndexEntry;
 use Bitrix\Note\Internal\Entity\Search\SearchResultCollection;
+use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\NoteDocumentSearchTable;
 use Bitrix\Note\Internal\Repository\Mapper\SearchIndexEntryMapper;
 use Bitrix\Note\Internal\Repository\Mapper\SearchResultMapper;
@@ -210,6 +212,7 @@ class DocumentSearchRepository implements RepositoryInterface
 			->addSelect('SCORE')
 			->whereMatch('BODY', $booleanQuery)
 			->where('DOCUMENT.IS_ARCHIVED', 'N')
+			->where('DOCUMENT.IS_MAIN', DocumentTable::IS_MAIN_NO)
 		;
 
 		if ($canUseDocumentGrants)
@@ -240,8 +243,10 @@ class DocumentSearchRepository implements RepositoryInterface
 			$snippet = '';
 			if ($withSnippets)
 			{
+				// BODY is stored emoji-encoded (see SearchIndexEntryMapper); decode so
+				// snippets render real emoji instead of :hex: shortcodes.
 				$snippet = $this->snippetExtractor->extract(
-					(string)($row['BODY'] ?? ''),
+					Emoji::decode((string)($row['BODY'] ?? '')),
 					$snippetTokens,
 				);
 			}
@@ -301,34 +306,21 @@ class DocumentSearchRepository implements RepositoryInterface
 	}
 
 	/**
-	 * Builds the OR-condition: document is visible if it lives in an accessible collection
-	 * OR the current user has a positive document-level grant without a persona NONE override.
+	 * [ALG-02] Builds the OR-condition: document is visible if it lives in an accessible
+	 * collection, OR the current user holds an inherited positive grant (source != 0, VIEW+)
+	 * unconditionally, OR an explicit positive grant (source = 0, VIEW+) with no explicit
+	 * NONE override. Deny is scoped to explicit rows only, so inheritance stays hard. The grant
+	 * predicate itself comes from DocumentAccessService::buildDocumentGrantFilter.
 	 *
 	 * @param int[] $allowedCollectionIds
 	 * @param string[] $accessCodes
 	 */
 	private function buildAclCondition(array $allowedCollectionIds, array $accessCodes): ConditionTree
 	{
-		$sqlHelper = Application::getConnection()->getSqlHelper();
-
 		$codesPersonal = array_values(array_unique(array_filter(
 			$accessCodes,
 			static fn($code) => is_string($code) && $code !== '' && $code !== '*',
 		)));
-
-		$quotedPersonal = implode(', ', array_map(
-			static fn(string $code): string => "'" . $sqlHelper->forSql($code) . "'",
-			$codesPersonal,
-		));
-
-		$grantSql = '(EXISTS (SELECT 1 FROM b_note_document_access da_pos'
-			. ' WHERE da_pos.DOCUMENT_ID = %s'
-			. " AND da_pos.SUBJECT_CODE IN ({$quotedPersonal})"
-			. ' AND da_pos.LEVEL >= ' . DocumentAccessService::LEVEL_VIEW . ')'
-			. ' AND NOT EXISTS (SELECT 1 FROM b_note_document_access da_neg'
-			. ' WHERE da_neg.DOCUMENT_ID = %s'
-			. " AND da_neg.SUBJECT_CODE IN ({$quotedPersonal})"
-			. ' AND da_neg.LEVEL = ' . DocumentAccessService::LEVEL_NONE . '))';
 
 		$tree = new ConditionTree();
 		$tree->logic('or');
@@ -338,7 +330,12 @@ class DocumentSearchRepository implements RepositoryInterface
 			$tree->whereIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
 		}
 
-		$tree->whereExpr($grantSql, ['DOCUMENT_ID', 'DOCUMENT_ID']);
+		if (!empty($codesPersonal))
+		{
+			// Taken from the predicate's owner rather than restated here: search must never diverge
+			// from what the listings show.
+			$tree->where(DocumentAccessService::buildDocumentGrantFilter('DOCUMENT_ID', $codesPersonal));
+		}
 
 		return $tree;
 	}

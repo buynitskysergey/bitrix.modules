@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Helper\Config;
 
+use Bitrix\Mail\Helper\Label\LabelsFeature;
+use Bitrix\Mail\MailboxTable;
 use Bitrix\Main\Application;
+use Bitrix\Main\Config\Option;
 
 class Guide
 {
@@ -18,6 +21,7 @@ class Guide
 	public const USER_OPTION_CONNECTION_REQUEST_NAME = 'connection_request_guide_shown';
 	public const USER_OPTION_FOLDER_SORT_GUIDE_NAME = 'folder_sort_guide_shown';
 	public const USER_OPTION_ALL_MAIL_MODE_GUIDE_NAME = 'all_mail_mode_guide_shown';
+	public const USER_OPTION_LABELS_ONBOARDING_NAME = 'labels_onboarding';
 	public const USER_OPTION_LARGE_ATTACHMENT_AHA_NAME = 'large_attachment_aha_shown';
 	public const USER_OPTION_LARGE_ATTACHMENT_POST_SEND_NAME = 'large_attachment_post_send_prompt_suppressed';
 
@@ -107,6 +111,56 @@ class Guide
 	public static function getAllMailModeGuideOptionName(): string
 	{
 		return self::USER_OPTION_ALL_MAIL_MODE_GUIDE_NAME;
+	}
+
+	public static function wasLabelsOnboardingShown(): bool
+	{
+		return \CUserOptions::GetOption(
+			self::USER_OPTION_CATEGORY,
+			self::USER_OPTION_LABELS_ONBOARDING_NAME,
+			null,
+		) === 'Y';
+	}
+
+	public static function getLabelsOnboardingOptionName(): string
+	{
+		return self::USER_OPTION_LABELS_ONBOARDING_NAME;
+	}
+
+	/**
+	 * Shown for an active mailbox with ID within the release boundary. Boundary 0 shows to nobody.
+	 */
+	public static function shouldShowLabelsOnboarding(int $userId): bool
+	{
+		if ($userId <= 0 || !LabelsFeature::isEnabled() || self::wasLabelsOnboardingShown())
+		{
+			return false;
+		}
+
+		return self::hasMailboxWithinOnboardingBoundary($userId);
+	}
+
+	private static function hasMailboxWithinOnboardingBoundary(int $userId): bool
+	{
+		$boundaryId = self::getLabelsOnboardingBoundaryId();
+		if ($boundaryId <= 0)
+		{
+			return false;
+		}
+
+		return MailboxTable::getRow([
+			'select' => ['ID'],
+			'filter' => [
+				'=USER_ID' => $userId,
+				'=ACTIVE' => 'Y',
+				'<=ID' => $boundaryId,
+			],
+		]) !== null;
+	}
+
+	private static function getLabelsOnboardingBoundaryId(): int
+	{
+		return (int)Option::get('mail', LabelsFeature::ONBOARDING_BOUNDARY_ID_OPTION, '0');
 	}
 
 	public static function wasLargeAttachmentAhaShown(): bool

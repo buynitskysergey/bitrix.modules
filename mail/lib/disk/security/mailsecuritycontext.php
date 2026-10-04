@@ -95,7 +95,90 @@ class MailSecurityContext extends Disk\Security\SecurityContext
 			$objectId
 		))->fetch();
 
-		return Mail\Helper\Message::hasAccess($message, $this->userId);
+		if (Mail\Helper\Message::hasAccess($message, $this->userId))
+		{
+			return true;
+		}
+
+		return $this->isOwnDraftAttachment($objectId);
+	}
+
+	/**
+	 * Draft-owned copies have no b_mail_msg_attachment row until the draft is sent,
+	 * so their author reads them through the draft binding.
+	 *
+	 * @param $objectId
+	 * @return bool
+	 */
+	private function isOwnDraftAttachment($objectId)
+	{
+		$userId = (int)$this->userId;
+		if ($userId <= 0 || !Mail\Helper\Config\Feature::isInternalDraftsAvailable())
+		{
+			return false;
+		}
+
+		static $draftTablesExist = null;
+		if ($draftTablesExist === null)
+		{
+			$connection = Main\Application::getConnection();
+			$draftTablesExist =
+				$connection->isTableExists(Mail\Internals\DraftTable::getTableName())
+				&& $connection->isTableExists(Mail\Internals\DraftAttachmentTable::getTableName())
+			;
+		}
+		if (!$draftTablesExist)
+		{
+			return false;
+		}
+
+		$draft = Mail\Internals\DraftAttachmentTable::query()
+			->setSelect([
+				'DRAFT_CONTEXT_TYPE' => 'DRAFT.CONTEXT_TYPE',
+				'DRAFT_CRM_ENTITY_TYPE_ID' => 'DRAFT.CRM_ENTITY_TYPE_ID',
+				'DRAFT_CRM_ENTITY_ID' => 'DRAFT.CRM_ENTITY_ID',
+			])
+			->registerRuntimeField(
+				new Main\ORM\Fields\Relations\Reference(
+					'DRAFT',
+					Mail\Internals\DraftTable::class,
+					Main\ORM\Query\Join::on('this.DRAFT_ID', 'ref.ID'),
+					['join_type' => Main\ORM\Query\Join::TYPE_INNER],
+				),
+			)
+			->registerRuntimeField(
+				new Main\ORM\Fields\Relations\Reference(
+					'DISK_OBJECT',
+					Disk\Internals\ObjectTable::class,
+					Main\ORM\Query\Join::on('this.FILE_ID', 'ref.FILE_ID'),
+					['join_type' => Main\ORM\Query\Join::TYPE_INNER],
+				),
+			)
+			->where('DRAFT.USER_ID', $userId)
+			->where('DRAFT.STATUS', Mail\Internals\DraftTable::STATUS_ACTIVE)
+			->where('DRAFT.DATE_EXPIRE', '>', new Main\Type\DateTime())
+			->where('DISK_OBJECT.ID', (int)$objectId)
+			->setLimit(1)
+			->fetch()
+		;
+		if ($draft === false)
+		{
+			return false;
+		}
+		if ($draft['DRAFT_CONTEXT_TYPE'] !== Mail\Internals\DraftTable::CONTEXT_CRM)
+		{
+			return true;
+		}
+		if (!Main\Loader::includeModule('crm'))
+		{
+			return false;
+		}
+
+		return \CCrmActivity::checkUpdatePermission(
+			(int)$draft['DRAFT_CRM_ENTITY_TYPE_ID'],
+			(int)$draft['DRAFT_CRM_ENTITY_ID'],
+			\CCrmPerms::getUserPermissions($userId),
+		);
 	}
 
 	/**

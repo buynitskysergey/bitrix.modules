@@ -213,13 +213,17 @@ final class Factory
 
 	private function getPreferences(Scene $scene, Context $context): ?Preferences
 	{
-		$array = \CUserOptions::GetOption('messageservice.message.editor', $scene->getId(), false, $context->getUserId());
-		if (empty($array) || !is_array($array))
+		$userId = $context->getUserId();
+
+		$sceneOptions = \CUserOptions::GetOption('messageservice.message.editor', $scene->getId(), false, $userId);
+		$sceneOptions = is_array($sceneOptions) ? $sceneOptions : [];
+
+		if (empty($sceneOptions))
 		{
 			return null;
 		}
 
-		$preferences = Preferences::fromArray($array);
+		$preferences = Preferences::fromArray($sceneOptions);
 
 		$validation = ServiceLocator::getInstance()->get('main.validation.service');
 		$result = $validation->validate($preferences);

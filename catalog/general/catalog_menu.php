@@ -1,5 +1,7 @@
 <?php
 
+use Bitrix\Main\Web\Uri;
+
 IncludeModuleLangFile(__FILE__);
 
 /**
@@ -198,12 +200,12 @@ class CCatalogMenu extends CAdminMenu
 				if ($tmp[0] == "find_section_section")
 					$tmp[0] = "filter_section";
 
-				$urlCurrent = CHTTP::urlDeleteParams($urlCurrent, array($tmp[0]));
+				$urlCurrent = (string)(new Uri($urlCurrent))->deleteParams([$tmp[0]]);
 				$arUrlAdd[$tmp[0]] = $tmp[1];
 			}
 		}
 
-		$url = CHTTP::urlAddParams($urlCurrent, $arUrlAdd, array("encode", "skip_empty"));
+		$url = (string)(new Uri($urlCurrent))->addParams($arUrlAdd);
 		$submenu["url"] = $url;
 
 		if (isset($submenu["items"]) && count($submenu["items"]) > 0)

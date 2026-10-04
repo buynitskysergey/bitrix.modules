@@ -35,6 +35,12 @@ class NodeCatalogItemDto implements JsonSerializable
 		public readonly array $returnProperties,
 		public readonly array $defaultSettings,
 		public readonly bool $hasAuxPorts,
+		/** Whether the node is served by the unified settings panel; absent reads as `false`. */
+		public readonly bool $servedByUnifiedPanel = false,
+		public readonly ?bool $relationsAvailable = null,
+		public readonly ?array $contentBlock = null,
+		public readonly ?array $contentBlockProducer = null,
+		public readonly ?array $contentBlockConsumer = null,
 	){}
 
 	public function jsonSerialize(): array
@@ -42,6 +48,7 @@ class NodeCatalogItemDto implements JsonSerializable
 		return [
 			'id' => $this->id,
 			'type' => $this->type,
+			'servedByUnifiedPanel' => $this->servedByUnifiedPanel,
 			'presetId' => $this->presetId,
 			'title' => $this->title,
 			'subtitle' => $this->subtitle,
@@ -53,6 +60,10 @@ class NodeCatalogItemDto implements JsonSerializable
 			'defaultSettings' => $this->defaultSettings,
 			'returnProperties' => $this->returnProperties,
 			'hasAuxPorts' => $this->hasAuxPorts,
+			'relationsAvailable' => $this->relationsAvailable,
+			'contentBlock' => $this->contentBlock,
+			'contentBlockProducer' => $this->contentBlockProducer,
+			'contentBlockConsumer' => $this->contentBlockConsumer,
 		];
 	}
 }

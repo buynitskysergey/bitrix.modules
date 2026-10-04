@@ -209,7 +209,7 @@ final class ClientSummaryAdapter
 
 		return $endpoint->addParams([
 			'site_id' => SITE_ID,
-			'ajax_action' => 'ACTIVITY_VIEW',
+			'action' => 'view',
 			'activity_id' => $activityId,
 		]);
 	}

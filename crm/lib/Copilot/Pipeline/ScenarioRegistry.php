@@ -6,11 +6,13 @@ namespace Bitrix\Crm\Copilot\Pipeline;
 
 use Bitrix\Crm\Copilot\Pipeline\Scenario\AnalyzeCommunicationScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\CallScoringScenario;
+use Bitrix\Crm\Copilot\Pipeline\Scenario\CallScoringScenarioV2;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\ExtractScoringCriteriaScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\FillFieldsScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\FullScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\RepeatSaleScreeningScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\RepeatSaleTipsScenario;
+use Bitrix\Crm\Copilot\Pipeline\Scenario\SelectCallScoringScriptScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\SummarizeScenario;
 use Bitrix\Crm\Copilot\Pipeline\Scenario\TranscribeRecordScenario;
 use Bitrix\Main\DI\ServiceLocator;
@@ -20,9 +22,15 @@ final class ScenarioRegistry
 	/** @var array<string, ScenarioInterface> */
 	private array $scenarios = [];
 
-	public function __construct()
+	/**
+	 * @param bool $withDefaults pass false to get a registry without production scenarios (tests only)
+	 */
+	public function __construct(bool $withDefaults = true)
 	{
-		$this->registerDefaults();
+		if ($withDefaults)
+		{
+			$this->registerDefaults();
+		}
 	}
 
 	/**
@@ -54,6 +62,8 @@ final class ScenarioRegistry
 		$this->register(new FillFieldsScenario());
 		$this->register(new SummarizeScenario());
 		$this->register(new CallScoringScenario());
+		$this->register(new CallScoringScenarioV2());
+		$this->register(new SelectCallScoringScriptScenario());
 		$this->register(new FullScenario());
 		$this->register(new TranscribeRecordScenario());
 		$this->register(new AnalyzeCommunicationScenario());

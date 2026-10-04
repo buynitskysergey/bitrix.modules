@@ -60,7 +60,11 @@ class VisibilityManager
 	 * @param array|null $userAccessCodes
 	 * @return array
 	 */
-	public static function getNotAccessibleFields(int $entityTypeId, ?array $userAccessCodes = null): array
+	public static function getNotAccessibleFields(
+		int $entityTypeId,
+		?array $userAccessCodes = null,
+		?int $userId = null,
+	): array
 	{
 		if (
 			$userAccessCodes !== null
@@ -72,7 +76,7 @@ class VisibilityManager
 
 		if (
 			$userAccessCodes === null
-			&& Container::getInstance()->getUserPermissions()->isAdmin()
+			&& Container::getInstance()->getUserPermissions($userId)->isAdmin()
 		)
 		{
 			return [];
@@ -84,7 +88,7 @@ class VisibilityManager
 			return [];
 		}
 
-		$userAccessCodes = $userAccessCodes ?? static::getUserAccessCodes();
+		$userAccessCodes = $userAccessCodes ?? static::getUserAccessCodes($userId);
 
 		$excludedFields = [];
 		foreach ($userFieldAccessCodes as $name => $item)

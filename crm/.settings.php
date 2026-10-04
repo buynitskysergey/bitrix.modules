@@ -199,6 +199,13 @@ return [
 		],
 		'readonly' => true,
 	],
+	'rest' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Crm\\V2\\Infrastructure\\Rest\\Controller',
+			'controllerProvider' => \Bitrix\Crm\V2\Infrastructure\Rest\CustomController\SchemaProvider::class,
+		],
+		'readonly' => true,
+	],
 	'ui.selector' => [
 		'value' => [
 			'crm.selector',
@@ -516,6 +523,18 @@ return [
 					return [null];
 				},
 			],
+			'crm.service.ads.conversion.vkads' => [
+				'className' => '\\Bitrix\\Crm\\Ads\\Pixel\\ConversionWrapper',
+				'constructorParams' => static function () {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+					if (\Bitrix\Main\Loader::includeModule('seo') && $locator->has('seo.vkads.conversion'))
+					{
+						return [$locator->get('seo.vkads.conversion')];
+					}
+
+					return [null];
+				},
+			],
 			'crm.service.ads.conversion.configurator' => [
 				'className' => '\\Bitrix\\Crm\\Ads\\Pixel\\Configuration\\Configurator',
 			],
@@ -673,6 +692,28 @@ return [
 
 				return new \Bitrix\Crm\Service\Logger\StackLogger(...$loggers);
 			},
+			'Import' => static function () {
+				if (\Bitrix\Main\Config\Option::get('crm', 'is_log_import', 'N') !== 'Y')
+				{
+					return new \Psr\Log\NullLogger();
+				}
+
+				$loggers = [
+					(new \Bitrix\Crm\Service\Logger\DbLogger('Import', 168))
+						->setLevel(\Psr\Log\LogLevel::INFO)
+					,
+				];
+
+				if (\Bitrix\Main\Loader::includeModule('bitrix24'))
+				{
+					$loggers[] =
+						(new \Bitrix\Crm\Service\Logger\Message2LogLogger('crm.Import', 9))
+							->setLevel(\Psr\Log\LogLevel::INFO)
+					;
+				}
+
+				return new \Bitrix\Crm\Service\Logger\StackLogger(...$loggers);
+			},
 			'Agent' => static function () {
 				$loggers = [
 					(new \Bitrix\Crm\Service\Logger\DbLogger('crm.agent', 168))
@@ -737,6 +778,23 @@ return [
 
 				return new \Bitrix\Crm\Service\Logger\StackLogger(...$loggers);
 			},
+			'Ads.VkadsConversion' => static function () {
+				$loggers = [
+					(new \Bitrix\Crm\Service\Logger\DbLogger('ads.vkads_conversion', 168))
+						->setLevel(\Psr\Log\LogLevel::ERROR)
+					,
+				];
+
+				if (\Bitrix\Main\Loader::includeModule('bitrix24'))
+				{
+					$loggers[] =
+						(new \Bitrix\Crm\Service\Logger\Message2LogLogger('crm.ads.vkads_conversion', 9))
+							->setLevel(\Psr\Log\LogLevel::ERROR)
+					;
+				}
+
+				return new \Bitrix\Crm\Service\Logger\StackLogger(...$loggers);
+			},
 			'RepeatSale' => static function () {
 				$loggers = [
 					(new \Bitrix\Crm\Service\Logger\DbLogger('crm.repeatSale', 168))
@@ -749,6 +807,23 @@ return [
 					$loggers[] =
 						(new \Bitrix\Crm\Service\Logger\Message2LogLogger('crm.repeatSale', 9))
 							->setLevel(\Bitrix\Main\Config\Option::get('crm', 'log_repeat_sale_message_level', \Psr\Log\LogLevel::INFO))
+					;
+				}
+
+				return new \Bitrix\Crm\Service\Logger\StackLogger(...$loggers);
+			},
+			'CallScoring' => static function () {
+				$loggers = [
+					(new \Bitrix\Crm\Service\Logger\DbLogger('crm.callScoring', 168))
+						->setLevel(\Bitrix\Main\Config\Option::get('crm', 'log_call_scoring_db_level', \Psr\Log\LogLevel::ERROR))
+					,
+				];
+
+				if (\Bitrix\Main\Loader::includeModule('bitrix24'))
+				{
+					$loggers[] =
+						(new \Bitrix\Crm\Service\Logger\Message2LogLogger('crm.callScoring', 9))
+							->setLevel(\Bitrix\Main\Config\Option::get('crm', 'log_call_scoring_message_level', \Psr\Log\LogLevel::INFO))
 					;
 				}
 
@@ -796,6 +871,7 @@ return [
 			'agents' => [
 				Bitrix\Crm\Integration\AiAssistant\Agents\CrmExecutorAgent::class,
 				Bitrix\Crm\Integration\AiAssistant\Agents\CrmExecutorPlannerAgent::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\Agent\Mail\CrmMailAgent::class,
 			],
 			'scenarios' => [
 				Bitrix\Crm\Integration\AiAssistant\Scenario\EmptyCrmSetupScenario::class,
@@ -805,6 +881,7 @@ return [
 				Bitrix\Crm\Integration\AiAssistant\ToolSets\TuningToolSet::class,
 				OpenLineToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\Mail\MailToolSet::class,
 			],
 			'profileDataProviders' => [
 				Bitrix\Crm\Integration\AiAssistant\DataProviders\CrmProvider::class,

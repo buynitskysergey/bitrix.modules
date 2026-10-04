@@ -39,7 +39,7 @@ class TemplateProvider extends BaseProvider
 	public function getItems(array $ids): array
 	{
 		$ids = array_filter(array_map('intval', $ids));
-		$templates = $this->getTemplatesByIds($ids);
+		$templates = $this->filterTemplates($this->getTemplatesByIds($ids));
 		$currentUserId = $this->getCurrentUserId();
 		$isAdmin = $this->isUserWorkflowTemplateAdmin($currentUserId);
 
@@ -101,7 +101,9 @@ class TemplateProvider extends BaseProvider
 
 		$preselectedItems = $dialog->getPreselectedCollection()->getEntityItems(static::ENTITY_ID);
 		$ids = array_keys($preselectedItems);
-		$templates = $this->getTemplatesByIds(array_filter(array_map('intval', $ids)));
+		$templates = $this->filterTemplates(
+			$this->getTemplatesByIds(array_filter(array_map('intval', $ids)))
+		);
 
 		foreach ($templates as $template)
 		{
@@ -243,7 +245,7 @@ class TemplateProvider extends BaseProvider
 
 		if ($moduleId && $documentType && IsModuleInstalled($moduleId))
 		{
-			$templates = $this->getTemplatesByDocumentType($moduleId, $documentType);
+			$templates = $this->filterTemplates($this->getTemplatesByDocumentType($moduleId, $documentType));
 			$isAdmin = $this->isUserWorkflowTemplateAdmin($currentUserId);
 			foreach ($templates as $template)
 			{
@@ -265,7 +267,7 @@ class TemplateProvider extends BaseProvider
 
 		$query =
 			WorkflowTemplateTable::query()
-				->setSelect(['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'NAME'])
+				->setSelect(['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'NAME', 'TYPE'])
 				->where($this->getDefaultTemplateFilter())
 		;
 		if (count($ids) === 1)
@@ -287,7 +289,7 @@ class TemplateProvider extends BaseProvider
 	{
 		$query =
 			WorkflowTemplateTable::query()
-				->setSelect(['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'NAME'])
+				->setSelect(['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'NAME', 'TYPE'])
 				->where('MODULE_ID', $moduleId)
 				->where('DOCUMENT_TYPE', $documentType)
 				->where($this->getDefaultTemplateFilter())
@@ -329,7 +331,7 @@ class TemplateProvider extends BaseProvider
 
 		$query =
 			WorkflowTemplateTable::query()
-				->setSelect(['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'NAME'])
+				->setSelect(['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'NAME', 'TYPE'])
 				->where($this->getDefaultTemplateFilter())
 		;
 
@@ -343,7 +345,7 @@ class TemplateProvider extends BaseProvider
 			$query->whereLike('NAME', "%$search%");
 		}
 
-		$templates = $query->exec()->fetchCollection();
+		$templates = $this->filterTemplates($query->exec()->fetchCollection());
 
 		$items = [];
 		foreach ($templates as $template)
@@ -377,6 +379,11 @@ class TemplateProvider extends BaseProvider
 		}
 
 		return $filter->where($autoExecuteFilter);
+	}
+
+	protected function filterTemplates(EO_WorkflowTemplate_Collection $templates): EO_WorkflowTemplate_Collection
+	{
+		return $templates;
 	}
 
 	protected function canUserStartWorkflow(int $userId, array $complexDocumentType): bool

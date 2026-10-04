@@ -88,11 +88,23 @@ class ActivityControlsBuilder
 		$properties = [];
 		foreach ($propertiesMap as $key => $property)
 		{
+			// Skip service properties that belong to the complex-activity framework
+			// (e.g. FieldType::RULES used by extractRulePropertyValue) — they must be
+			// present in the properties map for the complex controller but must not
+			// be rendered as UI controls in the base-settings block.
+			if (($property['Type'] ?? '') === \Bitrix\Bizproc\FieldType::RULES)
+			{
+				continue;
+			}
+
 			$property['FieldName'] ??= $key;
-			$properties[] = new ActivityControlDto(
-				$property,
-				$this->getCurrentValue($key, $property),
-			);
+			$value = $this->getCurrentValue($key, $property);
+
+			// Getter/Setter are server-side Closures used to read/write legacy properties;
+			// they must not leak into the serialized control JSON (a Closure encodes as {}).
+			unset($property['Getter'], $property['Setter']);
+
+			$properties[] = new ActivityControlDto($property, $value);
 		}
 
 		return $properties;

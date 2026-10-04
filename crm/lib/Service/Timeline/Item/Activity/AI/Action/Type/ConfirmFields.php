@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type;
 
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
@@ -27,6 +28,7 @@ final class ConfirmFields extends AIAction
 		return [
 			Call::getId(),
 			OpenLine::getId(),
+			Email::getId(),
 		];
 	}
 

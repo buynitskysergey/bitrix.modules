@@ -13,7 +13,9 @@ use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Uri;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Model\AppAttributeTable;
+use Bitrix\Rest\Internal\Service\Application\AccessCacheInvalidator;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\FormConfig\EventType;
 use Bitrix\Rest\Internals\FreeAppTable;
@@ -204,6 +206,7 @@ class AppTable extends Internal\Model\AppTable
 	public static function onAfterAdd(Main\Entity\Event $event)
 	{
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
+		LicenseScannerStateInvalidator::reset();
 		EventController::onAddApp($event);
 		$data = $event->getParameters();
 		if(!static::$skipRemoteUpdate)
@@ -292,7 +295,17 @@ class AppTable extends Internal\Model\AppTable
 	{
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
 		$data = $event->getParameters();
+		$fields = (array)($data['fields'] ?? []);
+		if (array_intersect_key($fields, ['CODE' => true, 'INSTALLED' => true, 'STATUS' => true]) !== [])
+		{
+			LicenseScannerStateInvalidator::reset();
+		}
 		static::clearClientCache($data['primary']['ID']);
+
+		if (static::hasAccessCacheSensitiveChanges($data['fields'] ?? []))
+		{
+			AccessCacheInvalidator::clear();
+		}
 
 		if(!static::$skipRemoteUpdate)
 		{
@@ -341,6 +354,22 @@ class AppTable extends Internal\Model\AppTable
 	}
 
 	/**
+	 * Placement access cache keeps APP.ACCESS and APP.INSTALLED, and its candidate list depends on APP.ACTIVE.
+	 */
+	private static function hasAccessCacheSensitiveChanges(array $fields): bool
+	{
+		foreach (['ACCESS', 'INSTALLED', 'ACTIVE'] as $field)
+		{
+			if (array_key_exists($field, $fields))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Event on before delete application.
 	 *
 	 * @param Main\Entity\Event $event
@@ -382,6 +411,7 @@ class AppTable extends Internal\Model\AppTable
 	public static function onAfterDelete(Main\Entity\Event $event)
 	{
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
+		LicenseScannerStateInvalidator::reset();
 		$data = $event->getParameters();
 
 		static::clearClientCache($data['primary']['ID']);
@@ -449,6 +479,7 @@ class AppTable extends Internal\Model\AppTable
 			if (
 				$appInfo['ACTIVE'] === self::ACTIVE
 				&& $appInfo['INSTALLED'] === self::INSTALLED
+				&& $appInfo['STATUS'] !== self::STATUS_LOCAL
 				&& Main\Config\Option::get('rest', 'allow_create_sys_user', 'N') === 'Y'
 			)
 			{
@@ -872,11 +903,7 @@ class AppTable extends Internal\Model\AppTable
 			));
 		}
 
-		if(defined("BX_COMP_MANAGED_CACHE"))
-		{
-			global $CACHE_MANAGER;
-			$CACHE_MANAGER->ClearByTag('bitrix24_left_menu');
-		}
+		AccessCacheInvalidator::clear();
 	}
 
 	/**

@@ -7,6 +7,8 @@
  */
 namespace Bitrix\Main\Mail;
 
+use Bitrix\Main\Error;
+
 class Context
 {
 	const CAT_EXTERNAL = 1;
@@ -24,6 +26,13 @@ class Context
 	protected $callback;
 
 	protected $keepAlive;
+
+	/** @var  Sender\Identity|null $senderIdentity */
+	protected $senderIdentity;
+
+	protected ?bool $automaticCustomSmtpEnabled = null;
+
+	protected ?Error $sendingError = null;
 
 	public function __construct(?array $params = null)
 	{
@@ -74,6 +83,48 @@ class Context
 	public function getSmtp()
 	{
 		return $this->smtp;
+	}
+
+	/**
+	 * @param Sender\Identity|null $identity Sender identity the message is sent on behalf of.
+	 * @return $this
+	 */
+	public function setSenderIdentity(?Sender\Identity $identity)
+	{
+		$this->senderIdentity = $identity;
+		return $this;
+	}
+
+	/**
+	 * @return Sender\Identity|null
+	 */
+	public function getSenderIdentity(): ?Sender\Identity
+	{
+		return $this->senderIdentity;
+	}
+
+	public function setAutomaticCustomSmtpEnabled(?bool $enabled): self
+	{
+		$this->automaticCustomSmtpEnabled = $enabled;
+
+		return $this;
+	}
+
+	public function getAutomaticCustomSmtpEnabled(): ?bool
+	{
+		return $this->automaticCustomSmtpEnabled;
+	}
+
+	public function setSendingError(?Error $error): self
+	{
+		$this->sendingError = $error;
+
+		return $this;
+	}
+
+	public function getSendingError(): ?Error
+	{
+		return $this->sendingError;
 	}
 
 	/**

@@ -7,12 +7,12 @@ use Bitrix\Main;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\Action;
+use Bitrix\Main\Engine\AutoWire\Parameter;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Sale;
 use Bitrix\Crm;
-use Bitrix\Sale\BasketItemBase;
-use Bitrix\Sale\Label\EntityLabelService;
+use Bitrix\Salescenter\Internal\Service\DiscountFormatter;
 use Bitrix\SalesCenter\Component\ReceivePaymentModeDictionary;
 use Bitrix\SalesCenter\Integration\Bitrix24Manager;
 use Bitrix\SalesCenter\Integration\CrmManager;
@@ -30,6 +30,7 @@ use Bitrix\Crm\Order\Builder\SettingsContainer;
 use Bitrix\Crm\Order\PersonType;
 use Bitrix\Crm\RequisiteAddress;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Sale\Delivery;
 use Bitrix\Sale\Helpers\Order\Builder\Converter\CatalogJSProductForm;
 use Bitrix\Sale\PaySystem\PaymentAvailablesPaySystems;
@@ -43,10 +44,21 @@ Loc::loadMessages(__FILE__);
 
 class Order extends Base
 {
+	public function getAutoWiredParameters(): array
+	{
+		return [
+			...parent::getAutoWiredParameters(),
+			new Parameter(
+				UserPermissions::class,
+				static fn (): UserPermissions => Container::getInstance()->getUserPermissions(),
+			),
+		];
+	}
+
 	public function configureActions()
 	{
 		return [
-			'searchProduct' => ['class' => SearchProductAction::class]
+			'searchProduct' => ['class' => SearchProductAction::class],
 		];
 	}
 
@@ -97,6 +109,8 @@ class Order extends Base
 				$item['code'] = 'n'.(count($result) + 1);
 			}
 
+			$item['isCustomPrice'] = 'Y';
+
 			$result[] = $item;
 		}
 
@@ -105,6 +119,12 @@ class Order extends Base
 
 	public function refreshBasketAction($orderId, array $basketItems = [])
 	{
+		// Canonicalize tax coordinates before building the order, symmetrically with
+		// the save paths (createPaymentAction/createTerminalPaymentAction/createShipmentAction).
+		// The live slider recalc must not trust netto slots that may carry gross values
+		// for taxIncluded='N' (deal product / repeated-product case), otherwise the Order
+		// builder accrues VAT a second time. See VatRate::prepareTaxPrices.
+		$basketItems = VatRate::prepareTaxPrices($basketItems);
 		$basketItems = $this->processBasketItems($basketItems);
 
 		$order = $this->buildOrder(
@@ -122,89 +142,125 @@ class Order extends Base
 
 		if ($order === null)
 		{
-			return ['items' => $basketItems];
+			// The order could not be built, so there is no basket to recompute brutto from.
+			// prepareTaxPrices normalized `price` to netto for taxIncluded='N'; project it
+			// back to gross before echoing the items to the frontend, otherwise the netto
+			// leaks into the `price` slot and the next refresh ratchets it down (same reason
+			// as the unmatched branch of fillResultBasket).
+			return [
+				'items' => array_map(
+					static fn (array $item): array => VatRate::restoreGrossDisplayPrice($item),
+					$basketItems
+				),
+			];
 		}
 
-		$discountSum = 0;
-		$baseSum = 0;
-		$price = 0;
-		$vatSum = 0;
-		foreach ($basketItems as $item)
-		{
-			$basketItem = $this->getBasketItemByProductId(
-				$order->getBasket(),
-				isset($item['skuId']) ? (int)$item['skuId'] : 0,
-				$item['module'] ?? ''
-			);
-			if ($basketItem === null)
-			{
-				continue;
-			}
+		$currency = (string)$order->getCurrency();
 
-			if ($basketItem->getBasePrice() !== $basketItem->getPrice() && empty($basketItem->getDiscountPrice()))
-			{
-				$discountSum += ($basketItem->getBasePrice() - $basketItem->getPrice()) * $item['quantity'];
-			}
-			else
-			{
-				$discountSum += $basketItem->getDiscountPrice() * $item['quantity'];
-			}
-
-			$baseSum += $basketItem->getBasePrice() * $item['quantity'];
-			$price += $basketItem->getPrice() * $item['quantity'];
-			$vatRate = (float)$basketItem->getVatRate();
-
-			if ($basketItem->isVatInPrice())
-			{
-				$vatSum += Sale\PriceMaths::roundPrecision(
-					$basketItem->getPrice()
-					* $item['quantity']
-					* $vatRate
-					/ (
-						$vatRate + 1
-					)
-				);
-			}
-			else
-			{
-				$vatSum += Sale\PriceMaths::roundPrecision(
-					$basketItem->getPrice()
-					* $item['quantity']
-					* $vatRate
-				);
-			}
-		}
+		$resultItems = $this->fillResultBasket($basketItems, $order);
 
 		return [
-			'items' => $this->fillResultBasket($basketItems, $order),
-			'total' => [
-				'discount' => $discountSum,
-				'result' => $price,
-				'taxSum' => $vatSum,
-				'sum' => $baseSum,
-			]
+			'items' => $resultItems,
+			'total' => $this->aggregateCurrentPaymentTotals(
+				$this->canonicalizeRowsForTotal($basketItems, $order->getBasket()),
+				$currency
+			),
 		];
 	}
 
-	private function getBasketItemByProductId(
-		Sale\BasketBase $basketItemCollection,
-		int $productId,
-		string $module
-	): ?BasketItemBase
+	/**
+	 * Project every priced form row onto its product's authoritative built basket item
+	 * before the current-payment total is aggregated.
+	 *
+	 * aggregateCurrentPaymentTotals must isolate the current payment, so it works from the
+	 * passed form rows rather than the order-wide built basket. But the raw rows cannot be
+	 * trusted for price/discount. catalog.product-form sends the SAME product added as two
+	 * lines with a per-row discount applied to only the edited line — a 10% discount arrives
+	 * as one line at price 900 / discount 100 and its duplicate still at 1000 / discount 0 —
+	 * and a repeated product's price can also lag a tax-mode toggle. The CRM distributed-
+	 * quantity builder resolves this: it spreads the discount across every unit of the
+	 * product, so the built basket item is the source of truth — exactly as fillResultBasket
+	 * uses it for the displayed rows. Mirroring each row onto its product's basket item here
+	 * keeps the total consistent with the items and the built order.
+	 *
+	 * Applies to matched rows too, not only merged-away duplicates: a matched row can carry
+	 * the stale half of an unevenly-applied duplicate discount (its sibling holds the
+	 * discount, it does not), which would otherwise under-count the discount in the total
+	 * (1000 + 900 = 1900 instead of 1800). A no-op for a row whose product basket item already
+	 * agrees, and for rows with no product/tax context (recalculateUnmatchedRow leaves those
+	 * untouched).
+	 */
+	private function canonicalizeRowsForTotal(array $formBasket, Sale\Basket $basket): array
 	{
-		/** @var BasketItemBase $basketItem */
-		foreach ($basketItemCollection as $basketItem)
+		foreach ($formBasket as &$item)
 		{
-			if (
-				$basketItem->getProductId() === $productId
-				&& $basketItem->getField('MODULE') === $module
-			)
-			{
-				return $basketItem;
-			}
+			$item = $this->recalculateUnmatchedRow($item, $basket);
+		}
+		unset($item);
+
+		return $formBasket;
+	}
+
+	/**
+	 * Builds the `total` block of the refreshBasket response from the items of the
+	 * CURRENT payment only (the basketItems passed by the slider).
+	 *
+	 * When a second payment is added to a deal, buildOrder() loads the whole order
+	 * (the CRM builder keeps products from earlier payments and merges quantities of
+	 * repeated products), so $order->getBasket() is wider than the current payment.
+	 * Aggregating it would show the order-wide sum. We instead aggregate the passed
+	 * items, honouring their input quantities — mirroring how obtainPaymentFields()
+	 * derives a single payment's sum and how fillResultBasket() uses input quantity.
+	 *
+	 * @param array $basketItems JS product-form items (same shape as refreshBasketAction input).
+	 */
+	private function aggregateCurrentPaymentTotals(array $basketItems, string $currency): array
+	{
+		$products = CatalogJSProductForm::convertToBuilderFormat($basketItems);
+		$inputFactory = ServiceLocator::getInstance()->get('sale.basketItemInputFactory');
+
+		$inputs = [];
+		foreach ($products as $product)
+		{
+			$discountPrice = (float)($product['DISCOUNT_PRICE'] ?? 0);
+			$inputs[] = $inputFactory->createFromArray([
+				'basePrice' => (float)($product['BASE_PRICE'] ?? 0),
+				'quantity' => (float)($product['QUANTITY'] ?? 0),
+				'discountValue' => $discountPrice > 0 ? $discountPrice : null,
+				'vatRate' => (float)($product['VAT_RATE'] ?? 0) * 100,
+				'vatIncluded' => ($product['VAT_INCLUDED'] ?? 'Y') === 'Y',
+			]);
 		}
 
-		return null;
+		return $this->aggregateCalculationInputs($inputs, $currency);
+	}
+
+	/**
+	 * @param \Bitrix\Sale\Public\Dto\BasketItemCalculationInput[] $inputs
+	 */
+	private function aggregateCalculationInputs(array $inputs, string $currency): array
+	{
+		$basketCalculator = ServiceLocator::getInstance()->get('sale.basketCalculator');
+		$priceRounder = ServiceLocator::getInstance()->get('sale.priceRounder');
+
+		$calcResult = $basketCalculator->calculate($inputs);
+
+		$discount = 0.0;
+		foreach ($calcResult->items as $itemResult)
+		{
+			$discount += DiscountFormatter::grossToNet(
+				$itemResult->totalCalculation->totalDiscountValue,
+				$itemResult->vatRate,
+				$itemResult->vatIncluded,
+			);
+		}
+
+		return [
+			'sum' => $priceRounder->roundByFormatCurrency($calcResult->totalBasePrice, $currency),
+			'result' => $priceRounder->roundByFormatCurrency($calcResult->totalPrice, $currency),
+			'discount' => $priceRounder->roundByFormatCurrency($discount, $currency),
+			'taxSum' => $priceRounder->roundByFormatCurrency($calcResult->totalVatValue, $currency),
+		];
 	}
 
 	protected function prepareParamsForBuilder(array $params, $scenario = null) : array
@@ -309,6 +365,8 @@ class Order extends Base
 		int $deliveryResponsibleId = 0
 	)
 	{
+		// Symmetric tax canonicalization with the save paths — see refreshBasketAction.
+		$basketItems = VatRate::prepareTaxPrices($basketItems);
 		$basketItems = $this->processBasketItems($basketItems);
 
 		$options['basketItems'] = $basketItems;
@@ -367,6 +425,8 @@ class Order extends Base
 		int $deliveryResponsibleId = 0
 	)
 	{
+		// Symmetric tax canonicalization with the save paths — see refreshBasketAction.
+		$basketItems = VatRate::prepareTaxPrices($basketItems);
 		$basketItems = $this->processBasketItems($basketItems);
 
 		$options['basketItems'] = $basketItems;
@@ -451,6 +511,11 @@ class Order extends Base
 			$order = null;
 		}
 
+		if ($order !== null)
+		{
+			$this->restoreCustomPriceBasePrices($order, $formData['PRODUCT'] ?? []);
+		}
+
 		$errorsFilter = $options['orderErrorsFilter'] ?? null;
 		if (is_null($errorsFilter))
 		{
@@ -471,6 +536,90 @@ class Order extends Base
 		$this->addErrors($filteredErrors);
 
 		return $order;
+	}
+
+	/**
+	 * Re-assert the form's custom base price onto the built basket, in-place.
+	 *
+	 * Every slider row is forced to CUSTOM_PRICE=Y (see processBasketItems), so the base
+	 * price the user entered — not the catalog list price — is the source of truth for the
+	 * displayed «Цена» and for what gets saved. But when a repeated deal product is added
+	 * as a second line, the CRM distributed-quantity builder creates a NEW basket item, so
+	 * BasketBuilderExist::finalActions() runs Basket::refreshData(['PRICE']). For an
+	 * existing (already merged, no new item) line refreshData is skipped; adding the second
+	 * line trips isProductAdded() and it fires. refreshData re-reads the catalog provider,
+	 * which returns the price in VAT-inclusive (gross) coordinates for a taxIncluded='N'
+	 * product (net 1000 → gross 1200) and writes it into BASE_PRICE without converting back
+	 * to net — leaving BASE_PRICE and PRICE in different tax coordinates. The symptom: both
+	 * the matched line and its merged-away duplicate (which fillResultBasket/
+	 * recalculateUnmatchedRow mirror off the same basket item) jump from 1000 to 1200 on the
+	 * refresh that adds the duplicate, and createPaymentAction persists the grossed base.
+	 *
+	 * Correcting the built basket here — before fillResultBasket reads it and before
+	 * createPaymentAction saves it — fixes the preview and the saved order in one place.
+	 * A no-op when the base already matches the form (the common single-line case, where
+	 * refreshData never fired) and for non-custom-price items. Matching is by PRODUCT_ID:
+	 * the merged line keeps its stored XML_ID (not a form innerId), so XML_ID matching would
+	 * miss it. A product whose rows carry conflicting bases is skipped — the merge collapses
+	 * them into one item and there is no unambiguous value to restore.
+	 *
+	 * PRICE is left untouched: for a CUSTOM_PRICE=Y item, BasketItem::onFieldModify does not
+	 * recompute PRICE from BASE_PRICE/DISCOUNT_PRICE, so the charged amount is unaffected.
+	 */
+	private function restoreCustomPriceBasePrices(Sale\Order $order, array $formProducts): void
+	{
+		$authoritative = [];
+		foreach ($formProducts as $product)
+		{
+			$productId = (int)($product['PRODUCT_ID'] ?? 0);
+			if ($productId <= 0 || ($product['CUSTOM_PRICE'] ?? 'N') !== 'Y')
+			{
+				continue;
+			}
+
+			$base = (float)($product['BASE_PRICE'] ?? 0);
+			if ($base <= 0)
+			{
+				continue;
+			}
+
+			if (
+				isset($authoritative[$productId])
+				&& abs($authoritative[$productId]['base'] - $base) > 1e-9
+			)
+			{
+				$authoritative[$productId]['conflict'] = true;
+				continue;
+			}
+
+			$authoritative[$productId] = [
+				'base' => $base,
+				'discount' => (float)($product['DISCOUNT_PRICE'] ?? 0),
+				'conflict' => false,
+			];
+		}
+
+		foreach ($order->getBasket() as $basketItem)
+		{
+			if (!$basketItem->isCustomPrice())
+			{
+				continue;
+			}
+
+			$auth = $authoritative[(int)$basketItem->getProductId()] ?? null;
+			if ($auth === null || $auth['conflict'])
+			{
+				continue;
+			}
+
+			if (abs((float)$basketItem->getBasePrice() - $auth['base']) <= 1e-9)
+			{
+				continue;
+			}
+
+			$basketItem->setField('BASE_PRICE', $auth['base']);
+			$basketItem->setField('DISCOUNT_PRICE', $auth['discount']);
+		}
 	}
 
 	protected function getBuilderScenario(array $options) :? string
@@ -499,6 +648,7 @@ class Order extends Base
 	private function fillResultBasket(array $formBasket, Sale\Order $order): array
 	{
 		$basket = $order->getBasket();
+		$currency = (string)$order->getCurrency();
 		$discount = $order->getDiscount();
 		$discountResult = $discount->getApplyResult(true);
 		$discountBasket = $discountResult['RESULT']['BASKET'];
@@ -510,14 +660,26 @@ class Order extends Base
 
 		$measureRatios = \Bitrix\Catalog\MeasureRatioTable::getCurrentRatio($productIds);
 
+		$inputFactory = ServiceLocator::getInstance()->get('sale.basketItemInputFactory');
+		$calculator = ServiceLocator::getInstance()->get('sale.basketItemCalculator');
+		$priceRounder = ServiceLocator::getInstance()->get('sale.priceRounder');
+
 		$resultBasket = [];
 
-		foreach ($formBasket as $index => $item)
+		foreach ($formBasket as $item)
 		{
 			$basketItem = $basket->getItemByXmlId($item['innerId']);
 			if (!$basketItem)
 			{
-				$resultBasket[$item['sort']] = $item;
+				// No basket item to read brutto/netto/VAT from: the CRM distributed-quantity
+				// builder merged this row into another (a repeated deal product added as a
+				// second line). Echoing the row as-is is wrong twice: prepareTaxPrices left
+				// `price` in netto for taxIncluded='N' (it ratchets down on the next refresh),
+				// and the per-row VAT fields stay stale after a tax-mode toggle (the second
+				// position keeps its old tax when switching "VAT not included" → "included").
+				// Mirror the merged sibling basket item of the same product so the duplicate
+				// line stays consistent with the matched line. See recalculateUnmatchedRow.
+				$resultBasket[$item['sort']] = $this->recalculateUnmatchedRow($item, $basket);
 				continue;
 			}
 
@@ -531,17 +693,28 @@ class Order extends Base
 			$sort = $basketItem->getField('SORT');
 			$productId = $basketItem->getProductId();
 
+			$calculation = $calculator->calculate($inputFactory->createFromBasketItem($basketItem));
+
+			$priceBrutto = $priceRounder->roundPrecision($calculation->priceBrutto);
+			$priceNetto = $priceRounder->roundPrecision($calculation->priceNetto);
+
 			$preparedItem = [
 				'code' => $code,
 				'productId' => $productId,
 				'sort' => $sort,
 				'name' => $basketItem->getField('NAME'),
-				'basePrice' => Sale\PriceMaths::roundPrecision($basketItem->getBasePrice()),
-				'price' => Sale\PriceMaths::roundPrecision($basketItem->getPrice()),
-				'priceExclusive' => Sale\PriceMaths::roundPrecision($basketItem->getPrice()),
+				'basePrice' => $priceRounder->roundPrecision($basketItem->getBasePrice()),
+				'price' => $priceBrutto,
+				'priceExclusive' => $priceNetto,
+				'vatAmount' => $priceRounder->roundPrecision($calculation->vatAmount),
+				'vatRate' => $calculation->vatRate,
+				'vatIncluded' => $calculation->vatIncluded,
+				'taxSum' => $priceRounder->roundPrecision(
+					$calculation->totalCalculation->totalVatValue
+				),
 				'quantity' => $item['quantity'],
 				'module' => $basketItem->getField('MODULE'),
-				'formattedPrice' => SaleFormatCurrency($basketItem->getPrice(), $order->getCurrency(), true),
+				'formattedPrice' => SaleFormatCurrency($basketItem->getPrice(), $currency, true),
 				'encodedFields' => Main\Web\Json::encode($basketItem->getFieldValues()),
 				'errors' => $errors,
 				'discountInfos' => [],
@@ -596,8 +769,15 @@ class Order extends Base
 					$preparedItem['showDiscount'] = 'Y';
 				}
 
-				$preparedItem['discount'] = $basketItem->getDiscountPrice();
-				$preparedItem['discountRate'] = roundEx($basketItem->getDiscountPrice() / $basketItem->getBasePrice() * 100, 2);
+				// BasketItem::getVatRate() returns a decimal (0.2 for 20%); the helper
+				// expects percent — multiply by 100 at the boundary.
+				$discountNet = DiscountFormatter::grossToNet(
+					(float)$basketItem->getDiscountPrice(),
+					(float)$basketItem->getVatRate() * 100,
+					$basketItem->isVatInPrice(),
+				);
+				$preparedItem['discount'] = $priceRounder->roundPrecision($discountNet);
+				$preparedItem['discountRate'] = roundEx($basketItem->getDiscountPrice() / $basketItem->getBasePrice() * 100, 4);
 			}
 			else
 			{
@@ -611,6 +791,108 @@ class Order extends Base
 		sort($resultBasket);
 
 		return $resultBasket;
+	}
+
+	/**
+	 * Recompute the display fields of a form row that has no matching basket item.
+	 *
+	 * fillResultBasket normally reads brutto/netto/VAT straight off the built basket
+	 * item. When the CRM distributed-quantity builder merges a repeated deal product,
+	 * the duplicate line has no basket item of its own and would otherwise be echoed
+	 * back with whatever the frontend last sent — a netto `price` that ratchets down
+	 * on the next refresh (taxIncluded='N'), and stale per-row VAT fields that do not
+	 * follow a tax-mode toggle (the second position keeps its old tax after switching
+	 * "VAT not included" → "included").
+	 *
+	 * Re-derive the row from its own coordinates through the SAME converter and
+	 * calculator the matched branch and aggregateCurrentPaymentTotals use, so the
+	 * unmatched row is consistent with both: brutto `price`, netto `priceExclusive`,
+	 * and VAT recomputed for the row's current tax mode. Returns the row untouched if
+	 * it cannot be converted (nothing to recompute from).
+	 *
+	 * @param array $item form product-form item (already normalized by prepareTaxPrices)
+	 *
+	 * @return array
+	 */
+	private function recalculateUnmatchedRow(array $item, Sale\Basket $basket): array
+	{
+		// Only priced product rows are handled. A row that legitimately has no basket
+		// item and no tax context (e.g. a shipping line the slider carries) must pass
+		// through untouched — mirrors the guard in VatRate::prepareTaxPrices.
+		if (!isset($item['taxId'], $item['price']))
+		{
+			return $item;
+		}
+
+		// The row has no basket item of its own because the CRM distributed-quantity
+		// builder merged this repeated product into another line. Mirror that sibling
+		// (the same product's basket item): its tax mode / base price is the source of
+		// truth for the current order state, so the duplicate line stays consistent with
+		// the matched line — no price ratchet, no stale tax, no tax-toggle drift. The
+		// row's own (possibly stale) sent fields are deliberately NOT trusted: a repeated
+		// deal product can arrive with a tax mode that lags a switcher toggle, which would
+		// otherwise recompute its price in the wrong coordinate system (e.g. 1000 → 1200).
+		$sibling = $this->findSiblingBasketItem($basket, $item);
+		if (!$sibling)
+		{
+			// No sibling to mirror: at least keep the display price gross so a
+			// taxIncluded='N' netto value cannot ratchet on the next refresh.
+			return VatRate::restoreGrossDisplayPrice($item);
+		}
+
+		$inputFactory = ServiceLocator::getInstance()->get('sale.basketItemInputFactory');
+		$calculator = ServiceLocator::getInstance()->get('sale.basketItemCalculator');
+		$priceRounder = ServiceLocator::getInstance()->get('sale.priceRounder');
+
+		$discountPrice = (float)$sibling->getDiscountPrice();
+		$calculation = $calculator->calculate($inputFactory->createFromArray([
+			'basePrice' => (float)$sibling->getBasePrice(),
+			'quantity' => (float)($item['quantity'] ?? $sibling->getQuantity()),
+			'discountValue' => $discountPrice > 0 ? $discountPrice : null,
+			'vatRate' => (float)$sibling->getVatRate() * 100,
+			'vatIncluded' => $sibling->isVatInPrice(),
+		]));
+
+		$item['price'] = $priceRounder->roundPrecision($calculation->priceBrutto);
+		$item['priceExclusive'] = $priceRounder->roundPrecision($calculation->priceNetto);
+		$item['basePrice'] = $priceRounder->roundPrecision((float)$sibling->getBasePrice());
+		$item['vatAmount'] = $priceRounder->roundPrecision($calculation->vatAmount);
+		$item['vatRate'] = $calculation->vatRate;
+		$item['vatIncluded'] = $calculation->vatIncluded;
+		// Keep the tax-mode string consistent with the recomputed mode so the frontend
+		// does not re-convert the base price against a stale 'N'/'Y' on the next refresh.
+		$item['taxIncluded'] = $calculation->vatIncluded ? 'Y' : 'N';
+		$item['taxSum'] = $priceRounder->roundPrecision($calculation->totalCalculation->totalVatValue);
+
+		return $item;
+	}
+
+	/**
+	 * Find the basket item that a merged-away form row is a duplicate of: same product
+	 * (and module, when the row carries one). Returns null for a row that is not a
+	 * catalog product line, so callers can leave it untouched.
+	 */
+	private function findSiblingBasketItem(Sale\Basket $basket, array $item): ?Sale\BasketItem
+	{
+		$productId = (int)($item['skuId'] ?? $item['productId'] ?? 0);
+		if ($productId <= 0)
+		{
+			return null;
+		}
+
+		$module = (string)($item['module'] ?? '');
+		foreach ($basket->getBasketItems() as $basketItem)
+		{
+			if (
+				(int)$basketItem->getProductId() === $productId
+				&& ($module === '' || (string)$basketItem->getField('MODULE') === $module)
+			)
+			{
+				return $basketItem;
+			}
+		}
+
+		return null;
 	}
 
 	public function resendPaymentAction($orderId, $paymentId, $shipmentId, array $options = [])
@@ -791,7 +1073,11 @@ class Order extends Base
 		$converter->convert();
 	}
 
-	public function createTerminalPaymentAction(array $basketItems = [], array $options = [])
+	public function createTerminalPaymentAction(
+		UserPermissions $userPermissions,
+		array $basketItems = [],
+		array $options = [],
+	)
 	{
 		$ownerTypeId = (int)$options['ownerTypeId'];
 		$ownerId = (int)$options['ownerId'];
@@ -803,6 +1089,15 @@ class Order extends Base
 			$this->addError(new Error(
 				Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_TERMINAL_PAYMENT_CREATION_ERROR')
 			));
+			return [];
+		}
+
+		if (!$userPermissions->item()->canReadItem($item))
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SALESCENTER_CONTROLLER_ORDER_TERMINAL_PAYMENT_ACCESS_DENIED'),
+			));
+
 			return [];
 		}
 
@@ -1293,7 +1588,6 @@ class Order extends Base
 		}
 		$paymentLabels[] = new Sale\Label\Label('section', $sectionLabel);
 
-		/** @var EntityLabelService $entityLabelService */
 		$entityLabelService = ServiceLocator::getInstance()->get('sale.entityLabel');
 		/** @var Sale\Label\Label $label */
 		foreach ($paymentLabels as $label)
@@ -1618,23 +1912,36 @@ class Order extends Base
 			'PRODUCT' => []
 		];
 
-		$sum = 0;
+		$inputs = [];
 
 		if (
 			isset($data['PRODUCT'])
 			&& is_array($data['PRODUCT'])
 		)
 		{
+			$inputFactory = ServiceLocator::getInstance()->get('sale.basketItemInputFactory');
+
 			foreach ($data['PRODUCT'] as $index => $item)
 			{
-				$price = VatRate::getPriceWithTax($item);
-				$sum += Sale\PriceMaths::roundPrecision($item['QUANTITY'] * $price);
+				$inputs[] = $inputFactory->createFromArray([
+					'basePrice' => (float)($item['PRICE'] ?? 0.0),
+					'quantity' => (float)($item['QUANTITY'] ?? 0),
+					'vatRate' => (float)($item['VAT_RATE'] ?? 0) * 100,
+					'vatIncluded' => ($item['VAT_INCLUDED'] ?? 'Y') === 'Y',
+				]);
 
 				$result['PRODUCT'][$index] = [
 					'BASKET_CODE' => $index,
 					'QUANTITY' => $item['QUANTITY']
 				];
 			}
+		}
+
+		$sum = 0.0;
+		if (!empty($inputs))
+		{
+			$basketCalculator = ServiceLocator::getInstance()->get('sale.basketCalculator');
+			$sum = $basketCalculator->calculate($inputs)->totalPrice;
 		}
 
 		if (

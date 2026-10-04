@@ -412,6 +412,31 @@ final class ControllerDataManager
 		return $dtos !== null ? $dtos : [];
 	}
 
+	/**
+	 * Restores eval-generated DTO classes from cached descriptors for the given modules.
+	 * Warm schema/documentation reads keep only FQCN; PHP classes must be rebuilt per request.
+	 */
+	public function ensureGeneratedDtoClassesLoaded(string ...$moduleIds): void
+	{
+		foreach (array_unique($moduleIds) as $moduleId)
+		{
+			if ($moduleId === '')
+			{
+				continue;
+			}
+
+			foreach ($this->getGeneratedDtosByModuleId($moduleId) as $generatedDto)
+			{
+				if (!$generatedDto instanceof GeneratedDto)
+				{
+					throw new \InvalidArgumentException('Generated DTO cache must contain GeneratedDto instances.');
+				}
+
+				Generator::generateByDto($generatedDto);
+			}
+		}
+	}
+
 	private function addMethodDescriptionsByControllerReflection(ControllerData $controllerData, ReflectionClass $controllerReflection): void
 	{
 		foreach ($controllerReflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method)

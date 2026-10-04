@@ -4,6 +4,7 @@ namespace Bitrix\Bizproc\Activity\Mixins;
 
 use Bitrix\Bizproc\Automation\Engine\ConditionGroup;
 use Bitrix\Bizproc\Automation\Engine\Condition;
+use Bitrix\Bizproc\Activity\Enum\Operator;
 use Bitrix\Bizproc\Activity\PropertiesDialog;
 use Bitrix\Bizproc\Error;
 use Bitrix\Bizproc\FieldType;
@@ -11,6 +12,11 @@ use Bitrix\Bizproc\Result;
 
 trait EntityFilter
 {
+	private const MAX_MULTIPLE_CONDITION_VALUES = 500;
+	private const MAX_MULTIPLE_CONDITION_VALUE_LENGTH = 255;
+	private const MAX_MULTIPLE_CONDITION_JSON_LENGTH = 65535;
+	private const IMPOSSIBLE_FILTER_VALUE = "\x00__bp_invalid_condition__";
+
 	private ?bool $ormFilterValid = null;
 
 	abstract public function getDocumentType();
@@ -65,7 +71,25 @@ trait EntityFilter
 			}
 			else
 			{
-				$extractionResult = $this->extractValue($fieldsMap[$fieldId], (string)$condition->getValue());
+				$fieldProperties = $fieldsMap[$fieldId];
+				$conditionValue = $condition->getValue();
+				if (self::isMultiValueOperator($condition->getOperator()))
+				{
+					$fieldProperties['Multiple'] = true;
+					$conditionValue = self::normalizeMultiValueConditionValue($conditionValue);
+					if ($conditionValue === null)
+					{
+						$this->ormFilterValid = false;
+
+						return $this->getImpossibleOrmFilter($condition->getField());
+					}
+				}
+				elseif (!is_array($conditionValue))
+				{
+					$conditionValue = (string)$conditionValue;
+				}
+
+				$extractionResult = $this->extractValue($fieldProperties, $conditionValue);
 				if ($extractionResult->isSuccess())
 				{
 					$value = $extractionResult->getData()['extractedValue'];
@@ -73,6 +97,17 @@ trait EntityFilter
 				else
 				{
 					continue;
+				}
+			}
+
+			if (self::isMultiValueOperator($condition->getOperator()) && $conditionGroup->isInternalized())
+			{
+				$value = self::normalizeMultiValueConditionValue($value);
+				if ($value === null)
+				{
+					$this->ormFilterValid = false;
+
+					return $this->getImpossibleOrmFilter($condition->getField());
 				}
 			}
 
@@ -159,13 +194,21 @@ trait EntityFilter
 		$value_greater_then = (is_array($value) && isset($value[0]) ? $value[0] : $value);
 		$value_less_then = (is_array($value) && isset($value[1]) ? $value[1] : '');
 
-		$extractionResult1 = $this->extractValue($property, (string)$value_greater_then);
+		if (!is_array($value_greater_then))
+		{
+			$value_greater_then = (string)$value_greater_then;
+		}
+		$extractionResult1 = $this->extractValue($property, $value_greater_then);
 		if (!$extractionResult1->isSuccess())
 		{
 			return Result::createOk()->addErrors($extractionResult1->getErrors());
 		}
 
-		$extractionResult2 = $this->extractValue($property, (string)$value_less_then);
+		if (!is_array($value_less_then))
+		{
+			$value_less_then = (string)$value_less_then;
+		}
+		$extractionResult2 = $this->extractValue($property, $value_less_then);
 		if (!$extractionResult2->isSuccess())
 		{
 			return Result::createOk()->addErrors($extractionResult2->getErrors());
@@ -180,6 +223,85 @@ trait EntityFilter
 	private function createRowFilter(string $operator, string $field, $value): array
 	{
 		return [$operator . $field => $value];
+	}
+
+	/**
+	 * Fail-closed ORM filter: a self-contradictory pair on the condition's own field
+	 * matches no rows, so even consumers that ignore isOrmFilterValid()
+	 * (crm*dynamic activities, node-filter adapters) select nothing instead of a widened set.
+	 */
+	private function getImpossibleOrmFilter(string $field): array
+	{
+		return [
+			'LOGIC' => 'OR',
+			0 => [
+				$this->createRowFilter('=', $field, self::IMPOSSIBLE_FILTER_VALUE),
+				$this->createRowFilter('!=', $field, self::IMPOSSIBLE_FILTER_VALUE),
+			],
+		];
+	}
+
+	private static function isMultiValueOperator(string $operator): bool
+	{
+		return $operator === Operator::In->value || $operator === Operator::NotIn->value;
+	}
+
+	private static function normalizeMultiValueConditionValue(mixed $value): mixed
+	{
+		if (is_array($value))
+		{
+			return self::sanitizeMultipleConditionValue($value);
+		}
+
+		return self::unserializeConditionValue($value);
+	}
+
+	private static function unserializeConditionValue(mixed $value): mixed
+	{
+		if (!is_string($value) || !str_starts_with(ltrim($value), '['))
+		{
+			return $value;
+		}
+
+		if (mb_strlen($value) > self::MAX_MULTIPLE_CONDITION_JSON_LENGTH)
+		{
+			return null;
+		}
+
+		$decoded = json_decode($value, true);
+		if (!is_array($decoded) || !array_is_list($decoded))
+		{
+			return $value;
+		}
+
+		return self::sanitizeMultipleConditionValue($decoded);
+	}
+
+	private static function sanitizeMultipleConditionValue(array $values): ?array
+	{
+		if (count($values) > self::MAX_MULTIPLE_CONDITION_VALUES)
+		{
+			return null;
+		}
+
+		$sanitizedValues = [];
+		foreach ($values as $element)
+		{
+			if (!is_scalar($element))
+			{
+				return null;
+			}
+
+			$value = (string)$element;
+			if (mb_strlen($value) > self::MAX_MULTIPLE_CONDITION_VALUE_LENGTH)
+			{
+				return null;
+			}
+
+			$sanitizedValues[] = $value;
+		}
+
+		return $sanitizedValues;
 	}
 
 	protected function extractValue(array $fieldProperties, $value): Result
@@ -244,6 +366,19 @@ trait EntityFilter
 				];
 
 				array_splice($currentValues[$prefix . 'value'], $index + 1, 1);
+			}
+			elseif (
+				self::isMultiValueOperator($operator)
+				&& isset($currentValues[$prefix . 'value'][$index])
+			)
+			{
+				$normalizedValue = self::normalizeMultiValueConditionValue(
+					$currentValues[$prefix . 'value'][$index]
+				);
+				if ($normalizedValue !== null)
+				{
+					$currentValues[$prefix . 'value'][$index] = $normalizedValue;
+				}
 			}
 
 			$conditionGroup['items'][] = [

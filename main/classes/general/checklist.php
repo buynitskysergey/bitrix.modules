@@ -294,7 +294,25 @@ class CCheckList
 		$howTo = "";
 		if (file_exists($file))
 		{
-			$howTo = file_get_contents($file);
+			static $howToCache = [];
+			if (!array_key_exists($file, $howToCache))
+			{
+				$howTo = file_get_contents($file);
+				if (is_string($howTo) && stripos($howTo, '.png') !== false)
+				{
+					$howTo = preg_replace_callback(
+						'#/bitrix/images/main/checklist/[a-z0-9_-]+/[a-z0-9_-]+\.png#i',
+						static function (array $matches): string {
+							$webpPath = preg_replace('/\.png$/i', '.webp', $matches[0]);
+
+							return is_file($_SERVER['DOCUMENT_ROOT'] . $webpPath) ? $webpPath : $matches[0];
+						},
+						$howTo,
+					);
+				}
+				$howToCache[$file] = $howTo;
+			}
+			$howTo = $howToCache[$file];
 		}
 
 		$convertEncoding = Translation::needConvertEncoding(LANG);

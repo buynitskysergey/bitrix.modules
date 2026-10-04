@@ -8,6 +8,9 @@ use Bitrix\Disk\Security\DiskSecurityContext;
 use Bitrix\Disk\Security\FakeSecurityContext;
 use Bitrix\Disk\ProxyType;
 use Bitrix\Disk\User;
+use Bitrix\Disk\Ui\Text;
+use Bitrix\Disk\Internals\ObjectTable;
+use Bitrix\Main\DB\SqlQueryException;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 
@@ -18,6 +21,12 @@ class CDavWebDavServer
 {
 	static $FORBIDDEN_SYMBOLS = array("/", "\\", ":", "*", "?", "\"", "'", "<", ">", "|", "#", "{", "}", "%", "&", "~", "+");
 	static $ALLOWED_SYMBOLS = array("#", "+");
+
+	// Client-requested LOCK timeout bounds (seconds). Max is mandatory: without a ceiling
+	// "Infinite" or a huge Second-<N> would create an effectively permanent lock.
+	const LOCK_TIMEOUT_MIN = 60;
+	const LOCK_TIMEOUT_DEFAULT = 300;
+	const LOCK_TIMEOUT_MAX = 3600;
 	private $titleGroupStoragesQuote = '';
 	private $titleUserStoragesQuote = '';
 
@@ -463,26 +472,20 @@ class CDavWebDavServer
 
 	protected function getNewLockToken()
 	{
-		$uuid = '';
-		if (function_exists('uuid_create'))
-		{
-			$uuid = uuid_create();
-		}
-		else
-		{
-			$uuid = md5(microtime().getmypid());
+		// RFC 4122 v4 UUID. The token MUST match the strict regex in
+		// CDavWebDav::CheckIfHeaderConditions (lowercase hex, 8-4-4-4-12); otherwise a
+		// valid lock token would be rejected as 423. Avoid uuid_create() (OSSP ext can
+		// return an int) and rely on random_bytes for a deterministic, correct format.
+		$bytes = random_bytes(16);
+		$bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40); // version 4
+		$bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80); // variant RFC 4122
+		$hex = bin2hex($bytes);
 
-			$uuid[12] = '4';
-			$n = 8 + (ord($uuid[16]) & 3);
-			$hex = '0123456789abcdef';
-			$uuid[16] = mb_substr($hex, $n, 1);
-
-			$uuid = mb_substr($uuid, 0, 8).'-'.
-				mb_substr($uuid, 8, 4).'-'.
-				mb_substr($uuid, 12, 4).'-'.
-				mb_substr($uuid, 16, 4).'-'.
-				mb_substr($uuid, 20);
-		}
+		$uuid = substr($hex, 0, 8) . '-' .
+			substr($hex, 8, 4) . '-' .
+			substr($hex, 12, 4) . '-' .
+			substr($hex, 16, 4) . '-' .
+			substr($hex, 20, 12);
 
 		return 'opaquelocktoken:' . $uuid;
 	}
@@ -506,6 +509,9 @@ class CDavWebDavServer
 
 		$withoutFilename = explode('/', $path);
 		$filename = array_pop($withoutFilename);
+		// Normalize the name the same way disk does before INSERT (Folder::processAdd -> Ui\Text::correctFilename),
+		// so the existence pre-check looks up the exact row that hits the unique index IX_DISK_O_5 (NAME, PARENT_ID).
+		$filename = Text::correctFilename($filename);
 		$folderId = Driver::getInstance()->getUrlManager()->resolveFolderIdFromPath($storage, implode('/', $withoutFilename));
 
 		if(!$folderId)
@@ -519,10 +525,7 @@ class CDavWebDavServer
 			return '404 Not Found'; //"409 Conflict"?
 		}
 
-		$file = File::load([
-			'=NAME' => $filename,
-			'PARENT_ID' => $folder->getRealObjectId(),
-		]);
+		$file = $this->loadLiveTwin($filename, $folder->getRealObjectId());
 
 		$securityContext = $folder->getStorage()->getCurrentUserSecurityContext();
 		if (!$file)
@@ -579,18 +582,80 @@ class CDavWebDavServer
 		if ($arResult['new'])
 		{
 			/** @var Folder $folder */
-			$file = $folder->uploadFile($fileArray, array('NAME' => $arResult['filename'], 'CREATED_BY' => $this->getUser()->getId()));
-
-			if (!$file)
+			$userId = $this->getUser()->getId();
+			$uploadedFile = null;
+			$isDuplicateKeyCollision = false;
+			try
 			{
+				// generateUniqueName stays false on purpose: it would break PUT idempotency and spawn "file (1).docx" copies.
+				$uploadedFile = $folder->uploadFile($fileArray, array('NAME' => $arResult['filename'], 'CREATED_BY' => $userId));
+			}
+			catch (SqlQueryException $e)
+			{
+				// Only a unique-key collision (lost INSERT race) is recoverable here: MySQL reports it as (1062),
+				// PostgreSQL raises DuplicateEntryException. Any other SQL error is a real failure and must propagate.
+				$isDuplicateKeyCollision = ($e instanceof \Bitrix\Main\DB\DuplicateEntryException)
+					|| mb_strpos($e->getDatabaseMessage(), '(1062)') !== false;
+				if (!$isDuplicateKeyCollision)
+				{
+					throw $e;
+				}
+			}
+
+			if ($uploadedFile)
+			{
+				return true;
+			}
+
+			if (!$isDuplicateKeyCollision)
+			{
+				// uploadFile() also returns null on save/addFile failures unrelated to the unique index;
+				// those are real errors, not a lost INSERT race, so do not fall through to overwrite a twin.
 				return false;
 			}
-			return true;
+
+			// Collision path: resolve against the live twin.
+			$folderRealId = $folder->getRealObjectId();
+			$securityContext = $folder->getStorage()->getCurrentUserSecurityContext();
+			$existing = $this->loadLiveTwin($arResult['filename'], $folderRealId);
+
+			if (!$existing)
+			{
+				// Twin is a folder, a trashed object or another entity -> not upsertable, transport returns 409.
+				return false;
+			}
+			if (!$existing->canUpdate($securityContext))
+			{
+				// No write access on the twin (incl. someone else's file) -> 409/403.
+				return false;
+			}
+
+			// Overwrite the live twin: idempotent result, no duplicate row.
+			return $existing->uploadVersion($fileArray, $userId) !== null;
 		}
 		/** @var File $file */
 		$file = $arResult['file'];
 
-		return $file->uploadVersion($fileArray, $this->getUser()->getId()) !== null;
+		$ver = $file->uploadVersion($fileArray, $this->getUser()->getId());
+
+		return $ver !== null;
+	}
+
+	/**
+	 * Load the live file twin that would collide on the unique index IX_DISK_O_5 (NAME, PARENT_ID).
+	 * Shared by the PUT() pre-check and the PutCommit() collision path so both stay in sync.
+	 * File::load forces TYPE=FILE but does not filter DELETED_TYPE; a trashed twin cannot collide,
+	 * so require DELETED_TYPE_NONE explicitly. $name must already be normalized via Text::correctFilename.
+	 *
+	 * @return File|null
+	 */
+	private function loadLiveTwin($name, $parentRealId)
+	{
+		return File::load([
+			'=NAME' => $name,
+			'PARENT_ID' => $parentRealId,
+			'DELETED_TYPE' => ObjectTable::DELETED_TYPE_NONE,
+		]);
 	}
 
 	protected function DELETE()
@@ -888,6 +953,41 @@ class CDavWebDavServer
 		return true;
 	}
 
+	private function checkWriteAccessByPath($storage, $path)
+	{
+		$securityContext = $storage->getCurrentUserSecurityContext();
+		$urlManager = Driver::getInstance()->getUrlManager();
+
+		$objectId = $urlManager->resolveObjectIdFromPath($storage, $path);
+		if ($objectId)
+		{
+			/** @var File|Folder $object */
+			$object = BaseObject::loadById($objectId);
+			if (!$object)
+			{
+				return '409 Conflict';
+			}
+
+			return $object->canUpdate($securityContext) ? null : '403 Forbidden';
+		}
+
+		$withoutName = explode('/', $path);
+		array_pop($withoutName);
+		$folderId = $urlManager->resolveFolderIdFromPath($storage, implode('/', $withoutName));
+		if (!$folderId)
+		{
+			return '409 Conflict';
+		}
+		/** @var Folder $folder */
+		$folder = Folder::loadById($folderId);
+		if (!$folder)
+		{
+			return '409 Conflict';
+		}
+
+		return $folder->canAdd($securityContext) ? null : '403 Forbidden';
+	}
+
 	protected function LOCK($locktoken, &$httpTimeout, &$owner, &$scope, &$type, $update)
 	{
 		/** @var CDavRequest $request */
@@ -901,20 +1001,36 @@ class CDavWebDavServer
 			return '409 Conflict';
 		}
 
+		$accessError = $this->checkWriteAccessByPath($storage, $path);
+		if ($accessError !== null)
+		{
+			return $accessError;
+		}
+
 		$path = CDavVirtualFileSystem::GetLockPath("WS" . ($storage->getId()), $path);
 
-//		if (!$arRequestPath["id"] || $request->GetDepth() || !$handler->CheckPrivilegesByPath("DAV:write", $request->GetPrincipal(), $arRequestPath["site"], $arRequestPath["account"], $arRequestPath["path"]))
-//			return '409 Conflict';
+		// Honor the client-requested Timeout ("Second-<N>"), clamped to [MIN, MAX].
+		// "Infinite", missing or invalid values fall back to the default. $httpTimeout
+		// arrives as the raw first Timeout token and is rewritten to an absolute timestamp.
+		$requestedSeconds = self::LOCK_TIMEOUT_DEFAULT;
+		if (is_string($httpTimeout) && preg_match('/^\s*Second-(\d+)\s*$/i', $httpTimeout, $matches))
+		{
+			$requestedSeconds = (int)$matches[1];
+		}
+		$requestedSeconds = max(self::LOCK_TIMEOUT_MIN, min(self::LOCK_TIMEOUT_MAX, $requestedSeconds));
 
-		$httpTimeout = time() + 300;
+		$httpTimeout = time() + $requestedSeconds;
+
+		// Numeric lock owner for owner-fallback in CheckLockStatus (reliable id, not free-text LOCK_OWNER)
+		$userId = ($request->GetPrincipal() ? (int)$request->GetPrincipal()->Id() : null);
 
 		if (!$update)
 		{
-			$ret = CDavVirtualFileSystem::Lock($path, $locktoken, $httpTimeout, $owner, $scope, $type);
+			$ret = CDavVirtualFileSystem::Lock($path, $locktoken, $httpTimeout, $owner, $scope, $type, $userId);
 			return $ret ? '200 OK' : '409 Conflict';
 		}
 
-		$ret = CDavVirtualFileSystem::UpdateLock($path, $locktoken, $httpTimeout, $owner, $scope, $type);
+		$ret = CDavVirtualFileSystem::UpdateLock($path, $locktoken, $httpTimeout, $owner, $scope, $type, $userId);
 		return $ret;
 	}
 
@@ -929,6 +1045,12 @@ class CDavWebDavServer
 		if (!$storage)
 		{
 			return '409 Conflict';
+		}
+
+		$accessError = $this->checkWriteAccessByPath($storage, $path);
+		if ($accessError !== null)
+		{
+			return $accessError;
 		}
 
 		$path = CDavVirtualFileSystem::GetLockPath("WS" . ($storage->getId()), $path);

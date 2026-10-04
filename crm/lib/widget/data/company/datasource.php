@@ -8,6 +8,7 @@ use Bitrix\Crm\Activity\StatisticsStatus;
 use Bitrix\Crm\Activity\StatisticsStream;
 use Bitrix\Main;
 use Bitrix\Crm\Widget\Filter;
+use Bitrix\Main\Web\Uri;
 
 abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 {
@@ -78,14 +79,14 @@ abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 		}
 
 		/** @var string $field */
-		$field = isset($params['field']) ? $params['field'] : '';
+		$field = $params['field'] ?? '';
 		if($field !== '')
 		{
 			$urlParams['FIELD'] = $field;
 		}
 
 		/** @var Filter $filter */
-		$filter = isset($params['filter']) ? $params['filter'] : null;
+		$filter = $params['filter'] ?? null;
 		if(!($filter instanceof Filter))
 		{
 			throw new Main\ObjectNotFoundException("The 'filter' is not found in params.");
@@ -94,18 +95,7 @@ abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 		$filterParams = self::externalizeFilter($filter);
 		foreach($filterParams as $k => $v)
 		{
-			if(!is_array($v))
-			{
-				$urlParams[$k] = $v;
-			}
-			else
-			{
-				$qty = count($v);
-				for($i = 0; $i < $qty; $i++)
-				{
-					$urlParams["{$k}[{$i}]"] = $v[$i];
-				}
-			}
+			$urlParams[$k] = $v;
 		}
 
 		if (
@@ -116,7 +106,7 @@ abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 			$urlParams['ENTITY_ID'] = $filter->getContextEntityID();
 		}
 
-		return \CHTTP::urlAddParams(static::getEntityListPath(), $urlParams);
+		return (string)(new Uri(static::getEntityListPath()))->addParams($urlParams);
 	}
 	/**
 	 * Extract details page URL params from request.
@@ -184,7 +174,7 @@ abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 		if (isset($filterParams['PN']))
 		{
 			// filter Calls, Meetings and Emails by TYPE_ID (not by PROVIDER_TYPE_ID) for compatibility.
-			list($providerId, $providerTypeId) = static::parsePresetName($filterParams['PN']);
+			[$providerId, $providerTypeId] = static::parsePresetName($filterParams['PN']);
 			if (
 				$providerId === Activity\Provider\Call::getId()
 				&& $providerTypeId === Activity\Provider\Call::ACTIVITY_PROVIDER_TYPE_CALL

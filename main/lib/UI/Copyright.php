@@ -851,6 +851,13 @@ In addition to the Google Terms of Service (http://www.google.com/accounts/TOS),
 				->setLicence(static::LICENCE_MIT)
 				->setLicenceUrl('https://github.com/facebook/lexical/blob/main/LICENSE'),
 
+			// ui/install/js/ui/floating-ui
+			(new static("Floating UI"))
+				->setCopyright('Copyright (c) 2021-present Floating UI contributors')
+				->setProductUrl('https://github.com/floating-ui/floating-ui')
+				->setLicence(static::LICENCE_MIT)
+				->setLicenceUrl('https://github.com/floating-ui/floating-ui/blob/master/LICENSE'),
+
 			// booking/lib/Internals/Recurr
 			(new static("Recurr"))
 				->setCopyright('Copyright (c) 2015 Shaun Simmons')
@@ -926,6 +933,133 @@ In addition to the Google Terms of Service (http://www.google.com/accounts/TOS),
 				->setProductUrl('https://github.com/symfony/polyfill/tree/1.x/src/Ctype')
 				->setLicence(Copyright::LICENCE_MIT)
 				->setLicenceUrl('https://github.com/symfony/polyfill/blob/1.x/src/Ctype/LICENSE'),
+
+			// ui/install/js/ui/mermaid (bundled into dist/mermaid.bundle.js).
+			// d3-* and lodash-es pulled in by mermaid are already covered by the
+			// "D3.js" and "Lodash" entries above.
+			(new static("Mermaid"))
+				->setCopyright("Copyright (c) 2014 - 2022 Knut Sveidqvist")
+				->setProductUrl('https://github.com/mermaid-js/mermaid')
+				->setLicence(static::LICENCE_MIT)
+				->setLicenceUrl('https://github.com/mermaid-js/mermaid/blob/develop/LICENSE'),
+
+			(new static("Mermaid Parser"))
+				->setCopyright("Copyright (c) 2023 Yokozuna59")
+				->setProductUrl('https://github.com/mermaid-js/mermaid/tree/develop/packages/parser')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("DOMPurify"))
+				->setCopyright("Copyright (c) Cure53 and other contributors")
+				->setProductUrl('https://github.com/cure53/DOMPurify')
+				->setLicence("Apache License 2.0 / Mozilla Public License 2.0")
+				->setLicenceUrl('https://github.com/cure53/DOMPurify/blob/main/LICENSE'),
+
+			(new static("KaTeX"))
+				->setCopyright("Copyright (c) 2013-2020 Khan Academy and other contributors")
+				->setProductUrl('https://katex.org')
+				->setLicence(static::LICENCE_MIT)
+				->setLicenceUrl('https://github.com/KaTeX/KaTeX/blob/main/LICENSE'),
+
+			(new static("Marked"))
+				->setCopyright("Copyright (c) 2018+, MarkedJS")
+				->setProductUrl('https://marked.js.org')
+				->setLicence(static::LICENCE_MIT)
+				->setLicenceUrl('https://github.com/markedjs/marked/blob/master/LICENSE.md'),
+
+			(new static("Cytoscape.js"))
+				->setCopyright("Copyright (c) 2016-2026, The Cytoscape Consortium")
+				->setProductUrl('https://js.cytoscape.org')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("cytoscape-cose-bilkent"))
+				->setCopyright("Copyright (c) 2016-2018, The Cytoscape Consortium")
+				->setProductUrl('https://github.com/cytoscape/cytoscape.js-cose-bilkent')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("cytoscape-fcose"))
+				->setCopyright("Copyright (c) 2018 - present, iVis-at-Bilkent")
+				->setProductUrl('https://github.com/iVis-at-Bilkent/cytoscape.js-fcose')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("cose-base"))
+				->setCopyright("Copyright (c) 2019 - present, iVis@Bilkent")
+				->setProductUrl('https://github.com/iVis-at-Bilkent/cose-base')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("layout-base"))
+				->setCopyright("Copyright (c) 2019 iVis@Bilkent")
+				->setProductUrl('https://github.com/iVis-at-Bilkent/layout-base')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("dagre-d3-es"))
+				->setCopyright("Copyright (c) 2013 Chris Pettitt and contributors")
+				->setProductUrl('https://github.com/tbo47/dagre-es')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("Rough.js"))
+				->setCopyright("Copyright (c) 2019 Preet Shihn")
+				->setProductUrl('https://roughjs.com')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("khroma"))
+				->setCopyright("Copyright (c) 2019-present Fabio Spampinato, Andrew Maney")
+				->setProductUrl('https://github.com/fabiospampinato/khroma')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("stylis"))
+				->setCopyright("Copyright (c) 2016-present Sultan Tarimo")
+				->setProductUrl('https://github.com/thysultan/stylis.js')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("Day.js"))
+				->setCopyright("Copyright (c) 2018-present, iamkun")
+				->setProductUrl('https://day.js.org')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("es-toolkit"))
+				->setCopyright("Copyright (c) 2024 Viva Republica, Inc.")
+				->setProductUrl('https://es-toolkit.dev')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("ts-dedent"))
+				->setCopyright("Copyright (c) 2018 Tamino Martinius")
+				->setProductUrl('https://github.com/tamino-martinius/node-ts-dedent')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("uuid"))
+				->setCopyright("Copyright (c) 2010-2020 Robert Kieffer and other contributors")
+				->setProductUrl('https://github.com/uuidjs/uuid')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("js-yaml"))
+				->setCopyright("Copyright (c) 2011-2015 by Vitaly Puzrin")
+				->setProductUrl('https://github.com/nodeca/js-yaml')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("@braintree/sanitize-url"))
+				->setCopyright("Copyright (c) 2017 Braintree")
+				->setProductUrl('https://github.com/braintree/sanitize-url')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("Iconify Utils"))
+				->setCopyright("Copyright (c) Iconify (Vjacheslav Trushkin)")
+				->setProductUrl('https://github.com/iconify/iconify')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("venn.js"))
+				->setCopyright("Copyright (c) 2013 Ben Frederickson")
+				->setProductUrl('https://github.com/upsetjs/venn.js')
+				->setLicence(static::LICENCE_MIT),
+
+			(new static("delaunator"))
+				->setCopyright("Copyright (c) Mapbox")
+				->setProductUrl('https://github.com/mapbox/delaunator')
+				->setLicence(static::LICENCE_ISC),
+
+			(new static("robust-predicates"))
+				->setCopyright("Vladimir Agafonkin")
+				->setProductUrl('https://github.com/mourner/robust-predicates')
+				->setLicence(static::LICENCE_PUBLIC_DOMAIN),
 		];
 	}
 }

@@ -3,6 +3,8 @@
 namespace Bitrix\AI\Facade;
 
 use Bitrix\AI\Config;
+use Bitrix\AI\Limiter\Policy\LimitPolicyMode;
+use Bitrix\AI\Limiter\Policy\TariffLimitPolicy;
 use Bitrix\Bitrix24\Feature;
 use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
@@ -19,6 +21,7 @@ class Bitrix24
 		'de' => 'de',
 		'us' => 'us',
 	];
+	private static ?TariffLimitPolicy $tariffLimitPolicy = null;
 
 	/**
 	 * Shows that we should use Bitrix24 module in the project.
@@ -164,6 +167,56 @@ class Bitrix24
 	}
 
 	/**
+	 * Returns the active tariff limit policy mode.
+	 *
+	 * @return LimitPolicyMode
+	 */
+	public static function getLimitPolicyMode(): LimitPolicyMode
+	{
+		return self::getTariffLimitPolicy()->getMode();
+	}
+
+	/**
+	 * Returns true when the new tariff limit policy is active.
+	 *
+	 * @return bool
+	 */
+	public static function isNewLimitPolicyActive(): bool
+	{
+		return self::getLimitPolicyMode() !== LimitPolicyMode::Legacy;
+	}
+
+	/**
+	 * Returns the daily limit for regular AI requests.
+	 *
+	 * @return int|null
+	 */
+	public static function getAiDailyLimit(): ?int
+	{
+		return self::getTariffLimitPolicy()->getAiDailyLimit();
+	}
+
+	/**
+	 * Returns the daily limit for AI agent requests.
+	 *
+	 * @return int|null
+	 */
+	public static function getAgentDailyLimit(): ?int
+	{
+		return self::getTariffLimitPolicy()->getAgentDailyLimit();
+	}
+
+	/**
+	 * Returns the shared monthly pool limit.
+	 *
+	 * @return int|null
+	 */
+	public static function getMonthlyPoolLimit(): ?int
+	{
+		return self::getTariffLimitPolicy()->getMonthlyPoolLimit();
+	}
+
+	/**
 	 * Returns Portal's Languages.
 	 *
 	 * @param string $dir Relative dir to languages file.
@@ -214,5 +267,10 @@ class Bitrix24
 	public static function isMarketAvailable(): bool
 	{
 		return (Option::get('baas', 'services_on_market', 'N') !== 'N')  && (self::getPortalZone() === 'ru');
+	}
+
+	private static function getTariffLimitPolicy(): TariffLimitPolicy
+	{
+		return self::$tariffLimitPolicy ??= new TariffLimitPolicy();
 	}
 }

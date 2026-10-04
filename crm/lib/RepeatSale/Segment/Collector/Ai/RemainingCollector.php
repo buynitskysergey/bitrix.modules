@@ -4,6 +4,7 @@ namespace Bitrix\Crm\RepeatSale\Segment\Collector\Ai;
 
 use Bitrix\Crm\RepeatSale\Service\Entity\RepeatSaleAiScreeningTable;
 use Bitrix\Crm\RepeatSale\Service\Handler\AiScreeningOpinion;
+use Bitrix\Main\Type\Date;
 
 final class RemainingCollector extends BaseAiCollector
 {
@@ -21,6 +22,8 @@ final class RemainingCollector extends BaseAiCollector
 					'=AI_OPINION' => AiScreeningOpinion::isRepeatSaleNotPossible->value,
 					'=RESULT_ENTITY_TYPE_ID' => null,
 					'=RESULT_ENTITY_ID' => null,
+					'>=DESIRED_CREATION_DATE' => (new Date())->add('-1 day'),
+					'<=DESIRED_CREATION_DATE' => (new Date())->add('1 day'),
 					'>ID' => $filter['>ID'] ?? 0,
 				])
 				->setOrder(['ID' => 'ASC'])

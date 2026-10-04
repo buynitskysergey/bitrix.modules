@@ -25,12 +25,18 @@ class Feature
 	private const MULTIPLE_USERS_REPORT_SETTINGS_ARE_AVAILABLE_OPTION_NAME = 'multiple_users_report_settings_available';
 	private const TEAM_REPORT_EXCEPTIONS_ARE_AVAILABLE_OPTION_NAME = 'team_report_exceptions_available';
 	private const STRUCTURE_CHANGE_NOTIFICATIONS_ARE_AVAILABLE_OPTION_NAME = 'structure_change_notifications_available';
+	private const HCMLINK_SALARY_VACATION_API_AVAILABLE_OPTION_NAME = 'hcmlink_salary_vacation_api_available';
 
 	public function isHcmLinkAvailable(): bool
 	{
 		$regionCode = Application::getInstance()->getLicense()->getRegion();
 
 		return in_array($regionCode, ['ru'], true);
+	}
+
+	public function isHcmLinkSalaryVacationApiAvailable(): bool
+	{
+		return $this->getOptionValue(self::HCMLINK_SALARY_VACATION_API_AVAILABLE_OPTION_NAME, 'N') === 'Y';
 	}
 
 	public function isCrossFunctionalTeamsAvailable(): bool

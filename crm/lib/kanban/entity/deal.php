@@ -397,6 +397,9 @@ class Deal extends Entity
 				&& in_array(
 					$field['NAME'],
 					[
+						Item::FIELD_NAME_MOVED_BY,
+						'MOVED_BY_ID',
+						Item::FIELD_NAME_MOVED_TIME,
 						'ORDER_STAGE',
 						'PREVIOUS_STAGE_ID',
 						'DELIVERY_STAGE',
@@ -405,7 +408,8 @@ class Deal extends Entity
 						'ORDER_SOURCE',
 						'IS_PRODUCT_RESERVED',
 						'ROBOT_DEBUGGER',
-					]
+					],
+					true
 				)
 			)
 			{

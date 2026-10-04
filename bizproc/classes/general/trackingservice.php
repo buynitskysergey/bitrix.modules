@@ -8,6 +8,25 @@ class CBPTrackingService extends CBPRuntimeService
 {
 	protected const CLEAR_LOG_SELECT_LIMIT = 50000;
 	protected const CLEAR_LOG_DELETE_LIMIT = 1000;
+
+	/**
+	 * Track types both cleanups work on: every journalled type except the report and the debug ones, which
+	 * are owned and removed by their own subsystems. One list for the retention agent and for the per-workflow
+	 * size limit alike - kept apart, a newly journalled type gets added to one and forgotten in the other, and
+	 * then never expires on a box.
+	 */
+	protected const CLEAR_LOG_TYPES = [
+		CBPTrackingType::Unknown,
+		CBPTrackingType::ExecuteActivity,
+		CBPTrackingType::CloseActivity,
+		CBPTrackingType::CancelActivity,
+		CBPTrackingType::FaultActivity,
+		CBPTrackingType::Custom,
+		CBPTrackingType::AttachedEntity,
+		CBPTrackingType::Trigger,
+		CBPTrackingType::Error,
+		CBPTrackingType::SkipActivity,
+	];
 	protected $skipTypes = [];
 	protected $forcedModeWorkflows = [];
 	protected static $userGroupsCache = [];
@@ -329,7 +348,24 @@ class CBPTrackingService extends CBPRuntimeService
 			return false;
 		}
 
-		return (!in_array($type, $this->skipTypes) || $this->isForcedMode($workflowId));
+		return (!$this->isSkippedType($type) || $this->isForcedMode($workflowId));
+	}
+
+	/**
+	 * Whether the log settings of the portal keep records of this type out of the journal. A skip record
+	 * follows the rule of the execution it stands in for, otherwise it would be the one record type no log
+	 * setting bounds - written on every run of every process.
+	 */
+	private function isSkippedType($type): bool
+	{
+		if (in_array($type, $this->skipTypes))
+		{
+			return true;
+		}
+
+		return (int)$type === CBPTrackingType::SkipActivity
+			&& in_array(CBPTrackingType::ExecuteActivity, $this->skipTypes)
+		;
 	}
 
 	public function write(
@@ -512,7 +548,7 @@ class CBPTrackingService extends CBPRuntimeService
 
 		$strSql = "SELECT ID FROM b_bp_tracking t WHERE t.COMPLETED {$completed} "
 			. " AND t.MODIFIED < {$sqlInterval}"
-			. " AND t.TYPE IN (0,1,2,3,4,5,7,8,9) LIMIT {$limit}"
+			. " AND t.TYPE IN (" . self::getClearLogTypesSql() . ") LIMIT {$limit}"
 		;
 
 		$ids = $connection->query($strSql)->fetchAll();
@@ -537,7 +573,8 @@ class CBPTrackingService extends CBPRuntimeService
 		$queryResult = $DB->Query(
 			sprintf(
 				"SELECT ID FROM b_bp_tracking"
-				. " WHERE WORKFLOW_ID = '%s' AND " . $DB->quote('TYPE') . " IN (0,1,2,3,4,5,7,8,9) ORDER BY ID DESC LIMIT %d,100",
+				. " WHERE WORKFLOW_ID = '%s' AND " . $DB->quote('TYPE')
+				. " IN (" . self::getClearLogTypesSql() . ") ORDER BY ID DESC LIMIT %d,100",
 				$DB->ForSql($workflowId),
 				$size
 			)
@@ -561,6 +598,11 @@ class CBPTrackingService extends CBPRuntimeService
 		}
 
 		return true;
+	}
+
+	private static function getClearLogTypesSql(): string
+	{
+		return implode(',', array_map('intval', static::CLEAR_LOG_TYPES));
 	}
 
 	private function cutLogSizeDeferred(string $workflowId)
@@ -708,4 +750,11 @@ class CBPTrackingType
 	public const DebugAutomation = 11;
 	public const DebugDesigner = 12;
 	public const DebugLink = 13;
+
+	/**
+	 * An activity the engine reached but did not run: switched off, or its condition was not met. The
+	 * reason goes into ACTION_NOTE, and the record is journalled under the log rule of ExecuteActivity
+	 * ({@see CBPTrackingService::canWrite()}).
+	 */
+	public const SkipActivity = 14;
 }

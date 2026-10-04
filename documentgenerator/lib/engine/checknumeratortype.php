@@ -45,6 +45,7 @@ class CheckNumeratorType extends Base
 	{
 		return [
 			Controller::SCOPE_REST,
+			Controller::SCOPE_AJAX,
 		];
 	}
 }

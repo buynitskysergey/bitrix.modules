@@ -26,6 +26,7 @@ class Document extends Controller
 	private const FILTER_PRESET_SEND = 'preset_send';
 	private const FILTER_PRESET_SIGNED = 'preset_signed';
 	private const FILTER_PRESET_PROCESSED_BY_ME = 'preset_processed_by_me';
+	private const FILTER_PRESET_ANNULLED = 'preset_annulled';
 
 	private function includeRequiredModules(): bool
 	{
@@ -86,16 +87,25 @@ class Document extends Controller
 				statuses: [FilterStatus::MY_ACTION_DONE],
 				text: $searchString,
 			),
+			self::FILTER_PRESET_ANNULLED => new MyDocumentsFilter(
+				statuses: [FilterStatus::ANNULLED],
+				text: $searchString,
+			),
 			default => new MyDocumentsFilter(text: $searchString),
 		};
 	}
 
 	public function isE2bAvailableAction(): array
 	{
+		$featureExists = class_exists(Feature::class);
+
 		return [
 			'isE2bAvailable' =>
-				class_exists(Feature::class)
-				&& Feature::instance()->isSendDocumentByEmployeeEnabled()
+				$featureExists
+				&& Feature::instance()->isSendDocumentByEmployeeEnabled(),
+			'isDocumentAnnulAvailable' =>
+				$featureExists
+				&& Feature::instance()->isDocumentAnnulEnabled(),
 		];
 	}
 
@@ -482,5 +492,139 @@ class Document extends Controller
 		$this->addErrors($result->getErrors());
 
 		return [];
+	}
+
+	/**
+	 * Marks a completed signer member as annulled, addressing it by member id.
+	 */
+	public function annulAction(int $memberId): void
+	{
+		$this->toggleAnnulment($memberId, true);
+	}
+
+	/**
+	 * Removes the annulment mark from a signer member, addressing it by member id.
+	 */
+	public function cancelAnnulmentAction(int $memberId): void
+	{
+		$this->toggleAnnulment($memberId, false);
+	}
+
+	/**
+	 * The annulment mark lives on the member record, which the mobile grid already
+	 * knows, so the operation is invoked on the member directly. The member is
+	 * still resolved to its document only for the owner-scoped IDOR guard (the
+	 * annul right is addressed through the member's document). The owner-scoped
+	 * access rule and the annulment operation are reused from the `sign` module
+	 * (the same ones behind the web endpoint), so no signing/access logic is
+	 * duplicated here.
+	 *
+	 * Errors carry user-facing text: the mobile card shows the message from the
+	 * response in its toast, so every branch reachable by a real user is localized
+	 * (including the "not signed" error raised inside the reused sign operation).
+	 */
+	private function toggleAnnulment(int $memberId, bool $annul): void
+	{
+		if (!$this->includeRequiredModules())
+		{
+			return;
+		}
+
+		if (!Loader::includeModule('sign'))
+		{
+			$this->addError(new Error(
+				'Modules must be installed: mobile, sign, intranet',
+				'REQUIRED_MODULES_NOT_INSTALLED'
+			));
+
+			return;
+		}
+
+		if (!Feature::instance()->isDocumentAnnulEnabled())
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_NOT_AVAILABLE'),
+				'ACCESS_DENIED',
+			));
+
+			return;
+		}
+
+		$currentUserId = (int)CurrentUser::get()->getId();
+		if ($currentUserId <= 0)
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_USER_WAS_NOT_FOUND'),
+				'USER_WAS_NOT_FOUND'
+			));
+
+			return;
+		}
+
+		$container = Sign\Service\Container::instance();
+
+		$member = $container->getMemberRepository()->getById($memberId);
+		if ($member === null || $member->documentId === null)
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_NOT_FOUND'),
+				'DOCUMENT_NOT_FOUND',
+			));
+
+			return;
+		}
+
+		$document = $container->getDocumentRepository()->getById($member->documentId);
+		if ($document === null || $document->id === null)
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_NOT_FOUND'),
+				'DOCUMENT_NOT_FOUND',
+			));
+
+			return;
+		}
+
+		// Owner-scoped guard on the resolved document (SIGN_DOCUMENT_ANNUL). This is
+		// the same check the web endpoint runs against the loaded item and guards
+		// against annulling a document the current user does not own (IDOR).
+		$annulPermission = Sign\Access\DocumentAnnulPermission::forUser($currentUserId);
+		if (!$annulPermission->canAnnulDocumentOwnedBy($document->createdById))
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_ACCESS_DENIED'),
+				'ACCESS_DENIED',
+			));
+
+			return;
+		}
+
+		$result = (new Sign\Operation\AnnulDocument($member, $annul, $currentUserId))->launch();
+		foreach ($result->getErrors() as $error)
+		{
+			$this->addError($this->localizeAnnulmentError($error));
+		}
+	}
+
+	/**
+	 * The reused sign operation reports technical, non-localized messages, while
+	 * the mobile card shows the message from the response as is. The codes a real
+	 * user can reach are mapped to user-facing text; an unforeseen error keeps its
+	 * own message rather than being hidden.
+	 */
+	private function localizeAnnulmentError(Error $error): Error
+	{
+		$message = match ((string)$error->getCode())
+		{
+			Sign\Operation\AnnulDocument::ERROR_MEMBER_NOT_SIGNED
+				=> Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_NOT_SIGNED'),
+			Sign\Operation\AnnulDocument::ERROR_DOCUMENT_NOT_B2E
+				=> Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_NOT_AVAILABLE'),
+			Sign\Operation\AnnulDocument::ERROR_UPDATE_FAILED
+				=> Loc::getMessage('SIGN_MOBILE_CONTROLLER_DOCUMENT_ANNUL_UPDATE_FAILED'),
+			default => null,
+		};
+
+		return $message === null ? $error : new Error($message, $error->getCode());
 	}
 }

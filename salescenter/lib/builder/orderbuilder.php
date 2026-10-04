@@ -3,10 +3,9 @@
 namespace Bitrix\Salescenter\Builder;
 
 use Bitrix\Crm\Order\Builder\OrderBuilderCrm;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Sale\PaySystem\ApplePay;
 use Bitrix\Sale\PaySystem\Manager;
-use Bitrix\Sale\PriceMaths;
-use Bitrix\Sale\Tax;
 use Bitrix\Sale\TradingPlatform\Landing\Landing;
 use Bitrix\SalesCenter\Integration\LandingManager;
 
@@ -46,28 +45,27 @@ class OrderBuilder extends OrderBuilderCrm
 				$fields['PAY_SYSTEM_NAME'] = $paySystem['NAME'];
 			}
 
+			$inputFactory = ServiceLocator::getInstance()->get('sale.basketItemInputFactory');
+			$basketCalculator = ServiceLocator::getInstance()->get('sale.basketCalculator');
+
+			$inputs = [];
 			foreach ($this->formData['PRODUCT'] as $index => $item)
 			{
-				$price = $item['PRICE'] ?? 0;
-
-				$vatRate = (float)($item['VAT_RATE'] ?? 0);
-				$isVatIncluded = ($item['VAT_INCLUDED'] ?? 'N') === 'Y';
-
-				if (!$isVatIncluded && $vatRate > 0)
-				{
-					$vatCalculator = new Tax\VatCalculator($vatRate);
-					$price = $vatCalculator->accrue($price);
-				}
-
-				$quantity = (float)$item['QUANTITY'];
-
-				$fields['SUM'] += PriceMaths::roundPrecision($quantity * $price);
+				$quantity = (float)($item['QUANTITY'] ?? 0);
+				$inputs[] = $inputFactory->createFromArray([
+					'basePrice' => (float)($item['PRICE'] ?? 0),
+					'quantity' => $quantity,
+					'vatRate' => (float)($item['VAT_RATE'] ?? 0) * 100,
+					'vatIncluded' => ($item['VAT_INCLUDED'] ?? 'N') === 'Y',
+				]);
 
 				$fields['PRODUCT'][] = [
 					'BASKET_CODE' => $index,
-					'QUANTITY' => $quantity
+					'QUANTITY' => $quantity,
 				];
 			}
+
+			$fields['SUM'] += $basketCalculator->calculate($inputs)->totalPrice;
 
 			$this->formData["PAYMENT"] = [$fields];
 		}

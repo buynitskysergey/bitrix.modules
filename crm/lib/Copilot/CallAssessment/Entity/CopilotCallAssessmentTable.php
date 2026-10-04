@@ -2,8 +2,11 @@
 
 namespace Bitrix\Crm\Copilot\CallAssessment\Entity;
 
+use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\Entity\Fields\Validators\PromptLengthValidator;
+use Bitrix\Crm\Copilot\CallAssessment\Enum\AutoCheckType;
 use Bitrix\Crm\Copilot\CallAssessment\Enum\AvailabilityType;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main;
@@ -54,17 +57,26 @@ class CopilotCallAssessmentTable extends Main\ORM\Data\DataManager
 
 		$fieldRepository = ServiceLocator::getInstance()->get('crm.model.fieldRepository');
 
+		$promptField = (new Main\ORM\Fields\StringField('PROMPT'))
+			->configureDefaultValue('')
+			->addSaveDataModifier([Emoji::class, 'encode'])
+			->addFetchDataModifier([Emoji::class, 'decode'])
+		;
+		if (!AIManager::isCallScoringV2Enabled())
+		{
+			$promptField->addValidator(new PromptLengthValidator());
+		}
+
 		return [
 			$fieldRepository->getId(),
 			$fieldRepository->getTitle()
 				->configureDefaultValue('')
 			,
-			(new Main\ORM\Fields\StringField('PROMPT'))
-				->addValidator(new PromptLengthValidator())
-				->addSaveDataModifier([Emoji::class, 'encode'])
-				->addFetchDataModifier([Emoji::class, 'decode'])
-				->configureRequired()
+			(new Main\ORM\Fields\StringField('DESCRIPTION'))
+				->configureDefaultValue('')
+				->addValidator(new Main\ORM\Fields\Validators\LengthValidator(0, 2000))
 			,
+			$promptField,
 			(new Main\ORM\Fields\StringField('GIST')),
 			(new Main\ORM\Fields\IntegerField('CALL_TYPE'))
 				->configureSize(1)
@@ -72,7 +84,7 @@ class CopilotCallAssessmentTable extends Main\ORM\Data\DataManager
 			,
 			(new Main\ORM\Fields\IntegerField('AUTO_CHECK_TYPE'))
 				->configureSize(1)
-				->configureRequired()
+				->configureDefaultValue(AutoCheckType::FIRST_INCOMING->value)
 			,
 			(new Main\ORM\Fields\BooleanField('IS_ENABLED'))
 				->configureStorageValues('N', 'Y')
@@ -82,6 +94,11 @@ class CopilotCallAssessmentTable extends Main\ORM\Data\DataManager
 			(new Main\ORM\Fields\BooleanField('IS_DEFAULT'))
 				->configureStorageValues('N', 'Y')
 				->configureDefaultValue('N')
+			,
+			(new Main\ORM\Fields\BooleanField('IS_AI_IMPROVEMENT_ENABLED'))
+				->configureStorageValues('N', 'Y')
+				->configureDefaultValue('Y')
+				->configureRequired()
 			,
 			(new Main\ORM\Fields\IntegerField('JOB_ID'))
 				->configureRequired()
@@ -98,12 +115,12 @@ class CopilotCallAssessmentTable extends Main\ORM\Data\DataManager
 			,
 			(new Main\ORM\Fields\IntegerField('LOW_BORDER'))
 				->configureRequired()
-				->configureDefaultValue(0)
+				->configureDefaultValue(CallAssessmentItem::LOW_BORDER_DEFAULT)
 				->addValidator(new RangeValidator(min: 0, max: 100))
 			,
 			(new Main\ORM\Fields\IntegerField('HIGH_BORDER'))
 				->configureRequired()
-				->configureDefaultValue(100)
+				->configureDefaultValue(CallAssessmentItem::HIGH_BORDER_DEFAULT)
 				->addValidator(new RangeValidator(min: 0, max: 100))
 			,
 			(new Main\ORM\Fields\EnumField('AVAILABILITY_TYPE'))
@@ -123,6 +140,7 @@ class CopilotCallAssessmentTable extends Main\ORM\Data\DataManager
 			,
 			(new OneToMany('CLIENT_TYPES', CopilotCallAssessmentClientTypeTable::class, 'ASSESSMENT')),
 			(new OneToMany('AVAILABILITY_DATA', CopilotCallAssessmentAvailabilityTable::class, 'ASSESSMENT')),
+			(new OneToMany('CRITERIA', CopilotCallAssessmentCriteriaTable::class, 'ASSESSMENT')),
 		];
 	}
 }

@@ -177,9 +177,8 @@ class CAdminTabControlDrag extends CAdminTabControl
 					<div class="adm-bus-component-title-container draggable">
 						<div class="adm-bus-component-title-icon"></div>
 						<div class="adm-bus-component-title">'.$title.'</div>
-						<div class="adm-bus-component-title-icon-turn" data-role="toggleObj"></div>'.
-			//'<div class="adm-bus-component-title-icon-close"></div>'
-			'</div>
+						<div class="adm-bus-component-title-icon-turn" data-role="toggleObj"></div>
+					</div>
 					<div class="adm-bus-component-content-container">
 						<div class="adm-bus-table-container">';
 	}

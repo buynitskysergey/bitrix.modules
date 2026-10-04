@@ -29,6 +29,8 @@ Loc::loadMessages(__FILE__);
 
 final class Storage extends Internals\Model implements \JsonSerializable
 {
+	public const GROUP_STORAGE_CACHE_TAG = 'disk_group_storage';
+
 	const ERROR_NOT_EXISTS_ROOT_OBJECT = 'DISK_ST_22001';
 	const ERROR_RENAME_ROOT_OBJECT     = 'DISK_ST_22002';
 	const ERROR_ROOT_OBJECT_NOT_FOLDER = 'DISK_ST_22003';
@@ -898,7 +900,7 @@ final class Storage extends Internals\Model implements \JsonSerializable
 		$event = new Event(Driver::INTERNAL_MODULE_ID, "onAfterAddStorage", array($storage));
 		$event->send();
 
-		$storage->clearByTagCommonStorages();
+		$storage->clearStorageListCaches();
 
 		return $storage;
 	}
@@ -945,18 +947,37 @@ final class Storage extends Internals\Model implements \JsonSerializable
 			$event = new Event(Driver::INTERNAL_MODULE_ID, "onAfterDeleteStorage", array($this->getId(), $deletedBy));
 			$event->send();
 
-			$this->clearByTagCommonStorages();
+			$this->clearStorageListCaches();
 		}
 
 		return $status;
 	}
 
-	private function clearByTagCommonStorages()
+	private function clearStorageListCaches(): void
 	{
-		if(defined('BX_COMP_MANAGED_CACHE') && $this->getProxyType() instanceof ProxyType\Common)
+		$cacheTag = $this->getStorageListCacheTag();
+		if (!defined('BX_COMP_MANAGED_CACHE') || $cacheTag === null)
 		{
-			Application::getInstance()->getTaggedCache()->clearByTag('disk_common_storage');
+			return;
 		}
+
+		Application::getInstance()->getTaggedCache()->clearByTag($cacheTag);
+	}
+
+	private function getStorageListCacheTag(): ?string
+	{
+		$proxyType = $this->getProxyType();
+		if ($proxyType instanceof ProxyType\Common)
+		{
+			return 'disk_common_storage';
+		}
+
+		if ($proxyType instanceof ProxyType\Group)
+		{
+			return self::GROUP_STORAGE_CACHE_TAG;
+		}
+
+		return null;
 	}
 
 	/**

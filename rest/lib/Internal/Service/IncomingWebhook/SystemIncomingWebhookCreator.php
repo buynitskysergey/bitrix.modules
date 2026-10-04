@@ -16,6 +16,7 @@ use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhook;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhookAttributeCollection;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhookExternalAttribute;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\WebhookType;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Repository\IncomingWebhookRepository;
 use Bitrix\Rest\Preset\EventController;
 use Bitrix\Rest\Internal\Service\Security\SecurityAuditLogger;
@@ -50,38 +51,45 @@ final class SystemIncomingWebhookCreator
 		try
 		{
 			EventController::disableEvents();
-
-			$webhook = new IncomingWebhook(
-				userId: $userId,
-				password: PasswordTable::generatePassword(),
-				active: true,
-				title: $title,
-				comment: ($comment !== '' ? $comment : null),
-				dateCreate: new DateTime(),
-				scopes: $scopes,
-				externalAttributes: $this->buildAttributeCollection($attributes),
-				type: WebhookType::System,
-			);
-
-			$this->repository->save($webhook);
-
-			$passwordId = $webhook->getId();
-			if ($passwordId === null)
+			try
 			{
-				throw new ObjectNotFoundException('System incoming webhook was not found after creation');
+				$webhook = new IncomingWebhook(
+					userId: $userId,
+					password: PasswordTable::generatePassword(),
+					active: true,
+					title: $title,
+					comment: ($comment !== '' ? $comment : null),
+					dateCreate: new DateTime(),
+					scopes: $scopes,
+					externalAttributes: $this->buildAttributeCollection($attributes),
+					type: WebhookType::System,
+				);
+
+				$this->repository->save($webhook);
+
+				$passwordId = $webhook->getId();
+				if ($passwordId === null)
+				{
+					throw new ObjectNotFoundException('System incoming webhook was not found after creation');
+				}
+
+				foreach ($scopes as $scope)
+				{
+					PermissionTable::add([
+						'PASSWORD_ID' => $passwordId,
+						'PERM' => $scope,
+					]);
+				}
+
+				$reloaded = $this->repository->getById($passwordId) ?? $webhook;
+			}
+			finally
+			{
+				EventController::enableEvents();
 			}
 
-			foreach ($scopes as $scope)
-			{
-				PermissionTable::add([
-					'PASSWORD_ID' => $passwordId,
-					'PERM' => $scope,
-				]);
-			}
-
-			$reloaded = $this->repository->getById($passwordId) ?? $webhook;
-			EventController::enableEvents();
 			$connection->commitTransaction();
+			LicenseScannerStateInvalidator::reset();
 
 			$this->securityAuditLogger->logWebhookCreated(
 				actingUserId: $userId,

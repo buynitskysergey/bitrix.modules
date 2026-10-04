@@ -23,7 +23,8 @@ use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Engine\Response\DataType\Page;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\NotSupportedException;
+use Bitrix\Main\ORM\Fields\DateField;
+use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\Relations\Relation;
 use Bitrix\Main\Type\Collection;
 use Bitrix\Main\UI\PageNavigation;
@@ -708,10 +709,6 @@ class Item extends Base
 		}
 
 		$isUseOriginalUfNames = $useOriginalUfNames === 'Y';
-		if ($this->shouldUseDeprecatedImportApi($entityTypeId))
-		{
-			return $this->importViaDeprecatedApi($entityTypeId, $fields, $isUseOriginalUfNames);
-		}
 
 		$item = $factory->createItem();
 
@@ -1019,10 +1016,53 @@ class Item extends Base
 	{
 		if($this->getScope() === static::SCOPE_REST)
 		{
-			$this->prepareDateTimeFieldsForFilter($filter, $factory->getFieldsCollection());
+			$this->convertDateTimeFilterValues($filter, $this->getDateTimeFilterFieldTypes($factory));
 		}
 
 		return $this->removeDotsFromKeys($filter);
+	}
+
+	/**
+	 * Collects date/datetime filterable field types indexed by name.
+	 *
+	 * Besides the CRM fields collection it inspects the ORM entity too: some filterable
+	 * system fields (e.g. DATE_CREATE) are absent from the collection. Without conversion
+	 * an unparseable value for such a field reaches SQL as an empty datetime literal ('')
+	 * and crashes on a strict DBMS (MySQL 8.0: "Incorrect DATETIME value: ''").
+	 *
+	 * @return array<string, string> field name => Field::TYPE_DATE|Field::TYPE_DATETIME
+	 */
+	private function getDateTimeFilterFieldTypes(Service\Factory $factory): array
+	{
+		$fieldTypesByName = [];
+
+		foreach ($factory->getFieldsCollection() as $field)
+		{
+			$type = $field->getType();
+			if ($type === Field::TYPE_DATE || $type === Field::TYPE_DATETIME)
+			{
+				$fieldTypesByName[$field->getName()] = $type;
+			}
+		}
+
+		foreach ($factory->getDataClass()::getEntity()->getFields() as $ormField)
+		{
+			$name = $ormField->getName();
+			if (isset($fieldTypesByName[$name]))
+			{
+				continue;
+			}
+			if ($ormField instanceof DatetimeField)
+			{
+				$fieldTypesByName[$name] = Field::TYPE_DATETIME;
+			}
+			elseif ($ormField instanceof DateField)
+			{
+				$fieldTypesByName[$name] = Field::TYPE_DATE;
+			}
+		}
+
+		return $fieldTypesByName;
 	}
 
 	protected function prepareSelect(Service\Factory $factory, array $select): array
@@ -1333,92 +1373,6 @@ class Item extends Base
 		}
 
 		return $result;
-	}
-
-	/**
-	 * @deprecated This method will be removed when operations will be supported for all entity types
-	 */
-	private function shouldUseDeprecatedImportApi(int $entityTypeId): bool
-	{
-		if (
-			$entityTypeId == \CCrmOwnerType::Lead
-			&& !method_exists(\Bitrix\Crm\Settings\LeadSettings::class, 'isFactoryEnabled')
-		)
-		{
-			//check for availability of \Bitrix\Crm\Settings\LeadSettings::getCurrent()->isFactoryEnabled();
-			return true;
-		}
-		if (
-			$entityTypeId == \CCrmOwnerType::Contact
-			&& !method_exists(\Bitrix\Crm\Settings\ContactSettings::class, 'isFactoryEnabled')
-		)
-		{
-			//check for availability of \Bitrix\Crm\Settings\ContactSettings::getCurrent()->isFactoryEnabled();
-			return true;
-		}
-		if (
-			$entityTypeId == \CCrmOwnerType::Company
-			&& !method_exists(\Bitrix\Crm\Settings\CompanySettings::class, 'isFactoryEnabled')
-		)
-		{
-			//check for availability of \Bitrix\Crm\Settings\CompanySettings::getCurrent()->isFactoryEnabled();
-			return true;
-		}
-
-		return false;
-	}
-
-	/**
-	 * @deprecated This method will be removed when operations will be supported for all entity types
-	 */
-	private function importViaDeprecatedApi(int $entityTypeId, array $fields, bool $useOriginalUfNames = false): ?array
-	{
-		$restEntity = match ($entityTypeId) {
-			\CCrmOwnerType::Lead => new \CCrmLeadRestProxy(),
-			\CCrmOwnerType::Contact => new \CCrmContactRestProxy(),
-			\CCrmOwnerType::Company => new \CCrmCompanyRestProxy(),
-			default => throw new NotSupportedException("Entity type {$entityTypeId} is not supported"),
-		};
-
-		if (!\CCrmAuthorizationHelper::CheckImportPermission($entityTypeId))
-		{
-			$this->addError(new Error(
-				Loc::getMessage('CRM_COMMON_READ_ACCESS_DENIED'),
-				ErrorCode::ACCESS_DENIED
-			));
-
-			return null;
-		}
-
-		$fields = $this->convertFieldNamesToUpper($fields, $useOriginalUfNames);
-		$fieldsMap = Container::getInstance()->getFactory($entityTypeId)->getFieldsMap();
-		foreach ($fieldsMap as $commonFieldName => $fieldName)
-		{
-			if (isset($fields[$commonFieldName]))
-			{
-				$fields[$fieldName] = $fields[$commonFieldName];
-				unset($fields[$commonFieldName]);
-			}
-		}
-
-		try
-		{
-			$id = $restEntity->add($fields, [ 'IMPORT' => true ]);
-		}
-		catch (\Bitrix\Rest\RestException $e)
-		{
-			$this->addError(new Error(
-				$e->getMessage()
-			));
-
-			return null;
-		}
-
-		return [
-			'item' => [
-				'id' => (int)$id,
-			],
-		];
 	}
 
 	private function getMultiFields(): array

@@ -281,6 +281,10 @@ class Delete extends Operation
 		$event = DeleteEvent::createDefault($item->getEntityTypeId());
 		$analytics->setStatus($status)->fillEventBuilder($event);
 
-		$event->buildEvent()->send();
+		$event
+			->setActorId($this->getAnalyticsActorId())
+			->buildEvent()
+			->send()
+		;
 	}
 }

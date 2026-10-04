@@ -959,6 +959,29 @@ class Chat
 		return Im\V2\Chat::getInstance($chatId)->getRelationByUserId($userId);
 	}
 
+	public static function getActiveMemberIds(int $chatId, array $excludedUserIds = []): array
+	{
+		if (!Main\Loader::includeModule('im') || $chatId <= 0)
+		{
+			return [];
+		}
+
+		$excludedUserIds = array_values(
+			array_filter(
+				array_map('intval', $excludedUserIds),
+				static fn(int $userId): bool => $userId > 0,
+			),
+		);
+
+		return array_values(
+			Im\V2\Chat::getInstance($chatId)
+				->getRelations()
+				->filterActiveMembers()
+				->filterExcludingUserIds($excludedUserIds)
+				->getUserIds(),
+		);
+	}
+
 	private static function getOpenLineLastActivity(string $code): array
 	{
 		$session = new Session();

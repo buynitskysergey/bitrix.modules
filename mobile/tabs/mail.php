@@ -63,7 +63,6 @@ final class Mail implements Tabable
 				'counter' => $this->getCounterId(),
 				'analytics' => Analytics::mail(),
 			],
-			'tag' => 'new',
 		];
 
 		if (!$this->isTagNewExpired())

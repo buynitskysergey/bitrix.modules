@@ -135,7 +135,14 @@ class BodyStructure
 
 		$disposition = &$bodystructure[$this->getDispositionIndex()];
 
-		$disposition[0] = mb_strtolower($disposition[0]);
+		$dispositionType = $disposition[0] ?? null;
+		if (is_array($dispositionType) && count($dispositionType) === 1)
+		{
+			$dispositionType = reset($dispositionType);
+		}
+		$disposition[0] = is_string($dispositionType) && $dispositionType !== ''
+			? mb_strtolower($dispositionType)
+			: null;
 		if (!empty($disposition[1]) && is_array($disposition[1]))
 		{
 			$params = array();

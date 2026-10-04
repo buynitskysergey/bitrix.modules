@@ -35,6 +35,10 @@ final class UserAttributesTable extends DataManager
 				->configureRequired(),
 
 			(new DatetimeField('CATALOG_FIRST_OPENED_AT')),
+
+			(new IntegerField('GROUP_EVENT_SEQUENCE'))
+				->configureRequired()
+				->configureDefaultValue(0),
 		];
 	}
 }

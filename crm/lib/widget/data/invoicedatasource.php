@@ -3,6 +3,7 @@ namespace Bitrix\Crm\Widget\Data;
 use Bitrix\Main;
 use Bitrix\Crm\Widget\Filter;
 use Bitrix\Crm\PhaseSemantics;
+use Bitrix\Main\Web\Uri;
 
 abstract class InvoiceDataSource extends DataSource
 {
@@ -83,14 +84,14 @@ abstract class InvoiceDataSource extends DataSource
 		$urlParams = array('WG' => 'Y', 'DS' => $this->getTypeName(), 'page' => '1');
 
 		/** @var string $field */
-		$field = isset($params['field']) ? $params['field'] : '';
+		$field = $params['field'] ?? '';
 		if($field !== '')
 		{
 			$urlParams['FIELD'] = $field;
 		}
 
 		/** @var Filter $filter */
-		$filter = isset($params['filter']) ? $params['filter'] : null;
+		$filter = $params['filter'] ?? null;
 		if(!($filter instanceof Filter))
 		{
 			throw new Main\ObjectNotFoundException("The 'filter' is not found in params.");
@@ -99,21 +100,10 @@ abstract class InvoiceDataSource extends DataSource
 		$params = self::externalizeFilter($filter);
 		foreach($params as $k => $v)
 		{
-			if(!is_array($v))
-			{
-				$urlParams[$k] = $v;
-			}
-			else
-			{
-				$qty = count($v);
-				for($i = 0; $i < $qty; $i++)
-				{
-					$urlParams["{$k}[{$i}]"] = $v[$i];
-				}
-			}
+			$urlParams[$k] = $v;
 		}
 
-		return \CHTTP::urlAddParams(self::getEntityListPath(), $urlParams);
+		return (string)(new Uri(self::getEntityListPath()))->addParams($urlParams);
 	}
 	/**
 	 * Extract details page URL params from request.

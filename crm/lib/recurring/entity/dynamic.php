@@ -15,6 +15,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\Date;
+use Bitrix\Main\Type\DateTime;
 
 final class Dynamic extends Base
 {
@@ -200,6 +201,134 @@ final class Dynamic extends Base
 		return $result;
 	}
 
+	public function exposeAutomatically(
+		int $limit,
+		?DateTime $serverMoment = null,
+		?Date $cursorDate = null,
+		int $cursorId = 0,
+	): Result
+	{
+		$selection = (new DynamicAgentSelector())->select($limit, $serverMoment, $cursorDate, $cursorId);
+		$result = $this->exposeSelectedItems($selection[DynamicAgentSelector::KEY_ITEMS]);
+		$data = $result->getData();
+		$data[DynamicAgentSelector::KEY_HAS_CANDIDATES] = $selection[DynamicAgentSelector::KEY_HAS_CANDIDATES];
+		$data[DynamicAgentSelector::KEY_NEXT_CURSOR_DATE] = $selection[DynamicAgentSelector::KEY_NEXT_CURSOR_DATE];
+		$data[DynamicAgentSelector::KEY_NEXT_CURSOR_ID] = $selection[DynamicAgentSelector::KEY_NEXT_CURSOR_ID];
+		$result->setData($data);
+
+		return $result;
+	}
+
+	private function exposeSelectedItems(array $selectedItems): Result
+	{
+		$result = new Result();
+		$newItemsIds = [];
+		$emailList = [];
+		$emailData = [];
+
+		try
+		{
+			$currentRecurringFields = $this->loadCurrentRecurringFields($selectedItems);
+			foreach ($selectedItems as $selectedItem)
+			{
+				$recurringFields = $selectedItem[DynamicAgentSelector::KEY_RECURRING_FIELDS];
+				$templateItem = $selectedItem[DynamicAgentSelector::KEY_TEMPLATE_ITEM];
+				$executionContext = $selectedItem[DynamicAgentSelector::KEY_EXECUTION_CONTEXT];
+				$recurringId = (int)$recurringFields['ID'];
+
+				$actualFields = $currentRecurringFields[$recurringId] ?? null;
+				$recurringItem = is_array($actualFields)
+					? Item\DynamicExist::createFromFields($actualFields, $executionContext)
+					: null;
+				if (!$recurringItem || !$recurringItem->hasSameAutomaticExposureState($recurringFields))
+				{
+					continue;
+				}
+
+				$recurringItem->setTemplateItem($templateItem);
+				$exposeResult = $recurringItem->expose(true);
+				if (!$exposeResult->isSuccess())
+				{
+					$result->addErrors($exposeResult->getErrors());
+					$recurringItem->deactivate();
+					$recurringItem->save();
+
+					continue;
+				}
+
+				$exposingData = $exposeResult->getData();
+				$newItemId = (int)$exposingData['NEW_ITEM_ID'];
+				$newItemsIds[] = $newItemId;
+
+				if (!$recurringItem->canSendEmail())
+				{
+					continue;
+				}
+
+				$preparedEmailData = $recurringItem->getPreparedEmailData();
+				$emailList = [
+					...$emailList,
+					...$preparedEmailData['EMAIL_IDS'],
+				];
+				$entityTypeId = (int)$recurringFields['ENTITY_TYPE_ID'];
+				$emailData[$entityTypeId][$newItemId] = [
+					'EMAIL_IDS' => $preparedEmailData['EMAIL_IDS'],
+					'EMAIL_TEMPLATE_ID' => $preparedEmailData['EMAIL_TEMPLATE_ID'] ?? null,
+					'EMAIL_DOCUMENT_ID' => $preparedEmailData['EMAIL_DOCUMENT_ID'] ?? null,
+					'RECURRING_ITEM_ID' => (int)$recurringFields['ITEM_ID'],
+				];
+			}
+
+			if (!empty($emailList))
+			{
+				$sendResult = $this->sendByMail(array_unique($emailList), $emailData);
+				$result->addErrors($sendResult->getErrors());
+			}
+		}
+		catch (SystemException $exception)
+		{
+			$result->addError(new Error($exception->getMessage(), $exception->getCode()));
+		}
+
+		if (!empty($newItemsIds))
+		{
+			$result->setData(['ID' => $newItemsIds]);
+		}
+
+		return $result;
+	}
+
+	private function loadCurrentRecurringFields(array $selectedItems): array
+	{
+		$ids = [];
+		foreach ($selectedItems as $selectedItem)
+		{
+			$id = (int)($selectedItem[DynamicAgentSelector::KEY_RECURRING_FIELDS]['ID'] ?? 0);
+			if ($id > 0)
+			{
+				$ids[$id] = $id;
+			}
+		}
+
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		$rows = RecurringTable::query()
+			->setSelect(['*'])
+			->whereIn('ID', array_values($ids))
+			->fetchAll()
+		;
+		$fieldsById = [];
+		foreach ($rows as $row)
+		{
+			$fieldsById[(int)$row['ID']] = $row;
+		}
+
+		return $fieldsById;
+	}
+
 	private function getEntityIdsFromItemIdentifiers(array $itemIdentifiers): array
 	{
 		$ids = [];
@@ -237,12 +366,12 @@ final class Dynamic extends Base
 		return Item\DynamicEntity::getFormMapper($params);
 	}
 
-	public static function getNextDate(array $params, $startDate = null): ?Date
+	public static function getNextDate(array $params, $startDate = null, $currentDate = null): ?Date
 	{
 		$mapper = self::getParameterMapper($params);
 		$mapper->fillMap($params);
 
-		return parent::getNextDate($mapper->getPreparedMap(), $startDate);
+		return parent::getNextDateWithCurrentDate($mapper->getPreparedMap(), $startDate, $currentDate);
 	}
 
 	public function delete($primary): Result

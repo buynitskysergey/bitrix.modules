@@ -41,12 +41,19 @@ abstract class Base
 	 */
 	public static function getNextDate(array $params, $startDate = null)
 	{
+		return static::getNextDateWithCurrentDate($params, $startDate);
+	}
+
+	protected static function getNextDateWithCurrentDate(array $params, $startDate = null, $currentDate = null)
+	{
+		$currentDate = $currentDate instanceof Date ? clone $currentDate : null;
 		if (!($startDate instanceof Date))
 		{
-			$startDate = new Date();
+			$startDate = $currentDate === null ? new Date() : clone $currentDate;
 		}
 		$instance = Calculator::getInstance();
 		$instance->setStartDate($startDate);
+		$instance->setCurrentDate($currentDate);
 		$instance->setParams($params);
 		return $instance->calculateDate();
 	}

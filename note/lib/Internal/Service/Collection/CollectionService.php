@@ -10,12 +10,14 @@ use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Model\Collection;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
+use Bitrix\Note\Internal\Service\Document\MainDocumentService;
 use Bitrix\Note\Internal\Service\User\SystemUser;
 
 class CollectionService
 {
 	public function __construct(
 		private readonly CollectionRepository $repository = new CollectionRepository(),
+		private readonly MainDocumentService $mainDocumentService = new MainDocumentService(),
 	)
 	{
 	}
@@ -43,10 +45,42 @@ class CollectionService
 	{
 		if ($policyLevel === null && $permissions === null)
 		{
-			$saved = $this->persistCollection($name, $userId, $position);
-			CollectionAccessService::createDefaultAccess((int)$saved->getId(), $userId);
+			$connection = Application::getConnection();
+			$connection->startTransaction();
+			try
+			{
+				$saved = $this->persistCollection($name, $userId, $position);
+				CollectionAccessService::createDefaultAccess((int)$saved->getId(), $userId);
+				$this->ensureMainDocument((int)$saved->getId(), $userId);
 
-			return $saved;
+				$connection->commitTransaction();
+
+				return $saved;
+			}
+			catch (SystemException $e)
+			{
+				try
+				{
+					$connection->rollbackTransaction();
+				}
+				catch (\Throwable)
+				{
+				}
+
+				throw $e;
+			}
+			catch (\Throwable $e)
+			{
+				try
+				{
+					$connection->rollbackTransaction();
+				}
+				catch (\Throwable)
+				{
+				}
+
+				throw new SystemException($e->getMessage());
+			}
 		}
 
 		$connection = Application::getConnection();
@@ -70,6 +104,8 @@ class CollectionService
 					'Unable to install collection permissions.',
 				));
 			}
+
+			$this->ensureMainDocument((int)$saved->getId(), $userId);
 
 			$connection->commitTransaction();
 
@@ -197,8 +233,33 @@ class CollectionService
 		}
 
 		$id = (int)$saved->getId();
+		if ($id <= 0)
+		{
+			return null;
+		}
 
-		return $id > 0 ? $id : null;
+		// Eager main document, atomic with the collection: the caller (WelcomeContentInstaller)
+		// wraps this in a transaction and rolls back on null, so no orphan collection remains.
+		if ($this->mainDocumentService->ensureMainDocument($id, SystemUser::ID) === null)
+		{
+			return null;
+		}
+
+		return $id;
+	}
+
+	/**
+	 * Creates the collection's main document in the caller's transaction. Failure aborts
+	 * the whole create so a collection is never left without its main document.
+	 *
+	 * @throws SystemException
+	 */
+	private function ensureMainDocument(int $collectionId, int $authorId): void
+	{
+		if ($this->mainDocumentService->ensureMainDocument($collectionId, $authorId) === null)
+		{
+			throw new SystemException('Unable to create the collection main document.');
+		}
 	}
 
 	private function buildSaveErrorMessage(array $errorMessages, string $defaultMessage): string

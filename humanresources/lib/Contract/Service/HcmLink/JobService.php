@@ -9,6 +9,8 @@ use Bitrix\Main\Type\DateTime;
 
 interface JobService
 {
+	public const ERROR_COMPANY_NOT_FOUND = 'COMPANY_NOT_FOUND';
+
 	public function update(Job $job): ?Job;
 
 	/**

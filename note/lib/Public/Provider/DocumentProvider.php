@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Public\Provider;
 
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Access\PortalAdmin;
@@ -11,8 +12,12 @@ use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Model\Document;
+use Bitrix\Note\Internal\Model\FavoriteTable;
+use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Repository\FavoriteRepository;
+use Bitrix\Note\Internal\Repository\SubscriptionRepository;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
 use Bitrix\Note\Internal\Service\User\SystemUser;
 use Bitrix\Note\Public\Provider\Dto\DocumentReadDto;
@@ -23,6 +28,7 @@ final class DocumentProvider
 		private readonly DocumentRepository $documentRepository = new DocumentRepository(),
 		private readonly DocumentCardMetaResolver $cardMetaResolver = new DocumentCardMetaResolver(),
 		private readonly CollectionRepository $collectionRepository = new CollectionRepository(),
+		private readonly SubscriptionRepository $subscriptionRepository = new SubscriptionRepository(),
 	) {}
 
 	public function getById(int $id): ?Document
@@ -36,15 +42,31 @@ final class DocumentProvider
 	}
 
 	/**
-	 * Returns only the ownership fields (id, collectionId) needed by callers that
-	 * just want to resolve the collection for an access check. Keeps the SELECT
-	 * narrow and hides repository column details from callers.
+	 * Batch structural meta (no ACL, no markdown) for a list of ids in a single query — same access profile as
+	 * the per-id getMetaById above, exposed for callers that must read many documents at once (e.g. the RAG
+	 * source-sync ancestor/membership traversal) without an N+1 of getMetaById. Thin delegate to the existing
+	 * repository batch reader (whereIn); it dedups/filters ids and keys nothing — callers key by getId(). Large
+	 * id sets should be chunked by the caller.
 	 *
-	 * @return array{id: int, collectionId: int}|null
+	 * @param int[] $ids
+	 * @return Document[]
+	 */
+	public function getMetaByIds(array $ids): array
+	{
+		return $this->documentRepository->getMetaByIds($ids);
+	}
+
+	/**
+	 * Returns the ownership fields needed by callers that resolve the collection for an
+	 * access check, plus the document's own creation info (createdBy/createdAt) used by
+	 * FeedProvider's lazy 'created' backfill. Keeps the SELECT narrow and hides repository
+	 * column details from callers.
+	 *
+	 * @return array{id: int, collectionId: int, createdBy: int, createdAt: \Bitrix\Main\Type\DateTime}|null
 	 */
 	public function getOwnershipInfo(int $id): ?array
 	{
-		$document = $this->documentRepository->getMetaById($id, ['ID', 'COLLECTION_ID']);
+		$document = $this->documentRepository->getMetaById($id, ['ID', 'COLLECTION_ID', 'CREATED_BY', 'CREATED_AT']);
 		if ($document === null)
 		{
 			return null;
@@ -53,6 +75,8 @@ final class DocumentProvider
 		return [
 			'id' => (int)$document->getId(),
 			'collectionId' => (int)$document->getCollectionId(),
+			'createdBy' => (int)$document->getCreatedBy(),
+			'createdAt' => $document->getCreatedAt(),
 		];
 	}
 
@@ -87,6 +111,10 @@ final class DocumentProvider
 			// REST-only read path: datetime is returned in UTC (ISO 8601 with Z).
 			createdAt: gmdate('Y-m-d\TH:i:s\Z', $document->getCreatedAt()->getTimestamp()),
 			updatedAt: gmdate('Y-m-d\TH:i:s\Z', $document->getUpdatedAt()->getTimestamp()),
+			// [DTO-01] Content build time, separate from updatedAt; null until the projection materializes.
+			contentUpdatedAt: $document->getContentUpdatedAt() !== null
+				? gmdate('Y-m-d\TH:i:s\Z', $document->getContentUpdatedAt()->getTimestamp())
+				: null,
 		);
 	}
 
@@ -125,7 +153,7 @@ final class DocumentProvider
 				'parentId' => $document->getParentId() !== null ? (int)$document->getParentId() : null,
 				'title' => (string)$document->getTitle(),
 				'position' => (int)$document->getPosition(),
-				'updatedAt' => $document->getUpdatedAt()->format('c'),
+				'updatedAt' => $this->observedUpdatedAt($document)->format('c'),
 				'hasChildren' => false,
 				'excerpt' => $meta['excerpt'],
 				'author' => $meta['author'],
@@ -152,7 +180,8 @@ final class DocumentProvider
 	 *     position: int,
 	 *     updatedAt: string,
 	 *     excerpt: string,
-	 *     author: ?array{id: int, name: string}
+	 *     author: ?array{id: int, name: string},
+	 *     hasChildren: bool
 	 *   }>,
 	 *   nextCursor: ?array{position: int, id: int}
 	 * }
@@ -207,11 +236,16 @@ final class DocumentProvider
 		;
 
 		$authorIdByDocumentId = [];
+		$documentIds = [];
 		foreach ($documents as $document)
 		{
 			$authorIdByDocumentId[(int)$document->getId()] = (int)$document->getCreatedBy();
+			$documentIds[] = (int)$document->getId();
 		}
 		$cardMeta = $this->cardMetaResolver->resolve($authorIdByDocumentId);
+		// Ship the "has live children" flag with the list so the bulk-confirm dialog can decide
+		// locally whether to offer the "with nested" toggle — no separate dry-run round-trip.
+		$hasChildrenMap = $this->documentRepository->getHasChildrenMap($collectionId, $documentIds);
 
 		$items = [];
 		$lastPosition = null;
@@ -229,9 +263,10 @@ final class DocumentProvider
 				'parentId' => $document->getParentId() !== null ? (int)$document->getParentId() : null,
 				'title' => (string)$document->getTitle(),
 				'position' => $position,
-				'updatedAt' => $document->getUpdatedAt()->format('c'),
+				'updatedAt' => $this->observedUpdatedAt($document)->format('c'),
 				'excerpt' => $meta['excerpt'],
 				'author' => $meta['author'],
+				'hasChildren' => $hasChildrenMap[$id] ?? false,
 			];
 		}
 
@@ -243,6 +278,20 @@ final class DocumentProvider
 				$accessSnapshot['effective'],
 				$accessSnapshot['policy'],
 			);
+			// Bundle the collection bell's on/off state into the first-page meta so the workspace header
+			// gets it without a separate getState request (collection scope only ever holds MODE_ALL).
+			$collectionMeta['subscribed'] = $this->subscriptionRepository->getUserState(
+				$userId,
+				SubscriptionTable::SCOPE_COLLECTION,
+				$collectionId,
+			) !== null;
+			// [TPL-01] Star state of the knowledge base, alongside its bell state: under the "notifications
+			// only on favorites" invariant the header bell is gated by one of the two.
+			$collectionMeta['isFavorite'] = (new FavoriteRepository())->findRow(
+				$userId,
+				FavoriteTable::ENTITY_TYPE_COLLECTION,
+				$collectionId,
+			) !== null;
 		}
 
 		return [
@@ -373,6 +422,18 @@ final class DocumentProvider
 	public function listArchivedIdsForUserWithManageAccess(int $userId): array
 	{
 		return DocumentAccessService::listArchivedIdsForUserWithManageAccess($userId);
+	}
+
+	/**
+	 * The change moment a list shows is the content date: the date a user sees moves when the text
+	 * changes and stays put when the document is merely moved, renamed or archived. Taking the later
+	 * of CONTENT_UPDATED_AT and the structural UPDATED_AT would let those operations push it forward
+	 * again. Legacy rows carry NULL in CONTENT_UPDATED_AT (no backfill) and fall back to UPDATED_AT.
+	 * Display only: no list orders or pages by this value, so no index is given up for it.
+	 */
+	private function observedUpdatedAt(Document $document): DateTime
+	{
+		return $document->getContentUpdatedAt() ?? $document->getUpdatedAt();
 	}
 
 	/**

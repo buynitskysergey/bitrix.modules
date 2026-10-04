@@ -57,4 +57,28 @@ class AllMembersSignedTrigger extends InitiatorSignedTrigger
 	{
 		return [ActivityGroup::DOCUMENT_FLOW->value];
 	}
+
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_SIGN_ALL_MEMBERS_SIGNED_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getSignReturnProperties()
+		);
+	}
+
+	/**
+	 * The completion event names no single member, so the node reports the document itself without the
+	 * member fields the other B2B nodes expose.
+	 */
+	protected static function getSignReturnFieldIds(): array
+	{
+		return [
+			self::RETURN_SIGN_DOCUMENT_ID,
+			self::RETURN_SIGN_INITIATED_BY_TYPE,
+		];
+	}
 }

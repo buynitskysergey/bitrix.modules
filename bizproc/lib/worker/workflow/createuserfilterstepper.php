@@ -4,6 +4,7 @@ namespace Bitrix\Bizproc\Worker\Workflow;
 
 use Bitrix\Main;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\SqlExpression;
 
 class CreateUserFilterStepper extends Main\Update\Stepper
 {
@@ -53,23 +54,24 @@ class CreateUserFilterStepper extends Main\Update\Stepper
 
 		$this->setOuterParams([$userId, $newLastTs]);
 
-		$idsSql = "'" . implode("','", $ids) . "'";
-
 		$connection->query(
-			<<<SQL
-				INSERT IGNORE INTO b_bp_workflow_filter
-				(WORKFLOW_ID, MODULE_ID, ENTITY, DOCUMENT_ID, TEMPLATE_ID, STARTED)
-				(
-					select ws.ID,
-					case when ws.MODULE_ID is null then '' else ws.MODULE_ID end,
-					ws.ENTITY,
-					ws.DOCUMENT_ID,
-					ws.WORKFLOW_TEMPLATE_ID,
-					case when ws.STARTED is null then now() else ws.STARTED end 
-					from b_bp_workflow_state ws
-					where ws.ID IN ({$idsSql})
-				)
-			SQL
+			new SqlExpression(
+				<<<SQL
+					INSERT IGNORE INTO b_bp_workflow_filter
+					(WORKFLOW_ID, MODULE_ID, ENTITY, DOCUMENT_ID, TEMPLATE_ID, STARTED)
+					(
+						select ws.ID,
+						case when ws.MODULE_ID is null then '' else ws.MODULE_ID end,
+						ws.ENTITY,
+						ws.DOCUMENT_ID,
+						ws.WORKFLOW_TEMPLATE_ID,
+						case when ws.STARTED is null then now() else ws.STARTED end
+						from b_bp_workflow_state ws
+						where ws.ID IN (?@)
+					)
+				SQL,
+				$ids,
+			)
 		);
 
 		if (count($ids) < $limit)

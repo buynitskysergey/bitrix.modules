@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Crm\Copilot\Pipeline;
 
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItemChecker;
 use Bitrix\Crm\Copilot\CallAssessment\ItemFactory;
@@ -13,11 +14,15 @@ use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\Operation\AbstractOperation;
 use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\ScenarioOverrideResolver;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\ScoreCallSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioRegistry;
 use Bitrix\Crm\Integration\AI\Operation\ExtractScoringCriteria;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\FillRepeatSaleTips;
+use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\ScreeningRepeatSaleItem;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
@@ -43,6 +48,7 @@ final readonly class StepFactory
 			SummarizeCallTranscription::class => $this->createSummarize($context),
 			FillItemFieldsFromCallTranscription::class => $this->createFillFields($context),
 			ScoreCall::class => $this->createScoreCall($context),
+			ScoreCallV2::class => $this->createScoreCallV2($context),
 			AnalyzeCommunication::class => $this->createAnalyzeCommunication($context),
 			ExtractScoringCriteria::class => $this->createExtractScoringCriteria($context),
 			FillRepeatSaleTips::class => $this->createFillRepeatSaleTips($context),
@@ -117,8 +123,8 @@ final readonly class StepFactory
 		}
 
 		if (
-			!$this->shouldAutostartCallOperation($context, SummarizeCallTranscription::TYPE_ID)
-			&& !$this->shouldAutostartCallOperation($context, FillItemFieldsFromCallTranscription::TYPE_ID)
+			!$this->shouldAutostartOperation($context, SummarizeCallTranscription::TYPE_ID)
+			&& !$this->shouldAutostartOperation($context, FillItemFieldsFromCallTranscription::TYPE_ID)
 		)
 		{
 			return null;
@@ -128,11 +134,12 @@ final readonly class StepFactory
 		$target = new ItemIdentifier(CCrmOwnerType::Activity, $activityId);
 
 		$isOpenLine = $context->getActivityProvider() === OpenLine::getId();
+		$isEmail = $context->getActivityProvider() === Email::getId();
 
 		if ($isOpenLine)
 		{
 			$messages = OpenLine::getMessagesForCopilot($activityId);
-			if (!OpenLine::isCopilotProcessingAvailable($activityId, $messages))
+			if (!OpenLine::isCopilotProcessingAvailable($activityId, $messages, true, $this->resolveChatBaselineTarget($context)))
 			{
 				return null;
 			}
@@ -142,6 +149,30 @@ final readonly class StepFactory
 				$messages,
 				$context->getUserId(),
 			);
+		}
+
+		if ($isEmail)
+		{
+			$targetOwnerTypeId = (int)$context->getExtra('targetOwnerTypeId');
+			$targetOwnerId = (int)$context->getExtra('targetOwnerId');
+			$messages = Email::getMessagesForCopilot(
+				$activityId,
+				$targetOwnerTypeId,
+				$targetOwnerId,
+			);
+			if (empty($messages))
+			{
+				return null;
+			}
+
+			return (new SummarizeCallTranscription(
+				$target,
+				$messages,
+				$context->getUserId(),
+			))
+				->setContextExtra('targetOwnerTypeId', $targetOwnerTypeId)
+				->setContextExtra('targetOwnerId', $targetOwnerId)
+			;
 		}
 
 		$transcriptionResult = $this->resultResolver->resolve(TranscribeCallRecording::class, $context);
@@ -160,7 +191,8 @@ final readonly class StepFactory
 	}
 
 	/**
-	 * Uses TargetResolver for Deal/Lead target.
+	 * Manual launch: fills exactly the clicked entity carried in the context (no re-resolve).
+	 * Auto path: uses TargetResolver for the priority Deal/Lead target (unchanged).
 	 * Gets summary from SummarizeCallTranscription result.
 	 * Returns null if FillItemFromCall is disabled or autostart settings don't allow it.
 	 * PipelineExecutor will skip this step and proceed to the next one (e.g., ScoreCall).
@@ -172,13 +204,35 @@ final readonly class StepFactory
 			return null;
 		}
 
-		$fillTarget = $this->targetResolver->findTarget($context->getActivityId());
+		$isEmail = $context->getActivityProvider() === Email::getId();
+		$targetOwnerTypeId = (int)$context->getExtra('targetOwnerTypeId');
+		$targetOwnerId = (int)$context->getExtra('targetOwnerId');
+
+		if ($isEmail && ($targetOwnerTypeId <= 0 || $targetOwnerId <= 0))
+		{
+			$fallback = $this->resolveFillFieldsTarget($context);
+			if ($fallback)
+			{
+				$targetOwnerTypeId = $fallback->getEntityTypeId();
+				$targetOwnerId = $fallback->getEntityId();
+			}
+		}
+
+		if ($isEmail && $targetOwnerTypeId > 0 && $targetOwnerId > 0)
+		{
+			$fillTarget = new ItemIdentifier($targetOwnerTypeId, $targetOwnerId);
+		}
+		else
+		{
+			$fillTarget = $this->resolveFillFieldsTarget($context);
+		}
+
 		if (!$fillTarget)
 		{
 			return null;
 		}
 
-		if (!$this->shouldAutostartCallOperation($context, FillItemFieldsFromCallTranscription::TYPE_ID, $fillTarget))
+		if (!$this->shouldAutostartOperation($context, FillItemFieldsFromCallTranscription::TYPE_ID, $fillTarget))
 		{
 			return null;
 		}
@@ -196,12 +250,49 @@ final readonly class StepFactory
 			return null;
 		}
 
-		return new FillItemFieldsFromCallTranscription(
+		$operation = new FillItemFieldsFromCallTranscription(
 			$fillTarget,
 			$summary,
 			$context->getUserId(),
 			$parentJobId,
 		);
+
+		if ($isEmail && $targetOwnerTypeId > 0 && $targetOwnerId > 0)
+		{
+			$operation
+				->setContextExtra('targetOwnerTypeId', $targetOwnerTypeId)
+				->setContextExtra('targetOwnerId', $targetOwnerId)
+			;
+		}
+
+		return $operation;
+	}
+
+	/**
+	 * Resolves the FillItemFields target.
+	 * Manual launch (ALG-01): the clicked entity from the timeline context — no re-resolve, single-target.
+	 * Auto path: unchanged TargetResolver priority Deal>Lead resolution.
+	 * Delegates to StepContext::resolveFillTarget so StepFactory and StepResultResolver share one rule.
+	 */
+	private function resolveFillFieldsTarget(StepContext $context): ?ItemIdentifier
+	{
+		return $context->resolveFillTarget($this->targetResolver);
+	}
+
+	/**
+	 * The chat baseline that gates (re)creating the summary must match the fill button's per-entity
+	 * baseline for fill-bearing scenarios (keyed by the fill target), so a stale summary is regenerated
+	 * exactly when the fill button re-enables. Non-fill chat scenarios keep the chat-global baseline.
+	 * See fill-fields-any-entity.
+	 */
+	private function resolveChatBaselineTarget(StepContext $context): ?ItemIdentifier
+	{
+		if (in_array($context->getScenarioName(), [Scenario::FILL_FIELDS_SCENARIO, Scenario::FULL_SCENARIO], true))
+		{
+			return $context->resolveFillTarget($this->targetResolver);
+		}
+
+		return null;
 	}
 
 	/**
@@ -240,6 +331,54 @@ final readonly class StepFactory
 	}
 
 	/**
+	 * V2 of ScoreCall — uses setters instead of constructor args (transcription / assessmentSettingsId).
+	 * Gating: CallAssessment global setting + auto-start check + non-empty transcription + selected script.
+	 * Automatic call scoring is driven by the bizproc call-assessment activity
+	 * (AIManager::launchScoreCallV2 with the chosen script); the pipeline must not launch V2 scoring
+	 * without a script — see the assessmentSettingsId guard below.
+	 */
+	private function createScoreCallV2(StepContext $context): ?AbstractOperation
+	{
+		if (!AIManager::isEnabledInGlobalSettings(GlobalSetting::CallAssessment))
+		{
+			return null;
+		}
+
+		if (!$this->shouldAutostartScoreCall($context))
+		{
+			return null;
+		}
+
+		$transcriptionResult = $this->resultResolver->resolve(TranscribeCallRecording::class, $context);
+		$transcription = (string)($transcriptionResult?->getPayload()?->transcription ?? '');
+		if (empty($transcription))
+		{
+			return null;
+		}
+
+		// V2 scoring must run against an explicitly selected script. The automatic pipeline does not
+		// carry the chosen assessment settings id, so launching ScoreCallV2 here would build an empty
+		// `dialog_quality_scorer` payload and fail with PAYLOAD_IS_EMPTY. Skip the step when no script
+		// is provided — automatic scoring goes through AIManager::launchScoreCallV2 (bizproc activity).
+		$assessmentSettingsId = $context->getExtra('assessmentSettingsId');
+		if ($assessmentSettingsId === null || (int)$assessmentSettingsId <= 0)
+		{
+			return null;
+		}
+
+		$operation = new ScoreCallV2(
+			new ItemIdentifier(CCrmOwnerType::Activity, $context->getActivityId()),
+			$transcriptionResult->getUserId() ?? $context->getUserId(),
+			$transcriptionResult->getJobId(),
+		);
+
+		$operation->setTranscription($transcription);
+		$operation->setAssessmentSettingsId((int)$assessmentSettingsId);
+
+		return $operation;
+	}
+
+	/**
 	 * Gets transcription from TranscribeCallRecording result.
 	 * For OpenLine provider, gets chat messages via OpenLine::getMessagesForCopilot().
 	 */
@@ -250,7 +389,7 @@ final readonly class StepFactory
 			return null;
 		}
 
-		if (!$this->shouldAutostartCallOperation($context, AnalyzeCommunication::TYPE_ID))
+		if (!$this->shouldAutostartOperation($context, AnalyzeCommunication::TYPE_ID))
 		{
 			return null;
 		}
@@ -259,6 +398,7 @@ final readonly class StepFactory
 		$target = new ItemIdentifier(CCrmOwnerType::Activity, $activityId);
 
 		$isOpenLine = $context->getActivityProvider() === OpenLine::getId();
+		$isEmail = $context->getActivityProvider() === Email::getId();
 
 		if ($isOpenLine)
 		{
@@ -273,6 +413,39 @@ final readonly class StepFactory
 				$messages,
 				$context->getUserId(),
 			);
+		}
+
+		if ($isEmail)
+		{
+			$targetOwnerTypeId = (int)$context->getExtra('targetOwnerTypeId');
+			$targetOwnerId = (int)$context->getExtra('targetOwnerId');
+			if ($targetOwnerTypeId <= 0 || $targetOwnerId <= 0)
+			{
+				$fallback = $this->targetResolver->findTarget($activityId);
+				if ($fallback)
+				{
+					$targetOwnerTypeId = $fallback->getEntityTypeId();
+					$targetOwnerId = $fallback->getEntityId();
+				}
+			}
+			$messages = Email::getMessagesForCopilot(
+				$activityId,
+				$targetOwnerTypeId,
+				$targetOwnerId,
+			);
+			if (empty($messages))
+			{
+				return null;
+			}
+
+			return (new AnalyzeCommunication(
+				$target,
+				$messages,
+				$context->getUserId(),
+			))
+				->setContextExtra('targetOwnerTypeId', $targetOwnerTypeId)
+				->setContextExtra('targetOwnerId', $targetOwnerId)
+			;
 		}
 
 		$transcriptionResult = $this->resultResolver->resolve(TranscribeCallRecording::class, $context);
@@ -342,21 +515,41 @@ final readonly class StepFactory
 		return new ScreeningRepeatSaleItem($target);
 	}
 
-	private function shouldAutostartCallOperation(
+	private function shouldAutostartOperation(
 		StepContext $context,
 		int $operationType,
 		?ItemIdentifier $fillTarget = null,
 	): bool
 	{
-		if ($context->isManualLaunch() || !$this->isCallActivity($context))
+		if ($context->isManualLaunch())
 		{
 			return true;
 		}
 
-		$activity = $this->loadActivity($context->getActivityId());
-		if (!is_array($activity))
+		$isChatActivity = $context->getActivityProvider() === OpenLine::getId();
+		$channelCode = $isChatActivity
+			? AutomationScenarioRegistry::CHANNEL_CHAT
+			: $this->resolveChannelCode($context)
+		;
+		if ($channelCode === null)
+		{
+			return true;
+		}
+
+		$activity = $isChatActivity ? null : $this->loadActivity($context->getActivityId());
+		if (!$isChatActivity && !is_array($activity))
 		{
 			return false;
+		}
+
+		$direction = (int)($activity['DIRECTION'] ?? 0);
+		if ($channelCode === AutomationScenarioRegistry::CHANNEL_EMAIL)
+		{
+			$triggerDirection = $context->getExtra('triggerDirection');
+			if ($triggerDirection !== null)
+			{
+				$direction = (int)$triggerDirection;
+			}
 		}
 
 		$fillTarget ??= $this->targetResolver->findTarget($context->getActivityId());
@@ -365,14 +558,55 @@ final readonly class StepFactory
 			return false;
 		}
 
-		return FillFieldsSettings::get(
+		$settings = FillFieldsSettings::get(
 			$fillTarget->getEntityTypeId(),
-			$fillTarget->getCategoryId()
-		)->shouldAutostart(
+			$fillTarget->getCategoryId(),
+		);
+
+		$scenarioCode = $this->resolveScenarioCodeForOperation($operationType);
+		if ($scenarioCode !== null)
+		{
+			$resolver = new ScenarioOverrideResolver();
+
+			return $resolver->isScenarioStepActive(
+				$settings,
+				$scenarioCode,
+				$channelCode,
+				$direction,
+			) && $resolver->isCallPrerequisiteActive(
+				$settings,
+				$scenarioCode,
+				$channelCode,
+				$direction,
+			);
+		}
+
+		if ($isChatActivity)
+		{
+			return true;
+		}
+
+		return $settings->shouldAutostart(
 			$operationType,
-			(int)($activity['DIRECTION'] ?? 0),
+			$direction,
 			false,
 		);
+	}
+
+	private function resolveChannelCode(StepContext $context): ?string
+	{
+		$activityProvider = $context->getActivityProvider();
+		if ($activityProvider === null)
+		{
+			$activity = $this->loadActivity($context->getActivityId());
+			$activityProvider = is_array($activity) ? ($activity['PROVIDER_ID'] ?? null) : null;
+		}
+
+		return match ($activityProvider) {
+			Call::getId() => AutomationScenarioRegistry::CHANNEL_CALL,
+			Email::getId() => AutomationScenarioRegistry::CHANNEL_EMAIL,
+			default => null,
+		};
 	}
 
 	private function shouldAutostartScoreCall(StepContext $context): bool
@@ -393,6 +627,16 @@ final readonly class StepFactory
 			ScoreCall::TYPE_ID,
 			(int)($activity['DIRECTION'] ?? 0),
 		);
+	}
+
+	private function resolveScenarioCodeForOperation(int $operationType): ?string
+	{
+		return match ($operationType) {
+			SummarizeCallTranscription::TYPE_ID => AutomationScenarioRegistry::SCENARIO_SUMMARIZE,
+			FillItemFieldsFromCallTranscription::TYPE_ID => AutomationScenarioRegistry::SCENARIO_FILL_FIELDS,
+			AnalyzeCommunication::TYPE_ID => AutomationScenarioRegistry::SCENARIO_ANALYZE_COMMUNICATION,
+			default => null,
+		};
 	}
 
 	private function isCallActivity(StepContext $context): bool

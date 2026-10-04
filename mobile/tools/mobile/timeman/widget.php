@@ -108,7 +108,6 @@ if (!empty($_REQUEST['action']))
 		if (!empty($_REQUEST['ts']) && !empty($_REQUEST['reason']))
 		{
 			$timestamp = (int) $_REQUEST['ts'];
-			$report = $expReasons[$_REQUEST['reason']];
 		}
 
 		if ($tmUser->CloseDay($timestamp, $report))

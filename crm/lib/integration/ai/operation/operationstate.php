@@ -31,6 +31,7 @@ class OperationState
 	private array $stateCache = [];
 	private ?bool $isOpenLineActivity = null;
 	private bool $isOpenLineActivityLoaded = false;
+	private ?bool $callScoringScriptSelectionPending = null;
 
 	public function __construct(private readonly int $activityId, private readonly ItemIdentifier $identifier) {}
 
@@ -87,13 +88,6 @@ class OperationState
 		}
 
 		$fillResult = $this->getFreshFillResult();
-		if (
-			$this->getSummarizeResult()?->isPending()
-			|| $fillResult?->isPending()
-		)
-		{
-			return true;
-		}
 
 		return $this->isFillFieldsScenario()
 			&& (
@@ -122,10 +116,11 @@ class OperationState
 			return true;
 		}
 
-		return (
-			$this->isLaunchOperationsSuccess()
-			|| $fillResult?->isSuccess()
-		);
+		// Success/visibility of the "fill fields" button must be per current entity: the button lives on
+		// the card of the entity carried by $this->identifier, so a successful neighbour binding (e.g. the
+		// Deal linked to the same call/chat) must not hide or mark the button as done on a Contact/Company
+		// card. Hence checkBindings=false — do not inherit success from adjacent bindings.
+		return $this->isLaunchOperationsSuccess(false);
 	}
 
 	public function isFillFieldsScenarioErrorsLimitExceeded(): bool
@@ -136,13 +131,6 @@ class OperationState
 		}
 
 		$fillResult = $this->getFreshFillResult();
-		if (
-			$this->getSummarizeResult()?->isErrorsLimitExceeded()
-			|| $fillResult?->isErrorsLimitExceeded()
-		)
-		{
-			return true;
-		}
 
 		return (
 			$this->isFillFieldsScenario()
@@ -163,7 +151,10 @@ class OperationState
 			return false;
 		}
 
-		if ($this->getCallScoringResult()?->isPending())
+		if (
+			$this->getCallScoringResult()?->isPending()
+			|| $this->isCallScoringScriptSelectionPending()
+		)
 		{
 			return true;
 		}
@@ -171,7 +162,7 @@ class OperationState
 		return $this->isCallScoringScenario()
 			&& (
 				$this->getTranscriptionResult()?->isPending()
-				|| $this->getCallScoringResult()?->isPending()
+				|| $this->getSummarizeResult()?->isPending()
 			)
 		;
 	}
@@ -206,14 +197,10 @@ class OperationState
 			return true;
 		}
 
-		if ($this->getCallScoringResult()?->isErrorsLimitExceeded())
-		{
-			return true;
-		}
-
 		return $this->isCallScoringScenario()
 			&& (
 				$this->getTranscriptionResult()?->isErrorsLimitExceeded()
+				|| $this->getSummarizeResult()?->isErrorsLimitExceeded()
 				|| $this->getCallScoringResult()?->isErrorsLimitExceeded()
 			)
 		;
@@ -377,8 +364,13 @@ class OperationState
 	{
 		if (!$this->summarizeResultLoaded)
 		{
-			$this->summarizeResult = JobRepository::getInstance()
-				->getSummarizeCallTranscriptionResultByActivity($this->activityId);
+			$this->summarizeResult = $this->getJobRepository()
+				->getSummarizeCallTranscriptionResultByActivity(
+					$this->activityId,
+					null,
+					$this->identifier->getEntityTypeId(),
+					$this->identifier->getEntityId(),
+				);
 			$this->summarizeResultLoaded = true;
 		}
 
@@ -419,12 +411,33 @@ class OperationState
 	{
 		if (!$this->analyzeCommunicationResultLoaded)
 		{
-			$this->analyzeCommunicationResult = JobRepository::getInstance()
-				->getAnalyzeCommunicationResult($this->activityId);
+			$this->analyzeCommunicationResult = $this->getJobRepository()
+				->getAnalyzeCommunicationResult(
+					$this->activityId,
+					$this->identifier->getEntityTypeId(),
+					$this->identifier->getEntityId(),
+				);
 			$this->analyzeCommunicationResultLoaded = true;
 		}
 
 		return $this->analyzeCommunicationResult;
+	}
+
+	protected function getJobRepository(): JobRepository
+	{
+		return JobRepository::getInstance();
+	}
+
+	protected function isCallScoringScriptSelectionPending(): bool
+	{
+		$this->callScoringScriptSelectionPending ??=
+			$this->getJobRepository()->getPendingJobByActivity(
+				$this->activityId,
+				SelectCallScoreScript::TYPE_ID,
+			) !== null
+		;
+
+		return $this->callScoringScriptSelectionPending;
 	}
 	// endregion
 
@@ -511,14 +524,29 @@ class OperationState
 
 	private function isFillFieldsScenario(): bool
 	{
-		return $this->getTranscriptionResult()?->getNextTypeId() === null
-			|| $this->getTranscriptionResult()?->getNextTypeId() === SummarizeCallTranscription::TYPE_ID
-		;
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			$summarizeNext = $this->getSummarizeResult()?->getNextTypeId();
+			if ($summarizeNext !== null)
+			{
+				return $summarizeNext === FillItemFieldsFromCallTranscription::TYPE_ID;
+			}
+
+			return $this->getTranscriptionResult()?->getNextTypeId() === null;
+		}
+
+		$transcribeNext = $this->getTranscriptionResult()?->getNextTypeId();
+
+		return $transcribeNext === null || $transcribeNext === SummarizeCallTranscription::TYPE_ID;
 	}
 
 	private function isCallScoringScenario(): bool
 	{
-		return $this->getTranscriptionResult()?->getNextTypeId() === ScoreCall::TYPE_ID;
+		// V2 chain: Summarize -> ScoreCallV2. V1 chain: Transcribe -> ScoreCall.
+		// Both target TYPE_IDs unique to scoring, so matching either transition is unambiguous
+		// and stays correct regardless of the dynamic AIManager::isCallScoringV2Enabled() flag.
+		return $this->getSummarizeResult()?->getNextTypeId() === ScoreCallV2::TYPE_ID
+			|| $this->getTranscriptionResult()?->getNextTypeId() === ScoreCall::TYPE_ID;
 	}
 
 	private function shouldTrackSummarizeInFullScenario(): bool
@@ -667,11 +695,7 @@ class OperationState
 	private function isValidParams(): bool
 	{
 		return $this->activityId > 0
-			&& in_array(
-				$this->identifier->getEntityTypeId(),
-				AIManager::SUPPORTED_ENTITY_TYPE_IDS,
-				true
-			)
+			&& AIManager::isEntityTypeSupported($this->identifier->getEntityTypeId())
 		;
 	}
 
@@ -682,13 +706,18 @@ class OperationState
 			$bindings = CCrmActivity::GetBindings($this->activityId);
 			$bindings = is_array($bindings) ? $bindings : [];
 
+			// Neighbour-binding traversal serves the non-fill scenarios (launch/full/scoring success),
+			// which stay limited to the classic Deal/Lead types. The universal manual fill-fields path
+			// uses checkBindings=false and never walks neighbours, so keeping the classic set here avoids
+			// an N+1 over every Factory-based binding in the timeline hot path. See fill-fields-any-entity.
 			$this->entityBindings = array_filter(
 				$bindings,
 				fn(array $row) => in_array(
 					(int)$row['OWNER_TYPE_ID'],
-					AIManager::SUPPORTED_ENTITY_TYPE_IDS,
-					true
-				) && $this->identifier->getEntityTypeId() !== (int)$row['OWNER_TYPE_ID']
+					FillItemFieldsFromCallTranscription::SUPPORTED_TARGET_ENTITY_TYPE_IDS,
+					true,
+				)
+					&& $this->identifier->getEntityTypeId() !== (int)$row['OWNER_TYPE_ID']
 			);
 			$this->entityBindingsLoaded = true;
 		}

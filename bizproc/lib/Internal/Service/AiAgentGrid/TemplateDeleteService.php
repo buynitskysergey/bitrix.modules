@@ -81,6 +81,33 @@ class TemplateDeleteService
 		bool $deleteChatbots = false,
 	): Result
 	{
+		return $this->deleteTemplatesInternal($templateIds, $initiator, $deleteChatbots);
+	}
+
+	/**
+	 * The processes grid calls this only after checking canDelete() for every requested template.
+	 * Owner filtering remains mandatory for every AI-agent-specific caller of deleteTemplates().
+	 *
+	 * @param list<int> $templateIds
+	 */
+	public function deleteTemplatesFromProcessesGrid(
+		array $templateIds,
+		CBPWorkflowTemplateUser $initiator,
+	): Result
+	{
+		return $this->deleteTemplatesInternal($templateIds, $initiator, ignoreOwner: true);
+	}
+
+	/**
+	 * @param list<int> $templateIds
+	 */
+	private function deleteTemplatesInternal(
+		array $templateIds,
+		CBPWorkflowTemplateUser $initiator,
+		bool $deleteChatbots = false,
+		bool $ignoreOwner = false,
+	): Result
+	{
 		$result = new Result();
 
 		$isUserAdmin = $initiator->isAdmin();
@@ -90,6 +117,7 @@ class TemplateDeleteService
 			$templateIds,
 			$currentUserId,
 			$isUserAdmin,
+			$ignoreOwner,
 		);
 		if (empty($agentIds))
 		{

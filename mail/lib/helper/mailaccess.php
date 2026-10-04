@@ -34,6 +34,18 @@ class MailAccess
 		return self::hasCurrentUserAccessToMailboxManagement();
 	}
 
+	public static function hasCurrentUserAccessToSharedSignatureManagement(): bool
+	{
+		if (!Feature::isSharedSignaturePermissionAvailable())
+		{
+			return LicenseManager::isMailboxManagementEnabled()
+				&& self::hasCurrentUserAccessToMailboxManagement()
+			;
+		}
+
+		return self::canPerform(MailActionDictionary::ACTION_SHARED_SIGNATURE_MANAGE);
+	}
+
 	public static function hasCurrentUserAccessToPermission(): bool
 	{
 		return self::checkGridAction(MailActionDictionary::ACTION_CONFIG_PERMISSIONS_EDIT);
@@ -66,8 +78,7 @@ class MailAccess
 		{
 			return (PermissionDictionary::getType($permissionId) === PermissionDictionaryAlias::TYPE_TOGGLER)
 				? PermissionDictionaryAlias::VALUE_YES
-				: PermissionVariablesDictionary::VARIABLE_ALL
-			;
+				: PermissionVariablesDictionary::VARIABLE_ALL;
 		}
 
 		return $accessController->getUser()->getPermission($permissionId);

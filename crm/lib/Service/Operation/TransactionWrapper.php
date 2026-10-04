@@ -8,6 +8,7 @@ use Bitrix\Crm\Integration\BizProc\Starter\CrmStarter;
 use Bitrix\Crm\Integration\BizProc\Starter\Dto\DocumentDto;
 use Bitrix\Crm\Integration\BizProc\Starter\Dto\RunDataDto;
 use Bitrix\Crm\Service\Context;
+use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Operation;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
@@ -41,6 +42,19 @@ final class TransactionWrapper
 		}
 
 		return $this->launchOperationInTransactionAndAutomationAfterIt();
+	}
+
+	public function launchWithCallbacks(
+		callable $launcher,
+		callable $onRollback,
+		callable $afterCommit,
+	): Result
+	{
+		return $this->launchOperationInTransactionAndAutomationAfterItWithCallbacks(
+			$launcher,
+			$onRollback,
+			$afterCommit,
+		);
 	}
 
 	private function launchWholeOperationInTransaction(): Result
@@ -94,8 +108,78 @@ final class TransactionWrapper
 		return $result;
 	}
 
+	private function launchOperationInTransactionAndAutomationAfterItWithCallbacks(
+		callable $launcher,
+		callable $onRollback,
+		callable $afterCommit,
+	): Result
+	{
+		$isBizProcEnabled = $this->operation->isBizProcEnabled();
+		$isAutomationEnabled = $this->operation->isAutomationEnabled();
+
+		$this->operation
+			->disableBizProc()
+			->disableAutomation()
+		;
+
+		$this->connection->startTransaction();
+
+		try
+		{
+			$result = $launcher();
+		}
+		catch (\Throwable $throwable)
+		{
+			$this->rollbackTransactionSafely();
+			$onRollback();
+
+			throw $throwable;
+		}
+		if (!$result->isSuccess())
+		{
+			$this->rollbackTransactionSafely();
+			$onRollback();
+
+			return $result;
+		}
+
+		$this->connection->commitTransaction();
+		$afterCommit();
+
+		$isRecurringItem = $this->isRecurringItem();
+		if (!$isRecurringItem && $isBizProcEnabled)
+		{
+			$this->runBizProc();
+		}
+		if (!$isRecurringItem && $isAutomationEnabled)
+		{
+			$this->runAutomation();
+		}
+
+		return $result;
+	}
+
+	private function rollbackTransactionSafely(): void
+	{
+		try
+		{
+			$this->connection->rollbackTransaction();
+		}
+		catch (\Bitrix\Main\DB\TransactionException)
+		{
+			// MySQL rolls back to a savepoint and reports nested rollback as an exception.
+		}
+	}
+
+	private function isRecurringItem(): bool
+	{
+		$factory = Container::getInstance()->getFactory($this->operation->getItem()->getEntityTypeId());
+
+		return $factory?->isRecurringSupported() && $this->operation->getItem()->getIsRecurring();
+	}
+
 	/**
-	 * @see Operation::runBizProc() - copy-paste
+	 * @see Operation::runBizProc() - copy-paste, except for the fields collected by prepareFieldsToCompare()
 	 */
 	private function runBizProc(): void
 	{
@@ -142,29 +226,13 @@ final class TransactionWrapper
 				$scope = CrmStarter::REST_SCOPE;
 			}
 
-			$actualFields = null;
-			$previousFields = null;
-			if ($this->operation->getItemBeforeSave())
-			{
-				$actualFields = Helper::prepareCompatibleData(
-					$this->operation->getItemBeforeSave()->getEntityTypeId(),
-					$this->operation->getItemBeforeSave()->getCompatibleData(Values::CURRENT)
-				);
-				$previousFields = Helper::prepareCompatibleData(
-					$this->operation->getItemBeforeSave()->getEntityTypeId(),
-					$this->operation->getItemBeforeSave()->getCompatibleData(Values::ACTUAL)
-				);
-			}
+			[$actualFields, $previousFields] = $this->prepareFieldsToCompare();
 
 			$starter->runProcess(
 				new RunDataDto(
 					actualFields: $actualFields,
 					previousFields: $previousFields,
-					userId: (
-						$this->operation->getContext()->getScope() === Context::SCOPE_AUTOMATION
-							? 0
-							: $this->operation->getContext()->getUserId()
-					),
+					userId: $this->operation->resolveAutomationInitiatorUserId(),
 					parameters: is_array($workflowParameters) || is_string($workflowParameters) ? $workflowParameters : null,
 					scope: $scope,
 					categoryId: $this->operation->getItem()->isCategoriesSupported()
@@ -174,6 +242,34 @@ final class TransactionWrapper
 				$bizProcEventType,
 			);
 		}
+	}
+
+	/**
+	 * Saved and previous values of the item to compare, or nulls when there is nothing to compare with.
+	 *
+	 * An update aborted as a no-op keeps no item before save, but its diff is known and empty, not unknown:
+	 * unlike Operation::runBizProc(), the wrapper is reached by such an update.
+	 *
+	 * @return array{0: array|null, 1: array|null}
+	 */
+	private function prepareFieldsToCompare(): array
+	{
+		$itemBeforeSave = $this->operation->getItemBeforeSave();
+		if (!$itemBeforeSave)
+		{
+			return $this->operation instanceof Operation\Update ? [[], []] : [null, null];
+		}
+
+		return [
+			Helper::prepareCompatibleData(
+				$itemBeforeSave->getEntityTypeId(),
+				$itemBeforeSave->getCompatibleData(Values::CURRENT)
+			),
+			Helper::prepareCompatibleData(
+				$itemBeforeSave->getEntityTypeId(),
+				$itemBeforeSave->getCompatibleData(Values::ACTUAL)
+			),
+		];
 	}
 
 	/**
@@ -203,11 +299,7 @@ final class TransactionWrapper
 			$scope = CrmStarter::REST_SCOPE;
 		}
 
-		$userId = (
-			$this->operation->getContext()->getScope() === Context::SCOPE_AUTOMATION
-				? 0
-				: $this->operation->getContext()->getUserId()
-		);
+		$userId = $this->operation->resolveAutomationInitiatorUserId();
 
 		$eventType = $this->operation->getItem()->getEntityEventName('OnAfterUpdate');
 		$eventId = EventManager::getInstance()->addEventHandler(

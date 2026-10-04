@@ -13,7 +13,7 @@ class Files
 		?string $updateSystemClass = null,
 	)
 	{
-		$this->updateSystemClass = $updateSystemClass ?? \CUpdateSystem::class;
+		$this->updateSystemClass = $updateSystemClass ?? \CUpdateClient::class;
 	}
 
 	/**

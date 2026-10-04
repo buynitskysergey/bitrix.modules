@@ -2,11 +2,13 @@
 
 namespace Bitrix\Crm\Integration\AI;
 
+use Bitrix\AI\Context;
+use Bitrix\AI\Model\QueueTable as AIQueueTable;
 use Bitrix\Crm\Integration\AI\Dto\AnalyzeCommunicationPayload;
 use Bitrix\Crm\Integration\AI\Dto\FillItemFieldsFromCallTranscriptionPayload;
 use Bitrix\Crm\Integration\AI\Dto\RepeatSale\FillRepeatSaleTipsPayload;
 use Bitrix\Crm\Integration\AI\Dto\Scoring\ExtractScoringCriteriaPayload;
-use Bitrix\Crm\Integration\AI\Dto\Scoring\ScoreCallPayload;
+use Bitrix\Crm\Integration\AI\Dto\Scoring\ScoreCallV2Payload;
 use Bitrix\Crm\Integration\AI\Dto\SummarizeCallTranscriptionPayload;
 use Bitrix\Crm\Integration\AI\Dto\TranscribeCallRecordingPayload;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
@@ -16,6 +18,7 @@ use Bitrix\Crm\Integration\AI\Operation\ExtractScoringCriteria;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\FillRepeatSaleTips;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 use Bitrix\Crm\ItemIdentifier;
@@ -30,6 +33,9 @@ class JobRepository
 {
 	use Singleton;
 
+	private const OWNER_SCOPED_JOB_LOOKUP_LIMIT = 20;
+	private const OWNER_SCOPED_JOB_SCAN_LIMIT = 200;
+
 	/** @var Array<int, Result|null> */
 	private array $transcribeCache = [];
 	/** @var Array<string, Result|null> */
@@ -38,7 +44,7 @@ class JobRepository
 	private array $fillCache = [];
 	/** @var Array<int, Result|null> */
 	private array $fillByIdCache = [];
-	/** @var Array<int, Result|null> */
+	/** @var array<int|string, Result|null> */
 	private array $callScoringCache = [];
 	/** @var Array<int, Result|null> */
 	private array $extractScoringCriteriaCache = [];
@@ -46,6 +52,10 @@ class JobRepository
 	private array $fillRepeatSaleTips = [];
 	/** @var Array<int, Result|null> */
 	private array $analyzeCommunicationCache = [];
+	/** @var Array<string, array> */
+	private array $summarizeTranscriptionDataCache = [];
+	/** @var Array<int, array|null> */
+	private array $jobOwnerCache = [];
 
 	private EventManager $ormEventManager;
 	private array $eventKeys = [
@@ -125,9 +135,18 @@ class JobRepository
 	/**
 	 * @return Result<SummarizeCallTranscriptionPayload>|null
 	 */
-	public function getSummarizeCallTranscriptionResultByActivity(int $activityId, ?int $jobId = null): ?Result
+	public function getSummarizeCallTranscriptionResultByActivity(
+		int $activityId,
+		?int $jobId = null,
+		?int $ownerTypeId = null,
+		?int $ownerId = null,
+	): ?Result
 	{
-		$cacheKey = sprintf('%d-%d', $activityId, $jobId ?? 0);
+		$hasOwnerScope = (int)$ownerTypeId > 0 && (int)$ownerId > 0;
+		$cacheKey = $hasOwnerScope
+			? sprintf('%d-%d-%d-%d', $activityId, $jobId ?? 0, $ownerTypeId, $ownerId)
+			: sprintf('%d-%d', $activityId, $jobId ?? 0)
+		;
 		if (array_key_exists($cacheKey, $this->summarizeCache))
 		{
 			return is_object($this->summarizeCache[$cacheKey])
@@ -143,7 +162,6 @@ class JobRepository
 				->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
 				->where('ENTITY_ID', $activityId)
 				->where('TYPE_ID', SummarizeCallTranscription::TYPE_ID)
-				// select last job
 				->addOrder('ID', 'DESC')
 			;
 
@@ -152,9 +170,9 @@ class JobRepository
 				$query->where('ID', $jobId);
 			}
 
-			$job = $query
-				->setLimit(1)
-				->fetchObject()
+			$job = $hasOwnerScope
+				? $this->findLatestJobForOwner($query, (int)$ownerTypeId, (int)$ownerId)
+				: $query->setLimit(1)->fetchObject()
 			;
 		}
 		else
@@ -265,7 +283,7 @@ class JobRepository
 	}
 
 	/**
-	 * @return Result<ScoreCallPayload>|null
+	 * @return Result<ScoreCallV2Payload>|null
 	 */
 	public function getCallScoringResult(int $activityId, ?int $jobId = null): ?Result
 	{
@@ -284,7 +302,7 @@ class JobRepository
 				->setSelect(['*'])
 				->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
 				->where('ENTITY_ID', $activityId)
-				->where('TYPE_ID', ScoreCall::TYPE_ID)
+				->whereIn('TYPE_ID', [ScoreCall::TYPE_ID, ScoreCallV2::TYPE_ID])
 				// select last job
 				->addOrder('ID', 'DESC')
 			;
@@ -304,7 +322,14 @@ class JobRepository
 			$job = null;
 		}
 
-		$result = $job ? ScoreCall::constructResult($job) : null;
+		$result = null;
+		if ($job)
+		{
+			$result = ((int)$job->requireTypeId() === ScoreCallV2::TYPE_ID)
+				? ScoreCallV2::constructResult($job)
+				: ScoreCall::constructResult($job)
+			;
+		}
 
 		$this->callScoringCache[$cacheKey] = is_object($result) ? clone $result : null;
 
@@ -312,28 +337,99 @@ class JobRepository
 	}
 
 	/**
+	 * @return array<int, Result|null>
+	 */
+	public function getAnyCallScoringResultsByJobIds(int $activityId, array $jobIds): array
+	{
+		$jobIds = array_values(array_unique(array_filter(
+			array_map('intval', $jobIds),
+			static fn(int $jobId): bool => $jobId > 0,
+		)));
+
+		if ($activityId <= 0 || empty($jobIds))
+		{
+			return [];
+		}
+
+		$results = [];
+
+		$jobs = QueueTable::query()
+			->setSelect(['*'])
+			->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
+			->where('ENTITY_ID', $activityId)
+			->whereIn('ID', $jobIds)
+			->whereIn('TYPE_ID', [ScoreCall::TYPE_ID, ScoreCallV2::TYPE_ID])
+			->fetchCollection()
+		;
+
+		$loadedJobIds = [];
+		foreach ($jobs as $job)
+		{
+			$jobId = (int)$job->getId();
+			$result = $this->makeCallScoringResult($job);
+
+			$results[$jobId] = $result;
+			$loadedJobIds[$jobId] = true;
+		}
+
+		foreach ($jobIds as $jobId)
+		{
+			if (isset($loadedJobIds[$jobId]))
+			{
+				continue;
+			}
+
+			$results[$jobId] = null;
+		}
+
+		return $results;
+	}
+
+	private function makeCallScoringResult(?EO_Queue $job): ?Result
+	{
+		if (!$job)
+		{
+			return null;
+		}
+
+		return match ((int)$job->requireTypeId()) {
+			ScoreCall::TYPE_ID => ScoreCall::constructResult($job),
+			ScoreCallV2::TYPE_ID => ScoreCallV2::constructResult($job),
+			default => null,
+		};
+	}
+
+	/**
 	 * @return Result<AnalyzeCommunicationPayload>|null
 	 */
-	public function getAnalyzeCommunicationResult(int $activityId): ?Result
+	public function getAnalyzeCommunicationResult(int $activityId, ?int $ownerTypeId = null, ?int $ownerId = null): ?Result
 	{
-		if (array_key_exists($activityId, $this->analyzeCommunicationCache))
+		$hasOwnerScope = (int)$ownerTypeId > 0 && (int)$ownerId > 0;
+		$cacheKey = $hasOwnerScope
+			? sprintf('%d-%d-%d', $activityId, $ownerTypeId, $ownerId)
+			: $activityId
+		;
+		if (array_key_exists($cacheKey, $this->analyzeCommunicationCache))
 		{
-			return is_object($this->analyzeCommunicationCache[$activityId])
-				? clone $this->analyzeCommunicationCache[$activityId]
+			return is_object($this->analyzeCommunicationCache[$cacheKey])
+				? clone $this->analyzeCommunicationCache[$cacheKey]
 				: null
 			;
 		}
 
 		if ($activityId > 0)
 		{
-			$job = QueueTable::query()
+			$query = QueueTable::query()
 				->setSelect(['*'])
 				->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
 				->where('ENTITY_ID', $activityId)
 				->where('TYPE_ID', AnalyzeCommunication::TYPE_ID)
 				->addOrder('ID', 'DESC')
-				->setLimit(1)
-				->fetchObject()
+			;
+
+			$job = $hasOwnerScope
+				? $this->findLatestJobForOwner($query, (int)$ownerTypeId, (int)$ownerId)
+				: $query->setLimit(1)->fetchObject()
 			;
 		}
 		else
@@ -343,9 +439,215 @@ class JobRepository
 
 		$result = $job ? AnalyzeCommunication::constructResult($job) : null;
 
-		$this->analyzeCommunicationCache[$activityId] = is_object($result) ? clone $result : null;
+		$this->analyzeCommunicationCache[$cacheKey] = is_object($result) ? clone $result : null;
 
 		return $result;
+	}
+
+	private function findLatestJobForOwner(\Bitrix\Main\ORM\Query\Query $query, int $ownerTypeId, int $ownerId): ?EO_Queue
+	{
+		foreach ($this->iterateJobsForOwner($query, $ownerTypeId, $ownerId) as $job)
+		{
+			return $job;
+		}
+
+		return null;
+	}
+
+	/**
+	 * @return \Generator<int, EO_Queue>
+	 */
+	private function iterateJobsForOwner(\Bitrix\Main\ORM\Query\Query $query, int $ownerTypeId, int $ownerId): \Generator
+	{
+		$offset = 0;
+		while ($offset < self::OWNER_SCOPED_JOB_SCAN_LIMIT)
+		{
+			$jobs = $query
+				->setLimit(self::OWNER_SCOPED_JOB_LOOKUP_LIMIT)
+				->setOffset($offset)
+				->fetchCollection()
+			;
+			if ($jobs->count() === 0)
+			{
+				return;
+			}
+
+			$this->warmJobOwnerCache($jobs);
+
+			foreach ($jobs as $job)
+			{
+				if ($this->jobBelongsToOwner($job, $ownerTypeId, $ownerId))
+				{
+					yield $job;
+				}
+			}
+
+			if ($jobs->count() < self::OWNER_SCOPED_JOB_LOOKUP_LIMIT)
+			{
+				return;
+			}
+
+			$offset += self::OWNER_SCOPED_JOB_LOOKUP_LIMIT;
+		}
+	}
+
+	private function jobBelongsToOwner(EO_Queue $job, int $ownerTypeId, int $ownerId): bool
+	{
+		$storedOwner = $this->resolveJobOwner($job);
+		if ($storedOwner === null)
+		{
+			return true;
+		}
+
+		return $storedOwner['ownerTypeId'] === $ownerTypeId && $storedOwner['ownerId'] === $ownerId;
+	}
+
+	private function resolveJobOwner(EO_Queue $job): ?array
+	{
+		$jobId = (int)$job->getId();
+		if (!array_key_exists($jobId, $this->jobOwnerCache))
+		{
+			$this->warmJobOwnerCache([$job]);
+		}
+
+		return $this->jobOwnerCache[$jobId] ?? null;
+	}
+
+	/**
+	 * @param iterable<EO_Queue> $jobs
+	 */
+	private function warmJobOwnerCache(iterable $jobs): void
+	{
+		$hashToJobIds = [];
+		foreach ($jobs as $job)
+		{
+			$jobId = (int)$job->getId();
+			if ($jobId <= 0 || array_key_exists($jobId, $this->jobOwnerCache))
+			{
+				continue;
+			}
+
+			$ownerFromResult = $this->extractOwnerFromJson($job->getResult());
+			if ($ownerFromResult !== null)
+			{
+				$this->jobOwnerCache[$jobId] = $ownerFromResult;
+
+				continue;
+			}
+
+			$hash = (string)$job->getHash();
+			if ($hash === '')
+			{
+				$this->jobOwnerCache[$jobId] = null;
+
+				continue;
+			}
+
+			$hashToJobIds[$hash][] = $jobId;
+		}
+
+		if (empty($hashToJobIds))
+		{
+			return;
+		}
+
+		$ownerByHash = array_fill_keys(array_keys($hashToJobIds), null);
+		if (AIManager::isAvailable())
+		{
+			$rows = AIQueueTable::query()
+				->setSelect(['HASH', 'CONTEXT'])
+				->whereIn('HASH', array_keys($hashToJobIds))
+				->fetchAll()
+			;
+			foreach ($rows as $row)
+			{
+				$hash = (string)($row['HASH'] ?? '');
+				if ($hash === '' || !isset($hashToJobIds[$hash]))
+				{
+					continue;
+				}
+
+				$ownerByHash[$hash] ??= $this->extractOwnerFromContextJson($row['CONTEXT'] ?? null);
+			}
+		}
+
+		foreach ($hashToJobIds as $hash => $jobIds)
+		{
+			foreach ($jobIds as $jobId)
+			{
+				$this->jobOwnerCache[$jobId] = $ownerByHash[$hash];
+			}
+		}
+	}
+
+	private function extractOwnerFromContextJson(?string $contextJson): ?array
+	{
+		if (!is_string($contextJson) || $contextJson === '')
+		{
+			return null;
+		}
+
+		try
+		{
+			$context = Context::unpack($contextJson);
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		$additionalInfo = $context->getParameters()['additionalInfo'] ?? [];
+
+		return $this->extractOwnerFromArray(is_array($additionalInfo) ? $additionalInfo : []);
+	}
+
+	private function extendOwnerScopedSelect(array $fields): array
+	{
+		if (in_array('*', $fields, true))
+		{
+			return $fields;
+		}
+
+		return array_values(array_unique(array_merge($fields, ['ID', 'HASH', 'RESULT'])));
+	}
+
+	private function extractOwnerFromJson(?string $json): ?array
+	{
+		if (!is_string($json) || $json === '')
+		{
+			return null;
+		}
+
+		try
+		{
+			$data = Json::decode($json);
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		return is_array($data) ? $this->extractOwnerFromArray($data) : null;
+	}
+
+	private function extractOwnerFromArray(array $data): ?array
+	{
+		if (!isset($data['targetOwnerTypeId'], $data['targetOwnerId']))
+		{
+			return null;
+		}
+
+		$ownerTypeId = (int)$data['targetOwnerTypeId'];
+		$ownerId = (int)$data['targetOwnerId'];
+		if ($ownerTypeId <= 0 || $ownerId <= 0)
+		{
+			return null;
+		}
+
+		return [
+			'ownerTypeId' => $ownerTypeId,
+			'ownerId' => $ownerId,
+		];
 	}
 
 	/**
@@ -380,7 +682,7 @@ class JobRepository
 
 		return $result;
 	}
-	
+
 	/**
 	 * @return Result<FillRepeatSaleTipsPayload>|null
 	 */
@@ -393,7 +695,7 @@ class JobRepository
 				: null
 			;
 		}
-		
+
 		if ($activityId > 0)
 		{
 			$job = QueueTable::query()
@@ -409,11 +711,11 @@ class JobRepository
 		{
 			$job = null;
 		}
-		
+
 		$result = $job ? FillRepeatSaleTips::constructResult($job) : null;
-		
+
 		$this->fillRepeatSaleTips[$activityId] = is_object($result) ? clone $result : null;
-		
+
 		return $result;
 	}
 	// endregion
@@ -471,6 +773,24 @@ class JobRepository
 		}
 
 		return $updateResult;
+	}
+
+	public function getPendingJobByActivity(int $activityId, int $typeId): ?EO_Queue
+	{
+		if ($activityId <= 0)
+		{
+			return null;
+		}
+
+		return QueueTable::query()
+			->setSelect(['ID', 'HASH'])
+			->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
+			->where('ENTITY_ID', $activityId)
+			->where('TYPE_ID', $typeId)
+			->where('EXECUTION_STATUS', QueueTable::EXECUTION_STATUS_PENDING)
+			->setLimit(1)
+			->fetchObject()
+		;
 	}
 
 	public function isJobOfSameTypeAlreadyExistsForTarget(ItemIdentifier $target, int $jobTypeId): bool
@@ -534,24 +854,116 @@ class JobRepository
 		return $fillFieldsJob->requireFinishedTime()->getTimestamp() - $transcribeJob->requireCreatedTime()->getTimestamp();
 	}
 
-	public function getSummarizeTranscriptionData(int $activityId, array $fields = ['*'], int $limit = 10): array
+	public function getSummarizeTranscriptionData(
+		int $activityId,
+		array $fields = ['*'],
+		int $limit = 10,
+		?int $ownerTypeId = null,
+		?int $ownerId = null,
+	): array
 	{
 		if ($activityId <= 0)
 		{
 			return [];
 		}
 
-		return QueueTable::query()
-			->setSelect($fields)
+		$hasOwnerScope = (int)$ownerTypeId > 0 && (int)$ownerId > 0;
+		$cacheKey = sprintf(
+			'%d-%d-%s-%d-%d',
+			$activityId,
+			$limit,
+			implode(',', $fields),
+			(int)$ownerTypeId,
+			(int)$ownerId,
+		);
+		if (array_key_exists($cacheKey, $this->summarizeTranscriptionDataCache))
+		{
+			return $this->summarizeTranscriptionDataCache[$cacheKey];
+		}
+
+		$query = QueueTable::query()
+			->setSelect($hasOwnerScope ? $this->extendOwnerScopedSelect($fields) : $fields)
 			->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
 			->where('ENTITY_ID', $activityId)
 			->where('TYPE_ID', SummarizeCallTranscription::TYPE_ID)
 			->where('EXECUTION_STATUS', QueueTable::EXECUTION_STATUS_SUCCESS)
-			->setOrder(['FINISHED_TIME' => 'DESC'])
-			->setLimit($limit)
-			->fetchCollection()
-			->getAll()
 		;
+
+		if ($hasOwnerScope)
+		{
+			$query->setOrder(['FINISHED_TIME' => 'DESC', 'ID' => 'DESC']);
+
+			$data = [];
+			foreach ($this->iterateJobsForOwner($query, (int)$ownerTypeId, (int)$ownerId) as $job)
+			{
+				$data[] = $job;
+				if (count($data) >= $limit)
+				{
+					break;
+				}
+			}
+		}
+		else
+		{
+			$data = $query
+				->setOrder(['FINISHED_TIME' => 'DESC'])
+				->setLimit($limit)
+				->fetchCollection()
+				->getAll()
+			;
+		}
+
+		$this->summarizeTranscriptionDataCache[$cacheKey] = $data;
+
+		return $data;
+	}
+
+	/**
+	 * @return array<int, array{
+	 *     jobId: int,
+	 *     summary: string,
+	 *     theme: string,
+	 *     createdAt: ?int,
+	 *     languageId: ?string,
+	 * }>
+	 */
+	public function getSummarizeCallTranscriptionHistoryByActivity(int $activityId, int $limit = 10): array
+	{
+		$result = [];
+		$jobs = $this->getSummarizeTranscriptionData($activityId, ['*'], $limit);
+
+		foreach ($jobs as $job)
+		{
+			$jobId = (int)$job->getId();
+			if ($jobId <= 0)
+			{
+				continue;
+			}
+
+			$summaryResult = SummarizeCallTranscription::constructResult($job);
+			$this->summarizeCache[sprintf('%d-%d', $activityId, $jobId)] = clone $summaryResult;
+
+			if (!$summaryResult->isSuccess())
+			{
+				continue;
+			}
+
+			$payload = $summaryResult->getPayload();
+			if (!$payload instanceof SummarizeCallTranscriptionPayload)
+			{
+				continue;
+			}
+
+			$result[] = [
+				'jobId' => $jobId,
+				'summary' => (string)$payload->summary,
+				'theme' => (string)($payload->data?->theme ?? ''),
+				'createdAt' => $job->getFinishedTime()?->getTimestamp(),
+				'languageId' => $summaryResult->getLanguageId(),
+			];
+		}
+
+		return $result;
 	}
 
 	public function isUserHasJobs(int $userId): bool
@@ -621,13 +1033,24 @@ class JobRepository
 		}
 
 		$scoringKey = sprintf('%d-0', $activityId);
-		if (
-			isset($latestByType[ScoreCall::TYPE_ID])
-			&& !array_key_exists($scoringKey, $this->callScoringCache)
-		)
+		if (!array_key_exists($scoringKey, $this->callScoringCache))
 		{
-			$result = ScoreCall::constructResult($latestByType[ScoreCall::TYPE_ID]);
-			$this->callScoringCache[$scoringKey] = is_object($result) ? clone $result : null;
+			$v1Job = $latestByType[ScoreCall::TYPE_ID] ?? null;
+			$v2Job = $latestByType[ScoreCallV2::TYPE_ID] ?? null;
+			$scoringJob = match (true) {
+				$v1Job === null => $v2Job,
+				$v2Job === null => $v1Job,
+				default => ((int)$v2Job->requireId() >= (int)$v1Job->requireId()) ? $v2Job : $v1Job,
+			};
+
+			if ($scoringJob !== null)
+			{
+				$result = ((int)$scoringJob->requireTypeId() === ScoreCallV2::TYPE_ID)
+					? ScoreCallV2::constructResult($scoringJob)
+					: ScoreCall::constructResult($scoringJob)
+				;
+				$this->callScoringCache[$scoringKey] = is_object($result) ? clone $result : null;
+			}
 		}
 
 		if (
@@ -650,6 +1073,60 @@ class JobRepository
 	}
 
 	/**
+	 * Warms the transcribe-result cache for many activities in a single query.
+	 *
+	 * Mirrors getTranscribeCallRecordingResultByActivity() but resolves a batch at once: one
+	 * QueueTable read by ENTITY_ID IN (...) + TYPE_ID = TranscribeCallRecording instead of a query
+	 * per activity. Activities without a job are cached as null so a later per-activity lookup still
+	 * hits the cache. Only activities that are not cached yet are queried. The cache is invalidated
+	 * by QueueTable ORM events, same as the single-activity path.
+	 *
+	 * @param int[] $activityIds
+	 */
+	public function warmTranscribeCacheForActivities(array $activityIds): void
+	{
+		$activityIds = array_values(array_unique(array_filter(
+			array_map('intval', $activityIds),
+			static fn (int $id): bool => $id > 0,
+		)));
+
+		$missing = array_values(array_filter(
+			$activityIds,
+			fn (int $id): bool => !array_key_exists($id, $this->transcribeCache),
+		));
+		if (empty($missing))
+		{
+			return;
+		}
+
+		$jobs = QueueTable::query()
+			->setSelect(['*'])
+			->where('ENTITY_TYPE_ID', CCrmOwnerType::Activity)
+			->whereIn('ENTITY_ID', $missing)
+			->where('TYPE_ID', TranscribeCallRecording::TYPE_ID)
+			->fetchCollection()
+		;
+
+		$jobByActivity = [];
+		foreach ($jobs as $job)
+		{
+			$activityId = (int)$job->requireEntityId();
+			// keep the first job per activity (mirrors the single-activity LIMIT 1 read)
+			if (!isset($jobByActivity[$activityId]))
+			{
+				$jobByActivity[$activityId] = $job;
+			}
+		}
+
+		foreach ($missing as $activityId)
+		{
+			$job = $jobByActivity[$activityId] ?? null;
+			$result = $job ? TranscribeCallRecording::constructResult($job) : null;
+			$this->transcribeCache[$activityId] = is_object($result) ? clone $result : null;
+		}
+	}
+
+	/**
 	 * @internal
 	 */
 	public function cleanRuntimeCache(): void
@@ -662,5 +1139,7 @@ class JobRepository
 		$this->extractScoringCriteriaCache = [];
 		$this->fillRepeatSaleTips = [];
 		$this->analyzeCommunicationCache = [];
+		$this->summarizeTranscriptionDataCache = [];
+		$this->jobOwnerCache = [];
 	}
 }

@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Internal\Service\Endpoint;
 
-use Bitrix\Main\Config\Option;
+use Bitrix\Vibecodeconnector\Internal\Config\ModuleOptions;
 
 final class BaseEndpointProvider
 {
 	private ?string $defaultUrl = null;
 
+	public function __construct(private readonly ModuleOptions $options = new ModuleOptions())
+	{
+	}
+
 	public function getBaseUrl(): string
 	{
-		$value = (string)Option::get('vibecodeconnector', 'endpoint_base_url', '');
+		$value = $this->options->get('endpoint_base_url');
 		if ($value !== '')
 		{
 			return $value;
@@ -36,6 +40,6 @@ final class BaseEndpointProvider
 
 	public function setBaseUrl(string $url): void
 	{
-		Option::set('vibecodeconnector', 'endpoint_base_url', $url);
+		$this->options->set('endpoint_base_url', $url);
 	}
 }

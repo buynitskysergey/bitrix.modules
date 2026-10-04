@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\MessageService\Public\UI\MessageEditor;
 
+use Bitrix\MessageService\Public\Type\CustomTemplate\TemplateBinding;
+
 /**
  * Scene is a concrete placement of the message editor, e.g. details tab scene and grid scene.
  * Each scene has its own preferences, e.g. channels sort is different in each scene.
@@ -11,6 +13,16 @@ namespace Bitrix\MessageService\Public\UI\MessageEditor;
 abstract class Scene implements \JsonSerializable
 {
 	abstract public function getId(): string;
+
+	/**
+	 * Resolve the custom-template binding for this scene from the current editor context.
+	 * Returning null means the scene does not support custom templates, so the editor
+	 * template selector stays unavailable.
+	 */
+	public function buildTemplateBinding(Context $context): ?TemplateBinding
+	{
+		return null;
+	}
 
 	/**
 	 * Scene can exclude some view channels. They will not be shown in the editor.

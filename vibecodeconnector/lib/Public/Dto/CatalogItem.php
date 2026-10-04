@@ -24,5 +24,6 @@ final class CatalogItem
 		public readonly ?string $ownerName = null,
 		public readonly bool $isHidden = false,
 		public readonly bool $isNew = false,
+		public readonly bool $isDescriptionDefault = false,
 	) {}
 }

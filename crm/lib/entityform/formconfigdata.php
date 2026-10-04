@@ -23,6 +23,16 @@ final class FormConfigData extends \Bitrix\UI\EntityForm\FormConfigData
 		$this->factory = Container::getInstance()->getFactory($this->getCrmEntityTypeIdByEntityTypeId($entityTypeId));
 	}
 
+	public function prepare(): array
+	{
+		$data = parent::prepare();
+
+		$totalRowsCount = count($data['grid']['ROWS'] ?? []);
+		$data['grid']['TOTAL_ROWS_COUNT'] = $totalRowsCount;
+
+		return $data;
+	}
+
 	private function isEntityCategoryValid(): bool
 	{
 		return $this->factory

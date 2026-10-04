@@ -17,6 +17,7 @@ use Bitrix\Crm\Service\Display\Field\IblockElementField;
 use Bitrix\Crm\Service\Display\Field\IblockSectionField;
 use Bitrix\Crm\Service\Display\Field\TextField;
 use Bitrix\Crm\Service\Display\Field\StringField;
+use Bitrix\Crm\Service\Display\Field\RichTextUserField;
 use Bitrix\Crm\Service\EditorAdapter;
 use Bitrix\Crm\Service\Factory;
 use Bitrix\Main\DI\ServiceLocator;
@@ -32,6 +33,7 @@ use Bitrix\UI\EntityEditor\ReturnsEditorFields;
 final class ProviderDecorator implements ReturnsEditorFields
 {
 	private const TEXTAREA = 'textarea';
+	private const READ_ONLY_ELEMENT_TYPE_BB_CODE = 'BBCodeText';
 	private const ENTITY_SELECTOR = 'entity-selector';
 	private const MULTI_FIELD = 'multifield';
 	private const COMBINED_FIELD = 'combined';
@@ -324,6 +326,11 @@ final class ProviderDecorator implements ReturnsEditorFields
 				if ($field['type'] === TextField::TYPE || $field['type'] === StringField::TYPE)
 				{
 					$field['type'] = self::TEXTAREA;
+				}
+				elseif ($field['type'] === RichTextUserField::TYPE)
+				{
+					$field['type'] = self::TEXTAREA;
+					$field['data']['readOnlyElementType'] = self::READ_ONLY_ELEMENT_TYPE_BB_CODE;
 				}
 				elseif ($field['type'] === 'double')
 				{

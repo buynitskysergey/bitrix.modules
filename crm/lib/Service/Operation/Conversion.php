@@ -4,9 +4,10 @@ namespace Bitrix\Crm\Service\Operation;
 
 use Bitrix\Crm\Conversion\ConversionManager;
 use Bitrix\Crm\Conversion\EntityConversionConfig;
+use Bitrix\Crm\Conversion\EntityConversionConfigItem;
 use Bitrix\Crm\Conversion\EntityConversionWizard;
-use Bitrix\Crm\Security\EntityAuthorization;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\Factory;
 use Bitrix\Crm\Service\Operation;
 use Bitrix\Crm\Synchronization\UserFieldSynchronizer;
 use Bitrix\Main\Error;
@@ -45,10 +46,25 @@ class Conversion extends Operation
 
 		foreach ($this->configs->getActiveItems() as $configItem)
 		{
-			$canAddDestinationItem = EntityAuthorization::checkCreatePermission($configItem->getEntityTypeID());
-			if(!$canAddDestinationItem)
+			$entityTypeId = $configItem->getEntityTypeID();
+			$factory = Container::getInstance()->getFactory($entityTypeId);
+
+			if ($factory && $factory->isCategoriesSupported())
 			{
-				$entityDescription = \CCrmOwnerType::GetDescription($configItem->getEntityTypeID());
+				$categoryId = $this->resolveTargetCategoryId($configItem, $factory);
+				$canAddDestinationItem =
+					$categoryId !== null
+					&& $userPermissions->entityType()->canAddItemsInCategory($entityTypeId, $categoryId)
+				;
+			}
+			else
+			{
+				$canAddDestinationItem = $userPermissions->entityType()->canAddItems($entityTypeId);
+			}
+
+			if (!$canAddDestinationItem)
+			{
+				$entityDescription = \CCrmOwnerType::GetDescription($entityTypeId);
 				$result->addError(
 					new Error(
 						Loc::getMessage(
@@ -62,6 +78,26 @@ class Conversion extends Operation
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Resolves the target category for a conversion destination that supports categories.
+	 *
+	 * The client-supplied categoryId only selects the pipeline; the permission to add into it is
+	 * verified by the caller. Returns null when the category is invalid (negative) or when the type
+	 * has no default category, which the caller treats as access denied (deny-by-default).
+	 */
+	private function resolveTargetCategoryId(EntityConversionConfigItem $configItem, Factory $factory): ?int
+	{
+		$initData = $configItem->getInitData();
+		if (isset($initData['categoryId']) && $initData['categoryId'] !== '')
+		{
+			$categoryId = (int)$initData['categoryId'];
+
+			return $categoryId >= 0 ? $categoryId : null;
+		}
+
+		return $factory->getDefaultCategory()?->getId();
 	}
 
 	/**

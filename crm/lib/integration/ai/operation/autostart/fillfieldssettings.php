@@ -11,6 +11,7 @@ use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\ChannelSett
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\ChatChannelSettings;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
@@ -21,10 +22,35 @@ use JsonSerializable;
 final class FillFieldsSettings implements AutoStartInterface, JsonSerializable
 {
 	private array $channelSettings;
+	private array $scenarioOverrides;
 
-	public function __construct(array $channelSettings = [])
+	public function __construct(array $channelSettings = [], array $scenarioOverrides = [])
 	{
 		$this->channelSettings = $channelSettings;
+		$this->scenarioOverrides = $scenarioOverrides;
+	}
+
+	public function getScenarioOverrides(): array
+	{
+		return $this->scenarioOverrides;
+	}
+
+	public function hasScenarioOverrides(): bool
+	{
+		return $this->scenarioOverrides !== [];
+	}
+
+	public function withScenarioOverrides(array $scenarioOverrides): self
+	{
+		$clone = clone $this;
+		$clone->scenarioOverrides = $scenarioOverrides;
+
+		return $clone;
+	}
+
+	public function getScenarioOverride(string $scenarioCode, string $channel): ?array
+	{
+		return $this->scenarioOverrides[$scenarioCode][$channel] ?? null;
 	}
 
 	public function addChannelSettings(ChannelSettingsInterface $settings): void
@@ -82,23 +108,35 @@ final class FillFieldsSettings implements AutoStartInterface, JsonSerializable
 			return $settings->toArray();
 		}, $this->channelSettings);
 
-		return [
+		$payload = [
 			'channels' => $result,
 		];
+
+		if ($this->scenarioOverrides !== [])
+		{
+			$payload['scenarioOverrides'] = $this->scenarioOverrides;
+		}
+
+		return $payload;
 	}
 
 	public static function fromJson(array $json): ?self
 	{
+		$scenarioOverrides = is_array($json['scenarioOverrides'] ?? null) ? $json['scenarioOverrides'] : [];
+
 		// backwards compatibility for calls
 		if (!isset($json['channels']))
 		{
 			$callSettings = CallChannelSettings::fromArray($json);
 			if ($callSettings !== null)
 			{
-				return new self([
-					CallChannelSettings::CHANNEL_TYPE => $callSettings,
-					ChatChannelSettings::CHANNEL_TYPE => ChatChannelSettings::getDefault(),
-				]);
+				return new self(
+					[
+						CallChannelSettings::CHANNEL_TYPE => $callSettings,
+						ChatChannelSettings::CHANNEL_TYPE => ChatChannelSettings::getDefault(),
+					],
+					$scenarioOverrides,
+				);
 			}
 
 			return null;
@@ -115,7 +153,7 @@ final class FillFieldsSettings implements AutoStartInterface, JsonSerializable
 			}
 		}
 
-		return new self($channelSettings);
+		return new self($channelSettings, $scenarioOverrides);
 	}
 
 	public static function getDefault(): self
@@ -146,6 +184,38 @@ final class FillFieldsSettings implements AutoStartInterface, JsonSerializable
 		$settings = self::fromJson($settingsJson);
 
 		return $settings instanceof self ? $settings : self::getDefault();
+	}
+
+	public static function hasSavedValue(int $entityTypeId, ?int $categoryId = null): bool
+	{
+		return Option::get('crm', self::getOptionName($entityTypeId, $categoryId)) !== '';
+	}
+
+	public static function getRawValue(int $entityTypeId, ?int $categoryId = null): string
+	{
+		return Option::get('crm', self::getOptionName($entityTypeId, $categoryId));
+	}
+
+	public static function getFreshRawValue(int $entityTypeId, ?int $categoryId = null): string
+	{
+		$connectionPool = Application::getInstance()->getConnectionPool();
+		$connectionPool->useMasterOnly(true);
+
+		try
+		{
+			$connection = Application::getConnection();
+			$sqlHelper = $connection->getSqlHelper();
+			$optionName = $sqlHelper->forSql(self::getOptionName($entityTypeId, $categoryId));
+			$value = $connection->queryScalar(
+				"SELECT VALUE FROM b_option WHERE MODULE_ID = 'crm' AND NAME = '{$optionName}'"
+			);
+
+			return is_string($value) ? $value : '';
+		}
+		finally
+		{
+			$connectionPool->useMasterOnly(false);
+		}
 	}
 
 	public static function save(self $settings, int $entityTypeId, ?int $categoryId = null): Result
@@ -182,10 +252,13 @@ final class FillFieldsSettings implements AutoStartInterface, JsonSerializable
 
 	private static function getOptionName(int $entityTypeId, ?int $categoryId): string
 	{
-		$factory = Container::getInstance()->getFactory($entityTypeId);
-		if ($factory?->isCategoriesSupported() && $categoryId === null)
+		if ($categoryId === null)
 		{
-			$categoryId = $factory?->createDefaultCategoryIfNotExist()->getId();
+			$factory = Container::getInstance()->getFactory($entityTypeId);
+			if ($factory?->isCategoriesSupported())
+			{
+				$categoryId = $factory?->getDefaultCategory()?->getId();
+			}
 		}
 
 		$typeKey = (string)($entityTypeId);

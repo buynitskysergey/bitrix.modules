@@ -55,11 +55,7 @@ class EntityMergerFactory
 		{
 			return new CompanyMerger($currentUserID, $enablePermissionCheck);
 		}
-		elseif (
-			$entityTypeID === \CCrmOwnerType::Quote
-			|| $entityTypeID === \CCrmOwnerType::SmartInvoice
-			|| \CCrmOwnerType::isPossibleDynamicTypeId($entityTypeID)
-		)
+		elseif (FactoryBasedMerger::shouldMergeClientBindingsFromAllItems($entityTypeID))
 		{
 			return new FactoryBasedMerger(
 				$entityTypeID,

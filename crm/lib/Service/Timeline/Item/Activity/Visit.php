@@ -12,6 +12,7 @@ use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\Text;
 use Bitrix\Crm\Service\Timeline\Layout\Body\Logo;
 use Bitrix\Crm\Service\Timeline\Layout\Common;
 use Bitrix\Crm\Service\Timeline\Layout\Header\Tag;
+use Bitrix\Crm\Service\Timeline\Layout\Menu\MenuItemFactory;
 use Bitrix\Main\Localization\Loc;
 
 final class Visit extends Activity
@@ -45,6 +46,7 @@ final class Visit extends Activity
 
 			return Common\Logo::getInstance(Common\Logo::CALL_PLAY_RECORD)
 				->createLogo()
+				?->setAdditionalIconCode('microphone')
 				?->setAction($changePlayerStateAction)
 			;
 		}
@@ -114,6 +116,26 @@ final class Visit extends Activity
 	{
 		$items = parent::getMenuItems();
 		unset($items['view']);
+
+		$records = $this->fetchAudioRecordList();
+		$isSingleRecord = (count($records) === 1);
+		foreach ($records as $index => $record)
+		{
+			$downloadItem = MenuItemFactory::createDownloadFileMenuItem()
+				->setAction(
+					(new JsEvent('Activity:Visit:DownloadRecord'))
+						->addActionParamString('url', $record['VIEW_URL'])
+						->addActionParamString('name', (string)($record['NAME'] ?? ''))
+				)
+			;
+
+			if (!$isSingleRecord)
+			{
+				$downloadItem->setSubtitle($record['NAME']);
+			}
+
+			$items["downloadFile_$index"] = $downloadItem;
+		}
 
 		return $items;
 	}

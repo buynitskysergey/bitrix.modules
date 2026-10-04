@@ -4,7 +4,6 @@ namespace Bitrix\Crm\RepeatSale\Service;
 
 use Bitrix\Crm\Item;
 use Bitrix\Crm\RepeatSale\Log\Entity\RepeatSaleLogTable;
-use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
 use Bitrix\Crm\RepeatSale\Segment\SegmentItem;
 use Bitrix\Crm\RepeatSale\Service\Action\ActionInterface;
 use Bitrix\Main\Error;
@@ -23,26 +22,7 @@ final class Operation
 		private readonly ?Context $context = null,
 	)
 	{
-		if ($this->context)
-		{
-			$segmentId = $this->context->getSegmentId();
-			$entity = RepeatSaleSegmentController::getInstance()->getById($segmentId, true);
-			if ($entity)
-			{
-				if ($entity->isChildren())
-				{
-					$segmentController = RepeatSaleSegmentController::getInstance();
-					$parentEntity = $segmentController->getList([
-						'filter' => [
-							'=CODE' => $entity->getBaseSegmentCode(),
-						],
-						'limit' => 1,
-					])->current();
-				}
-
-				$this->segmentItem = SegmentItem::createFromEntity($parentEntity ?? $entity);
-			}
-		}
+		$this->segmentItem = $this->context?->getTargetSegmentItem();
 	}
 
 	public function addAction(ActionInterface $action): self
@@ -133,6 +113,11 @@ final class Operation
 
 	private function afterLaunch(): Result
 	{
+		if (!$this->segmentItem)
+		{
+			return new Result();
+		}
+
 		if (!isset(self::$itemsCount['all']))
 		{
 			self::$itemsCount['all'] = 0;

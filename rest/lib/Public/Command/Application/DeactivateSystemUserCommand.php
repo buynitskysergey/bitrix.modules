@@ -8,6 +8,9 @@ use Bitrix\Main;
 
 class DeactivateSystemUserCommand extends Main\Command\AbstractCommand
 {
+	/**
+	 * @param int $appId AppTable.ID
+	 */
 	public function __construct(
 		public readonly int $appId,
 	)

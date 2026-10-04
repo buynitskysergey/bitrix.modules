@@ -60,6 +60,7 @@ class MailEntityDataTable extends Entity\DataManager
 					MailEntityOptionsTable::MAILBOX_TYPE_NAME,
 					MailEntityOptionsTable::MESSAGE_TYPE_NAME,
 					MailEntityOptionsTable::USER_TYPE_NAME,
+					MailEntityOptionsTable::SOURCE_GENERATION_MATCH_TYPE_NAME,
 				],
 				'required' => true,
 				'primary' => true,

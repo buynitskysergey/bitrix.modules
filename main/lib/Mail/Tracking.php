@@ -28,6 +28,7 @@ class Tracking
 	const onClick = 'OnMailEventMailClick';
 	const onUnsubscribe = 'OnMailEventSubscriptionDisable';
 	const onChangeStatus = 'OnMailEventMailChangeStatus';
+	const onClickRedirect = 'OnMailEventMailClickRedirect';
 	const CUSTOM_SIGNER_KEY = 'signer_sender_mail_key';
 
 	/**
@@ -435,12 +436,124 @@ class Tracking
 		$url = $url ?: '/';
 		if ($isValidate)
 		{
+			$url = static::applyClickRedirectHandlers($url, $skipSecCheck);
 			LocalRedirect($url, $skipSecCheck);
 		}
 		else
 		{
 			ShowError('Failed to verify the security of the url address');
 		}
+	}
+
+	/**
+	 * Generic extension point invoked right before the click redirect.
+	 * Owner modules (e.g. sender) may sanitize the target url — for instance strip their own
+	 * service query parameters that must not leak to external sites — without main knowing about
+	 * any concrete parameter. Handlers must only narrow the url within the same origin, never
+	 * change the destination.
+	 *
+	 * Defense in depth: the caller's $skipSecCheck flag (which may disable the anti-open-redirect
+	 * check) is computed against the ORIGINAL signed url and is NOT recomputed here. Therefore a
+	 * handler-supplied url is applied only when its origin (scheme + host + port) is identical to
+	 * the origin of the incoming url. If a handler changes the origin the change is ignored and the
+	 * previous url is kept, so the destination stays the same and $skipSecCheck remains valid.
+	 *
+	 * @param string $url Target url (already signature-validated).
+	 * @param bool $isSigned Whether the url arrived with a valid signature.
+	 * @return string Possibly sanitized url with the original origin preserved.
+	 */
+	private static function applyClickRedirectHandlers(string $url, bool $isSigned): string
+	{
+		$originalOrigin = null;
+
+		$event = new Main\Event(
+			'main',
+			self::onClickRedirect,
+			[['url' => $url, 'isSigned' => $isSigned]]
+		);
+		$event->send();
+
+		foreach ($event->getResults() as $eventResult)
+		{
+			if ($eventResult->getType() === EventResult::ERROR)
+			{
+				continue;
+			}
+
+			$parameters = $eventResult->getParameters();
+			if (is_array($parameters) && isset($parameters['url']) && is_string($parameters['url']) && $parameters['url'] !== '')
+			{
+				$candidate = $parameters['url'];
+				// Apply the handler's url only when it keeps the original origin. A different origin
+				// would redirect elsewhere while $skipSecCheck (computed for the original url) still
+				// bypasses the anti-open-redirect check, so such a change must be discarded.
+				// $originalOrigin is computed lazily, only once there is an actual candidate to compare
+				// against, so the common case (no handler returns a url) never parses $url at all.
+				if ($originalOrigin === null)
+				{
+					$originalOrigin = static::getUrlOrigin($url);
+				}
+
+				if (static::getUrlOrigin($candidate) === $originalOrigin)
+				{
+					$url = $candidate;
+				}
+			}
+		}
+
+		return $url;
+	}
+
+	/**
+	 * Builds a normalized origin key (scheme + host + port) used to compare a handler-supplied url
+	 * against the original redirect target. Two urls with an equal key point to the same origin.
+	 *
+	 * Relative urls (no authority) collapse to a single stable marker (empty string), so any two
+	 * relative urls share an origin while a relative-to-absolute switch does not.
+	 *
+	 * Protocol-relative forms ("//host", and the backslash variants "/\", "\/", "\\" that browsers
+	 * treat as "//") are detected before normalization — Main\Web\Uri collapses the leading pair
+	 * into "/" and hides the host — and reparsed with a temporary scheme, matching the approach used
+	 * by the redirect handler (see sender ExternalUrlSanitizer). The same temporary scheme is used
+	 * for every protocol-relative url, so an original protocol-relative url and a handler-sanitized
+	 * protocol-relative variant of it yield the same origin.
+	 *
+	 * @param string $url Url to derive the origin from.
+	 * @return string Origin key "scheme://host:port" (lowercased) or '' for relative urls.
+	 */
+	private static function getUrlOrigin(string $url): string
+	{
+		$trimmedUrl = ltrim($url);
+		$isProtocolRelative = strlen($trimmedUrl) >= 2
+			&& ($trimmedUrl[0] === '/' || $trimmedUrl[0] === '\\')
+			&& ($trimmedUrl[1] === '/' || $trimmedUrl[1] === '\\');
+
+		if ($isProtocolRelative)
+		{
+			// Turn backslashes after the leading pair into forward slashes for this temporary parsing url:
+			// Main\Web\Uri does not treat "\" as a path delimiter, so a host like "portal.example\path"
+			// would otherwise be glued to the path and produce a wrong origin key.
+			$uri = new Main\Web\Uri('http://' . str_replace('\\', '/', substr($trimmedUrl, 2)));
+		}
+		else
+		{
+			// Normalize backslashes to forward slashes for this temporary parsing url ONLY, to
+			// extract the origin: Main\Web\Uri does not treat "\" as a path delimiter, so a host like
+			// "portal.example\path" would otherwise be glued to the path and produce a wrong origin
+			// key. The scheme is unaffected (it precedes "://"), so the real scheme is still used.
+			$uri = new Main\Web\Uri(str_replace('\\', '/', $url));
+		}
+
+		$host = mb_strtolower($uri->getHost());
+		if ($host === '')
+		{
+			return '';
+		}
+
+		$scheme = mb_strtolower($uri->getScheme());
+		$port = $uri->getPort();
+
+		return $scheme . '://' . $host . ':' . ($port === null ? '' : $port);
 	}
 
 	/**

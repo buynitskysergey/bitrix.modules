@@ -3,11 +3,14 @@
 namespace Bitrix\UI\Controller;
 
 use Bitrix\Bitrix24\License;
+use Bitrix\Bitrix24\Internal\Service\VibePlus\VibePlusTrialService;
+use Bitrix\Bitrix24\Public\Service\VibePlus\RuntimeStateProvider;
 use Bitrix\Main\Application;
 use Bitrix\Bitrix24;
 use Bitrix\Bitrix24\License\Market;
 use Bitrix\Main\Engine;
 use Bitrix\Main\Loader;
+use Bitrix\Main\Result;
 use Bitrix\UI\FeaturePromoter;
 
 class InfoHelper extends Engine\Controller
@@ -33,7 +36,18 @@ class InfoHelper extends Engine\Controller
 		];
 		if (Loader::includeModule('bitrix24') && defined('BX24_HOST_NAME'))
 		{
-			$res = License::getCurrent()->getDemo()->activate();
+			if (
+				class_exists(RuntimeStateProvider::class)
+				&& class_exists(VibePlusTrialService::class)
+				&& (new RuntimeStateProvider())->isVibePlusStartEnabled()
+			)
+			{
+				$res = $this->getVibePlusTrialService()->activateTrial();
+			}
+			else
+			{
+				$res = $this->activateTariffDemo();
+			}
 
 			if ($res->isSuccess())
 			{
@@ -42,6 +56,16 @@ class InfoHelper extends Engine\Controller
 		}
 
 		return $result;
+	}
+
+	protected function getVibePlusTrialService(): VibePlusTrialService
+	{
+		return new VibePlusTrialService();
+	}
+
+	protected function activateTariffDemo(): Result
+	{
+		return License::getCurrent()->getDemo()->activate();
 	}
 
 	public function getBuySubscriptionUrlAction()

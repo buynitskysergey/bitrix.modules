@@ -3,6 +3,7 @@
 use Bitrix\Disk\Bitrix24Disk\SubscriberManager;
 use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Document\DocumentHandlersManager;
+use Bitrix\Disk\Document\Flipchart\DualMode;
 use Bitrix\Disk\Document\OnlyOffice;
 use Bitrix\Disk\Document\Vibeoffice;
 use Bitrix\Disk\Internal\Entity\CustomServers\OnlyOfficeCustomServer;
@@ -150,6 +151,9 @@ return [
 			ExternalLinkRepositoryInterface::class => [
 				'className' => ExternalLinkBitrixOrmRepository::class,
 			],
+			DualMode\BoardApiServiceFactory::class => [
+				'className' => DualMode\DefaultBoardApiServiceFactory::class,
+			],
 		],
 		'readonly' => true,
 	],
@@ -169,7 +173,6 @@ return [
 		'value' => [
 			'client_token_header_lookup' => 'X-Permissions',
 			'api_host' => 'https://flip-backend',
-			'jwt_secret' => 'secret_token',
 			'jwt_ttl' => 30,
 			'app_url' => 'https://flip-backend/app',
 			'save_delta_time' => 30,

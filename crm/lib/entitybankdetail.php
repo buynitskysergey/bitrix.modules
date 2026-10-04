@@ -333,12 +333,42 @@ class EntityBankDetail
 
 	public function getList($params)
 	{
+		$checkOwnerPermissions = (bool)($params['checkOwnerPermissions'] ?? false);
+		unset($params['checkOwnerPermissions']);
+
+		if ($checkOwnerPermissions)
+		{
+			$params['filter'] = $this->applyOwnerPermissionsFilter(
+				isset($params['filter']) && is_array($params['filter']) ? $params['filter'] : []
+			);
+		}
+
 		return BankDetailTable::getList($params);
 	}
 
-	public function getCountByFilter($filter = array())
+	public function getCountByFilter($filter = array(), array $options = [])
 	{
+		if ($options['checkOwnerPermissions'] ?? false)
+		{
+			$filter = $this->applyOwnerPermissionsFilter(is_array($filter) ? $filter : []);
+		}
+
 		return BankDetailTable::getCountByFilter($filter);
+	}
+
+	private function applyOwnerPermissionsFilter(array $filter): array
+	{
+		$restrictionFilter = (new Security\OwnerEntityListRestriction(
+			Service\Container::getInstance()->getUserPermissions()
+		))->buildRequisiteBoundFilter('ENTITY_TYPE_ID', 'ENTITY_ID');
+
+		if ($restrictionFilter === null)
+		{
+			return $filter;
+		}
+
+		// combine via AND as a nested subfilter to avoid key conflicts with the existing filter
+		return empty($filter) ? $restrictionFilter : [$filter, $restrictionFilter];
 	}
 
 	public function getById($id)

@@ -34,56 +34,6 @@ class Deal extends Factory
 		Loc::loadMessages(Path::combine(__DIR__, '..', '..', '..', 'classes', 'general', 'crm_deal.php'));
 	}
 
-	public function isSourceEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isObserversEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isClientEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isClientContactEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isClientCompanyEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isBeginCloseDatesEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isAutomationEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isBizProcSupported(): bool
-	{
-		return true;
-	}
-
-	public function isCategoriesSupported(): bool
-	{
-		return true;
-	}
-
-	public function isPaymentsEnabled(): bool
-	{
-		return true;
-	}
-
 	public function isInventoryManagementEnabled(): bool
 	{
 		return
@@ -149,26 +99,6 @@ class Deal extends Factory
 	public function isNewRoutingForAutomationEnabled(): bool
 	{
 		return false;
-	}
-
-	public function isUseInUserfieldEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isCrmTrackingEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isLinkWithProductsEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isRecyclebinEnabled(): bool
-	{
-		return DealSettings::getCurrent()->isRecycleBinEnabled();
 	}
 
 	public function isDeferredCleaningEnabled(): bool
@@ -837,32 +767,12 @@ class Deal extends Factory
 		return is_null($categoryId) ? -1 : $categoryId;
 	}
 
-	public function isCountersEnabled(): bool
-	{
-		return true;
-	}
-
 	public function isSmartActivityNotificationSupported(): bool
 	{
 		return true;
 	}
 
 	public function isCommunicationRoutingSupported(): bool
-	{
-		return true;
-	}
-
-	public function isRecurringEnabled(): bool
-	{
-		return $this->isRecurringSupported();
-	}
-
-	public function isRecurringSupported(): bool
-	{
-		return true;
-	}
-
-	public function isMyCompanyEnabled(): bool
 	{
 		return true;
 	}

@@ -186,7 +186,7 @@ class Dynamic extends Kanban\Entity
 		return 'SUM';
 	}
 
-	protected function getDataToCalculateTotalSums(string $fieldSum, array $filter, array $runtime): array
+	protected function doGetDataToCalculateTotalSums(string $fieldSum, array $filter, array $runtime): array
 	{
 		if ($this->factory->isStagesEnabled())
 		{

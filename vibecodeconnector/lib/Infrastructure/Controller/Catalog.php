@@ -5,45 +5,77 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Infrastructure\Controller;
 
 use Bitrix\Main\AccessDeniedException;
+use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Config\Ini;
+use Bitrix\Main\DB\TransactionException;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\Response\AjaxJson;
+use Bitrix\Main\Error;
 use Bitrix\Main\HttpResponse;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Result;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UI\PageNavigation;
+use Bitrix\Vibecodeconnector\Infrastructure\Controller\ActionFilter\CheckCatalogAvailability;
 use Bitrix\Vibecodeconnector\Infrastructure\Dto\CatalogItemDtoMapper;
 use Bitrix\Vibecodeconnector\Infrastructure\Integration\Main\CatalogOnboardingSpotlight;
 use Bitrix\Vibecodeconnector\Infrastructure\Service\Catalog\OpenApp\OpenAppLayoutService;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItem;
+use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogItemType;
 use Bitrix\Vibecodeconnector\Internal\Entity\Catalog\CatalogListState;
 use Bitrix\Vibecodeconnector\Internal\Exception\CatalogItemNotFoundException;
+use Bitrix\Vibecodeconnector\Internal\Exception\CatalogSyncFailedException;
 use Bitrix\Vibecodeconnector\Internal\Integration\Main\AccessCodes;
+use Bitrix\Vibecodeconnector\Internal\Integration\Main\IconStorageService;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\AccessRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\CatalogItemFilter;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\CatalogItemRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\LastOpenedRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\PinRepository;
+use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\ViewedRepository;
 use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Access\HiddenAccessCleaner;
+use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Icon\IconUpdateIntent;
+use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Icon\UploadedIconProcessor;
+use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Sharing\CatalogSharingService;
+use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Vibecode\CatalogItemSender;
+use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Vibecode\CatalogItemUpdateSender;
 use Bitrix\Vibecodeconnector\Public\Dto\CatalogItemCollection;
+use Bitrix\Vibecodeconnector\Public\Service\AvailabilityService;
 use Bitrix\Vibecodeconnector\Public\Command\Catalog\Item\Hide\HideCatalogItemCommand;
 use Bitrix\Vibecodeconnector\Public\Command\Catalog\Item\Hide\HideCatalogItemCommandHandler;
 use Bitrix\Vibecodeconnector\Public\Command\Catalog\Item\Hide\UnhideCatalogItemCommand;
 use Bitrix\Vibecodeconnector\Public\Command\Catalog\Item\Hide\UnhideCatalogItemCommandHandler;
+use Bitrix\Vibecodeconnector\Public\Command\Catalog\Item\UpdateCatalogItemCommand;
 use Bitrix\Vibecodeconnector\Public\Provider\CatalogProvider;
+
+Loc::loadMessages(__FILE__);
 
 final class Catalog extends Controller
 {
+	private const TITLE_MIN_LENGTH = 2;
+	private const TITLE_MAX_LENGTH = 100;
+	private const DESCRIPTION_MAX_LENGTH = 500;
+	private const VIEW_SESSION_MAX_AGE = 86400;
+
 	private CatalogProvider $catalog;
 	private CatalogItemDtoMapper $mapper;
 	private CatalogItemRepository $itemRepository;
 	private PinRepository $pinRepository;
 	private LastOpenedRepository $lastOpenedRepository;
+	private ViewedRepository $viewedRepository;
 	private AccessRepository $accessRepository;
 	private AccessCodes $accessCodes;
 	private HiddenAccessCleaner $hiddenAccessCleaner;
 	private OpenAppLayoutService $openAppLayoutService;
+	private CatalogItemUpdateSender $catalogItemSender;
+	private IconStorageService $iconStorage;
+	private UploadedIconProcessor $uploadedIconProcessor;
+	private CatalogSharingService $sharingService;
 
 	public function init(): void
 	{
@@ -53,10 +85,51 @@ final class Catalog extends Controller
 		$this->itemRepository = new CatalogItemRepository();
 		$this->pinRepository = new PinRepository();
 		$this->lastOpenedRepository = new LastOpenedRepository();
+		$this->viewedRepository = new ViewedRepository();
 		$this->accessRepository = new AccessRepository();
 		$this->accessCodes = new AccessCodes();
 		$this->hiddenAccessCleaner = new HiddenAccessCleaner();
 		$this->openAppLayoutService = ServiceLocator::getInstance()->get(OpenAppLayoutService::class);
+		$this->catalogItemSender = ServiceLocator::getInstance()->get(CatalogItemSender::class);
+		$this->iconStorage = new IconStorageService();
+		$this->uploadedIconProcessor = new UploadedIconProcessor($this->iconStorage);
+		$this->sharingService = ServiceLocator::getInstance()->get(CatalogSharingService::class);
+	}
+
+	protected function processBeforeAction(Action $action)
+	{
+		if (
+			$action->getName() === 'update'
+			&& $this->getRequest()->isPost()
+			&& $this->getRequest()->getPost('catalogItemId') === null
+		)
+		{
+			$contentLength = (int)($this->getRequest()->getServer()->get('CONTENT_LENGTH') ?? 0);
+			$postMaxSize = Ini::getInt('post_max_size');
+			if ($postMaxSize > 0 && $contentLength > $postMaxSize)
+			{
+				$this->addError(new Error(
+					(string)Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_TOO_LARGE'),
+					UploadedIconProcessor::ERROR_SIZE,
+				));
+
+				return false;
+			}
+		}
+
+		return parent::processBeforeAction($action);
+	}
+
+	protected function getDefaultPreFilters(): array
+	{
+		return [
+			...parent::getDefaultPreFilters(),
+			// from the container, like the client extensions: the registration stays the
+			// single place the availability service is assembled in
+			new CheckCatalogAvailability(
+				ServiceLocator::getInstance()->get(AvailabilityService::class),
+			),
+		];
 	}
 
 	public function configureActions(): array
@@ -68,6 +141,15 @@ final class Catalog extends Controller
 			],
 			'+prefilters' => [
 				new ActionFilter\HttpMethod([ActionFilter\HttpMethod::METHOD_POST]),
+			],
+		];
+		$configureActions['update'] = [
+			'-prefilters' => [
+				ActionFilter\HttpMethod::class,
+			],
+			'+prefilters' => [
+				new ActionFilter\HttpMethod([ActionFilter\HttpMethod::METHOD_POST]),
+				new ActionFilter\CloseSession(),
 			],
 		];
 		$configureActions['markCatalogShown'] = [
@@ -88,6 +170,18 @@ final class Catalog extends Controller
 				new ActionFilter\Csrf(false),
 			],
 		];
+		foreach (['getShare', 'setShare', 'getLink', 'setLink'] as $action)
+		{
+			$configureActions[$action] = [
+				'-prefilters' => [
+					ActionFilter\HttpMethod::class,
+				],
+				'+prefilters' => [
+					new ActionFilter\HttpMethod([ActionFilter\HttpMethod::METHOD_POST]),
+					new ActionFilter\CloseSession(),
+				],
+			];
+		}
 
 		return $configureActions;
 	}
@@ -109,6 +203,7 @@ final class Catalog extends Controller
 				$offset,
 				$limit,
 			),
+			$currentUser->isAdmin(),
 		)];
 	}
 
@@ -149,6 +244,7 @@ final class Catalog extends Controller
 		?string $q = null,
 		?string $state = null,
 		?int $previewUserId = null,
+		?int $viewSession = null,
 		?PageNavigation $pageNavigation = null,
 	): array
 	{
@@ -156,28 +252,92 @@ final class Catalog extends Controller
 		$userId = $this->resolveListUserId($currentUser, $previewUserId);
 		$offset = $this->resolvePaginationOffset($pageNavigation);
 		$limit = $this->resolvePaginationLimit($pageNavigation);
+		$listState = CatalogListState::fromRequest($state);
+		$isSelfListing = $userId === $selfId && $userId > 0;
+
+		// Order matters: the stamp and the count describe the state before this page is
+		// marked, so a client switching to the New state by this very response still finds
+		// the apps it has just been shown.
+		$session = $isSelfListing ? $this->resolveViewSession($viewSession, $offset) : null;
+		// The count does not depend on the search query, and the client decides on its
+		// starting selection by the first response without one. Unlike the stamp it is
+		// reported in preview too — for the employee whose catalog is shown, the same way
+		// the standalone count action does it. Computed without the cache: the starting
+		// selection must not be decided by a value that may be up to the cache TTL old.
+		// The price is a COUNT on every first page, so also on each selection switch inside
+		// an open catalog, not just on opening it — paging itself pays nothing. Telling the
+		// two apart needs a bootstrap flag in the request; the flag was not added because
+		// the count is cheap next to the listing query it travels with.
+		$hasSearchQuery = $q !== null && trim($q) !== '';
+		$newAppsCount = $userId > 0 && $offset === 0 && !$hasSearchQuery
+			? $this->catalog->countNewAppsForUser($userId, useCache: false)
+			: null;
+
 		$collection = $this->catalog->listAccessibleToUser(
-			$userId,
-			$q,
-			$offset,
-			$limit + 1,
-			CatalogListState::fromRequest($state),
+			userId: $userId,
+			query: $q,
+			offset: $offset,
+			limit: $limit + 1,
+			state: $listState,
+			markViewing: $isSelfListing,
+			viewSession: $session,
+			pageSize: $limit,
 		);
 		[$collection, $hasNext] = $this->slicePaginationCollection($collection, $limit);
 
-		if ($userId === $selfId && $userId > 0)
+		if ($isSelfListing)
 		{
 			$this->catalog->markCatalogOpenedForUser($userId);
 		}
 
-		return [
-			'items' => $this->mapper->toArrayList($collection),
+		$response = [
+			'items' => $this->mapper->toArrayList($collection, $currentUser->isAdmin()),
 			'pagination' => [
 				'offset' => $offset,
 				'limit' => $limit,
 				'hasNext' => $hasNext,
 			],
 		];
+
+		if ($session !== null)
+		{
+			$response['viewSession'] = $session->getTimestamp();
+		}
+
+		if ($newAppsCount !== null)
+		{
+			$response['newAppsCount'] = $newAppsCount;
+		}
+
+		return $response;
+	}
+
+	/**
+	 * The stamp is issued by the server: the client echoes it back while paging so items
+	 * marked as viewed by the pages it already got stay in the New selection. A malformed
+	 * stamp (not a positive integer or in the future) is replaced with a fresh one instead
+	 * of being rejected.
+	 *
+	 * The age limit applies to the first page only. Replacing a stale stamp mid-paging
+	 * would shrink the selection to items the earlier pages have not marked yet, while the
+	 * offset keeps counting the whole one — the pages in between would be skipped. Paging
+	 * therefore keeps the stamp it was started with, however old, and the limit takes
+	 * effect on the next opening, which starts from the first page.
+	 */
+	private function resolveViewSession(?int $viewSession, int $offset = 0): DateTime
+	{
+		$now = time();
+		if (
+			$viewSession !== null
+			&& $viewSession > 0
+			&& $viewSession <= $now
+			&& ($offset > 0 || $viewSession >= $now - self::VIEW_SESSION_MAX_AGE)
+		)
+		{
+			return DateTime::createFromTimestamp($viewSession);
+		}
+
+		return DateTime::createFromTimestamp($now);
 	}
 
 	private function resolvePaginationOffset(?PageNavigation $pageNavigation = null): int
@@ -230,8 +390,73 @@ final class Catalog extends Controller
 		return [
 			'items' => $this->mapper->toArrayList(
 				$this->catalog->listDiscoverableToUser($userId, $query, $offset, $limit),
+				$currentUser->isAdmin(),
 			),
 		];
+	}
+
+	public function getShareAction(CurrentUser $currentUser, int $catalogItemId): ?array
+	{
+		return $this->sharingResult($this->sharingService->getShare(
+			$catalogItemId,
+			(int)$currentUser->getId(),
+			$currentUser->isAdmin(),
+		));
+	}
+
+	public function getLinkAction(CurrentUser $currentUser, int $catalogItemId): ?array
+	{
+		return $this->sharingResult($this->sharingService->getLink(
+			$catalogItemId,
+			(int)$currentUser->getId(),
+			$currentUser->isAdmin(),
+		));
+	}
+
+	public function setShareAction(
+		CurrentUser $currentUser,
+		int $catalogItemId,
+		string $audience,
+		array $users = [],
+		array $departments = [],
+	): ?array {
+		return $this->sharingResult($this->sharingService->setShare(
+			$catalogItemId,
+			(int)$currentUser->getId(),
+			$currentUser->isAdmin(),
+			$audience,
+			$users,
+			$departments,
+		));
+	}
+
+	public function setLinkAction(
+		CurrentUser $currentUser,
+		int $catalogItemId,
+		bool $enabled,
+		?string $expiresAt = null,
+		?bool $requireB24Auth = null,
+	): ?array {
+		return $this->sharingResult($this->sharingService->setLink(
+			$catalogItemId,
+			(int)$currentUser->getId(),
+			$currentUser->isAdmin(),
+			$enabled,
+			$expiresAt,
+			$requireB24Auth,
+		));
+	}
+
+	private function sharingResult(Result $result): ?array
+	{
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		return $result->getData();
 	}
 
 	public function openAppLayoutAction(
@@ -369,6 +594,7 @@ final class Catalog extends Controller
 		}
 
 		$this->lastOpenedRepository->recordOpen($userId, $catalogItemId);
+		$this->viewedRepository->markViewed($userId, [$catalogItemId]);
 		$this->catalog->forgetNewAppsCount($userId);
 
 		return AjaxJson::createSuccess(['ok' => true]);
@@ -413,6 +639,269 @@ final class Catalog extends Controller
 		$this->hiddenAccessCleaner->cleanupLostAccess($catalogItemId);
 
 		return ['ok' => true];
+	}
+
+	public function updateAction(
+		CurrentUser $currentUser,
+		int $catalogItemId,
+		?string $title = null,
+		?string $description = null,
+		?string $iconAction = null,
+	): array
+	{
+		$userId = (int)$currentUser->getId();
+		$iconIntent = $this->resolveIconIntent($iconAction);
+		$item = $this->mustGetItem($catalogItemId);
+		$this->mustOwnItem($item, $userId);
+
+		if ($item->getType() !== CatalogItemType::Application)
+		{
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_TYPE'),
+				'catalogItemId',
+			);
+		}
+
+		$fields = [];
+
+		if ($title !== null)
+		{
+			$fields['title'] = $this->validateTitle($title, $item->getTitle());
+		}
+
+		if ($description !== null)
+		{
+			$description = trim($this->validateDescription($description, $item->getDescription()) ?? '');
+			$fields['description'] = $description === '' ? null : $description;
+		}
+
+		if (
+			$iconIntent === IconUpdateIntent::Keep
+			&& ($fields['title'] ?? $item->getTitle()) === $item->getTitle()
+			&& (array_key_exists('description', $fields) ? $fields['description'] : $item->getDescription())
+				=== $item->getDescription()
+		)
+		{
+			return ['ok' => true];
+		}
+
+		$preparedIcon = $iconIntent === IconUpdateIntent::Replace ? $this->storeUploadedIcon() : null;
+		$newIconFileId = $preparedIcon['fileId'] ?? null;
+
+		if ($iconIntent !== IconUpdateIntent::Keep)
+		{
+			$fields['iconFileId'] = $newIconFileId;
+		}
+
+		$displacedIconFileId = null;
+		$connection = Application::getConnection();
+		try
+		{
+			$connection->startTransaction();
+
+			$commandResult = (new UpdateCatalogItemCommand($userId, $catalogItemId, $fields))->run();
+			$displacedIconFileId = $commandResult->getData()['displacedIconFileId'] ?? null;
+
+			$item = $commandResult->getData()['item'];
+			$this->catalogItemSender->updateItem($item, $userId, $iconIntent, $preparedIcon);
+
+			$connection->commitTransaction();
+		}
+		catch (\Throwable $e)
+		{
+			try
+			{
+				$connection->rollbackTransaction();
+			}
+			catch (TransactionException)
+			{
+			}
+
+			if ($newIconFileId !== null)
+			{
+				$this->iconStorage->delete($newIconFileId);
+			}
+
+			Application::getInstance()->getExceptionHandler()->writeToLog($e);
+
+			if ($e instanceof CatalogSyncFailedException)
+			{
+				throw new ArgumentException(
+					Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_SYNC'),
+					'catalogItemId',
+					$e,
+				);
+			}
+
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_COMMON'),
+				'catalogItemId',
+				$e,
+			);
+		}
+
+		if ($displacedIconFileId !== null)
+		{
+			$this->iconStorage->delete($displacedIconFileId);
+		}
+
+		$iconFileId = $item->getIconFileId();
+
+		return [
+			'ok' => true,
+			'item' => [
+				'id' => $catalogItemId,
+				'title' => $item->getTitle(),
+				'description' => $this->catalog->resolveDisplayDescription($item->getType(), $item->getDescription()),
+				'isDescriptionDefault' => $item->getDescription() === null || $item->getDescription() === '',
+				'iconUrl' => $iconFileId !== null ? $this->iconStorage->getPublicUrl($iconFileId) : null,
+			],
+		];
+	}
+
+	/**
+	 * @return array{fileId: int, content: string, format: string}
+	 */
+	private function storeUploadedIcon(): array
+	{
+		$iconFile = $this->getRequest()->getFile('icon');
+		if (!is_array($iconFile))
+		{
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_ICON_REQUIRED'),
+				'icon',
+			);
+		}
+
+		$result = $this->uploadedIconProcessor->process($iconFile);
+		if (!$result->isSuccess())
+		{
+			throw new ArgumentException($this->resolveIconErrorMessage($result), 'icon');
+		}
+
+		return $result->getData();
+	}
+
+	private function resolveIconErrorMessage(Result $result): string
+	{
+		$code = (string)($result->getErrors()[0]?->getCode() ?? '');
+		$phraseId = match ($code)
+		{
+			UploadedIconProcessor::ERROR_SIZE => 'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_ICON_SIZE',
+			UploadedIconProcessor::ERROR_PIXELS => 'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_ICON_PIXELS',
+			UploadedIconProcessor::ERROR_FORMAT => 'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_ICON_FORMAT',
+			UploadedIconProcessor::ERROR_UPLOAD => 'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_ICON_UPLOAD',
+			default => 'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_ICON_SAVE',
+		};
+
+		return (string)Loc::getMessage($phraseId);
+	}
+
+	private function validateTitle(string $title, string $currentTitle): string
+	{
+		$title = trim($title);
+
+		if (!mb_check_encoding($title, 'UTF-8'))
+		{
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_TITLE_ENCODING'),
+				'title',
+			);
+		}
+
+		if ($title === $currentTitle)
+		{
+			return $title;
+		}
+
+		$length = mb_strlen($title);
+		if ($length < self::TITLE_MIN_LENGTH)
+		{
+			throw new ArgumentException(
+				Loc::getMessagePlural(
+					'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_TITLE_MIN',
+					self::TITLE_MIN_LENGTH,
+					['#MIN#' => self::TITLE_MIN_LENGTH],
+				),
+				'title',
+			);
+		}
+
+		if ($length > self::TITLE_MAX_LENGTH)
+		{
+			throw new ArgumentException(
+				Loc::getMessagePlural(
+					'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_TITLE_MAX',
+					self::TITLE_MAX_LENGTH,
+					['#MAX#' => self::TITLE_MAX_LENGTH],
+				),
+				'title',
+			);
+		}
+
+		if (preg_match('/[\x00-\x1F\x7F]/u', $title) !== 0)
+		{
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_TITLE_CONTROL'),
+				'title',
+			);
+		}
+
+		return $title;
+	}
+
+	private function validateDescription(?string $description, ?string $currentDescription): ?string
+	{
+		if ($description === null)
+		{
+			return null;
+		}
+
+		if (!mb_check_encoding($description, 'UTF-8'))
+		{
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_DESCRIPTION_ENCODING'),
+				'description',
+			);
+		}
+
+		if (trim($description) === $currentDescription)
+		{
+			return $description;
+		}
+
+		if (mb_strlen($description) > self::DESCRIPTION_MAX_LENGTH)
+		{
+			throw new ArgumentException(
+				Loc::getMessagePlural(
+					'VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_DESCRIPTION_LENGTH',
+					self::DESCRIPTION_MAX_LENGTH,
+					['#MAX#' => self::DESCRIPTION_MAX_LENGTH],
+				),
+				'description',
+			);
+		}
+
+		if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', $description) !== 0)
+		{
+			throw new ArgumentException(
+				Loc::getMessage('VIBECODECONNECTOR_CATALOG_UPDATE_ERROR_DESCRIPTION_CONTROL'),
+				'description',
+			);
+		}
+
+		return $description;
+	}
+
+	private function resolveIconIntent(?string $iconAction): IconUpdateIntent
+	{
+		if ($iconAction === null || $iconAction === '')
+		{
+			return IconUpdateIntent::Keep;
+		}
+
+		return IconUpdateIntent::tryFrom($iconAction)
+			?? throw new ArgumentException('Unsupported iconAction value', 'iconAction');
 	}
 
 	private function mustGetItem(int $catalogItemId): CatalogItem

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Internal\Grid\AiAgents;
 
-use Bitrix\Bizproc\Integration\ImBot\BizprocBot;
-use Bitrix\Bizproc\Internal\Factory\Workflow\TriggerStageWorkflowFactory;
 use Bitrix\Bizproc\Internal\Integration\Rag\DocumentFieldTypes\RagKnowledgeBaseType;
 use Bitrix\Bizproc\Internal\Integration\Rag\Dto\KnowledgeBaseFileStatusDtoCollection;
 use Bitrix\Bizproc\Internal\Integration\Rag\FileStatus;
@@ -13,8 +11,6 @@ use Bitrix\Bizproc\Internal\Integration\Rag\Result\KnowledgeBaseGetInfoResult;
 use Bitrix\Bizproc\Internal\Integration\Rag\Service\KnowledgeBaseFileCacheService;
 use Bitrix\Bizproc\Internal\Integration\Rag\Service\KnowledgeBaseFileService;
 use Bitrix\Bizproc\Internal\Integration\Rag\Service\KnowledgeBaseService;
-use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTriggerTable;
-use Bitrix\Im\Model\RelationTable;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\FileTable;
 use CBPHelper;
@@ -27,7 +23,6 @@ use Bitrix\HumanResources\Builder\Structure\Filter\NodeFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\IdFilter;
 
 use Bitrix\Main\Loader;
-use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\UserTable;
 use Bitrix\Main\Web\Uri;
@@ -35,8 +30,14 @@ use Bitrix\Main\Engine\Response\Converter;
 
 use Bitrix\Bizproc\Api\Enum\Template\WorkflowTemplateSection;
 use Bitrix\Bizproc\FieldType;
+use Bitrix\Bizproc\Internal\Grid\AiAgents\Filter\AiAgentsFilter;
+use Bitrix\Bizproc\Internal\Grid\AiAgents\Filter\AiAgentsFilterSettings;
+use Bitrix\Bizproc\Internal\Grid\AiAgents\Service\TemplateBotUsageService;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Settings\AiAgentsSettings;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Visibility\HiddenAiAgentsRegistry;
+use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\Query\LaunchedCopyQuery;
+use Bitrix\Bizproc\Internal\Service\AiAgentGrid\Version\UpgradeAvailabilityService;
+use Bitrix\Bizproc\Internal\Service\SetupTemplate\SetupTemplateService;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateSectionTable;
 
@@ -48,17 +49,26 @@ class AiAgentsGridHelper
 {
 	private const GRID_ID = 'BIZPROC_AI_AGENTS_GRID';
 	private const DEFAULT_PAGE_SIZE = 20;
-	private const IM_BOT_NEW_MESSAGE_TRIGGER = 'ImBotNewMessageTrigger';
-	private const IM_BOT_PARAM_BOT_CODE = 'BotCode';
-	private const IM_BOT_PARAM_BOT_ID = 'BotId';
 	private string $navParamName;
 	private ?AiAgentsGrid $grid = null;
 	private HiddenAiAgentsRegistry $hiddenAiAgents;
+	private UpgradeAvailabilityService $upgradeAvailabilityService;
+	private TemplateBotUsageService $templateBotUsageService;
+	private SetupTemplateService $setupTemplateService;
 
-	public function __construct(?HiddenAiAgentsRegistry $hiddenAiAgents = null)
+	public function __construct(
+		?HiddenAiAgentsRegistry $hiddenAiAgents = null,
+		?UpgradeAvailabilityService $upgradeAvailabilityService = null,
+		?TemplateBotUsageService $templateBotUsageService = null,
+		?SetupTemplateService $setupTemplateService = null,
+	)
 	{
 		$this->navParamName = self::GRID_ID . '_nav';
 		$this->hiddenAiAgents = $hiddenAiAgents ?? ServiceLocator::getInstance()->get(HiddenAiAgentsRegistry::class);
+		$this->upgradeAvailabilityService = $upgradeAvailabilityService ?? new UpgradeAvailabilityService();
+		$this->templateBotUsageService =
+			$templateBotUsageService ?? ServiceLocator::getInstance()->get(TemplateBotUsageService::class);
+		$this->setupTemplateService = $setupTemplateService ?? new SetupTemplateService();
 
 		Loader::requireModule('humanresources');
 	}
@@ -91,11 +101,11 @@ class AiAgentsGridHelper
 
 		$this->grid = new AiAgentsGrid($settings);
 
+		// The lazy total counter runs in its own ajax request, so it must repeat the filter the
+		// page fetch applied; otherwise the widget reports every agent of the section.
 		$this->grid->setTotalCountCalculator(function ()
 		{
-			$query = $this->getAiAgentsTemplatesQuery();
-
-			return $query->fetchCollection()?->count();
+			return $this->getTotalCount($this->getCurrentFilterData());
 		});
 
 		return $this->grid;
@@ -130,13 +140,15 @@ class AiAgentsGridHelper
 	 */
 	public function getGridDataWithOrmParams(array $ormParams): array
 	{
-		$filterOptions = new \Bitrix\Main\UI\Filter\Options($this->getGridId());
-		$filterData = $filterOptions->getFilter();
-
 		$limit = $ormParams['limit'] ?? self::DEFAULT_PAGE_SIZE;
 		$offset = $ormParams['offset'] ?? 0;
 
-		return $this->getGridData($limit, $offset, $filterData);
+		return $this->getGridData($limit, $offset, $this->getCurrentFilterData());
+	}
+
+	private function getCurrentFilterData(): array
+	{
+		return (new \Bitrix\Main\UI\Filter\Options($this->getGridId()))->getFilter();
 	}
 
 	public function getBaseBizprocDesignerUri(): Uri
@@ -195,6 +207,7 @@ class AiAgentsGridHelper
 	public function getRowFieldsByTemplateId(int $templateId): array
 	{
 		$query = $this->getAiAgentsTemplatesQuery();
+		$query->addSelect('TEMPLATE');
 		$query->where('ID', $templateId);
 		$templateFields = $query->fetchAll();
 
@@ -221,6 +234,17 @@ class AiAgentsGridHelper
 		return $templates;
 	}
 
+	private function getTotalCount(array $filterData): int
+	{
+		$query = $this->getAiAgentsTemplatesQuery();
+		$this->applyFilterToQuery($query, $filterData);
+
+		// Counted by wrapping the query into a subselect: the AGENT_TEMPLATE filter adds a
+		// GROUP BY, and an aggregated query can neither be fetched as objects nor counted with
+		// a plain COUNT(*) over the joined rows.
+		return (int)$query->queryCountTotal();
+	}
+
 	private function getAiAgentsTemplatesQuery(?int $limit = null, ?int $offset = null): Query
 	{
 		$query = WorkflowTemplateTable::query()
@@ -236,16 +260,17 @@ class AiAgentsGridHelper
 				'ACTIVATED_BY',
 				'ACTIVATED_AT',
 				'CREATE_SOURCE',
+				'IS_MODIFIED',
+				'MODIFIED',
 			])
-			->registerRuntimeField(
-				'SECTION',
-				new \Bitrix\Main\ORM\Fields\Relations\Reference(
-					'SECTION',
-					WorkflowTemplateSectionTable::class,
-					Join::on('this.ID', 'ref.TEMPLATE_ID'),
-				),
+			// Section membership is a semi-join, not a relation: a template may own several
+			// section rows, and joining them would multiply the template row in the grid.
+			->whereIn(
+				'ID',
+				WorkflowTemplateSectionTable::query()
+					->setSelect(['TEMPLATE_ID'])
+					->where('SECTION_ID', WorkflowTemplateSection::AiAgent->value),
 			)
-			->where('SECTION.SECTION_ID', WorkflowTemplateSection::AiAgent->value)
 			->setOrder([
 				'ACTIVE' => 'DESC',
 				'ACTIVATED_AT' => 'DESC',
@@ -280,6 +305,9 @@ class AiAgentsGridHelper
 	private function getAiAgentsTemplates(int $limit, int $offset, array $filterData): array
 	{
 		$query = $this->getAiAgentsTemplatesQuery($limit, $offset);
+		// TEMPLATE body is needed to detect "chatbot setup" activities; it is added only to the
+		// page fetch (not to the shared query reused by the unbounded total-count calculator).
+		$query->addSelect('TEMPLATE');
 		$this->applyFilterToQuery($query, $filterData);
 		$templates = $query->fetchAll();
 
@@ -333,8 +361,7 @@ class AiAgentsGridHelper
 			];
 		}
 
-		$templateBotIdMap = $this->fetchTemplateBotIdMap($templateIds);
-		$templateGroupChatMap = $this->fetchTemplateGroupChatMap($templateBotIdMap);
+		$templateBotIdMap = $this->templateBotUsageService->getBotIdsByTemplate($templateIds, $templates);
 
 		$allBotIds = array_merge(...array_values($templateBotIdMap));
 		$allUserIds = [...$allUserIds, ...$allBotIds];
@@ -358,9 +385,9 @@ class AiAgentsGridHelper
 		$ragFileNames = $this->fetchRagFileNameByFileIds($ragFileIds);
 		$this->fileRagFileNamesToIdMapByTemplate($idMapByTemplate, $ragFileNames);
 
-		$templateChatsMap = $this->prepareTemplateChatsMap($templateBotIdMap, $users, $templateGroupChatMap);
+		$templateChatsMap = $this->prepareTemplateChatsMap($templateBotIdMap, $users);
 
-		return $this->attachRelatedDataToTemplates(
+		$enriched = $this->attachRelatedDataToTemplates(
 			$templates,
 			$idMapByTemplate,
 			$users,
@@ -368,6 +395,32 @@ class AiAgentsGridHelper
 			$childDepartmentMap,
 			$templateChatsMap,
 		);
+
+		return $this->attachVersionAvailabilityToTemplates($enriched);
+	}
+
+	/**
+	 * Enriches launched copies with DTO-01 upgrade/customization fields
+	 * (hasNewVersion, isCustomized, currentVersionLabel, newVersionLabel).
+	 *
+	 * @param array $templates
+	 * @return array
+	 */
+	private function attachVersionAvailabilityToTemplates(array $templates): array
+	{
+		// Batch-load ORIGIN_SYSTEM_CODE/VERSION for the whole page in a single query up front, so
+		// the per-row getAvailabilityForRow() below reads them from the service cache instead of
+		// issuing two settings lookups per launched copy (grid hot-path N+1, NFR P95).
+		$this->upgradeAvailabilityService->preloadOriginSettings($templates);
+
+		foreach ($templates as &$template)
+		{
+			$availability = $this->upgradeAvailabilityService->getAvailabilityForRow($template);
+			$template += $availability->toArray();
+		}
+		unset($template);
+
+		return $templates;
 	}
 
 	/**
@@ -391,9 +444,14 @@ class AiAgentsGridHelper
 		$departmentIds = [];
 		$recursiveDepartmentIds = [];
 
-		$documentType = [$template['MODULE_ID'], $template['ENTITY'], $template['DOCUMENT_TYPE']];
+		$documentType = $this->getTemplateDocumentType($template);
 
-		foreach ((array)$template['CONSTANTS'] as $constantInfo)
+		$constants = $this->setupTemplateService->normalizeConstantsByTemplate(
+			is_array($template['TEMPLATE'] ?? null) ? $template['TEMPLATE'] : [],
+			(array)($template['CONSTANTS'] ?? []),
+		);
+
+		foreach ($constants as $constantInfo)
 		{
 			if (($constantInfo['Type'] ?? '') !== FieldType::USER)
 			{
@@ -486,190 +544,26 @@ class AiAgentsGridHelper
 	}
 
 	/**
-	 * @param array<int> $templateIds
-	 * @return array<int, list<int>>
-	 */
-	private function fetchTemplateBotIdMap(array $templateIds): array
-	{
-		$triggersToFetch = [self::IM_BOT_NEW_MESSAGE_TRIGGER];
-		$templatesTriggers = $this->fetchTemplatesTriggers($templateIds, $triggersToFetch);
-
-		$templateBotIdMap = [];
-
-		foreach ($templatesTriggers as $trigger)
-		{
-			$botId = $this->getBotIdByTrigger($trigger);
-
-			if ($botId)
-			{
-				$templateBotIdMap[$trigger['TEMPLATE_ID']][] = $botId;
-			}
-		}
-
-		return $templateBotIdMap;
-	}
-
-	/**
-	 * Extract logic for getting Bot ID from a trigger array.
+	 * Returns the workflow document type triple [MODULE_ID, ENTITY, DOCUMENT_TYPE] for a template row.
 	 *
-	 * @param array $trigger
-	 * @return int|null
-	 */
-	private function getBotIdByTrigger(array $trigger): ?int
-	{
-		if (!Loader::includeModule('imbot'))
-		{
-			return null;
-		}
-
-		$triggerType = $trigger['TRIGGER_TYPE'] ?? null;
-		$templateId = $trigger['TEMPLATE_ID'] ?? null;
-		$applyRules = $trigger['APPLY_RULES'] ?? [];
-		$properties = $applyRules['Properties'] ?? [];
-
-		if (is_null($triggerType) || is_null($templateId) || empty($properties))
-		{
-			return null;
-		}
-
-		if (!\CBPRuntime::getRuntime()->includeActivityFile($triggerType))
-		{
-			return null;
-		}
-
-		$activity = \CBPActivity::createInstance($triggerType, '');
-		if (!$activity)
-		{
-			return null;
-		}
-
-		$activity->initializeFromArray($properties);
-		$documentId = [$trigger['MODULE_ID'], $trigger['ENTITY'], $trigger['DOCUMENT_TYPE']];
-
-		$stubWorkflow = (new TriggerStageWorkflowFactory())->create((int)$templateId, $documentId);
-		$activity->setWorkflow($stubWorkflow);
-
-		$botId = $activity->{self::IM_BOT_PARAM_BOT_ID};
-		$botId = filter_var($botId, FILTER_VALIDATE_INT, [
-			'options' => [
-				'min_range' => 0,
-			],
-		]);
-
-		if (!$botId)
-		{
-			$botCode = (string)$activity->{self::IM_BOT_PARAM_BOT_CODE};
-
-			$botId = (int)BizprocBot::getBotIdByCode($botCode);
-		}
-
-		return $botId > 0 ? $botId : null;
-	}
-
-	/**
-	 * Fetches group chats associated with the bots in the templates.
+	 * DOCUMENT_TYPE arrives in two shapes depending on the source: a scalar code from the grid ORM
+	 * query, or an already-expanded triple array from the copy-and-start raw fields. Both are
+	 * normalized to a flat triple; otherwise a nested array is passed as the third element and
+	 * CBPHelper::parseDocumentId() rejects it as an empty documentId.
 	 *
-	 * @param array<int, list<int>> $templateBotIdMap
-	 * @return array<int, array>
+	 * @param array $template
+	 * @return array{0: mixed, 1: mixed, 2: mixed}
 	 */
-	private function fetchTemplateGroupChatMap(array $templateBotIdMap): array
+	private function getTemplateDocumentType(array $template): array
 	{
-		if (!Loader::includeModule('im'))
+		$documentType = $template['DOCUMENT_TYPE'] ?? null;
+
+		if (is_array($documentType))
 		{
-			return [];
+			return array_values($documentType);
 		}
 
-		$templateGroupChatMap = [];
-		$allBotIds = [];
-
-		foreach ($templateBotIdMap as $botIds)
-		{
-			foreach ($botIds as $botId)
-			{
-				$allBotIds[$botId] = $botId;
-			}
-		}
-
-		if (empty($allBotIds))
-		{
-			return [];
-		}
-
-		$query = RelationTable::query()
-			->setSelect([
-				'USER_ID',
-				'CHAT_ID',
-				'CHAT_TITLE' => 'CHAT.TITLE',
-			])
-			->registerRuntimeField(
-				'CHAT',
-				new \Bitrix\Main\ORM\Fields\Relations\Reference(
-					'CHAT',
-					\Bitrix\Im\Model\ChatTable::class,
-					Join::on('this.CHAT_ID', 'ref.ID'),
-				),
-			)
-			->whereIn('USER_ID', array_values($allBotIds))
-			->where('MESSAGE_TYPE', \Bitrix\Im\Chat::TYPE_GROUP)
-		;
-
-		$groupChats = $query->fetchAll();
-		$chatsByBotId = [];
-
-		foreach ($groupChats as $chat)
-		{
-			$chatsByBotId[$chat['USER_ID']][] = $chat;
-		}
-
-		foreach ($templateBotIdMap as $templateId => $botIds)
-		{
-			foreach ($botIds as $botId)
-			{
-				if (isset($chatsByBotId[$botId]))
-				{
-					foreach ($chatsByBotId[$botId] as $chat)
-					{
-						$templateGroupChatMap[$templateId][] = $chat;
-					}
-				}
-			}
-		}
-
-		return $templateGroupChatMap;
-	}
-
-	/**
-	 * Fetches workflow template triggers for given template IDs and trigger type.
-	 *
-	 * @param list<int> $templateIds
-	 * @param list<string> $triggerTypes (e.g., ['ImBotNewMessageTrigger', ...])
-	 * @return array<int, array<string, mixed>>
-	 */
-	private function fetchTemplatesTriggers(array $templateIds, array $triggerTypes = []): array
-	{
-		if (empty($templateIds))
-		{
-			return [];
-		}
-
-		$query = WorkflowTemplateTriggerTable::query()
-			->setSelect([
-				'TEMPLATE_ID',
-				'TRIGGER_TYPE',
-				'APPLY_RULES',
-				'MODULE_ID',
-				'ENTITY',
-				'DOCUMENT_TYPE',
-			])
-			->whereIn('TEMPLATE_ID', $templateIds)
-		;
-
-		if (!empty($triggerTypes))
-		{
-			$query->whereIn('TRIGGER_TYPE', $triggerTypes);
-		}
-
-		return $query->fetchAll();
+		return [$template['MODULE_ID'] ?? null, $template['ENTITY'] ?? null, $documentType];
 	}
 
 	/**
@@ -816,6 +710,10 @@ class AiAgentsGridHelper
 		$result = [];
 		foreach ($templates as $template)
 		{
+			// the TEMPLATE body was only needed to detect create-bot activities; drop it so the
+			// (potentially large) workflow tree is not carried into every grid row.
+			unset($template['TEMPLATE']);
+
 			$templateId = (int)$template['ID'];
 			$idMap = $idMapByTemplate[$templateId] ?? null;
 
@@ -1018,33 +916,16 @@ class AiAgentsGridHelper
 	}
 
 	/**
+	 * Builds the chatbots list for each template. Only direct chat bots are exposed,
+	 * group chats the bot merely participates in are intentionally excluded.
+	 *
 	 * @param array<int, list<int>> $templateBotIdMap [templateId => [botUserId, ...]]
 	 * @param array $users [userId => userData]
-	 * @param array<int, array<array<string, mixed>>> $templateGroupChatIdMap [templateId => [0 => [CHAT_ID=>1, ...]]]
 	 * @return array<int, list<array{chatId: int, chatName: string}>>
 	 */
-	private function prepareTemplateChatsMap(array $templateBotIdMap, array $users, array $templateGroupChatIdMap): array
+	private function prepareTemplateChatsMap(array $templateBotIdMap, array $users): array
 	{
 		$chatsMap = [];
-
-		foreach ($templateGroupChatIdMap as $templateId => $chats)
-		{
-			foreach ($chats as $chat)
-			{
-				$chatId = 'chat' . $chat['CHAT_ID'];
-				$chatTitle = $chat['CHAT_TITLE'] ?? null;
-
-				if (empty($chatTitle))
-				{
-					continue;
-				}
-
-				$chatsMap[$templateId][] = [
-					'chatId' => $chatId,
-					'chatName' => $chatTitle,
-				];
-			}
-		}
 
 		foreach ($templateBotIdMap as $templateId => $botIds)
 		{
@@ -1075,7 +956,15 @@ class AiAgentsGridHelper
 			return;
 		}
 
-		$fieldsWhiteList = $this->grid->getVisibleColumnsIds();
+		$filter = $this->grid?->getFilter();
+		if (!$filter instanceof AiAgentsFilter)
+		{
+			return;
+		}
+
+		// Whitelist is the set of declared filter fields, not the visible grid columns:
+		// a filter-only field (AGENT_TEMPLATE) is filterable without being a grid column.
+		$fieldsWhiteList = $filter->getFilterSettings()?->getWhiteList() ?? [];
 
 		foreach ($filterData as $filterId => $filterValue)
 		{
@@ -1092,7 +981,9 @@ class AiAgentsGridHelper
 	{
 		match ($filterId)
 		{
-			'LAUNCHED_BY' => $this->addLaunchedByQueryFilter($query, $filterValue),
+			AiAgentsFilterSettings::LAUNCHED_BY_FIELD => $this->addLaunchedByQueryFilter($query, $filterValue),
+			AiAgentsFilterSettings::AGENT_TEMPLATE_FIELD => $this->addAgentTemplateQueryFilter($query, $filterValue),
+			AiAgentsFilterSettings::IS_ACTIVE_FIELD => $this->addIsActiveQueryFilter($query, $filterValue),
 			default => null,
 		};
 	}
@@ -1128,5 +1019,58 @@ class AiAgentsGridHelper
 				->whereIn('ACTIVATED_BY', $userIds)
 				->where('ACTIVATED_AT', null),
 		);
+	}
+
+	private function addAgentTemplateQueryFilter(Query $query, mixed $filterValue): void
+	{
+		if (!is_array($filterValue))
+		{
+			return;
+		}
+
+		$systemCodes = [];
+		foreach ($filterValue as $rawSystemCode)
+		{
+			if (is_string($rawSystemCode) && $rawSystemCode !== '')
+			{
+				$systemCodes[] = $rawSystemCode;
+			}
+		}
+
+		if (empty($systemCodes))
+		{
+			return;
+		}
+
+		// The link "system template -> its launched copies" lives in LaunchedCopyQuery; only the
+		// SYSTEM_CODE branch (match the system row itself) is the filter's own business.
+		$originLink = LaunchedCopyQuery::joinOriginLink($query, $systemCodes);
+
+		$query->where(
+			Query::filter()
+				->logic('or')
+				->whereIn('SYSTEM_CODE', $systemCodes)
+				->where($originLink),
+		);
+
+		// The LEFT JOIN to the one-to-many origin settings can duplicate a template row;
+		// collapse duplicates by grouping on the PK. Applied only here, so the base grid
+		// query keeps no GROUP BY. ID is the PK, so other selected columns stay valid under
+		// GROUP BY on both MySQL and PostgreSQL.
+		$query->setGroup(['ID']);
+	}
+
+	/**
+	 * What counts as an active agent is defined once, in LaunchedCopyQuery: the same definition
+	 * serves the existing-runs warning, so the warning and this filter can never disagree.
+	 */
+	private function addIsActiveQueryFilter(Query $query, mixed $filterValue): void
+	{
+		match ($filterValue)
+		{
+			'Y' => LaunchedCopyQuery::applyActive($query),
+			'N' => LaunchedCopyQuery::applyInactive($query),
+			default => null,
+		};
 	}
 }

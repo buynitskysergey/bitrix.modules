@@ -50,10 +50,10 @@ class Parser
 		8 => 'Incorrect arguments of function "#STR#"',
 	];
 
-	public function __construct(\CBPActivity $activity)
+	public function __construct(\CBPActivity $activity, ?array $functions = null)
 	{
 		$this->activity = $activity;
-		$this->functions = Functions::getList();
+		$this->functions = $functions ?? Functions::getList();
 	}
 
 	public function getActivity(): \CBPActivity
@@ -80,6 +80,11 @@ class Parser
 	public function getErrors(): array
 	{
 		return $this->errors;
+	}
+
+	public function clearErrors(): void
+	{
+		$this->errors = [];
 	}
 
 	/*
@@ -314,6 +319,32 @@ class Parser
 		return $notation;
 	}
 
+	/**
+	 * Parsed form of the expression, ready for {@see self::calculateNotation()}: an expression computed
+	 * over many rows is tokenized once instead of once per row.
+	 */
+	public function parse($text): array|false
+	{
+		return $this->getPolishNotation($text);
+	}
+
+	/**
+	 * @return string[] lower-cased names of the functions the parsed expression calls
+	 */
+	public function getCalledFunctions(array $notation): array
+	{
+		$names = [];
+		foreach ($notation as [$value, $type])
+		{
+			if ($type === self::Operation && is_string($value) && isset($this->functions[$value]))
+			{
+				$names[] = $value;
+			}
+		}
+
+		return $names;
+	}
+
 	public function calculate($text)
 	{
 		if (!$notation = $this->getPolishNotation($text))
@@ -321,6 +352,11 @@ class Parser
 			return null;
 		}
 
+		return $this->calculateNotation($notation);
+	}
+
+	public function calculateNotation(array $notation)
+	{
 		$stack = [];
 		foreach ($notation as $item)
 		{

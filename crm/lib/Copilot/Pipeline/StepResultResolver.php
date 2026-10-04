@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\Copilot\Pipeline;
 
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Integration\AI\JobRepository;
+use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Integration\AI\Operation\AnalyzeCommunication;
 use Bitrix\Crm\Integration\AI\Operation\ExtractScoringCriteria;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\FillRepeatSaleTips;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\ScreeningRepeatSaleItem;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
@@ -39,7 +42,7 @@ final class StepResultResolver
 				=> $this->jobRepository->getSummarizeCallTranscriptionResultByActivity($activityId),
 			FillItemFieldsFromCallTranscription::class
 				=> $this->resolveFillResult($context),
-			ScoreCall::class
+			ScoreCall::class, ScoreCallV2::class
 				=> $this->jobRepository->getCallScoringResult($activityId),
 			AnalyzeCommunication::class
 				=> $this->resolveAnalyzeCommunication($context),
@@ -55,7 +58,19 @@ final class StepResultResolver
 
 	private function resolveFillResult(StepContext $context): ?Result
 	{
-		$target = $this->targetResolver->findTarget($context->getActivityId());
+		$isEmail = $context->getActivityProvider() === Email::getId();
+		$targetOwnerTypeId = (int)$context->getExtra('targetOwnerTypeId');
+		$targetOwnerId = (int)$context->getExtra('targetOwnerId');
+
+		if ($isEmail && $targetOwnerTypeId > 0 && $targetOwnerId > 0)
+		{
+			$target = new ItemIdentifier($targetOwnerTypeId, $targetOwnerId);
+		}
+		else
+		{
+			$target = $this->resolveFillFieldsTarget($context);
+		}
+
 		if (!$target)
 		{
 			return null;
@@ -68,6 +83,18 @@ final class StepResultResolver
 			$context->getActivityId(),
 			$summarizeResult?->getJobId(),
 		);
+	}
+
+	/**
+	 * Resolves the FillItemFields target for the reuse/dedup lookup.
+	 * Manual launch (ALG-01): the clicked entity from the timeline context — the reuse/short-circuit
+	 * check must key on the clicked entity, not on a re-resolved Deal/Lead (single-target).
+	 * Auto path: unchanged TargetResolver priority Deal>Lead resolution.
+	 * Delegates to StepContext::resolveFillTarget so StepFactory and StepResultResolver share one rule.
+	 */
+	private function resolveFillFieldsTarget(StepContext $context): ?ItemIdentifier
+	{
+		return $context->resolveFillTarget($this->targetResolver);
 	}
 
 	private function resolveAnalyzeCommunication(StepContext $context): ?Result

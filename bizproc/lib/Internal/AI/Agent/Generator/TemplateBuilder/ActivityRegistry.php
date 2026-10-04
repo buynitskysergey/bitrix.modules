@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Bizproc\Internal\AI\Agent\Generator\TemplateBuilder;
 
 use Bitrix\Bizproc\Activity\Enum\ActivityNodeType;
+use Bitrix\Bizproc\Activity\Enum\ActivityPortType;
 use Bitrix\Bizproc\Public\Activity\BaseComplexActivity;
+use Bitrix\Bizproc\Runtime\ActivitySearcher\Searcher;
 
 final class ActivityRegistry
 {
@@ -38,13 +40,24 @@ final class ActivityRegistry
 
 	public function isTrigger(string $activityType): bool
 	{
-		$desc = $this->getDescription($activityType);
-		if ($desc !== null && isset($desc['TYPE']) && is_array($desc['TYPE']))
+		$declaredTypes = $this->getDescription($activityType)['TYPE'] ?? null;
+
+		// Only a description naming a category answers here. An empty TYPE names none - the shipped
+		// ManualStartTrigger and CreateDocumentTrigger declare exactly that - so it is no verdict and the
+		// code reaches the single recognition below instead of being called no trigger.
+		if (is_array($declaredTypes) && $declaredTypes !== [])
 		{
-			return in_array('trigger', $desc['TYPE'], true);
+			return Searcher::declaresTriggerType($declaredTypes);
 		}
 
-		return str_ends_with($activityType, 'Trigger');
+		if (!$this->resolvesHere($activityType))
+		{
+			// Fail-open as the other getters: an activity whose module is absent from this portal resolves
+			// to nothing, and reverse conversion would drop the whole flow of a system AI agent.
+			return str_ends_with($activityType, 'Trigger');
+		}
+
+		return \CBPRuntime::getRuntime()->isTriggerActivity($activityType);
 	}
 
 	public function getNodeType(string $activityType): ActivityNodeType
@@ -59,8 +72,7 @@ final class ActivityRegistry
 
 		return match ($nodeType)
 		{
-			ActivityNodeType::TRIGGER, ActivityNodeType::COMPLEX => $nodeType,
-			ActivityNodeType::OPERATORS => ActivityNodeType::COMPLEX,
+			ActivityNodeType::TRIGGER, ActivityNodeType::COMPLEX, ActivityNodeType::OPERATORS => $nodeType,
 			default => ActivityNodeType::SIMPLE,
 		};
 	}
@@ -141,6 +153,24 @@ final class ActivityRegistry
 		}
 
 		return null;
+	}
+
+	/**
+	 * Whether the activity declares the port with this type. A port the activity does not declare at all
+	 * belongs to no type and answers false - the ports of the description are the whole port contract of
+	 * the activity. Fail-open as the other getters: an unresolved activity answers from its fallback ports.
+	 */
+	public function isPortOfType(string $activityType, string $portId, ActivityPortType $type): bool
+	{
+		foreach ($this->getDefaultPorts($activityType) as $port)
+		{
+			if (($port['id'] ?? null) === $portId)
+			{
+				return ($port['type'] ?? '') === $type->value;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -241,6 +271,34 @@ final class ActivityRegistry
 	public function getDisplayName(string $activityType): ?string
 	{
 		return $this->getDescription($activityType)['NAME'] ?? null;
+	}
+
+	/**
+	 * Whether the activity resolves in this environment. The getters stay fail-open and substitute
+	 * defaults for an unresolved activity; callers that must not ship invented values ask this first
+	 * - see {@see StrictActivityResolver}.
+	 */
+	public function hasDescription(string $activityType): bool
+	{
+		return $this->getDescription($activityType) !== null;
+	}
+
+	/** Whether the activity resolves here at all: neither a description nor a class means it does not. */
+	private function resolvesHere(string $activityType): bool
+	{
+		if ($this->getDescription($activityType) !== null)
+		{
+			return true;
+		}
+
+		try
+		{
+			return $this->getClassName($activityType) !== null;
+		}
+		catch (\Throwable)
+		{
+			return false;
+		}
 	}
 
 	private function getDescription(string $activityType): ?array

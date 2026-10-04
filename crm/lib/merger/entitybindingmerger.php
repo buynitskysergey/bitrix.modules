@@ -21,33 +21,8 @@ abstract class EntityBindingMerger
 	public function merge(array &$seeds, array &$targ, $skipEmpty = false, array $options = array())
 	{
 		$resultSeedBindings = array();
-		$effectiveIDs = null;
 
-		$map = null;
-		if(isset($options['map']) && is_array($options['map']))
-		{
-			$map = $options['map'];
-		}
-
-		$sourceIDs = is_array($map) ? $this->getMappedIDs($map) : null;
-		if(is_array($sourceIDs))
-		{
-			$effectiveIDs = array();
-			if(isset($targ['ID']))
-			{
-				$effectiveIDs[] = (int)$targ['ID'];
-			}
-
-			foreach($seeds as $seed)
-			{
-				if(isset($seed['ID']))
-				{
-					$effectiveIDs[] = (int)$seed['ID'];
-				}
-			}
-
-			$effectiveIDs = array_intersect($sourceIDs, $effectiveIDs);
-		}
+		$effectiveIDs = $this->prepareEffectiveIDs($seeds, $targ, $options);
 
 		foreach($seeds as $seed)
 		{
@@ -126,5 +101,95 @@ abstract class EntityBindingMerger
 				$targ[$this->bindingFieldName]
 			);
 		}
+	}
+
+	public function prepareMergeData(array $seeds, array $targ, $skipEmpty = false, array $options = array())
+	{
+		$mergedTarg = $targ;
+		$this->merge($seeds, $mergedTarg, $skipEmpty, $options);
+
+		$bindings = $this->getBindings($mergedTarg);
+		if($bindings === null)
+		{
+			$bindings = array();
+		}
+
+		$bindingIDs = Crm\Binding\EntityBinding::prepareEntityIDs($this->entityTypeID, $bindings);
+
+		return array(
+			'SOURCE_ENTITY_IDS' => $this->prepareSourceEntityIDs($seeds, $targ, $bindingIDs, $options),
+			'VALUE' => $bindingIDs,
+		);
+	}
+
+	private function prepareEffectiveIDs(array $seeds, array $targ, array $options)
+	{
+		$map = null;
+		if(isset($options['map']) && is_array($options['map']))
+		{
+			$map = $options['map'];
+		}
+
+		$sourceIDs = is_array($map) ? $this->getMappedIDs($map) : null;
+		if(!is_array($sourceIDs))
+		{
+			return null;
+		}
+
+		$effectiveIDs = array();
+		if(isset($targ['ID']))
+		{
+			$effectiveIDs[] = (int)$targ['ID'];
+		}
+
+		foreach($seeds as $seed)
+		{
+			if(isset($seed['ID']))
+			{
+				$effectiveIDs[] = (int)$seed['ID'];
+			}
+		}
+
+		return array_intersect($sourceIDs, $effectiveIDs);
+	}
+
+	private function prepareSourceEntityIDs(array $seeds, array $targ, array $bindingIDs, array $options)
+	{
+		if(empty($bindingIDs))
+		{
+			return array();
+		}
+
+		$sourceEntityIDs = array();
+		$effectiveIDs = $this->prepareEffectiveIDs($seeds, $targ, $options);
+
+		$this->collectSourceEntityID($targ, $effectiveIDs, $sourceEntityIDs);
+		foreach($seeds as $seed)
+		{
+			$this->collectSourceEntityID($seed, $effectiveIDs, $sourceEntityIDs);
+		}
+
+		return array_values(array_unique($sourceEntityIDs, SORT_NUMERIC));
+	}
+
+	private function collectSourceEntityID(
+		array $entityFields,
+		$effectiveIDs,
+		array &$sourceEntityIDs
+	)
+	{
+		$entityID = isset($entityFields['ID']) ? (int)$entityFields['ID'] : 0;
+		if($entityID <= 0 || ($effectiveIDs !== null && !in_array($entityID, $effectiveIDs)))
+		{
+			return;
+		}
+
+		$bindings = $this->getBindings($entityFields);
+		if($bindings === null || empty($bindings))
+		{
+			return;
+		}
+
+		$sourceEntityIDs[] = $entityID;
 	}
 }

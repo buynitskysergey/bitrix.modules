@@ -20,14 +20,19 @@ abstract class BaseEntity
 	/** @var array */
 	protected $calculateParameters = [];
 
-	/** @var \CCrmUserType */
-	protected static $ufInstance = null;
+	/** @var \CCrmUserType[] user field helper cached per entity id */
+	protected static $ufInstance = [];
 
 	protected static $controllerInstance = null;
 
 	protected function __construct($id = null)
 	{
 		$this->id = (int)$id;
+	}
+
+	protected function getCurrentDate(): Date
+	{
+		return new Date();
 	}
 
 	abstract protected function getControllerInstance();
@@ -97,7 +102,7 @@ abstract class BaseEntity
 			$startDate = $this->recurringFields['START_DATE'];
 			if (!$startDate instanceof Date)
 			{
-				$startDate = new Date();
+				$startDate = $this->getCurrentDate();
 			}
 			$nextExecution = $this->calculateNextExecutionDate($startDate);
 			$this->setFieldNoDemand('NEXT_EXECUTION', $nextExecution);
@@ -164,12 +169,13 @@ abstract class BaseEntity
 	 */
 	protected function getUserFieldInstance()
 	{
-		if(self::$ufInstance === null)
+		$entityId = $this->getUserFieldEntityID();
+		if (!isset(self::$ufInstance[$entityId]))
 		{
 			global $USER_FIELD_MANAGER;
-			self::$ufInstance = new \CCrmUserType($USER_FIELD_MANAGER, $this->getUserFieldEntityID());
+			self::$ufInstance[$entityId] = new \CCrmUserType($USER_FIELD_MANAGER, $entityId);
 		}
-		return self::$ufInstance;
+		return self::$ufInstance[$entityId];
 	}
 
 	protected function isActive()
@@ -183,7 +189,7 @@ abstract class BaseEntity
 			return false;
 		}
 
-		$today = new Date();
+		$today = $this->getCurrentDate();
 		if ($today->getTimestamp() > $nextTimeStamp)
 		{
 			return false;

@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Integration\AI\Operation;
 use Bitrix\AI\Context;
 use Bitrix\Crm\Activity\Entity\ToDo;
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\EntityExclusion;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Activity\Provider\ToDo\ToDo as ToDoProvider;
@@ -42,6 +43,7 @@ final class AnalyzeCommunication extends AbstractOperation
 	public const SUPPORTED_ACTIVITY_PROVIDER_IDS = [
 		Call::ACTIVITY_PROVIDER_ID,
 		OpenLine::ACTIVITY_PROVIDER_ID,
+		Email::ACTIVITY_PROVIDER_ID,
 	];
 
 	public const DATE_FORMAT = 'Y-m-d\TH:i:s';
@@ -102,9 +104,22 @@ final class AnalyzeCommunication extends AbstractOperation
 
 	public static function shouldRelaunch(Result $existingResult, StepContext $context): bool
 	{
+		if ($context->getActivityId() <= 0)
+		{
+			return false;
+		}
+
+		if ($context->getActivityProvider() === Email::getId())
+		{
+			$ownerTypeId = (int)$context->getExtra('targetOwnerTypeId');
+			$ownerId = (int)$context->getExtra('targetOwnerId');
+
+			return $ownerTypeId > 0 && $ownerId > 0
+				&& Email::isCopilotRepeatProcessingAvailable($context->getActivityId(), $ownerTypeId, $ownerId);
+		}
+
 		if (
-			$context->getActivityId() <= 0
-			|| !$context->isManualLaunch()
+			!$context->isManualLaunch()
 			|| $context->getActivityProvider() !== OpenLine::getId()
 		)
 		{
@@ -130,12 +145,13 @@ final class AnalyzeCommunication extends AbstractOperation
 	protected static function checkPreviousJobs(ItemIdentifier $target, int $parentId): \Bitrix\Main\Result
 	{
 		$activity = Container::getInstance()->getActivityBroker()->getById($target->getEntityId());
-		if (($activity['PROVIDER_ID'] ?? null) !== OpenLine::getId())
+		$providerId = $activity['PROVIDER_ID'] ?? null;
+		if ($providerId === OpenLine::getId() || $providerId === Email::getId())
 		{
-			return parent::checkPreviousJobs($target, $parentId);
+			return parent::checkPreviousJobsAllowingSuccessfulRelaunch($target, $parentId);
 		}
 
-		return parent::checkPreviousJobsAllowingSuccessfulRelaunch($target, $parentId);
+		return parent::checkPreviousJobs($target, $parentId);
 	}
 
 	protected function getAIPayload(): \Bitrix\Main\Result
@@ -177,7 +193,8 @@ final class AnalyzeCommunication extends AbstractOperation
 	protected static function notifyAboutJobError(
 		Result $result,
 		bool $withSyncBadges = true,
-		bool $withSendAnalytics = true
+		bool $withSendAnalytics = true,
+		?ItemIdentifier $target = null
 	): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();
@@ -283,7 +300,20 @@ final class AnalyzeCommunication extends AbstractOperation
 		}
 
 		$activityId = $result->getTarget()?->getEntityId();
-		$entityTarget = (new TargetResolver())->findTarget($activityId);
+
+		$additionalInfo = $context?->getParameters()['additionalInfo'] ?? [];
+		$targetOwnerTypeId = is_array($additionalInfo) ? (int)($additionalInfo['targetOwnerTypeId'] ?? 0) : 0;
+		$targetOwnerId = is_array($additionalInfo) ? (int)($additionalInfo['targetOwnerId'] ?? 0) : 0;
+
+		if ($targetOwnerTypeId > 0 && $targetOwnerId > 0)
+		{
+			$entityTarget = new ItemIdentifier($targetOwnerTypeId, $targetOwnerId);
+		}
+		else
+		{
+			$entityTarget = (new TargetResolver())->findTarget($activityId);
+		}
+
 		if (!$entityTarget)
 		{
 			AIManager::logger()->error(
@@ -299,6 +329,14 @@ final class AnalyzeCommunication extends AbstractOperation
 
 		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
 		$responsibleId = is_array($activity) ? (int)($activity['RESPONSIBLE_ID'] ?? 0) : 0;
+		if (($activity['PROVIDER_ID'] ?? null) === Email::getId())
+		{
+			Email::saveCopilotContentFingerprint(
+				$activityId,
+				$entityTarget->getEntityTypeId(),
+				$entityTarget->getEntityId(),
+			);
+		}
 		$userId = $responsibleId > 0 ? $responsibleId : (int)$result->getUserId();
 
 		if ($userId <= 0)
@@ -404,7 +442,11 @@ final class AnalyzeCommunication extends AbstractOperation
 			}
 		}
 
-		OpenLine::saveLastMessagesVolumeForCopilot($activityId);
+		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
+		if (($activity['PROVIDER_ID'] ?? null) !== Email::getId())
+		{
+			OpenLine::saveLastMessagesVolumeForCopilot($activityId);
+		}
 		self::notifyTimelinesAboutActivityUpdate($activityId, true);
 	}
 
@@ -459,7 +501,11 @@ final class AnalyzeCommunication extends AbstractOperation
 			);
 		}
 
-		OpenLine::saveLastMessagesVolumeForCopilot($activityId);
+		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
+		if (($activity['PROVIDER_ID'] ?? null) !== Email::getId())
+		{
+			OpenLine::saveLastMessagesVolumeForCopilot($activityId);
+		}
 		self::notifyTimelinesAboutActivityUpdate($activityId, true);
 	}
 

@@ -242,13 +242,24 @@ class ActivityController extends EntityController
 
 			if ($timelineEntryId > 0)
 			{
+				$timelineRow = Entity\TimelineTable::getRow([
+					'select' => ['CREATED'],
+					'filter' => ['=ID' => $timelineEntryId],
+				]);
+				$timelineCreated = $timelineRow['CREATED'] ?? null;
+
 				foreach ($bindings as $binding)
 				{
-					Entity\TimelineBindingTable::upsert([
+					$bindingFields = [
 						'OWNER_ID' => $timelineEntryId,
 						'ENTITY_TYPE_ID' => $binding['OWNER_TYPE_ID'],
 						'ENTITY_ID' => $binding['OWNER_ID'],
-					]);
+					];
+					if ($timelineCreated !== null)
+					{
+						$bindingFields['CREATED'] = $timelineCreated;
+					}
+					Entity\TimelineBindingTable::upsert($bindingFields);
 				}
 			}
 		}

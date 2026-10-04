@@ -8,7 +8,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Uri;
-use \Bitrix\Main\Web\Json;
+use Bitrix\Main\Web\Json;
 
 Loc::loadMessages(__FILE__);
 

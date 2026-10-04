@@ -24,6 +24,7 @@ use Bitrix\Rest\AppLangTable;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\Analytic;
+use Bitrix\Rest\Service\ServiceContainer;
 use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\Bot;
 use Bitrix\Rest\Internal;
@@ -349,6 +350,8 @@ class Provider
 	 * @param $requestData
 	 * @param string $elementCode
 	 * @param int $id
+	 * @param int|null $userId
+	 * @param bool $skipTariffCheck
 	 *
 	 * @return array
 	 * @throws SystemException
@@ -356,7 +359,13 @@ class Provider
 	 * @throws \Bitrix\Main\LoaderException
 	 * @throws \Bitrix\Main\ObjectPropertyException
 	 */
-	public static function saveIntegration($requestData, $elementCode = '', $id = 0, ?int $userId = null)
+	public static function saveIntegration(
+		$requestData,
+		$elementCode = '',
+		$id = 0,
+		?int $userId = null,
+		bool $skipTariffCheck = false,
+	)
 	{
 		$result = [
 			'status' => true,
@@ -369,6 +378,10 @@ class Provider
 		$isAdmin = $user->isAdmin();
 		$presetData = Element::get($elementCode);
 		$integrationData = $id > 0 ? IntegrationTable::getById($id)->fetch() : null;
+		if (!$skipTariffCheck)
+		{
+			ServiceContainer::getInstance()->getVibePlusTariffAccessService()->ensurePresetAvailable();
+		}
 
 		$presetData['OPTIONS']['IS_APPLICATION_PERSONAL'] = $requestData['IS_APPLICATION_PERSONAL'] ?? 'N';
 
@@ -609,6 +622,18 @@ class Provider
 									if (isset($events[$allEvents[$event['EVENT_NAME']]]) &&
 										$event['EVENT_HANDLER'] === $events[$allEvents[$event['EVENT_NAME']]])
 									{
+										$eventUpdateResult = EventTable::update(
+											$event['ID'],
+											['INTEGRATION_ID' => $id],
+										);
+										if (!$eventUpdateResult->isSuccess())
+										{
+											$result['status'] = false;
+											$errorList = array_merge(
+												$errorList,
+												$eventUpdateResult->getErrorMessages(),
+											);
+										}
 										unset($events[$allEvents[$event['EVENT_NAME']]]);
 									}
 									else
@@ -628,6 +653,7 @@ class Provider
 											'EVENT_HANDLER' => $eventHandler,
 											'APPLICATION_TOKEN' => $clientId,
 											'USER_ID' => 0,
+											'INTEGRATION_ID' => $id,
 										]
 									);
 									if ($result['status'] = $res->isSuccess())

@@ -10,6 +10,7 @@ use Bitrix\Mail\Infrastructure\Rest\Dto\MessageDto;
 use Bitrix\Mail\Infrastructure\Rest\RequestParams;
 use Bitrix\Mail\Helper\Message\MessageSearch;
 use Bitrix\Mail\Helper\RecipientHelper;
+use Bitrix\Mail\Helper\Message\MailboxMigrationActionException;
 use Bitrix\Mail\Helper\Message\MessageSender;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
@@ -116,6 +117,12 @@ class Message extends RestController
 			$provider = new MessageSearch();
 			$messages = $provider->search($dto, $userId);
 		}
+		catch (MailboxMigrationActionException $e)
+		{
+			throw new RequestValidationException([
+				new Error($e->getMessage(), $e->errorCode),
+			]);
+		}
 		catch (SystemException $e)
 		{
 			throw new RequestValidationException([
@@ -147,6 +154,8 @@ class Message extends RestController
 	 * - string   body*     Email body content (plain text or basic HTML)
 	 * - string[] cc        CC recipients (optional)
 	 * - string[] bcc       BCC recipients (optional)
+	 * - int      senderId  Exact sender record identifier (optional)
+	 * - int      mailboxId Exact mailbox identifier; takes priority over senderId (optional)
 	 *
 	 * @return ArrayResponse {success: bool, to: string[]}
 	 */
@@ -158,6 +167,8 @@ class Message extends RestController
 		$from = $params->requireString('from');
 		$subject = $params->requireString('subject');
 		$body = $params->requireString('body');
+		$senderId = $params->getInt('senderId');
+		$mailboxId = $params->getInt('mailboxId');
 
 		[$recipients, $cc, $bcc] = $this->resolveAddressLists(
 			to: $params->requireArray('to'),
@@ -166,9 +177,8 @@ class Message extends RestController
 			userId: $userId,
 		);
 
-		try
-		{
-			$result = (new MessageSender())->send(
+		$result = $this->executeSendingAction(
+			static fn (): array => (new MessageSender())->send(
 				from: $from,
 				recipients: $recipients,
 				subject: $subject,
@@ -176,14 +186,11 @@ class Message extends RestController
 				userId: $userId,
 				cc: $cc,
 				bcc: $bcc,
-			);
-		}
-		catch (SystemException $e)
-		{
-			throw new RequestValidationException([
-				new Error($e->getMessage(), 'MESSAGE_SEND_FAILED'),
-			]);
-		}
+				senderId: $senderId,
+				mailboxId: $mailboxId,
+			),
+			'MESSAGE_SEND_FAILED',
+		);
 
 		return new ArrayResponse($result);
 	}
@@ -204,6 +211,8 @@ class Message extends RestController
 	 * - string   body*              Email body content (plain text or basic HTML)
 	 * - string[] cc                 CC recipients (optional)
 	 * - string[] bcc                BCC recipients (optional)
+	 * - int      senderId           Exact sender record identifier (optional)
+	 * - int      mailboxId          Exact mailbox identifier; takes priority over senderId (optional)
 	 *
 	 * @return ArrayResponse {success: bool, to: string[]}
 	 */
@@ -216,6 +225,8 @@ class Message extends RestController
 		$from = $params->requireString('from');
 		$subject = $params->requireString('subject');
 		$body = $params->requireString('body');
+		$senderId = $params->getInt('senderId');
+		$mailboxId = $params->getInt('mailboxId');
 
 		[$recipients, $cc, $bcc] = $this->resolveAddressLists(
 			to: $params->requireArray('to'),
@@ -224,9 +235,8 @@ class Message extends RestController
 			userId: $userId,
 		);
 
-		try
-		{
-			$result = (new MessageSender())->reply(
+		$result = $this->executeSendingAction(
+			static fn (): array => (new MessageSender())->reply(
 				messageId: $messageId,
 				from: $from,
 				recipients: $recipients,
@@ -235,14 +245,11 @@ class Message extends RestController
 				userId: $userId,
 				cc: $cc,
 				bcc: $bcc,
-			);
-		}
-		catch (SystemException $e)
-		{
-			throw new RequestValidationException([
-				new Error($e->getMessage(), 'MESSAGE_REPLY_FAILED'),
-			]);
-		}
+				senderId: $senderId,
+				mailboxId: $mailboxId,
+			),
+			'MESSAGE_REPLY_FAILED',
+		);
 
 		return new ArrayResponse($result);
 	}
@@ -263,6 +270,8 @@ class Message extends RestController
 	 * - string   body*              Email body content (plain text or basic HTML)
 	 * - string[] cc                 CC recipients (optional)
 	 * - string[] bcc                BCC recipients (optional)
+	 * - int      senderId           Exact sender record identifier (optional)
+	 * - int      mailboxId          Exact mailbox identifier; takes priority over senderId (optional)
 	 *
 	 * @return ArrayResponse {success: bool, to: string[]}
 	 */
@@ -275,6 +284,8 @@ class Message extends RestController
 		$from = $params->requireString('from');
 		$subject = $params->requireString('subject');
 		$body = $params->requireString('body');
+		$senderId = $params->getInt('senderId');
+		$mailboxId = $params->getInt('mailboxId');
 
 		[$recipients, $cc, $bcc] = $this->resolveAddressLists(
 			to: $params->requireArray('to'),
@@ -283,9 +294,8 @@ class Message extends RestController
 			userId: $userId,
 		);
 
-		try
-		{
-			$result = (new MessageSender())->forward(
+		$result = $this->executeSendingAction(
+			static fn (): array => (new MessageSender())->forward(
 				messageId: $messageId,
 				from: $from,
 				recipients: $recipients,
@@ -294,16 +304,33 @@ class Message extends RestController
 				userId: $userId,
 				cc: $cc,
 				bcc: $bcc,
-			);
-		}
-		catch (SystemException $e)
-		{
-			throw new RequestValidationException([
-				new Error($e->getMessage(), 'MESSAGE_FORWARD_FAILED'),
-			]);
-		}
+				senderId: $senderId,
+				mailboxId: $mailboxId,
+			),
+			'MESSAGE_FORWARD_FAILED',
+		);
 
 		return new ArrayResponse($result);
+	}
+
+	private function executeSendingAction(callable $action, string $fallbackCode): array
+	{
+		try
+		{
+			return $action();
+		}
+		catch (MailboxMigrationActionException $exception)
+		{
+			throw new RequestValidationException([
+				new Error($exception->getMessage(), $exception->errorCode),
+			]);
+		}
+		catch (SystemException $exception)
+		{
+			throw new RequestValidationException([
+				new Error($exception->getMessage(), $fallbackCode),
+			]);
+		}
 	}
 
 	/**

@@ -328,6 +328,15 @@ class CAllUserTypeEntity extends CDBResult
 			$aMsg[] = ["id" => "USER_TYPE_ID", "text" => GetMessage("USER_TYPE_USER_TYPE_ID_INVALID")];
 		}
 
+		if (
+			$ID <= 0
+			&& ($arFields["USER_TYPE_ID"] ?? '') === 'rich_text'
+			&& \Bitrix\Main\Config\Feature::isDisabled('Bitrix\\UI\\Config\\Feature\\RichTextUserFieldFlag')
+		)
+		{
+			$aMsg[] = ["id" => "USER_TYPE_ID", "text" => GetMessage("USER_TYPE_USER_TYPE_ID_INVALID")];
+		}
+
 		if (!empty($aMsg))
 		{
 			$e = new CAdminException($aMsg);

@@ -4,6 +4,9 @@ namespace Bitrix\Mail;
 
 use Bitrix\Mail\Helper\Message\MessageInternalDateHandler;
 use Bitrix\Mail\Helper\MessageEventManager;
+use Bitrix\Mail\Internal\Service\Label\LabelCountersService;
+use Bitrix\Mail\Internal\Service\Message\ClassifyPendingService;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\MailMessageMarkTable;
 use Bitrix\Mail\Internals\MessageUploadQueueTable;
 use Bitrix\Main\DB\Connection;
@@ -158,25 +161,16 @@ class MailMessageUidTable extends Entity\DataManager
 
 		$remainingRows = static::selectRemainingUidRows($messages);
 
-		static::removeMessageMarks($messages, $filter, $remainingRows);
+		static::removeMessageMarksAndPendingFlags($messages, $filter, $remainingRows);
 
-		$remains=[];
+		static::cleanupDeletedMessageLabels($messages, $filter, $remainingRows);
 
-		if($limit === false)
-		{
-			$remains = array_column(
-				static::selectMessagesToBeDeleted(
-					MessageEventManager::getRequiredFieldNamesForEvent($eventName),
-					$filter,
-					$messages
-				),
-				'MESSAGE_ID'
-			);
-		}
-		else
-		{
-			$remains = array_column($remainingRows, 'MESSAGE_ID');
-		}
+		/*
+			A message has left the mailbox only when no uid row of it survives: the same letter
+			may sit in another folder or in a retained source generation. Repeating the filter
+			cannot answer that - it names the rows just deleted, not the message.
+		*/
+		$remains = array_column($remainingRows, 'MESSAGE_ID');
 
 		if ($sendEvent)
 		{
@@ -206,11 +200,30 @@ class MailMessageUidTable extends Entity\DataManager
 	}
 
 	/**
-	 * Lives here and not in an onMailMessageDeleted handler: at $limit === false the event payload comes back
-	 * empty (see the early return of selectMessagesToBeDeleted), so a handler would have nothing to clean up.
-	 * Best effort: a broken cleanup must not break the deletion itself.
+	 * A binding goes away with the last uid row of the message in that mailbox, as marks do.
 	 */
-	private static function removeMessageMarks(array $messages, array $filter, array $remainingRows): void
+	private static function cleanupDeletedMessageLabels(array $messages, array $filter, array $remainingRows): void
+	{
+		$deletedMessages = static::groupDeletedMessageIdsByMailbox(
+			$messages,
+			$remainingRows,
+			$filter
+		);
+
+		$countersService = new LabelCountersService();
+
+		foreach ($deletedMessages as $mailboxId => $messageIds)
+		{
+			$countersService->handleMessagesDeleted($mailboxId, $messageIds);
+		}
+	}
+
+	/**
+	 * Lives here and not in an onMailMessageDeleted handler: the deletion may be asked to keep silent,
+	 * and the marks have to go anyway. The classify pending flag goes with the marks: process state of a
+	 * letter that no longer exists. Best effort: a broken cleanup must not break the deletion itself.
+	 */
+	private static function removeMessageMarksAndPendingFlags(array $messages, array $filter, array $remainingRows): void
 	{
 		try
 		{
@@ -220,30 +233,23 @@ class MailMessageUidTable extends Entity\DataManager
 				$filter
 			);
 
+			$pendingService = new ClassifyPendingService();
+
 			foreach ($deletedMessages as $mailboxId => $messageIds)
 			{
 				MailMessageMarkTable::deleteByMessages($mailboxId, $messageIds);
+				$pendingService->clearMany($mailboxId, $messageIds);
 			}
 		}
-		catch (\Throwable $exception)
+		catch (\Throwable)
 		{
-			AddMessage2Log(
-				sprintf(
-					'removeMessageMarks failed: messages=%d, error=%s',
-					count($messages),
-					$exception->getMessage()
-				),
-				'mail',
-				2,
-				false
-			);
 		}
 	}
 
 	/**
 	 * A message keeps its marks while any of its uid rows in the same mailbox survives - the same letter may
-	 * sit in another folder. Mailbox id is not guaranteed in the deleted rows: a caller may pass ready event
-	 * data without it (see the early return of selectMessagesToBeDeleted), and then the filter is the source.
+	 * sit in another folder. Mailbox id is not taken for granted in the deleted rows: a caller reaching this
+	 * helper on its own may describe the letters without them, and then the filter is the source.
 	 *
 	 * @return array<int, int[]> Mailbox id => ids of messages that are gone.
 	 */
@@ -325,7 +331,7 @@ class MailMessageUidTable extends Entity\DataManager
 		return $remaining;
 	}
 
-	public static function getLocalUID(int $mailboxId, string $dirPath, string $dirUIDv, string $order): int
+	public static function getLocalUID(int $mailboxId, string $dirPath, string $dirUIDv, string $order, ?GenerationScope $scope = null): int
 	{
 		$additionalFilter = [];
 
@@ -336,20 +342,28 @@ class MailMessageUidTable extends Entity\DataManager
 			];
 		}
 
+		$filter = array_merge([
+			'=MAILBOX_ID' => $mailboxId,
+			'=DIR_MD5' => md5($dirPath),
+			'=DIR_UIDV' => $dirUIDv,
+			'>MSG_UID' => 0,
+			'=IS_OLD' => 'N',
+			'!=MESSAGE_ID' => 0,
+			'==DELETE_TIME' => 0,
+		], $additionalFilter);
+
+		// The same physical coordinates may exist in several generations
+		if ($scope !== null)
+		{
+			$filter = $scope->apply($filter);
+		}
+
 		$row = self::getRow(
 			[
 				'select' => [
 					'MSG_UID'
 				],
-				'filter' => array_merge([
-					'=MAILBOX_ID' => $mailboxId,
-					'=DIR_MD5' => md5($dirPath),
-					'=DIR_UIDV' => $dirUIDv,
-					'>MSG_UID' => 0,
-					'=IS_OLD' => 'N',
-					'!=MESSAGE_ID' => 0,
-					'==DELETE_TIME' => 0,
-				], $additionalFilter),
+				'filter' => $filter,
 				'order' => [
 					'MSG_UID' => $order,
 				],
@@ -364,14 +378,14 @@ class MailMessageUidTable extends Entity\DataManager
 		return (int)$row['MSG_UID'];
 	}
 
-	public static function getLastLocalUID(int $mailboxId, string $dirPath, string $dirUIDv): int
+	public static function getLastLocalUID(int $mailboxId, string $dirPath, string $dirUIDv, ?GenerationScope $scope = null): int
 	{
-		return self::getLocalUID($mailboxId, $dirPath, $dirUIDv, 'DESC');
+		return self::getLocalUID($mailboxId, $dirPath, $dirUIDv, 'DESC', $scope);
 	}
 
-	public static function getFirstLocalUID(int $mailboxId, string $dirPath, string $dirUIDv): int
+	public static function getFirstLocalUID(int $mailboxId, string $dirPath, string $dirUIDv, ?GenerationScope $scope = null): int
 	{
-		return self::getLocalUID($mailboxId, $dirPath, $dirUIDv, 'ASC');
+		return self::getLocalUID($mailboxId, $dirPath, $dirUIDv, 'ASC', $scope);
 	}
 
 	public static function getMessage(
@@ -403,7 +417,9 @@ class MailMessageUidTable extends Entity\DataManager
 		return self::getRow(
 			[
 				'select' => $select,
-				'filter' => $filter,
+				// The placement a message is read through is one of the generation serving the
+				// mailbox now: a retained one names the coordinates of a source it has left
+				'filter' => GenerationScope::forMailbox($mailboxId)->apply($filter),
 			]
 		);
 	}
@@ -421,8 +437,9 @@ class MailMessageUidTable extends Entity\DataManager
 	{
 		$sqlHelper = $connection->getSqlHelper();
 		$messageDeleteTableName = $sqlHelper->quote(Internals\MessageDeleteQueueTable::getTableName());
-		$insertFields = ' (ID, MAILBOX_ID, MESSAGE_ID) ';
-		$fromSelect = sprintf('(SELECT ID, MAILBOX_ID, MESSAGE_ID %s)', $query);
+		// The queue row inherits the generation of the uid row it replaces
+		$insertFields = ' (ID, MAILBOX_ID, MESSAGE_ID, GENERATION_ID) ';
+		$fromSelect = sprintf('(SELECT ID, MAILBOX_ID, MESSAGE_ID, GENERATION_ID %s)', $query);
 		$insertQuery = $sqlHelper->getInsertIgnore($messageDeleteTableName, $insertFields, $fromSelect);
 		$connection->query($insertQuery);
 	}
@@ -497,6 +514,16 @@ class MailMessageUidTable extends Entity\DataManager
 		{
 			$select = $fields;
 		}
+		elseif (array_diff($primary, array_intersect($primary, ...array_map('array_keys', $eventData))))
+		{
+			/*
+				The caller knows the letters but not the rows that hold them: the primary key
+				has to be read from the table. Checked before the event fields are complete -
+				otherwise ready event data would be returned as the rows to delete, and a
+				deletion by an empty list of ids would report success without deleting anything.
+			*/
+			$select = $fields;
+		}
 		else
 		{
 			$select = array_diff($fields, array_intersect($fields, ...array_map('array_keys', $eventData)));
@@ -506,17 +533,10 @@ class MailMessageUidTable extends Entity\DataManager
 				return $eventData;
 			}
 
-			if (array_diff($primary, array_intersect($primary, ...array_map('array_keys', $eventData))))
+			foreach ($eventData as $item)
 			{
-				$select = $fields;
-			}
-			else
-			{
-				foreach ($eventData as $item)
-				{
-					$key = sprintf('%u:%s', $item['MAILBOX_ID'], $item['ID']);
-					$result[$key] = $item;
-				}
+				$key = sprintf('%u:%s', $item['MAILBOX_ID'], $item['ID']);
+				$result[$key] = $item;
 			}
 		}
 
@@ -656,6 +676,10 @@ class MailMessageUidTable extends Entity\DataManager
 				'data_type' => 'integer',
 				'default' => 0,
 			),
+			'GENERATION_ID' => array(
+				'data_type' => 'integer',
+				'default_value' => 0,
+			),
 			new Reference(
 				'MESSAGE_TABLE',
 				MailMessageTable::class,
@@ -672,38 +696,85 @@ class MailMessageUidTable extends Entity\DataManager
 	{
 		$result = new Entity\EventResult;
 		$parameters = $event->getParameters();
-		if ($parameters['primary'] && is_set($parameters['fields']['IS_OLD']))
+
+		if (!$parameters['primary'] || !is_set($parameters['fields']['IS_OLD']))
 		{
-			$message = self::getByPrimary($parameters['primary'], [
-				'select' => [
-					'MAILBOX_ID',
-					'DIR_MD5',
-					'INTERNALDATE'
-				],
-			])->fetch();
+			return $result;
+		}
 
-			if (!$message)
+		$message = self::getByPrimary($parameters['primary'], [
+			'select' => [
+				'MAILBOX_ID',
+				'DIR_MD5',
+				'INTERNALDATE',
+				'IS_OLD',
+				'DELETE_TIME',
+				'MESSAGE_ID',
+			],
+		])->fetch();
+
+		if (!$message)
+		{
+			return $result;
+		}
+
+		if (self::shouldInvalidateStartDateCacheOnUpdate($message))
+		{
+			$updateResult = MessageInternalDateHandler::clearStartInternalDate(
+				(int)$message['MAILBOX_ID'],
+				$message['DIR_MD5'],
+			);
+			if (!$updateResult->isSuccess())
 			{
-				return $result;
-			}
-
-			$internalDate = $message['INTERNALDATE'];
-			$mailboxId = (int)$message['MAILBOX_ID'];
-			$dirMd5 = $message['DIR_MD5'];
-
-			$startInternalDate = MessageInternalDateHandler::getStartInternalDateForDir($mailboxId, dirMd5: $dirMd5);
-
-			if (!is_null($startInternalDate) && $internalDate <= $startInternalDate)
-			{
-				$updateResult = MessageInternalDateHandler::clearStartInternalDate($mailboxId, $dirMd5);
-				if (!$updateResult->isSuccess())
-				{
-					$result->setErrors($updateResult->getErrors());
-				}
+				$result->setErrors($updateResult->getErrors());
 			}
 		}
 
 		return $result;
+	}
+
+	/**
+	 * The write-path invalidation once the read path took over recalculation. The cache is read without a
+	 * side effect - this handler never recalculates. A counted letter strictly below the stored minimum, a
+	 * folder cached empty, or a letter no later than the minimum leaving the counted set makes the cache wrong.
+	 * The comparison for a counted letter is strict because equality does not change the minimum. Reverse of the
+	 * move path
+	 * ({@see MessageEventManager::checkForNeedClearCache}), where the letter leaves the folder and equality
+	 * does move the minimum.
+	 *
+	 * @param array<string, mixed> $message
+	 */
+	private static function shouldInvalidateStartDateCacheOnUpdate(array $message): bool
+	{
+		if (
+			!isset($message['DELETE_TIME']) || (int)$message['DELETE_TIME'] !== 0
+			|| !isset($message['MESSAGE_ID']) || (int)$message['MESSAGE_ID'] <= 0
+			|| !isset($message['INTERNALDATE']) || $message['INTERNALDATE'] === null
+			|| !isset($message['IS_OLD'])
+		)
+		{
+			return false;
+		}
+
+		$cache = MessageInternalDateHandler::getCachedStartInternalDateForDir(
+			(int)$message['MAILBOX_ID'],
+			(string)$message['DIR_MD5'],
+		);
+
+		if ($cache === null)
+		{
+			return false;
+		}
+
+		if (MessageInternalDateHandler::isCountableMessageRow($message))
+		{
+			return $cache->value === null || $message['INTERNALDATE'] < $cache->value;
+		}
+
+		return in_array($message['IS_OLD'], self::EXCLUDED_COUNTER_STATUSES, true)
+			&& $cache->value !== null
+			&& $message['INTERNALDATE'] <= $cache->value
+		;
 	}
 
 }

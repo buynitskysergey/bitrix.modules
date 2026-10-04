@@ -142,6 +142,18 @@ class MailboxSyncManager
 			return true;
 		}
 
+		/*
+			A mailbox already known to be unavailable, or one checked too recently, is answered from
+			the stored state: the check below opens a connection with a login per synced folder, each
+			one up to the connect timeout. Only an explicit sync clears a raised problem status.
+		*/
+		$connectionCheckState = $problemMailboxStateService->getConnectionCheckState($mailboxId);
+
+		if ($connectionCheckState['isProblem'] || !$connectionCheckState['isAttemptDue'])
+		{
+			return !$connectionCheckState['isProblem'];
+		}
+
 		$mailboxHelper = Helper\Mailbox::createInstance($mailboxId, false);
 
 		if (!$mailboxHelper)
@@ -172,6 +184,61 @@ class MailboxSyncManager
 		$this->sendMailboxGridButtonRefreshIfNeeded($mailboxId, $transitionResult);
 
 		return !$transitionResult['isProblem'];
+	}
+
+	/**
+	 * Connection state of the mailbox as it is stored, without touching the mail server. Read paths
+	 * that render a screen or answer a payload use this one: a live check belongs to an explicit sync.
+	 *
+	 * Precondition: $mailboxId belongs to the user this manager was created for. Half of the answer
+	 * comes from the state warmed for that user alone, so another mailbox may be answered from the
+	 * unscoped row instead and read differently. The right to the mailbox is the business of the
+	 * caller: the entry point checks it, not this helper.
+	 */
+	public function getStoredConnectionStatus(int $mailboxId): bool
+	{
+		if ($this->getLastMailboxSyncIsSuccessStatus($mailboxId))
+		{
+			return true;
+		}
+
+		$warmedProblemStatus = $this->findWarmedProblemStatus($mailboxId);
+
+		if ($warmedProblemStatus !== null)
+		{
+			return !$warmedProblemStatus;
+		}
+
+		return !(new ProblemMailboxStateService())->isProblemMailbox($mailboxId);
+	}
+
+	/**
+	 * Problem status of the mailbox out of the state the read above has already warmed. This reader now
+	 * answers by the same predicate as the mailbox grid - PROBLEM_STATUS alone - though not from the
+	 * same source: the grid reads the flag with a direct query of its own,
+	 * {@see self::getMailboxesWithConnectionErrorForUsers()}.
+	 *
+	 * Null means the mailbox is not in that state and the caller has to read the row: the warmed state
+	 * covers the mailboxes of the user alone, so a passwordless staging record may be missing from it,
+	 * and the attempt counter it does not carry is deliberately left uncached.
+	 */
+	private function findWarmedProblemStatus(int $mailboxId): ?bool
+	{
+		$userId = (int)$this->userId;
+
+		if (!$userId)
+		{
+			return null;
+		}
+
+		$warmedState = $this->loadMailboxSyncState($userId);
+
+		if (!in_array($mailboxId, $warmedState['mailboxIds'], true))
+		{
+			return null;
+		}
+
+		return in_array($mailboxId, $warmedState['connectionErrorIds'], true);
 	}
 
 	/**
@@ -224,6 +291,11 @@ class MailboxSyncManager
 	/**
 	 * Single bulk+cached read of per-mailbox sync state for a user:
 	 * combines SYNC_STATUS and PROBLEM_STATUS into one cached fetch.
+	 *
+	 * `mailboxIds` tells "this mailbox has no problem status" from "this mailbox is not covered here":
+	 * only the mailboxes of the user are read, so a caller outside that set has to fall back to a row.
+	 *
+	 * @return array{syncInfo: array<int, array{isSuccess: bool, timeStarted: int}>, connectionErrorIds: int[], mailboxIds: int[]}
 	 */
 	private function loadMailboxSyncState(int $userId): array
 	{
@@ -237,6 +309,7 @@ class MailboxSyncManager
 		$cache[$userId] = [
 			'syncInfo' => [],
 			'connectionErrorIds' => [],
+			'mailboxIds' => [],
 		];
 
 		$userMailboxIds = array_keys(MailboxTable::getUserMailboxes($userId, true));
@@ -245,6 +318,8 @@ class MailboxSyncManager
 		{
 			return $cache[$userId];
 		}
+
+		$cache[$userId]['mailboxIds'] = array_map('intval', $userMailboxIds);
 
 		$mailboxesOptions = MailEntityOptionsTable::getCachedMailboxesOptions(
 			$userMailboxIds,

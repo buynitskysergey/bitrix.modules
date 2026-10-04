@@ -135,6 +135,7 @@ final class RepeatSale extends AIActivity
 					? EditableDescription::BG_COLOR_YELLOW
 					: EditableDescription::BG_COLOR_WHITE
 			)
+			->setHeight(EditableDescription::HEIGHT_AUTO)
 		;
 
 		$jobResult = $this->getJobResult();

@@ -7,7 +7,6 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Analytics\AnalyticsEvent;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Sale;
-use Bitrix\Sale\Label\EntityLabelService;
 use Bitrix\Salescenter\Analytics\Dictionary\SectionDictionary;
 use Bitrix\Salescenter\Analytics\Dictionary\SubSectionDictionary;
 
@@ -32,7 +31,6 @@ class LabelConstructor
 
 	public function getSectionLabelForPayment(Sale\Payment $payment): string
 	{
-		/** @var EntityLabelService $entityLabelService */
 		$entityLabelService = ServiceLocator::getInstance()->get('sale.entityLabel');
 		$label = $entityLabelService->getLabelForEntity($payment, 'section');
 
@@ -41,7 +39,6 @@ class LabelConstructor
 
 	public function getSubSectionLabelForPayment(Sale\Payment $payment): string
 	{
-		/** @var EntityLabelService $entityLabelService */
 		$entityLabelService = ServiceLocator::getInstance()->get('sale.entityLabel');
 		$label = $entityLabelService->getLabelForEntity($payment, 'subSection');
 

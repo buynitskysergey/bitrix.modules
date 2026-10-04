@@ -18,10 +18,11 @@ class MarkEntry extends TimelineEntry
 		}
 		[$authorId, $created, $settings, $bindings] = self::fetchParams($params);
 
+		$entryCreated = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => TimelineType::MARK,
 			'TYPE_CATEGORY_ID' => $markTypeId,
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => $authorId,
 			'SETTINGS' => $settings,
 			'ASSOCIATED_ENTITY_TYPE_ID' => $entityTypeId,
@@ -39,7 +40,7 @@ class MarkEntry extends TimelineEntry
 		{
 			$bindings[] = array('ENTITY_TYPE_ID' => $entityTypeId, 'ENTITY_ID' => $entityId);
 		}
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $entryCreated);
 
 		if ($entityTypeId === \CCrmOwnerType::Activity)
 		{

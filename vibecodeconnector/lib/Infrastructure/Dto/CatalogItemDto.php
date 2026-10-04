@@ -33,6 +33,8 @@ final class CatalogItemDto
 		public readonly bool $isMine,
 		public readonly bool $isHidden = false,
 		public readonly bool $isNew = false,
+		public readonly bool $isDescriptionDefault = false,
+		public readonly bool $canShare = false,
 	) {}
 
 	/**
@@ -60,6 +62,8 @@ final class CatalogItemDto
 			'isMine' => $this->isMine,
 			'isHidden' => $this->isHidden,
 			'isNew' => $this->isNew,
+			'isDescriptionDefault' => $this->isDescriptionDefault,
+			'canShare' => $this->canShare,
 		];
 	}
 

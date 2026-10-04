@@ -2,9 +2,10 @@
 
 namespace Bitrix\Crm\Ads;
 
-use Bitrix\Main\Loader;
+use Bitrix\Crm\Integration\Bitrix24\Product;
 use Bitrix\Main\Context;
-use \Bitrix\Seo\Retargeting\Service;
+use Bitrix\Main\Loader;
+use Bitrix\Seo\Retargeting\Service;
 
 /**
  * Class AdsService.
@@ -135,7 +136,7 @@ abstract class AdsService
 
 		$service = static::getService();
 		$types = $service->getTypes();
-		if (!Loader::includeModule('bitrix24') || in_array(\CBitrix24::getPortalZone(), ['ru', 'kz', 'by', 'uz']))
+		if (Product::isVkAvailable())
 		{
 			return $types;
 		}

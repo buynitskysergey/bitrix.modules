@@ -124,9 +124,11 @@ final class ToRepository
 		{
 			foreach ($holders as $entityTypeId => &$itemIds)
 			{
+				$permissions->item()->preloadPermissionAttributes($entityTypeId, $itemIds);
 				$itemIds = array_filter($itemIds, fn(int $id) => $permissions->item()->canRead($entityTypeId, $id));
 			}
 		}
+		unset($itemIds);
 
 		if (empty($holders))
 		{

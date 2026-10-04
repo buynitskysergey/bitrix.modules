@@ -49,7 +49,6 @@ class StorageFileFinder
 			'=STORAGE.MODULE_ID' => Driver::INTERNAL_MODULE_ID,
 			'@STORAGE.ENTITY_TYPE' => $this->entityTypes,
 		];
-
 		$fulltextContent = Disk\Search\FullTextBuilder::create()
 			->addText($searchQuery)
 			->getSearchValue()
@@ -82,7 +81,7 @@ class StorageFileFinder
 				'limit' => $this->limit,
 				'order' => $this->order,
 			],
-			['ID', 'CREATED_BY']
+			['ID', 'CREATED_BY'],
 		);
 
 		$objectIds = [];
@@ -115,12 +114,21 @@ class StorageFileFinder
 		}
 
 		$parameters = [
-			'filter' => ['@ID' => $objectIds],
+			'filter' => [
+				'@ID' => $objectIds,
+				'=DELETED_TYPE' => ObjectTable::DELETED_TYPE_NONE,
+			],
 			'order' => $this->order,
 		];
+		$securityContext = new Disk\Security\DiskSecurityContext($this->userId);
+		$parameters = Driver::getInstance()->getRightsManager()->addRightsCheck(
+			$securityContext,
+			$parameters,
+			['ID', 'CREATED_BY'],
+		);
 		$objects = [];
 
-		foreach (Disk\BaseObject::getModelList($parameters) as $object)
+		foreach ($this->loadModels($parameters) as $object)
 		{
 			$objects[] = $object;
 		}
@@ -188,6 +196,10 @@ class StorageFileFinder
 		}
 
 		$filter[] = $this->buildObjectTypeFilter($objectTypes);
+		if ($this->options->getAdditionalFilter() !== [])
+		{
+			$filter[] = $this->options->getAdditionalFilter();
+		}
 
 		$parameters = Driver::getInstance()->getRightsManager()->addRightsCheck(
 			new Disk\Security\DiskSecurityContext($this->userId),
@@ -237,11 +249,20 @@ class StorageFileFinder
 
 	private function loadModelsInIdOrder(array $objectIds): array
 	{
+		$parameters = Driver::getInstance()->getRightsManager()->addRightsCheck(
+			new Disk\Security\DiskSecurityContext($this->userId),
+			[
+				'filter' => [
+					'@ID' => $objectIds,
+					'=DELETED_TYPE' => ObjectTable::DELETED_TYPE_NONE,
+				],
+				'with' => ['STORAGE'],
+			],
+			['ID', 'CREATED_BY'],
+		);
+
 		$modelsById = [];
-		foreach (Disk\BaseObject::getModelList([
-			'filter' => ['@ID' => $objectIds],
-			'with' => ['STORAGE'],
-		]) as $object)
+		foreach ($this->loadModels($parameters) as $object)
 		{
 			$modelsById[$object->getId()] = $object;
 		}
@@ -256,5 +277,10 @@ class StorageFileFinder
 		}
 
 		return $objects;
+	}
+
+	protected function loadModels(array $parameters): iterable
+	{
+		return Disk\BaseObject::getModelList($parameters);
 	}
 }

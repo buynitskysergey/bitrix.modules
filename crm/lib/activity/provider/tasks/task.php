@@ -7,6 +7,7 @@ use Bitrix\Crm\Activity\TodoPingSettingsProvider;
 use Bitrix\Crm\ActivityTable;
 use Bitrix\Crm\Badge;
 use Bitrix\Crm\EO_Activity;
+use Bitrix\Crm\Integration\Analytics;
 use Bitrix\Crm\Integration\Tasks\Task2ActivityPriority;
 use Bitrix\Crm\Integration\Tasks\Task2ActivityStatus;
 use Bitrix\Crm\Integration\Tasks\TaskAccessController;
@@ -29,7 +30,8 @@ use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Tasks\Integration\CRM\Timeline\Bindings;
-use Bitrix\Crm\Integration\Analytics;
+use Bitrix\Tasks\V2\Public\Entity\TaskState;
+use Bitrix\Tasks\V2\Public\Provider\TaskStateProvider;
 use CCrmActivity;
 use CCrmActivityStatus;
 use CCrmDateTimeHelper;
@@ -45,6 +47,15 @@ final class Task extends Base
 	private const SUBJECT = 'TASK';
 	private const TASK_CRM_FIELD = 'UF_CRM_TASK';
 	private const UPDATE_OPTIONS = ['SKIP_ASSOCIATED_ENTITY' => true, 'REGISTER_SONET_EVENT' => false];
+	private const MAX_STATE_SYNC_ATTEMPTS = 3;
+	public const ERROR_ACTIVITY_NOT_FOUND = 'CRM_TASK_ACTIVITY_NOT_FOUND';
+	public const ERROR_CURRENT_STATUS_NOT_FOUND = 'CRM_TASK_ACTIVITY_CURRENT_STATUS_NOT_FOUND';
+	public const ERROR_STATUS_TRANSITION_NOT_ALLOWED = 'CRM_TASK_ACTIVITY_STATUS_TRANSITION_NOT_ALLOWED';
+	public const ERROR_STATUS_UPDATE_FAILED = 'CRM_TASK_ACTIVITY_STATUS_UPDATE_FAILED';
+	public const ERROR_TASK_NOT_FOUND = 'CRM_TASK_NOT_FOUND';
+	public const ERROR_COMPLETION_UPDATE_FAILED = 'CRM_TASK_ACTIVITY_COMPLETION_UPDATE_FAILED';
+	public const ERROR_END_TIME_UPDATE_FAILED = 'CRM_TASK_ACTIVITY_END_TIME_UPDATE_FAILED';
+	public const ERROR_TASK_STATE_CHANGED = 'CRM_TASK_STATE_CHANGED_DURING_SYNC';
 
 	public static array $cache = [];
 
@@ -341,37 +352,84 @@ final class Task extends Base
 		return $result;
 	}
 
-	public function updateStatus(int $taskId, string $desiredStatus): void
+	public function updateStatus(int $taskId, string $desiredStatus): Result
 	{
+		$result = new Result();
 		$activity = $this->find($taskId, true);
-		if (!$activity)
+		if (is_null($activity))
 		{
-			// nothing to update
-			return;
+			return $result->addError(new Error(
+				'Task activity was not found.',
+				self::ERROR_ACTIVITY_NOT_FOUND,
+				['taskId' => $taskId, 'desiredStatus' => $desiredStatus],
+			));
 		}
 
 		$settings = $activity->getSettings();
-		if (!is_array($settings) || !isset($settings['ACTIVITY_STATUS']))
-		{
-			// no status
-			return;
-		}
+		$settings = is_array($settings) ? $settings : [];
+		$currentStatus = $settings['ACTIVITY_STATUS'] ?? null;
 
-		$currStatus = $settings['ACTIVITY_STATUS'];
 		$taskActivityStatus = new TaskActivityStatus();
-		if (!$taskActivityStatus->isAllowedStatusChange($desiredStatus, $currStatus))
+		if ($taskActivityStatus->isTaskStatusProjection($desiredStatus))
 		{
-			// can't update due to task activity status logic
-			return;
+			// the task state is authoritative, the transition matrix does not gate it
+			if ($currentStatus !== $desiredStatus)
+			{
+				return $this->applyStatus($activity, $settings, $desiredStatus);
+			}
+
+			return $result;
 		}
 
-		$settings['ACTIVITY_STATUS'] = $desiredStatus;
-		$this->update(
+		if (is_null($currentStatus))
+		{
+			return $result->addError(new Error(
+				'Task activity current status was not found.',
+				self::ERROR_CURRENT_STATUS_NOT_FOUND,
+				['taskId' => $taskId, 'desiredStatus' => $desiredStatus],
+			));
+		}
+
+		if (!$taskActivityStatus->isAllowedStatusChange($desiredStatus, $currentStatus))
+		{
+			return $result->addError(new Error(
+				'Task activity status transition is not allowed.',
+				self::ERROR_STATUS_TRANSITION_NOT_ALLOWED,
+				[
+					'taskId' => $taskId,
+					'desiredStatus' => $desiredStatus,
+					'currentStatus' => $currentStatus,
+				],
+			));
+		}
+
+		return $this->applyStatus($activity, $settings, $desiredStatus);
+	}
+
+	private function applyStatus(EO_Activity $activity, array $settings, string $status): Result
+	{
+		$result = new Result();
+		$settings['ACTIVITY_STATUS'] = $status;
+
+		$isUpdated = CCrmActivity::Update(
 			$activity->getId(),
 			[
 				'SETTINGS' => $settings,
-			]
+			],
+			false,
+			true,
+			self::UPDATE_OPTIONS,
 		);
+		if (!$isUpdated)
+		{
+			$result->addError(new Error(
+				'Task activity status could not be updated.',
+				self::ERROR_STATUS_UPDATE_FAILED,
+				['activityId' => $activity->getId(), 'desiredStatus' => $status],
+			));
+		}
+
+		return $result;
 	}
 
 	public static function updateAssociatedEntity($entityId, array $activity, array $options = []): Result
@@ -566,6 +624,415 @@ final class Task extends Base
 	// 	$closedDate = $task->getClosedDate();
 	// }
 
+	/**
+	 * Derives both copies of the task state kept by the activity - the completion flag and the status label -
+	 * from the current task state and applies them.
+	 */
+	public function syncStateWithTask(int $taskId): TaskStateSyncResult
+	{
+		$result = new TaskStateSyncResult();
+		if ($taskId <= 0)
+		{
+			return $result->addError(new Error(
+				'Task was not found.',
+				self::ERROR_TASK_NOT_FOUND,
+				['taskId' => $taskId],
+			));
+		}
+
+		if (!$this->isTaskStateProviderAvailable())
+		{
+			return $result;
+		}
+
+		$taskState = $this->getCurrentTaskState($taskId);
+		if ($taskState === null)
+		{
+			return $result->addError(new Error(
+				'Task was not found.',
+				self::ERROR_TASK_NOT_FOUND,
+				['taskId' => $taskId],
+			));
+		}
+
+		$activity = $this->find($taskId, true);
+		if ($activity === null)
+		{
+			return $result->addError(new Error(
+				'Task activity was not found.',
+				self::ERROR_ACTIVITY_NOT_FOUND,
+				['taskId' => $taskId],
+			));
+		}
+
+		$initialActivityState = $this->captureState($activity);
+		$result->setInitialActivityState($initialActivityState);
+		$activityWasChanged = false;
+		$completionWasCreated = false;
+
+		for ($attempt = 1; $attempt <= self::MAX_STATE_SYNC_ATTEMPTS; $attempt++)
+		{
+			$taskActivityStatus = new TaskActivityStatus();
+			$desiredStatus = $taskActivityStatus->onStatusChange($taskState['status'], $taskState['isExpired']);
+			$desiredCompleted = null;
+			if ($desiredStatus === '')
+			{
+				if ($activityWasChanged)
+				{
+					$restoreResult = $this->restoreInitialState($taskId, $initialActivityState, $result);
+					if (!$restoreResult->isSuccess())
+					{
+						return $result->addErrors($restoreResult->getErrors());
+					}
+
+					$activityWasChanged = false;
+				}
+			}
+			else
+			{
+				$desiredCompleted = $taskActivityStatus->isCompletedTaskState($taskState['status']);
+				$completionWasCreated = $completionWasCreated
+					|| (!$activity->getCompleted() && $desiredCompleted)
+				;
+				$activityWasChanged = $activityWasChanged || $this->isStateUpdateRequired(
+					$activity,
+					$desiredCompleted,
+					$desiredStatus,
+				);
+				if (
+					$activity->getCompleted() !== $desiredCompleted
+					&& $initialActivityState->completedEntryIds === null
+				)
+				{
+					$initialActivityState = new TaskActivityState(
+						activityId: $initialActivityState->activityId,
+						completed: $initialActivityState->completed,
+						status: $initialActivityState->status,
+						endTime: $initialActivityState->endTime,
+						completedEntryIds: $this->getCompletedActivityEntryIds($activity->getId(), $taskId),
+					);
+					$result->setInitialActivityState($initialActivityState);
+				}
+
+				$syncResult = $this->setState($activity, $desiredCompleted, $desiredStatus);
+				if (!$syncResult->isSuccess())
+				{
+					return $result->addErrors($syncResult->getErrors());
+				}
+			}
+
+			$currentTaskState = $this->getCurrentTaskState($taskId);
+			if ($currentTaskState === $taskState)
+			{
+				if ($desiredCompleted === false && $completionWasCreated)
+				{
+					$this->deleteTechnicalCompletionEntries($taskId, $initialActivityState, $result);
+				}
+
+				return $result;
+			}
+
+			if ($currentTaskState === null)
+			{
+				return $result->addError(new Error(
+					'Task was not found.',
+					self::ERROR_TASK_NOT_FOUND,
+					['taskId' => $taskId],
+				));
+			}
+
+			$taskState = $currentTaskState;
+			$activity = $this->find($taskId, true);
+			if ($activity === null)
+			{
+				return $result->addError(new Error(
+					'Task activity was not found.',
+					self::ERROR_ACTIVITY_NOT_FOUND,
+					['taskId' => $taskId],
+				));
+			}
+		}
+
+		if ($activityWasChanged)
+		{
+			$restoreResult = $this->restoreInitialState($taskId, $initialActivityState, $result);
+			if (!$restoreResult->isSuccess())
+			{
+				$result->addErrors($restoreResult->getErrors());
+			}
+		}
+
+		return $result->addError(new Error(
+			'Task state kept changing while its activity was being synchronized.',
+			self::ERROR_TASK_STATE_CHANGED,
+			['taskId' => $taskId],
+		));
+	}
+
+	private function captureState(EO_Activity $activity): TaskActivityState
+	{
+		$settings = $activity->getSettings();
+		$endTime = $activity->getEndTime();
+
+		return new TaskActivityState(
+			activityId: $activity->getId(),
+			completed: $activity->getCompleted(),
+			status: is_array($settings) ? ($settings['ACTIVITY_STATUS'] ?? null) : null,
+			endTime: $endTime === null ? null : clone $endTime,
+			completedEntryIds: null,
+		);
+	}
+
+	private function isStateUpdateRequired(EO_Activity $activity, bool $completed, string $status): bool
+	{
+		$settings = $activity->getSettings();
+
+		return $activity->getCompleted() !== $completed
+			|| !is_array($settings)
+			|| ($settings['ACTIVITY_STATUS'] ?? null) !== $status
+		;
+	}
+
+	private function restoreInitialState(
+		int $taskId,
+		TaskActivityState $initialState,
+		TaskStateSyncResult $syncResult,
+	): Result
+	{
+		$result = new Result();
+		$activity = $this->find($taskId, true);
+		if ($activity === null)
+		{
+			return $result->addError(new Error(
+				'Task activity was not found.',
+				self::ERROR_ACTIVITY_NOT_FOUND,
+				['taskId' => $taskId],
+			));
+		}
+
+		$restoreResult = $this->updateState(
+			activity: $activity,
+			completed: $initialState->completed,
+			status: $initialState->status,
+			updateStatus: true,
+			updateEndTime: false,
+			endTime: null,
+		);
+		if (!$restoreResult->isSuccess())
+		{
+			return $result->addErrors($restoreResult->getErrors());
+		}
+
+		$this->deleteTechnicalCompletionEntries($taskId, $initialState, $syncResult);
+
+		return $result;
+	}
+
+	private function deleteTechnicalCompletionEntries(
+		int $taskId,
+		TaskActivityState $initialState,
+		TaskStateSyncResult $syncResult,
+	): void
+	{
+		if ($initialState->completedEntryIds === null)
+		{
+			return;
+		}
+
+		$currentEntryIds = $this->getCompletedActivityEntryIds($initialState->activityId, $taskId);
+		$technicalEntryIds = array_values(array_diff($currentEntryIds, $initialState->completedEntryIds));
+		foreach ($technicalEntryIds as $entryId)
+		{
+			TimelineEntry::delete($entryId);
+		}
+
+		$syncResult->addDeletedCompletionEntryIds($technicalEntryIds);
+	}
+
+	public function setState(EO_Activity $activity, bool $completed, ?string $status = null): Result
+	{
+		return $this->updateState(
+			activity: $activity,
+			completed: $completed,
+			status: $status,
+			updateStatus: $status !== null,
+			updateEndTime: false,
+			endTime: null,
+		);
+	}
+
+	public function restoreState(
+		EO_Activity $activity,
+		bool $completed,
+		?string $status,
+		?DateTime $endTime,
+	): Result
+	{
+		return $this->updateState(
+			activity: $activity,
+			completed: $completed,
+			status: $status,
+			updateStatus: true,
+			updateEndTime: true,
+			endTime: $endTime,
+		);
+	}
+
+	private function updateState(
+		EO_Activity $activity,
+		bool $completed,
+		?string $status,
+		bool $updateStatus,
+		bool $updateEndTime,
+		?DateTime $endTime,
+	): Result
+	{
+		$result = new Result();
+		$settings = $activity->getSettings();
+		$settings = is_array($settings) ? $settings : [];
+
+		$isCompletionUpdateRequired = $activity->getCompleted() !== $completed;
+		$isStatusUpdateRequired = $updateStatus && ($settings['ACTIVITY_STATUS'] ?? null) !== $status;
+		if (!$isCompletionUpdateRequired && !$isStatusUpdateRequired && !$updateEndTime)
+		{
+			return $result;
+		}
+
+		$fields = [];
+		if ($isCompletionUpdateRequired)
+		{
+			$fields['COMPLETED'] = $completed ? 'Y' : 'N';
+		}
+
+		if ($isStatusUpdateRequired)
+		{
+			if ($status === null)
+			{
+				unset($settings['ACTIVITY_STATUS']);
+			}
+			else
+			{
+				$settings['ACTIVITY_STATUS'] = $status;
+			}
+
+			$fields['SETTINGS'] = $settings;
+		}
+
+		if ($updateEndTime)
+		{
+			$fields['END_TIME'] = $endTime?->toString() ?? '';
+		}
+
+		if (CCrmActivity::Update($activity->getId(), $fields, false, true, self::UPDATE_OPTIONS))
+		{
+			self::invalidateAll();
+
+			return $result;
+		}
+
+		if ($isCompletionUpdateRequired)
+		{
+			$result->addError(new Error(
+				'Task activity completion state could not be updated.',
+				self::ERROR_COMPLETION_UPDATE_FAILED,
+				['activityId' => $activity->getId(), 'completed' => $completed],
+			));
+		}
+
+		if ($isStatusUpdateRequired)
+		{
+			$result->addError(new Error(
+				'Task activity status could not be updated.',
+				self::ERROR_STATUS_UPDATE_FAILED,
+				['activityId' => $activity->getId(), 'status' => $status],
+			));
+		}
+
+		if ($updateEndTime)
+		{
+			$result->addError(new Error(
+				'Task activity end time could not be updated.',
+				self::ERROR_END_TIME_UPDATE_FAILED,
+				['activityId' => $activity->getId(), 'endTime' => $endTime?->toString()],
+			));
+		}
+
+		return $result;
+	}
+
+	public function syncExpiredStatusWithTask(int $taskId): TaskStateSyncResult
+	{
+		return $this->syncStateWithTask($taskId);
+	}
+
+	/**
+	 * @return array{status: int, isExpired: bool}|null
+	 */
+	public function getCurrentTaskState(int $taskId): ?array
+	{
+		$taskState = $this->getCurrentTaskStateSnapshot($taskId);
+		if ($taskState === null)
+		{
+			return null;
+		}
+
+		return [
+			'status' => $taskState->status,
+			'isExpired' => $taskState->isExpired,
+		];
+	}
+
+	public function getCurrentTaskStateSnapshot(int $taskId): ?TaskState
+	{
+		if (!$this->isTaskStateProviderAvailable())
+		{
+			return null;
+		}
+
+		return (new TaskStateProvider())->getCurrent($taskId);
+	}
+
+	private function isTaskStateProviderAvailable(): bool
+	{
+		return Loader::includeModule('tasks') && class_exists(TaskStateProvider::class);
+	}
+
+	/**
+	 * Writes nothing when the activity already holds the requested state, so callers may ask for it
+	 * unconditionally.
+	 */
+	public function setCompleted(EO_Activity $activity, bool $completed): Result
+	{
+		$result = new Result();
+		if ($activity->getCompleted() === $completed)
+		{
+			return $result;
+		}
+
+		$isUpdated = $completed
+			? CCrmActivity::Complete($activity->getId(), true, self::UPDATE_OPTIONS)
+			: CCrmActivity::Update(
+				$activity->getId(),
+				['COMPLETED' => 'N'],
+				false,
+				true,
+				self::UPDATE_OPTIONS,
+			)
+		;
+		if (!$isUpdated)
+		{
+			return $result->addError(new Error(
+				'Task activity completion state could not be updated.',
+				self::ERROR_COMPLETION_UPDATE_FAILED,
+				['activityId' => $activity->getId(), 'completed' => $completed],
+			));
+		}
+
+		self::invalidateAll();
+
+		return $result;
+	}
+
 	public function complete(EO_Activity $activity): void
 	{
 		CCrmActivity::Complete($activity->getId(), true, self::UPDATE_OPTIONS);
@@ -586,6 +1053,14 @@ final class Task extends Base
 
 	public function getCompletedActivityEntryId(int $activityId, int $taskId): int
 	{
+		return $this->getCompletedActivityEntryIds($activityId, $taskId)[0] ?? 0;
+	}
+
+	/**
+	 * @return int[]
+	 */
+	public function getCompletedActivityEntryIds(int $activityId, int $taskId): array
+	{
 		$completedActivityQuery = TimelineTable::query();
 		$completedActivityQuery
 			->setSelect(['ID'])
@@ -595,16 +1070,13 @@ final class Task extends Base
 			->where('TYPE_ID', TimelineType::ACTIVITY)
 			->where('TYPE_CATEGORY_ID', \CCrmActivityType::Provider)
 			->where('ASSOCIATED_ENTITY_TYPE_ID', \CCrmActivityType::Provider)
-			->setLimit(1)
+			->setOrder(['ID' => 'ASC'])
 		;
 
-		$completedActivity = $completedActivityQuery->exec()->fetchObject();
-		if (is_null($completedActivity))
-		{
-			return 0;
-		}
-
-		return $completedActivity->getId();
+		return array_map(
+			static fn($completedActivity): int => $completedActivity->getId(),
+			$completedActivityQuery->fetchCollection()->getAll(),
+		);
 	}
 	public static function syncBadges(int $activityId, array $activityFields, array $bindings): void
 	{

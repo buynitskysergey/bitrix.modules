@@ -79,10 +79,7 @@ class DealChannelStatistics extends DealDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'COUNT';
-		}
+		$name = $this->sanitizeSelectName($name, 'COUNT');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -489,6 +486,10 @@ class DealChannelStatistics extends DealDataSource
 				)
 			)
 		);
+	}
+	protected function getAllowedSelectNames()
+	{
+		return array('COUNT', 'SUM_TOTAL');
 	}
 	/**
 	 * @return void

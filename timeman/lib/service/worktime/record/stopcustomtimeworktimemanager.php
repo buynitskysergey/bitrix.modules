@@ -129,10 +129,26 @@ class StopCustomTimeWorktimeManager extends StopWorktimeManager
 	{
 		if ($record)
 		{
+			// Trusted system path (auto-close): honor the exact stop instant verbatim, with NO wall-time
+			// round-trip. Rebuilding from seconds/date goes through buildTimestampFromWallTime, which on a
+			// fall-back resolves an ambiguous local time to a fixed (zone-dependent) occurrence and can
+			// shift the stop by an hour relative to the real instant. recordedStopTimestamp is a public
+			// loadable form field (filled from the entity in the constructor and accepted on public
+			// requests), so it must NOT be trusted on a non-system path — same security model as stopOffset
+			// in WorktimeRecord::stopWork(). The guard is therefore isSystem === true.
+			if (
+				$this->worktimeRecordForm->isSystem === true
+				&& (int)$this->worktimeRecordForm->recordedStopTimestamp > 0
+			)
+			{
+				return (int)$this->worktimeRecordForm->recordedStopTimestamp;
+			}
+			// Unified on the EMPLOYEE's zone on the event date (userId), not the editor's — matches
+			// updateByForm and removes the legacy "always editedBy" timezone asymmetry.
 			return $record->buildStopTimestampBySecondsAndDate(
 				$this->worktimeRecordForm->recordedStopSeconds,
 				$this->worktimeRecordForm->recordedStopDateFormatted,
-				$this->worktimeRecordForm->editedBy
+				$this->worktimeRecordForm->userId
 			);
 		}
 		return parent::getRecordedStopTimestamp($record);

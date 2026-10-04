@@ -59,10 +59,7 @@ class ActivitySumStatistics extends DataSource
 
 		list($providerId, $providerTypeId) = $this->getActivityProviderInfo();
 
-		if($name === '')
-		{
-			$name = 'TOTAL_QTY';
-		}
+		$name = $this->sanitizeSelectName($name, 'TOTAL_QTY');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -252,6 +249,10 @@ class ActivitySumStatistics extends DataSource
 		return $result;
 	}
 
+	protected function getAllowedSelectNames()
+	{
+		return array('TOTAL_QTY', 'SUM_TOTAL');
+	}
 	/**
 	 * @return void
 	 */

@@ -27,7 +27,16 @@ final class SelectStructure extends Structure
 
 	protected array $relationFields = [];
 
+	/** @var array<string, self> */
 	private array $nestedStructures = [];
+
+	/**
+	 * Child requests for nested selects (ORM relations and embedded DTOs).
+	 * Used to resolve nested dtoClass when processing dotted paths.
+	 *
+	 * @var array<string, Request>
+	 */
+	private array $nestedRequests = [];
 
 	public static function create(mixed $value, string $dtoClass, ?Request $request = null): self
 	{
@@ -71,12 +80,20 @@ final class SelectStructure extends Structure
 							continue;
 						}
 
-						// A bare relation name (no dot) means "expand all sub-fields".
-						// Route through processRelationField so the relation is
-						// registered with an empty sub-select.
-						if (self::isRelationField($fields[$item]))
+						// A bare nested-DTO name (no dot) means "expand all sub-fields".
+						// ORM relations ([RelationToOne]/[RelationToMany]) go through
+						// ResponseWithRelations; embedded DTOs (no FK attribute) stay
+						// in nestedStructures for MappedBy / inline mapping.
+						if (self::isOrmRelationField($fields[$item]))
 						{
 							self::processRelationField($item, $structure, $request);
+
+							continue;
+						}
+
+						if (self::isNestedDtoField($fields[$item]))
+						{
+							self::processEmbeddedDtoField($item, $structure, $request);
 
 							continue;
 						}
@@ -86,7 +103,17 @@ final class SelectStructure extends Structure
 						continue;
 					}
 
-					self::processRelationField($item, $structure, $request);
+					$rootField = explode('.', $item, 2)[0];
+					if (
+						!empty($availableFields)
+						&& !in_array($item, $availableFields, true)
+						&& !in_array($rootField, $availableFields, true)
+					)
+					{
+						throw new UnknownDtoPropertyException($dto->getShortName(), $rootField);
+					}
+
+					self::processNestedSelectPath($item, $structure, $request, $fields);
 				}
 				else
 				{
@@ -104,12 +131,18 @@ final class SelectStructure extends Structure
 	}
 
 	/**
-	 * Checks whether the given DTO field is a relation — i.e. its type is a
-	 * Dto subclass (RelationToOne-style) or a DtoCollection of Dto subclasses
-	 * (RelationToMany-style). Such fields cannot be selected as plain scalars;
-	 * a bare name in `select` is treated as "expand all sub-fields".
+	 * True when the field is an ORM-style relation with #[RelationToOne] / #[RelationToMany].
+	 * Only these participate in ResponseWithRelations sub-requests.
 	 */
-	private static function isRelationField(DtoField $field): bool
+	private static function isOrmRelationField(DtoField $field): bool
+	{
+		return $field->getRelation() !== null;
+	}
+
+	/**
+	 * Nested DTO / DtoCollection property — with or without FK relation metadata.
+	 */
+	private static function isNestedDtoField(DtoField $field): bool
 	{
 		$type = $field->getPropertyType();
 		if (is_subclass_of($type, Dto::class))
@@ -125,6 +158,148 @@ final class SelectStructure extends Structure
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param \ArrayAccess<string, DtoField>|array<string, DtoField> $fields
+	 */
+	private static function processNestedSelectPath(
+		string $field,
+		self $structure,
+		Request $request,
+		\ArrayAccess|array $fields,
+	): void
+	{
+		$root = explode('.', $field, 2)[0];
+		if (!isset($fields[$root]))
+		{
+			$parentDto = self::getDto($request->getDtoClass());
+
+			throw new UnknownDtoPropertyException($parentDto->getShortName(), $root);
+		}
+
+		if (self::isOrmRelationField($fields[$root]))
+		{
+			self::processRelationField($field, $structure, $request);
+
+			return;
+		}
+
+		if (self::isNestedDtoField($fields[$root]))
+		{
+			self::processEmbeddedDtoField($field, $structure, $request);
+
+			return;
+		}
+
+		$parentDto = self::getDto($request->getDtoClass());
+
+		throw new UnknownDtoPropertyException($parentDto->getShortName(), $field);
+	}
+
+	/**
+	 * Nested DTO without #[RelationToOne]/#[RelationToMany] — "entity in entity"
+	 * populated by MappedBy (or manually), not via ORM relation dispatch.
+	 */
+	private static function processEmbeddedDtoField(string $field, self $structure, Request $request): void
+	{
+		$parts = explode('.', $field, 2);
+		$embeddedName = $parts[0];
+		$remaining = $parts[1] ?? null;
+
+		$parentDto = self::getDto($request->getDtoClass());
+		if (!isset($parentDto->getFields()[$embeddedName]))
+		{
+			throw new UnknownDtoPropertyException($parentDto->getShortName(), $embeddedName);
+		}
+
+		/** @var DtoField $embeddedDtoField */
+		$embeddedDtoField = $parentDto->getFields()[$embeddedName];
+		if (!self::isNestedDtoField($embeddedDtoField) || self::isOrmRelationField($embeddedDtoField))
+		{
+			throw new UnknownDtoPropertyException($parentDto->getShortName(), $field);
+		}
+
+		$childDtoClass = self::resolveNestedDtoClass($embeddedDtoField);
+		$childDto = self::getDto($childDtoClass);
+		if ($childDto === null)
+		{
+			$childDto = $childDtoClass::create();
+			self::addDto($childDto);
+		}
+
+		$childRequest = $structure->ensureEmbeddedNested($embeddedName, $childDtoClass);
+		$subSelect = $structure->nestedStructures[$embeddedName];
+
+		if ($remaining === null)
+		{
+			foreach (self::getScalarFieldNames($childDtoClass) as $scalar)
+			{
+				if (!in_array($scalar, $subSelect->items, true))
+				{
+					$subSelect->items[] = $scalar;
+				}
+			}
+
+			return;
+		}
+
+		$childFields = $childDto->getFields();
+		$remainingParts = explode('.', $remaining, 2);
+		$next = $remainingParts[0];
+
+		if (!isset($childFields[$next]))
+		{
+			throw new UnknownDtoPropertyException($childDto->getShortName(), $next);
+		}
+
+		if (self::isOrmRelationField($childFields[$next]))
+		{
+			// ORM relations under an embedded DTO are not part of the executable
+			// request graph (childRequest is synthetic / not dispatched).
+			throw new InvalidSelectException($field);
+		}
+
+		if (self::isNestedDtoField($childFields[$next]))
+		{
+			self::processEmbeddedDtoField($remaining, $subSelect, $childRequest);
+
+			return;
+		}
+
+		if (isset($remainingParts[1]))
+		{
+			throw new UnknownDtoPropertyException($childDto->getShortName(), $remaining);
+		}
+
+		if (!in_array($next, $subSelect->items, true))
+		{
+			$subSelect->items[] = $next;
+		}
+	}
+
+	private function ensureEmbeddedNested(string $name, string $childDtoClass): Request
+	{
+		if (!isset($this->nestedStructures[$name]))
+		{
+			$childRequest = new ListRequest($childDtoClass);
+			$childRequest->select = new self();
+			$this->nestedStructures[$name] = $childRequest->select;
+			$this->nestedRequests[$name] = $childRequest;
+		}
+
+		return $this->nestedRequests[$name];
+	}
+
+	private static function resolveNestedDtoClass(DtoField $field): string
+	{
+		$type = $field->getPropertyType();
+		if ($type === DtoCollection::class)
+		{
+			return $field->getElementType();
+		}
+
+		return $type;
 	}
 
 	private static function processRelationField(string $field, self $structure, Request $request): void
@@ -147,17 +322,25 @@ final class SelectStructure extends Structure
 
 			/** @var DtoField $relationDtoField */
 			$relationDtoField = $parentDto->getFields()[$relationName];
+			$relationMeta = $relationDtoField->getRelation();
 
-			$type = $relationDtoField->getPropertyType();
-			$isSingleDto = is_subclass_of($type, Dto::class);
-			$isMultipleDto = $type === DtoCollection::class &&
-				$relationDtoField->getElementType() !== null &&
-				is_subclass_of($relationDtoField->getElementType(), Dto::class);
+			// Nested DTO without FK relation metadata — MappedBy / inline path.
+			if ($relationMeta === null && self::isNestedDtoField($relationDtoField))
+			{
+				self::processEmbeddedDtoField($field, $structure, $request);
 
-			if ($relationDtoField->getRelation() === null && !$isSingleDto && !$isMultipleDto)
+				return;
+			}
+
+			if ($relationMeta === null)
 			{
 				throw new UnknownDtoPropertyException($parentDto->getShortName(), $field);
 			}
+
+			$type = $relationDtoField->getPropertyType();
+			$isMultipleDto = $type === DtoCollection::class &&
+				$relationDtoField->getElementType() !== null &&
+				is_subclass_of($relationDtoField->getElementType(), Dto::class);
 
 			if ($isMultipleDto)
 			{
@@ -178,28 +361,26 @@ final class SelectStructure extends Structure
 			$relationRequest = new ListRequest($childDtoReflection->getName());
 			$relationRequest->select = self::create([], $relationRequest->getDtoClass(), $relationRequest);
 
-			if ($relationDtoField->getRelation()->sort !== null)
+			if ($relationMeta->sort !== null)
 			{
 				$relationRequest->order = OrderStructure::create(
-					$relationDtoField->getRelation()->sort['order'],
+					$relationMeta->sort['order'],
 					$relationRequest->getDtoClass(), $relationRequest,
 				);
 			}
 
-			$fromField = $relationDtoField->getRelation()?->thisField ?? $remaining;
-			$toField = $relationDtoField->getRelation()?->refField ?? $relationDtoField->getPropertyName();
-
 			$relation = new Relation(
 				$relationName,
 				$childDto,
-				$fromField,
-				$toField,
+				$relationMeta->thisField,
+				$relationMeta->refField,
 				$relationRequest,
-				$relationDtoField->getRelation()?->multiple ?? $isMultipleDto,
+				$relationMeta->multiple,
 			);
 			$request->addRelation($relation);
-			$structure->relationFields[] = $fromField;
+			$structure->relationFields[] = $relationMeta->thisField;
 			$structure->nestedStructures[$relationName] = $relation->getRequest()->select;
+			$structure->nestedRequests[$relationName] = $relation->getRequest();
 		}
 
 		$subSelect = $relation->getRequest()->select;
@@ -267,12 +448,19 @@ final class SelectStructure extends Structure
 	}
 
 	/**
-	 * Returns the list of scalar (non-relation) property names of a DTO class.
-	 * Used to materialise "expand all" when a bare relation name appears in select.
+	 * Returns the list of scalar (non-nested) property names of a DTO class.
+	 * Used to materialise "expand all" when a bare nested-DTO name appears in select,
+	 * and as the default select when the client omits select entirely.
 	 */
-	private static function getScalarFieldNames(string $dtoClass): array
+	public static function getScalarFieldNames(string $dtoClass): array
 	{
 		$dto = self::getDto($dtoClass);
+		if ($dto === null)
+		{
+			$dto = $dtoClass::create();
+			self::addDto($dto);
+		}
+
 		$names = [];
 		foreach ($dto->getFields() as $field)
 		{
@@ -283,7 +471,7 @@ final class SelectStructure extends Structure
 			{
 				continue;
 			}
-			if (!self::isRelationField($field))
+			if (!self::isNestedDtoField($field))
 			{
 				$names[] = $field->getPropertyName();
 			}
@@ -301,7 +489,7 @@ final class SelectStructure extends Structure
 	 * Returns the full structured list of requested fields.
 	 *
 	 * Top-level scalar fields are string values at integer keys.
-	 * Relation fields are string keys mapping to their nested structured list.
+	 * Relation / embedded fields are string keys mapping to their nested structured list.
 	 *
 	 * Example: select=['id', 'name', 'category.id', 'tags.id']
 	 *          → ['id', 'name', 'category' => ['id'], 'tags' => ['id']]

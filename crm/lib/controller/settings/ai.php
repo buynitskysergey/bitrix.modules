@@ -5,7 +5,18 @@ namespace Bitrix\Crm\Controller\Settings;
 use Bitrix\Crm\Controller\Base;
 use Bitrix\Crm\Controller\ErrorCode;
 use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\Config;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\CallAssessmentDefault;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioCompiler;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioRegistry;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationSliderCommandService;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationSliderQueryService;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutostartSettingsRepository;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\GlobalFeatureReader;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\ScopeResolver;
+use Bitrix\Crm\Service\Container;
+use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\ActionFilter\ContentType;
 use Bitrix\Main\Engine\ActionFilter\Scope;
 use Bitrix\Main\Error;
@@ -38,38 +49,73 @@ class AI extends Base
 		return $filters;
 	}
 
-	public function getAutostartSettingsAction(int $entityTypeId, ?int $categoryId = null): ?array
+	public function configureActions(): array
 	{
-		if (!FillFieldsSettings::checkReadPermissions($entityTypeId, $categoryId))
+		$configureActions = parent::configureActions();
+		foreach (['getAutomationSlider', 'saveAutomationSlider'] as $actionName)
 		{
-			$this->addError(ErrorCode::getAccessDeniedError());
-
-			return null;
+			$configureActions[$actionName] = [
+				'+prefilters' => [
+					new ActionFilter\HttpMethod(
+						[
+							ActionFilter\HttpMethod::METHOD_POST,
+						]
+					),
+				],
+			];
 		}
 
-		return [
-			'settings' => FillFieldsSettings::get($entityTypeId, $categoryId),
-		];
+		return $configureActions;
 	}
 
-	public function saveAutostartSettingsAction(array $settings, int $entityTypeId, ?int $categoryId = null): ?array
+	public function getAutomationSliderAction(int $entityTypeId, ?int $categoryId = null): ?array
 	{
-		if (!FillFieldsSettings::checkSavePermissions($entityTypeId, $categoryId))
+		$scope = $this->resolveScopeForUser($entityTypeId, $categoryId);
+		if ($scope === null)
+		{
+			return null;
+		}
+
+		if (!FillFieldsSettings::checkReadPermissions($scope['entityTypeId'], $scope['categoryId']))
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
 
 			return null;
 		}
 
-		$settingsObject = FillFieldsSettings::fromJson($settings);
-		if (!$settingsObject)
+		$slider = $this->getAutomationSliderQueryService()->build(
+			$scope,
+			Config::getLanguageId(
+				Container::getInstance()->getContext()->getUserId(),
+				$scope['entityTypeId'],
+				$scope['categoryId'],
+			),
+		);
+
+		return ['slider' => $slider];
+	}
+
+	public function saveAutomationSliderAction(
+		array $scenarioUpdates,
+		string $revision,
+		int $entityTypeId,
+		?int $categoryId = null,
+	): ?array
+	{
+		$scope = $this->resolveScopeForUser($entityTypeId, $categoryId);
+		if ($scope === null)
 		{
-			$this->addError(new Error('settings has invalid structure', ErrorCode::INVALID_ARG_VALUE));
+			return null;
+		}
+
+		if (!FillFieldsSettings::checkSavePermissions($scope['entityTypeId'], $scope['categoryId']))
+		{
+			$this->addError(ErrorCode::getAccessDeniedError());
 
 			return null;
 		}
 
-		$result = FillFieldsSettings::save($settingsObject, $entityTypeId, $categoryId);
+		$result = $this->getAutomationSliderCommandService()->save($scope, $revision, $scenarioUpdates);
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -77,6 +123,73 @@ class AI extends Base
 			return null;
 		}
 
-		return $this->getAutostartSettingsAction($entityTypeId, $categoryId);
+		return $this->getAutomationSliderAction($scope['entityTypeId'], $scope['categoryId']);
+	}
+
+	private function getAutomationScopeResolver(): ScopeResolver
+	{
+		return new ScopeResolver();
+	}
+
+	/**
+	 * Resolves the scope for user-initiated actions (opening/saving the slider).
+	 * If the entity supports categories but has no default one, creates it on the fly
+	 * (an explicit side effect under user intent, not a read).
+	 */
+	private function resolveScopeForUser(int $entityTypeId, ?int $categoryId): ?array
+	{
+		if (!in_array($entityTypeId, AIManager::SUPPORTED_ENTITY_TYPE_IDS, true))
+		{
+			$this->addError(new Error('invalid scope', 'invalid_scope'));
+
+			return null;
+		}
+
+		$factory = Container::getInstance()->getFactory($entityTypeId);
+		$resolver = $this->getAutomationScopeResolver();
+		$scopeResult = $resolver->resolve($entityTypeId, $categoryId);
+		if ($scopeResult->isSuccess())
+		{
+			return $scopeResult->getData();
+		}
+
+		if (($categoryId === null) && $factory?->isCategoriesSupported())
+		{
+			if (!FillFieldsSettings::checkSavePermissions($entityTypeId))
+			{
+				$this->addError(ErrorCode::getAccessDeniedError());
+
+				return null;
+			}
+
+			$created = $factory->createDefaultCategoryIfNotExist();
+			$scopeResult = $resolver->resolve($entityTypeId, $created->getId());
+			if ($scopeResult->isSuccess())
+			{
+				return $scopeResult->getData();
+			}
+		}
+
+		$this->addErrors($scopeResult->getErrors());
+
+		return null;
+	}
+
+	private function getAutomationSliderQueryService(): AutomationSliderQueryService
+	{
+		return new AutomationSliderQueryService(
+			new AutostartSettingsRepository(),
+			new AutomationScenarioRegistry(),
+			new GlobalFeatureReader(),
+			new CallAssessmentDefault(),
+		);
+	}
+
+	private function getAutomationSliderCommandService(): AutomationSliderCommandService
+	{
+		return new AutomationSliderCommandService(
+			new AutostartSettingsRepository(),
+			new AutomationScenarioCompiler(),
+		);
 	}
 }

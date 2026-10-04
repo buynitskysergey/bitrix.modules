@@ -39,6 +39,12 @@ return [
 	],
 	'services' => [
 		'value' => [
+			Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class => [
+				'className' => Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class,
+			],
+			'rest.service.vibe_plus.tariff_access' => [
+				'className' => Rest\Internal\Service\VibePlus\TariffAccessService::class,
+			],
 			'rest.service.apauth.password' => [
 				'className' => \Bitrix\Rest\Service\APAuth\PasswordService::class,
 			],
@@ -80,7 +86,38 @@ return [
 					);
 				},
 			],
+			Rest\V3\Idempotency\IdempotencyService::class => [
+				'constructor' => static function () {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+
+					return new Rest\V3\Idempotency\IdempotencyService(
+						$locator->get(\Bitrix\Main\Data\Storage\PersistentStorageInterface::class),
+						$locator->get(Rest\V3\Schema\SchemaManager::class),
+					);
+				},
+			],
+			Rest\V3\Idempotency\IdempotencyKeyResolver::class => [
+				'className' => Rest\V3\Idempotency\IdempotencyKeyResolver::class,
+			],
 		],
 		'readonly' => true,
-	]
+	],
+	'messenger' => [
+		'value' => [
+			'queues' => [
+				'rest.deferred_batch' => [
+					'handler' => Bitrix\Rest\Internal\Service\Messenger\DeferredBatch\Receiver::class,
+					'limit' => 5,
+					'total_processing_limit' => 20,
+					'retry_strategy' => [
+						'max_retries' => 3,
+						'delay' => 30,
+						'multiplier' => 2,
+						'max_delay' => 300,
+					],
+				],
+			],
+		],
+		'readonly' => true,
+	],
 ];

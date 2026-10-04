@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\Copilot\Pipeline;
 
+use Bitrix\AI\Context;
+use Bitrix\AI\Model\QueueTable as AIQueueTable;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\JobRepository;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
 use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Integration\AI\Result;
+use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
 use CCrmOwnerType;
 use Psr\Log\LoggerInterface;
@@ -89,7 +92,11 @@ final readonly class PipelineExecutor
 	 * Entry point 2: Continue chain after async step completion.
 	 * Called from EventHandler::onQueueJobExecute.
 	 */
-	public function continueAfterCompletion(Result $completedResult, string $scenarioName): void
+	public function continueAfterCompletion(
+		Result $completedResult,
+		string $scenarioName,
+		?ItemIdentifier $manualFillTarget = null,
+	): void
 	{
 		$scenario = $this->scenarioRegistry->getByName($scenarioName);
 		if (!$scenario)
@@ -97,7 +104,7 @@ final readonly class PipelineExecutor
 			return;
 		}
 
-		$context = $this->buildContextFromResult($completedResult, $scenarioName);
+		$context = $this->buildContextFromResult($completedResult, $scenarioName, $manualFillTarget);
 
 		if ($context->getActivityId() <= 0)
 		{
@@ -190,6 +197,21 @@ final readonly class PipelineExecutor
 
 		$operation->setIsManualLaunch($context->isManualLaunch());
 		$operation->setScenario($context->getScenarioName());
+		// Re-propagate the manual clicked target into the engine context on every step so it survives
+		// the async boundary and is present on the last hop before FillFields (ALG-01). Null on the
+		// auto path — TargetResolver keeps resolving the priority Deal/Lead as before.
+		$operation->setManualFillTarget($context->getManualTarget());
+
+		// Forward owner-extra so it survives every step in email-chain pipelines.
+		// Keys absent for call/openline — no effect on those flows.
+		foreach (['targetOwnerTypeId', 'targetOwnerId', 'triggerDirection'] as $ownerKey)
+		{
+			$ownerValue = $context->getExtra($ownerKey);
+			if ($ownerValue !== null)
+			{
+				$operation->setContextExtra($ownerKey, $ownerValue);
+			}
+		}
 
 		// Only set explicit NEXT_TYPE_ID for scenarios that have unique step transitions.
 		// FULL scenario uses null NEXT_TYPE_ID (from Scenario::getNextTypeIdByScenario('full'))
@@ -251,7 +273,11 @@ final readonly class PipelineExecutor
 		}
 	}
 
-	private function buildContextFromResult(Result $completedResult, string $scenarioName): StepContext
+	private function buildContextFromResult(
+		Result $completedResult,
+		string $scenarioName,
+		?ItemIdentifier $manualFillTarget = null,
+	): StepContext
 	{
 		$activityId = $completedResult->getTarget()?->getEntityId() ?? 0;
 
@@ -287,16 +313,95 @@ final readonly class PipelineExecutor
 		if ($activityId > 0)
 		{
 			$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
-			$activityProvider = $activity['PROVIDER_ID'] ?? null;
+			$activityProvider = is_array($activity) ? ($activity['PROVIDER_ID'] ?? null) : null;
 		}
 
-		return new StepContext(
+		$extra = $activityProvider === \Bitrix\Crm\Activity\Provider\Email::getId()
+			? $this->recoverExtraFromJob($completedResult->getJobId())
+			: [];
+
+		$context = new StepContext(
 			activityId: $activityId,
 			userId: $completedResult->getUserId() ?? Container::getInstance()->getContext()->getUserId(),
 			scenarioName: $scenarioName,
 			isManualLaunch: $completedResult->isManualLaunch(),
 			activityProvider: $activityProvider,
+			// Recovered from the engine context (best-effort, same channel as `scenario`) so a fresh
+			// manual launch keeps filling the clicked entity across the async boundary (ALG-01). Null
+			// for the auto path, where StepContext::resolveFillTarget falls back to TargetResolver.
+			manualTarget: $manualFillTarget,
 		);
+
+		foreach ($extra as $key => $value)
+		{
+			$context = $context->withExtra($key, $value);
+		}
+
+		return $context;
+	}
+
+	private function recoverExtraFromJob(?int $jobId): array
+	{
+		if (!$jobId)
+		{
+			return [];
+		}
+
+		$crmJob = QueueTable::query()
+			->setSelect(['HASH'])
+			->where('ID', $jobId)
+			->fetchObject()
+		;
+
+		$hash = $crmJob?->getHash();
+		if (!$hash)
+		{
+			return [];
+		}
+
+		$aiRow = AIQueueTable::query()
+			->setSelect(['CONTEXT'])
+			->where('HASH', $hash)
+			->setLimit(1)
+			->fetch()
+		;
+
+		$contextJson = $aiRow['CONTEXT'] ?? null;
+		if (!is_string($contextJson) || $contextJson === '')
+		{
+			return [];
+		}
+
+		try
+		{
+			$context = Context::unpack($contextJson);
+		}
+		catch (\Throwable)
+		{
+			return [];
+		}
+
+		$additionalInfo = $context->getParameters()['additionalInfo'] ?? [];
+		if (!is_array($additionalInfo))
+		{
+			return [];
+		}
+
+		$extra = [];
+		if (isset($additionalInfo['targetOwnerTypeId']))
+		{
+			$extra['targetOwnerTypeId'] = (int)$additionalInfo['targetOwnerTypeId'];
+		}
+		if (isset($additionalInfo['targetOwnerId']))
+		{
+			$extra['targetOwnerId'] = (int)$additionalInfo['targetOwnerId'];
+		}
+		if (isset($additionalInfo['triggerDirection']))
+		{
+			$extra['triggerDirection'] = (int)$additionalInfo['triggerDirection'];
+		}
+
+		return $extra;
 	}
 
 	private function findStepIndex(array $steps, int $typeId): ?int

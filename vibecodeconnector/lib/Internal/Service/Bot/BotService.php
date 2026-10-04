@@ -9,10 +9,10 @@ use Bitrix\Im\Command;
 use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\RestBot;
 use Bitrix\Main\Application;
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\IO\File;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Vibecodeconnector\Internal\Config\ModuleOptions;
 use Bitrix\Vibecodeconnector\Internal\Exception\BotOperationFailedException;
 use Bitrix\Vibecodeconnector\Internal\Integration\Rest\BotWebhookGateway;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\BaseEndpointProvider;
@@ -22,7 +22,6 @@ final class BotService
 	public const VERSION = 2;
 	public const BOT_CODE = 'vibecode_bot';
 
-	private const MODULE_ID = 'vibecodeconnector';
 	private const OPTION_BOT_ID = 'bot.botId';
 	private const OPTION_CLIENT_ID = 'bot.clientId';
 	private const OPTION_BOT_TOKEN = 'bot.botToken';
@@ -41,6 +40,7 @@ final class BotService
 		private readonly BaseEndpointProvider $endpointProvider,
 		private readonly TokenGenerator $tokenGenerator,
 		private readonly BotWebhookGateway $botWebhooks,
+		private readonly ModuleOptions $options = new ModuleOptions(),
 	)
 	{
 	}
@@ -138,8 +138,8 @@ final class BotService
 
 	public function isInstalled(): bool
 	{
-		return (string)Option::get(self::MODULE_ID, self::OPTION_BOT_ID, '') !== ''
-			&& (string)Option::get(self::MODULE_ID, self::OPTION_CLIENT_ID, '') !== '';
+		return $this->options->get(self::OPTION_BOT_ID) !== ''
+			&& $this->options->get(self::OPTION_CLIENT_ID) !== '';
 	}
 
 	/**
@@ -157,15 +157,15 @@ final class BotService
 			$this->install();
 		}
 
-		$botId = (int)Option::get(self::MODULE_ID, self::OPTION_BOT_ID, 0);
+		$botId = (int)$this->options->get(self::OPTION_BOT_ID, '0');
 
 		return [
 			'version' => self::VERSION,
 			'botId' => $botId,
 			'botCode' => self::BOT_CODE,
-			'botToken' => (string)Option::get(self::MODULE_ID, self::OPTION_BOT_TOKEN, ''),
-			'clientId' => (string)Option::get(self::MODULE_ID, self::OPTION_CLIENT_ID, ''),
-			'applicationToken' => (string)Option::get(self::MODULE_ID, self::OPTION_APPLICATION_TOKEN, ''),
+			'botToken' => $this->options->get(self::OPTION_BOT_TOKEN),
+			'clientId' => $this->options->get(self::OPTION_CLIENT_ID),
+			'applicationToken' => $this->options->get(self::OPTION_APPLICATION_TOKEN),
 			'webhookUrl' => $this->ensureWebhookUrl(),
 		];
 	}
@@ -228,8 +228,8 @@ final class BotService
 			return;
 		}
 
-		$botId = (int)Option::get(self::MODULE_ID, self::OPTION_BOT_ID, 0);
-		$botToken = (string)Option::get(self::MODULE_ID, self::OPTION_BOT_TOKEN, '');
+		$botId = (int)$this->options->get(self::OPTION_BOT_ID, '0');
+		$botToken = $this->options->get(self::OPTION_BOT_TOKEN);
 		if ($botId <= 0 || $botToken === '')
 		{
 			return;
@@ -249,7 +249,7 @@ final class BotService
 	 */
 	private function ensureWebhookUrl(): string
 	{
-		$passwordId = (int)Option::get(self::MODULE_ID, self::OPTION_WEBHOOK_PASSWORD_ID, 0);
+		$passwordId = (int)$this->options->get(self::OPTION_WEBHOOK_PASSWORD_ID, '0');
 		if ($passwordId > 0 && isset($this->webhookUrlCache[$passwordId]))
 		{
 			return $this->webhookUrlCache[$passwordId];
@@ -277,7 +277,7 @@ final class BotService
 
 	private function createWebhook(): string
 	{
-		$botId = (int)Option::get(self::MODULE_ID, self::OPTION_BOT_ID, 0);
+		$botId = (int)$this->options->get(self::OPTION_BOT_ID, '0');
 
 		$webhook = $this->botWebhooks->issue(
 			$botId,
@@ -285,7 +285,7 @@ final class BotService
 			self::WEBHOOK_TITLE,
 		);
 
-		Option::set(self::MODULE_ID, self::OPTION_WEBHOOK_PASSWORD_ID, (string)$webhook->passwordId);
+		$this->options->set(self::OPTION_WEBHOOK_PASSWORD_ID, (string)$webhook->passwordId);
 
 		$url = $this->botWebhooks->buildUrl($webhook);
 		$this->webhookUrlCache = [$webhook->passwordId => $url];
@@ -302,7 +302,7 @@ final class BotService
 			return;
 		}
 
-		$passwordId = (int)Option::get(self::MODULE_ID, self::OPTION_WEBHOOK_PASSWORD_ID, 0);
+		$passwordId = (int)$this->options->get(self::OPTION_WEBHOOK_PASSWORD_ID, '0');
 		if ($passwordId > 0)
 		{
 			$this->botWebhooks->revoke($passwordId);
@@ -358,10 +358,10 @@ final class BotService
 			'HIDDEN' => 'Y',
 		]);
 
-		Option::set(self::MODULE_ID, self::OPTION_BOT_ID, (string)$botId);
-		Option::set(self::MODULE_ID, self::OPTION_CLIENT_ID, $clientId);
-		Option::set(self::MODULE_ID, self::OPTION_BOT_TOKEN, $botToken);
-		Option::set(self::MODULE_ID, self::OPTION_APPLICATION_TOKEN, $applicationToken);
+		$this->options->set(self::OPTION_BOT_ID, (string)$botId);
+		$this->options->set(self::OPTION_CLIENT_ID, $clientId);
+		$this->options->set(self::OPTION_BOT_TOKEN, $botToken);
+		$this->options->set(self::OPTION_APPLICATION_TOKEN, $applicationToken);
 
 		$this->createWebhook();
 	}
@@ -415,10 +415,10 @@ final class BotService
 
 	private function clearOptions(): void
 	{
-		Option::delete(self::MODULE_ID, ['name' => self::OPTION_BOT_ID]);
-		Option::delete(self::MODULE_ID, ['name' => self::OPTION_CLIENT_ID]);
-		Option::delete(self::MODULE_ID, ['name' => self::OPTION_BOT_TOKEN]);
-		Option::delete(self::MODULE_ID, ['name' => self::OPTION_APPLICATION_TOKEN]);
-		Option::delete(self::MODULE_ID, ['name' => self::OPTION_WEBHOOK_PASSWORD_ID]);
+		$this->options->delete(self::OPTION_BOT_ID);
+		$this->options->delete(self::OPTION_CLIENT_ID);
+		$this->options->delete(self::OPTION_BOT_TOKEN);
+		$this->options->delete(self::OPTION_APPLICATION_TOKEN);
+		$this->options->delete(self::OPTION_WEBHOOK_PASSWORD_ID);
 	}
 }

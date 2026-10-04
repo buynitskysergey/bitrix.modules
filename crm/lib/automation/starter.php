@@ -127,7 +127,11 @@ class Starter
 					'OWNER_TYPE_ID' => $this->entityTypeId,
 					'OWNER_ID' => $this->entityId
 				]],
-				$fields
+				array_merge($fields, [
+					'initiatorUserId' => $this->getUserId(),
+					'previousResponsibleId' => (int)($prevFields[$this->responsibleFieldKey] ?? 0),
+					'responsibleId' => (int)($fields[$this->responsibleFieldKey] ?? 0),
+				])
 			);
 			$data = $result->getData();
 			$triggerApplied = $data['triggersApplied'];
@@ -137,7 +141,10 @@ class Starter
 		{
 			$result = FieldChangedTrigger::execute(
 				[['OWNER_TYPE_ID' => $this->entityTypeId, 'OWNER_ID' => $this->entityId]],
-				['CHANGED_FIELDS' => $changedFields]
+				[
+					'CHANGED_FIELDS' => $changedFields,
+					'initiatorUserId' => $this->getUserId(),
+				]
 			);
 			$data = $result->getData();
 			$triggerApplied = $data['triggersApplied'];
@@ -145,7 +152,9 @@ class Starter
 
 		if (!$triggerApplied && $this->isStatusChanged($changedFields))
 		{
-			return Factory::runOnStatusChanged($this->entityTypeId, $this->entityId);
+			// Propagate the acting user as the automation initiator so a stage robot
+			// attributes history to them (not the responsible user/System).
+			return Factory::runOnStatusChanged($this->entityTypeId, $this->entityId, $this->getUserId());
 		}
 
 		return new Result();

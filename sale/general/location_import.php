@@ -2,6 +2,7 @@
 
 use Bitrix\Main;
 use Bitrix\Main\Loader;
+use Bitrix\Sale\Location\Import;
 
 IncludeModuleLangFile(__FILE__);
 
@@ -43,6 +44,20 @@ function saleLocationLoadFile($arParams): array
 		'ERROR' => '',
 		'MESSAGE' => '',
 	];
+	$legacyPath = null;
+	if (array_key_exists('TMP_PATH', $arParams))
+	{
+		$legacyPath = is_string($arParams['TMP_PATH']) ? $arParams['TMP_PATH'] : '';
+	}
+
+	$sTmpFilePath = Import\TempPath::resolve($legacyPath, 'sale');
+	$zipFileName = is_string($arParams['DLZIPFILE'] ?? null) ? $arParams['DLZIPFILE'] : '';
+	if ($sTmpFilePath === null || $zipFileName !== 'zip_ussr.csv')
+	{
+		$arReturn['ERROR'] = GetMessage('SL_IMPORT_ERROR_FILES');
+
+		return $arReturn;
+	}
 
 	if (!defined('DLSERVER'))
 	{
@@ -62,19 +77,22 @@ function saleLocationLoadFile($arParams): array
 	}
 	if (!defined('DLZIPFILE'))
 	{
-		define('DLZIPFILE', $arParams['DLZIPFILE']);
+		define('DLZIPFILE', $zipFileName);
 	}
-
-	if(isset($arParams['TMP_PATH']))
-		$sTmpFilePath = $arParams['TMP_PATH'];
-	else
-		$sTmpFilePath = CTempFile::GetDirectoryName(12, 'sale');
 
 	set_time_limit(600);
 
 	$STEP = (int)($arParams['STEP'] ?? 0);
 	$CSVFILE = (string)($arParams['CSVFILE'] ?? '');
 	$LOADZIP = $arParams["LOADZIP"];
+	$downloadServer = is_string($arParams['DLSERVER'] ?? null) ? $arParams['DLSERVER'] : '';
+	$downloadPort = is_int($arParams['DLPORT'] ?? null) || is_string($arParams['DLPORT'] ?? null)
+		? (string)$arParams['DLPORT']
+		: null
+	;
+	$downloadPath = is_string($arParams['DLPATH'] ?? null) ? $arParams['DLPATH'] : '';
+	$downloadMethod = is_string($arParams['DLMETHOD'] ?? null) ? $arParams['DLMETHOD'] : '';
+	$downloader = new Import\Downloader(new Main\Web\HttpClient());
 
 	if ($CSVFILE !== '' && !in_array($CSVFILE, getAllowedFiles(), true))
 	{
@@ -96,21 +114,15 @@ function saleLocationLoadFile($arParams): array
 			break;
 
 			case 1:
-				$url = $arParams['DLSERVER']
-					. (isset($arParams['DLPORT']) ? ':' . $arParams['DLPORT'] : '')
-					. $arParams['DLPATH']
-					. $CSVFILE
-				;
-				$http = new Main\Web\HttpClient();
-				$http->setRedirect(true);
-				$data =
-					DLMETHOD === 'POST'
-						? $http->post($url)
-						: $http->get($url)
-				;
-				$data = (string)$data;
+				$data = $downloader->download(
+					$downloadServer,
+					$downloadPort,
+					$downloadPath,
+					$CSVFILE,
+					$downloadMethod
+				);
 
-				if ($data !== '')
+				if ($data !== null && $data !== '')
 				{
 					CheckDirPath($sTmpFilePath);
 					$fp = fopen($sTmpFilePath.$CSVFILE, 'w');
@@ -129,33 +141,27 @@ function saleLocationLoadFile($arParams): array
 			break;
 
 			case 2:
-				$url = $arParams['DLSERVER']
-					. (isset($arParams['DLPORT']) ? ':' . $arParams['DLPORT'] : '')
-					. $arParams['DLPATH']
-					. $CSVFILE
-				;
-				$http = new Main\Web\HttpClient();
-				$http->setRedirect(true);
-				$data =
-					DLMETHOD === 'POST'
-						? $http->post($url)
-						: $http->get($url)
-				;
-				$data = (string)$data;
+				$data = $downloader->download(
+					$downloadServer,
+					$downloadPort,
+					$downloadPath,
+					$zipFileName,
+					$downloadMethod
+				);
 
-				if ($data !== '')
+				if ($data !== null && $data !== '')
 				{
 					CheckDirPath($sTmpFilePath);
-					$fp = fopen($sTmpFilePath.DLZIPFILE, 'w');
+					$fp = fopen($sTmpFilePath.$zipFileName, 'w');
 					fwrite($fp, Main\Text\Encoding::convertEncoding($data, 'windows-1251', LANG_CHARSET));
 					fclose($fp);
 
-					$arReturn['MESSAGE'] = GetMessage('SL_LOADER_FILE_LOADED').' '.DLZIPFILE;
+					$arReturn['MESSAGE'] = GetMessage('SL_LOADER_FILE_LOADED').' '.$zipFileName;
 					$arReturn['STEP'] = 3;
 				}
 				else
 				{
-					$arReturn['ERROR'] = GetMessage('SL_LOADER_FILE_ERROR').' '.DLZIPFILE;
+					$arReturn['ERROR'] = GetMessage('SL_LOADER_FILE_ERROR').' '.$zipFileName;
 					$arReturn['RUN_ERROR'] = true;
 				}
 
@@ -181,6 +187,20 @@ function saleLocationImport($arParams): array
 		'POS' => 0,
 		'MESSAGE' => '',
 	];
+	$legacyPath = null;
+	if (array_key_exists('TMP_PATH', $arParams))
+	{
+		$legacyPath = is_string($arParams['TMP_PATH']) ? $arParams['TMP_PATH'] : '';
+	}
+
+	$sTmpFilePath = Import\TempPath::resolve($legacyPath, 'sale');
+	$zipFileName = is_string($arParams['DLZIPFILE'] ?? null) ? $arParams['DLZIPFILE'] : '';
+	if ($sTmpFilePath === null || $zipFileName !== 'zip_ussr.csv')
+	{
+		$arReturn['ERROR'] = GetMessage('SL_IMPORT_ERROR_FILES');
+
+		return $arReturn;
+	}
 
 	$step_length = (int)($arParams['STEP_LENGTH'] ?? 0);
 
@@ -189,18 +209,15 @@ function saleLocationImport($arParams): array
 
 	define('ZIP_STEP_LENGTH', $step_length);
 	define('LOC_STEP_LENGTH', $step_length);
-	define('DLZIPFILE', $arParams["DLZIPFILE"]);
+	if (!defined('DLZIPFILE'))
+	{
+		define('DLZIPFILE', $zipFileName);
+	}
 
 	$STEP = (int)($arParams['STEP'] ?? 0);
 	$CSVFILE = (string)($arParams['CSVFILE'] ?? '');
 	$LOADZIP = $arParams["LOADZIP"];
 	$bSync = $arParams["SYNC"] == "Y";
-
-	if(isset($arParams['TMP_PATH']))
-		$sTmpFilePath = $arParams['TMP_PATH'];
-	else
-		$sTmpFilePath = CTempFile::GetDirectoryName(12, 'sale');
-
 
 	if ($CSVFILE !== '' && !in_array($CSVFILE, getAllowedFiles(), true))
 	{
@@ -536,7 +553,7 @@ function saleLocationImport($arParams): array
 				$start_time = time();
 				$finish_time = $start_time + ZIP_STEP_LENGTH;
 
-				if ($LOADZIP == "Y" && file_exists($sTmpFilePath.DLZIPFILE))
+				if ($LOADZIP == "Y" && file_exists($sTmpFilePath.$zipFileName))
 				{
 					$rsLocations = CSaleLocation::GetList(
 													array(),
@@ -561,7 +578,7 @@ function saleLocationImport($arParams): array
 					include_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/classes/general/csv_data.php");
 
 					$csvFile = new CCSVData();
-					$csvFile->LoadFile($sTmpFilePath.DLZIPFILE);
+					$csvFile->LoadFile($sTmpFilePath.$zipFileName);
 					$csvFile->SetFieldsType("R");
 					$csvFile->SetFirstHeader(false);
 					$csvFile->SetDelimiter(";");

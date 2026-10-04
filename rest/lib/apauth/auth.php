@@ -13,11 +13,13 @@ use Bitrix\Main\Authentication\ApplicationPasswordTable;
 use Bitrix\Main\Context;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UserTable;
 use Bitrix\Rest\Engine\Access;
 use Bitrix\Rest\Engine\Access\HoldEntity;
 use Bitrix\Rest\Internal\Entity\SystemUser\ResourceType;
+use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface;
 use Bitrix\Rest\Internal\Repository\SystemUser\SystemUserRepository;
 use Throwable;
 
@@ -54,24 +56,42 @@ class Auth
 			return false;
 		}
 
+		$password = $auth[static::$authQueryParams['PASSWORD']];
+		if (!is_string($password))
+		{
+			$res = [
+				'error' => 'INVALID_CREDENTIALS',
+				'error_description' => 'Invalid request credentials',
+				'parameters_clear' => static::$authQueryParams,
+				'auth_type' => static::AUTH_TYPE,
+			];
+
+			return false;
+		}
+
+		// the hold list is keyed by the raw password, so the check needs no database lookup
+		if (HoldEntity::is(HoldEntity::TYPE_WEBHOOK, $password))
+		{
+			$res = [
+				'error' => 'OVERLOAD_LIMIT',
+				'error_description' => 'REST API is blocked due to overload.',
+				'parameters_clear' => static::$authQueryParams,
+				'auth_type' => static::AUTH_TYPE,
+			];
+
+			return false;
+		}
+
 		$tokenInfo = static::check($auth, $scope);
 
 		if (is_array($tokenInfo))
 		{
 			$error = array_key_exists('error', $tokenInfo);
 
-			if (!$error && HoldEntity::is(HoldEntity::TYPE_WEBHOOK, $auth[static::$authQueryParams['PASSWORD']]))
-			{
-				$tokenInfo = [
-					'error' => 'OVERLOAD_LIMIT',
-					'error_description' => 'REST API is blocked due to overload.'
-				];
-				$error = true;
-			}
-
 			if (!$error)
 			{
 				$passwordId = (int)$tokenInfo['password_id'];
+				$upsellUserId = (int)($tokenInfo['user_id'] ?? 0);
 
 				try
 				{
@@ -91,15 +111,31 @@ class Auth
 					)
 				)
 				{
-					$tokenInfo = [
-						'error' => 'ACCESS_DENIED',
-						'error_description' => 'REST is available only by subscription.',
-					];
-					if ($accessException instanceof Throwable)
+					if ($accessException instanceof FeatureNotAvailableOnCurrentPlanExceptionInterface)
 					{
-						$tokenInfo['exception'] = $accessException;
+						$tokenInfo = [
+							'error' => FeatureNotAvailableOnCurrentPlanExceptionInterface::ERROR_CODE,
+							'error_description' => $accessException->getMessage(),
+							'error_status' => \CRestServer::STATUS_FORBIDDEN,
+							'exception' => $accessException,
+						];
+					}
+					else
+					{
+						$tokenInfo = [
+							'error' => 'ACCESS_DENIED',
+							'error_description' => 'REST is available only by subscription.',
+						];
+						if ($accessException instanceof Throwable)
+						{
+							$tokenInfo['exception'] = $accessException;
+						}
 					}
 
+					$tokenInfo = static::appendVibePlusUpsellProjection(
+						$tokenInfo,
+						userId: $upsellUserId,
+					);
 					$error = true;
 				}
 			}
@@ -145,6 +181,48 @@ class Auth
 		}
 
 		return false;
+	}
+
+	private static function appendVibePlusUpsellProjection(
+		array $tokenInfo,
+		?\Closure $projectionResolver = null,
+		int $userId = 0,
+	): array
+	{
+		try
+		{
+			if ($projectionResolver === null)
+			{
+				if (!Loader::includeModule('bitrix24'))
+				{
+					return $tokenInfo;
+				}
+
+				$serviceLocator = ServiceLocator::getInstance();
+				if (!$serviceLocator->has(\Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class))
+				{
+					return $tokenInfo;
+				}
+
+				$projectionResolver = static fn(int $resolvedUserId) => $serviceLocator
+					->get(\Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class)
+					->getProjectionForUser($resolvedUserId)
+				;
+			}
+
+			$projection = $projectionResolver($userId);
+		}
+		catch (\Throwable)
+		{
+			return $tokenInfo;
+		}
+
+		if (!$projection instanceof \Bitrix\Bitrix24\Public\ValueObject\VibePlusUpsellProjection)
+		{
+			return $tokenInfo;
+		}
+
+		return array_replace($tokenInfo, $projection->toArray());
 	}
 
 	protected static function check($auth, $scope)

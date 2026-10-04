@@ -33,7 +33,7 @@ class NotifyChecklistDeleted extends AbstractNotify
 	{
 		return [
 			'#USER#' => $this->formatUser($this->triggeredBy),
-			'#CHECKLIST_NAME#' => $this->checklistName,
+			'#CHECKLIST_NAME#' => $this->getNonClickablePlainChecklistTitle($this->checklistName),
 		];
 	}
 }

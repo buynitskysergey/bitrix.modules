@@ -30,4 +30,6 @@ interface IncomingWebhookRepositoryInterface extends RepositoryInterface
 	): IncomingWebhookCollection;
 
 	public function getCount(WebhookFilter $filter): int;
+
+	public function exists(WebhookFilter $filter): bool;
 }

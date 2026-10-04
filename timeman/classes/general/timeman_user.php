@@ -332,13 +332,15 @@ class CTimeManUser
 
 			if ($result->isSuccess())
 			{
-				$ts_finish = MakeTimeStamp($lastEntry['DATE_FINISH']) - CTimeZone::GetOffset();
-				$leak = time() - $ts_finish;
+				// The finish instant comes from the record's absolute columns: $lastEntry['DATE_FINISH'] is a
+				// display string that DateToCharFunction('FULL') has already shifted by the site offset, so
+				// MakeTimeStamp() on it drifts by "employee zone minus server zone".
+				$ts_finish = WorktimeRecord::wakeUpRecord($lastEntry)->buildDisplayedStopTimestamp();
 				CUser::SetLastActivityDate($this->USER_ID);
 				CTimeManReport::Reopen($lastEntry['ID']);
 				CTimeManReportDaily::Reopen($lastEntry['ID']);
 
-				$this->setLastPauseInfo($this->USER_ID, $ts_finish, $ts_finish + $leak);
+				$this->setLastPauseInfo($this->USER_ID, $ts_finish, time());
 
 				$report = \Bitrix\Timeman\Model\Worktime\Report\WorktimeReport::createReopenReport(
 					$lastEntry['USER_ID'],
@@ -596,9 +598,12 @@ class CTimeManUser
 			$recommendedTimestamp = $manager->getRecommendedStopTimestamp();
 			if ($recommendedTimestamp > 0)
 			{
+				// Day-seconds in the employee's REAL IANA zone (date-aware at the recommended stop instant),
+				// not a synthetic "+HH:MM as of now" zone. Passing the real DateTimeZone makes the
+				// conversion honor DST on the recommended-stop date (feeds REST TIME_FINISH_DEFAULT, P5).
 				return TimeHelper::getInstance()->convertUtcTimestampToDaySeconds(
 					$recommendedTimestamp,
-					TimeHelper::getInstance()->getUserTimezone($lastEntry['USER_ID'])
+					TimeHelper::getInstance()->getUserDateTimeZone((int)$lastEntry['USER_ID'])
 				);
 			}
 		}
@@ -625,37 +630,61 @@ class CTimeManUser
 			return 0;
 		}
 
-		$ts_start = $bTs ? $entry['DATE_START'] : (MakeTimeStamp($entry['DATE_START']) - CTimeZone::GetOffset());
-		$ts_start_day = MakeTimeStamp(ConvertTimeStamp($ts_start, 'SHORT'));
+		// Date-aware reconstruction (INV-COORD): the start TZ diff is derived from the employee's real
+		// IANA zone at the absolute start instant, NOT from the DATE_START/TIME_START server-day pair.
+		// The value stays a user-minus-server diff because that is what the report popup expects of
+		// TIME_OFFSET: core_timeman.js:6131 compares it with USER_TZ_OFFSET, and :6799 adds
+		// SERVER_TZ_OFFSET to reach the absolute employee offset.
+		$startInstant = $bTs ? (int)$entry['DATE_START'] : $this->resolveAbsoluteStartInstant($entry);
+		$userId = (int)($entry['USER_ID'] ?? $this->USER_ID);
 
-		$time_start = $ts_start - $ts_start_day;
+		$timeHelper = TimeHelper::getInstance();
+		$userOffset = $timeHelper->getOffsetAt($userId, $startInstant);
+		$serverOffset = $this->getServerOffsetAt($startInstant);
 
-		return $entry['TIME_START'] - $time_start;
+		return $userOffset - $serverOffset;
+	}
+
+	/**
+	 * @see TimeHelper::getServerOffsetAt()
+	 */
+	private function getServerOffsetAt(int $timestamp): int
+	{
+		return TimeHelper::getInstance()->getServerOffsetAt($timestamp);
+	}
+
+	/**
+	 * Absolute start instant of a legacy entry row. RECORDED_START_TIMESTAMP is the absolute source and is
+	 * present in every row of the compatibility query (E.*). Rows selected through the legacy field map
+	 * (CTimeManEntry::GetList) expose no absolute columns at all, so they fall back to the DATE_START
+	 * display string, undoing the site offset that DateToCharFunction('FULL') added while reading it.
+	 */
+	private function resolveAbsoluteStartInstant(array $entry): int
+	{
+		if (!empty($entry['RECORDED_START_TIMESTAMP']))
+		{
+			return (int)$entry['RECORDED_START_TIMESTAMP'];
+		}
+
+		return (int)MakeTimeStamp($entry['DATE_START']) - CTimeZone::GetOffset();
 	}
 
 	public function isDayOpenedToday()
 	{
-		// server time at the moment of day start
-		$ts_start = !empty(CTimeManUser::$LAST_ENTRY[$this->USER_ID]['DATE_START']) ? (MakeTimeStamp(CTimeManUser::$LAST_ENTRY[$this->USER_ID]['DATE_START']) - CTimeZone::GetOffset()) : time();
-		$ts_start_day = MakeTimeStamp(ConvertTimeStamp($ts_start, 'SHORT'));
+		// Date-aware (INV-COORD): "is the open day today" compares the calendar date of the day start and
+		// of "now", both read in the EMPLOYEE's real IANA zone, instead of reconstructing a server
+		// timezone_diff from the DATE_START/TIME_START pair. The cookie cache $LAST_ENTRY is preserved as
+		// the start source (quirk #4): a stale cache still yields a stale-but-consistent start instant.
+		$timeHelper = TimeHelper::getInstance();
+		$userZone = $timeHelper->getUserDateTimeZone($this->USER_ID);
 
-		// server time that was at the day start
-		$time_start = $ts_start - $ts_start_day;
+		// absolute start instant from the cached entry, now() otherwise
+		$startInstant = !empty(CTimeManUser::$LAST_ENTRY[$this->USER_ID]['DATE_START'])
+			? $this->resolveAbsoluteStartInstant(CTimeManUser::$LAST_ENTRY[$this->USER_ID])
+			: time();
 
-		// server timezone diff with server that was at the day start
-		if (!empty(CTimeManUser::$LAST_ENTRY[$this->USER_ID]))
-		{
-			$timezone_diff = CTimeManUser::$LAST_ENTRY[$this->USER_ID]['TIME_START'] - $time_start;
-		}
-		else
-		{
-			$timezone_diff = 0;
-		}
-
-		// current date with such timezone_diff;
-		$t = time();
-		$date_current = date('Y-m-d', $t + $timezone_diff);
-		$date_current_day = date('Y-m-d', $ts_start_day);
+		$date_current_day = (new \DateTime('@' . $startInstant))->setTimezone($userZone)->format('Y-m-d');
+		$date_current = (new \DateTime('@' . time()))->setTimezone($userZone)->format('Y-m-d');
 
 		return $date_current == $date_current_day;
 	}

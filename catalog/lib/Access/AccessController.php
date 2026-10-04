@@ -65,7 +65,7 @@ class AccessController extends BaseAccessController
 	 */
 	public function check(string $action, ?AccessibleItem $item = null, $params = null): bool
 	{
-		if (!ModuleManager::isModuleInstalled('crm') || InstallStatus::inProgress())
+		if ($this->isLegacyAccessMode())
 		{
 			return $this->checkLegacy($action);
 		}
@@ -85,6 +85,16 @@ class AccessController extends BaseAccessController
 		}
 
 		return parent::check($action, $item, $params);
+	}
+
+	public function isLegacyAccessMode(): bool
+	{
+		return !$this->isCrmModuleInstalled() || InstallStatus::inProgress();
+	}
+
+	protected function isCrmModuleInstalled(): bool
+	{
+		return ModuleManager::isModuleInstalled('crm');
 	}
 
 	public function checkByValue(string $action, string $value): bool
@@ -124,7 +134,7 @@ class AccessController extends BaseAccessController
 	 */
 	private function checkLegacy(string $action): bool
 	{
-		if (CurrentUser::get()->isAdmin())
+		if ($this->isAdmin())
 		{
 			return true;
 		}
@@ -222,6 +232,11 @@ class AccessController extends BaseAccessController
 	 */
 	public function checkCompleteRight(string $action): bool
 	{
+		if ($this->isAdmin() || $this->isLegacyAccessMode())
+		{
+			return $this->check($action);
+		}
+
 		$permissionValue = $this->getPermissionValue($action);
 
 		if ($permissionValue === null)

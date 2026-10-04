@@ -11,7 +11,7 @@ class Read extends Permission
 
 	public function name(): string
 	{
-		return GetMessage('CRM_SECURITY_ROLE_PERMS_HEAD_READ');
+		return GetMessage('CRM_SECURITY_ROLE_PERMS_HEAD_READ_MSGVER_1');
 	}
 
 	public function canAssignPermissionToStages(): bool

@@ -8,6 +8,7 @@ use Bitrix\HumanResources\Builder\Structure\Filter\Column\EntityIdFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\RoleFilter;
 use Bitrix\HumanResources\Enum\DepthLevel;
 use Bitrix\HumanResources\Enum\Direction;
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Model\NodeMemberTable;
 use Bitrix\HumanResources\Model\NodePathTable;
 use Bitrix\HumanResources\Type\MemberEntityType;
@@ -25,6 +26,7 @@ final class NodeMemberFilter extends BaseFilter
 		public bool $findRelatedMembers = false,
 		public ?bool $active = true,
 		public ?RoleFilter $roleFilter = null,
+		public bool $withVirtualUsers = false,
 	)
 	{}
 
@@ -56,6 +58,13 @@ final class NodeMemberFilter extends BaseFilter
 			$conditionTree->where(
 				$this->getFieldByQueryContext('ENTITY_TYPE'),
 				$this->entityType->value,
+			);
+		}
+
+		if (!$this->withVirtualUsers && $this->entityType === MemberEntityType::USER)
+		{
+			$conditionTree->addCondition(
+				RealUserFilter::memberCondition($this->getFieldByQueryContext('ENTITY_ID')),
 			);
 		}
 

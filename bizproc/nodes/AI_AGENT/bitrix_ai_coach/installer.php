@@ -3,17 +3,17 @@
 declare(strict_types=1);
 
 use Bitrix\Bizproc\Public\Entity\Template\NodesInstaller;
-use Bitrix\Main\Config\Option;
+use Bitrix\Bizproc\Public\Feature\AiAgent\CoachAgentFlag;
 
-return new class extends NodesInstaller
+return new class() extends NodesInstaller
 {
 	public function shouldInstall(): bool
 	{
-		return Option::get('bizproc', 'bitrix_ai_coach_available', 'N') === 'Y';
+		return \Bitrix\Main\Config\Feature::isEnabled(CoachAgentFlag::class);
 	}
 
 	public function getModifiedTime(): int
 	{
-		return /*mtime*/1780305400/*mtime*/;
+		return /*mtime*/1786526835/*mtime*/;
 	}
 };

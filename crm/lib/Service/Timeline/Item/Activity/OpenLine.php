@@ -222,20 +222,20 @@ final class OpenLine extends AIActivity
 	{
 		if ($this->isAIScope() && $this->getAIService()->isFieldsFillingWrong())
 		{
-			return [
+			return $this->limitScenariosForExtendedEntityTypes([
 				Scenario::CONFIRM_FIELDS_SCENARIO,
 				Scenario::SUMMARIZE_SCENARIO, // in menu only
 				Scenario::ANALYZE_COMMUNICATION_SCENARIO, // in menu only
 				Scenario::FULL_SCENARIO, // in menu only
-			];
+			]);
 		}
 
-		return [
+		return $this->limitScenariosForExtendedEntityTypes([
 			Scenario::SUMMARIZE_SCENARIO, // in menu only
 			Scenario::FILL_FIELDS_SCENARIO,
 			Scenario::ANALYZE_COMMUNICATION_SCENARIO, // in menu only
 			Scenario::FULL_SCENARIO, // in menu only
-		];
+		]);
 	}
 
 	protected function canShowAIActions(): bool
@@ -245,6 +245,11 @@ final class OpenLine extends AIActivity
 
 	protected function createViewCopilotSummaryItem(array $list): ?ActionBarItem
 	{
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			return null;
+		}
+
 		$activityId = $this->getActivityId();
 		$languageTitle = $this->getAIService()->getAILanguage(SummarizeCallTranscription::TYPE_ID);
 		$barItemAction = (new JsEvent('Openline:ShowCopilotSummary'))
@@ -271,6 +276,32 @@ final class OpenLine extends AIActivity
 		}
 
 		return $barItem;
+	}
+
+	protected function createViewCopilotSummaryDrawerItem(array $list): ?ActionBarItem
+	{
+		if (!AIManager::isCallScoringV2Enabled() || empty($list))
+		{
+			return null;
+		}
+
+		$barItemAction = (new JsEvent('Openline:ShowCopilotSummaryDrawer'))
+			->addActionParamInt('activityId', $this->getActivityId())
+			->addActionParamInt('ownerTypeId', $this->getContext()->getEntityTypeId())
+			->addActionParamInt('ownerId', $this->getContext()->getEntityId())
+		;
+
+		return (new ActionBarItem())
+			->setSize(ActionBarItem::SIZE_SM)
+			->setDesign(ActionBarItem::DESIGN_AI)
+			->setAction($barItemAction)
+			->setText(
+				Loc::getMessage(
+					'CRM_TIMELINE_BLOCK_OPEN_LINE_ACTION_BAR_COPILOT_SUMMARY',
+					['#COPILOT_NAME#' => AIManager::getCopilotName()]
+				)
+			)
+		;
 	}
 
 	protected function getOpenChatAction(): ?Action

@@ -1,4 +1,7 @@
 <?php
+
+use Bitrix\Main\Web\Uri;
+
 IncludeModuleLangFile(__FILE__);
 
 class CCrmProductFile
@@ -211,7 +214,7 @@ class CCrmProductFile
 
 		if (is_array($params['url_params']))
 		{
-			$result = CHTTP::urlAddParams($result, $params['url_params']);
+			$result = (string)(new Uri($result))->addParams($params['url_params']);
 		}
 
 		if(!preg_match("/^[a-z]+:\\/\\//", $result))
@@ -241,7 +244,7 @@ class CCrmProductFile
 	{
 		if(is_array($this->_file))
 		{
-			$src = CHTTP::urlAddParams($this->GetImgSrc($params), array("download" => "y"));
+			$src = (string)(new Uri($this->GetImgSrc($params)))->addParams(array("download" => "y"));
 			return ' [ <a href="'.htmlspecialcharsbx($src).'" target="_self">'.$params['download_text'].'</a> ] ';
 		}
 		else
@@ -372,10 +375,7 @@ class CCrmProductFileControl
 
 		if($this->_ob_file->IsImage() && $this->_ob_file->GetSize()/* < $max_size*/)
 		{
-			$img_src = CHTTP::urlAddParams(
-				$this->_ob_file->GetImgSrc(array('url_template'=>$url_template)),
-				array('ncc' => '1')
-			);
+			$img_src = (string)(new Uri($this->_ob_file->GetImgSrc(array('url_template'=>$url_template))))->addParams(array('ncc' => '1'));
 			CUtil::InitJSCore(array("viewer"));
 			self::$_counter++;
 			$divId = 'lists-image-' . self::$_counter;

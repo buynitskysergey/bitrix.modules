@@ -20,7 +20,7 @@ final class Entry extends TimelineEntry
 		}
 
 		$entityTypeId = self::fetchEntityTypeId($params);
-		if (!in_array($entityTypeId, AIManager::SUPPORTED_ENTITY_TYPE_IDS, true))
+		if (!AIManager::isEntityTypeSupported($entityTypeId))
 		{
 			return 0;
 		}
@@ -64,7 +64,7 @@ final class Entry extends TimelineEntry
 			$bindings[] = ['ENTITY_TYPE_ID' => $entityTypeId, 'ENTITY_ID' => $entityId];
 		}
 
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $created);
 
 		return $createdId;
 	}

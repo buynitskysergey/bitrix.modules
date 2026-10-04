@@ -7,7 +7,6 @@ namespace Bitrix\Rest\Public\Command\Application;
 use Bitrix\Main\AccessDeniedException;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\DI\ServiceLocator;
-use Bitrix\Main\ObjectNotFoundException;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Main\SystemException;
 use Bitrix\Rest\Internal\Access\AppAccessChecker;
@@ -17,17 +16,23 @@ use Bitrix\Rest\Internal\Entity\Application\AppAttributeCollection;
 use Bitrix\Rest\Internal\Entity\Application\AppExternalAttribute;
 use Bitrix\Rest\Internal\Entity\Application\AppFactory;
 use Bitrix\Rest\Internal\Service\Application\ApplicationInstaller;
+use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
+use Bitrix\Rest\Service\ServiceContainer;
 
 class InstallPersonalAppCommandHandler
 {
 	private ApplicationInstaller $applicationInstaller;
+	private TariffAccessService $tariffAccessService;
 
 	public function __construct(
 		?ApplicationInstaller $applicationInstaller = null,
+		?TariffAccessService $tariffAccessService = null,
 	)
 	{
 		$this->applicationInstaller = $applicationInstaller
 			?? ServiceLocator::getInstance()->get(ApplicationInstaller::class);
+		$this->tariffAccessService = $tariffAccessService
+			?? ServiceContainer::getInstance()->getVibePlusTariffAccessService();
 	}
 
 	/**
@@ -49,6 +54,8 @@ class InstallPersonalAppCommandHandler
 		{
 			throw new AccessDeniedException('User does not have rights to install a personal application');
 		}
+
+		$this->tariffAccessService->ensurePresetAvailable();
 
 		$externalAttributes = new AppAttributeCollection();
 		foreach ($command->attributes as $code => $value)

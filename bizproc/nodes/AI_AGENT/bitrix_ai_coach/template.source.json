@@ -1,0 +1,1020 @@
+{
+    "name": "bitrix_ai_coach",
+    "title": "BIZPROC_NODES_BITRIX_AI_COACH_NAME_1",
+    "description": "BIZPROC_NODES_BITRIX_AI_COACH_DESCRIPTION_1",
+    "wizard_title": "BIZPROC_NODES_BITRIX_AI_COACH_NAME_1",
+    "wizard_description": "BIZPROC_NODES_BITRIX_AI_COACH_TEXT_1",
+    "constants": {
+        "SetupTemplateActivity_OgbJZSi53p": {
+            "label": "BIZPROC_NODES_BITRIX_AI_COACH_NAME_2",
+            "type": "string",
+            "wizard_required": true,
+            "default": "###BIZPROC_NODES_BITRIX_AI_COACH_DEFAULT_1###"
+        },
+        "SetupTemplateActivity_f8J9TnkjX5": {
+            "label": "BIZPROC_NODES_BITRIX_AI_COACH_NAME_3",
+            "type": "user",
+            "multiple": true,
+            "wizard_required": true,
+            "wizard_default": "",
+            "default": [
+                "user_1"
+            ]
+        },
+        "SetupTemplateActivity_0ioDFL4rgH": {
+            "label": "BIZPROC_NODES_BITRIX_AI_COACH_NAME_4",
+            "type": "string",
+            "wizard_title": "BIZPROC_NODES_BITRIX_AI_COACH_TEXT_2",
+            "wizard_description": "BIZPROC_NODES_BITRIX_AI_COACH_TEXT_3",
+            "wizard_required": true,
+            "default": "###BIZPROC_NODES_BITRIX_AI_COACH_DEFAULT_2###"
+        }
+    },
+    "flows": {
+        "setup": {
+            "trigger": "AiAgentStartTrigger",
+            "trigger_props": {
+                "_id": "A4372_1460_5476_9814",
+                "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_4###"
+            },
+            "steps": [
+                {
+                    "SetupTemplateActivity": {
+                        "_id": "A8369_8149_6365_5481",
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_13###",
+                        "fanout": {
+                            "o0": [
+                                [
+                                    {
+                                        "ImBotCreateBotActivity": {
+                                            "_id": "A9598_6102_8882_8646",
+                                            "botName": "{=Constant:SetupTemplateActivity_OgbJZSi53p}",
+                                            "workPosition": "",
+                                            "avatar": null,
+                                            "botCode": "{=Workflow:TemplateId}-feedback-maker",
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_5###",
+                                            "NodeTitle": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_6###"
+                                        }
+                                    },
+                                    {
+                                        "ImBotMessageActivity": {
+                                            "_id": "A5722_9997_9025_4029",
+                                            "botId": "{=A9598_6102_8882_8646:botId}",
+                                            "botCode": "",
+                                            "recipient": [
+                                                "{=Constant:SetupTemplateActivity_f8J9TnkjX5}"
+                                            ],
+                                            "chatId": null,
+                                            "message": "###BIZPROC_NODES_BITRIX_AI_COACH_MESSAGE_1###",
+                                            "asError": "N",
+                                            "aiWarning": "N",
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                        }
+                                    }
+                                ],
+                                [
+                                    {
+                                        "ImBotCreateBotActivity": {
+                                            "_id": "A5647_8130_8558_3635",
+                                            "botName": "{=Constant:SetupTemplateActivity_0ioDFL4rgH}",
+                                            "workPosition": "",
+                                            "avatar": null,
+                                            "botCode": "{=Workflow:TemplateId}-feedback-interviewer",
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_7###",
+                                            "NodeTitle": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_6###"
+                                        }
+                                    }
+                                ],
+                                [
+                                    {
+                                        "CreateStorageNode": {
+                                            "_id": "A4306_9994_2013_8543",
+                                            "StorageTitle": "###BIZPROC_NODES_BITRIX_AI_COACH_STORAGETITLE_1###",
+                                            "StorageDescription": "",
+                                            "StorageCode": "storage_{=Workflow:TemplateId}",
+                                            "StorageFields": {
+                                                "ItemCode": {
+                                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_5###",
+                                                    "Type": "string"
+                                                },
+                                                "title": {
+                                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_6###",
+                                                    "Type": "string"
+                                                },
+                                                "questions": {
+                                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_10###",
+                                                    "Type": "string"
+                                                },
+                                                "author": {
+                                                    "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_11###",
+                                                    "Type": "user"
+                                                }
+                                            },
+                                            "SelectedFields": [
+                                                {
+                                                    "id": 0,
+                                                    "storageId": 0,
+                                                    "code": "title",
+                                                    "sort": 500,
+                                                    "name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_6###",
+                                                    "description": "",
+                                                    "type": "string",
+                                                    "multiple": false,
+                                                    "mandatory": false,
+                                                    "settings": null
+                                                },
+                                                {
+                                                    "id": 0,
+                                                    "storageId": 0,
+                                                    "code": "questions",
+                                                    "sort": 500,
+                                                    "name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_10###",
+                                                    "description": "",
+                                                    "type": "string",
+                                                    "multiple": false,
+                                                    "mandatory": false,
+                                                    "settings": null
+                                                },
+                                                {
+                                                    "id": 0,
+                                                    "storageId": 0,
+                                                    "code": "author",
+                                                    "sort": 500,
+                                                    "name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_11###",
+                                                    "description": "",
+                                                    "type": "user",
+                                                    "multiple": false,
+                                                    "mandatory": false,
+                                                    "settings": null
+                                                }
+                                            ],
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_17###"
+                                        }
+                                    },
+                                    {
+                                        "DeleteDataStorageActivity": {
+                                            "_id": "A2636_8739_1696_8052",
+                                            "StorageId": 0,
+                                            "StorageCode": "storage_{=Workflow:TemplateId}",
+                                            "DeleteMode": "all",
+                                            "DynamicFilterFields": {
+                                                "items": []
+                                            },
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_12###"
+                                        }
+                                    }
+                                ]
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "restart": {
+            "trigger": "AiAgentRestartTrigger",
+            "trigger_props": {
+                "_id": "A2026_0806_0001_0001",
+                "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_18###"
+            },
+            "steps": [
+                {
+                    "SetupTemplateActivity": {
+                        "_id": "A2026_0806_0001_0002",
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_13###",
+                        "fanout": {
+                            "o0": [
+                                [
+                                    {
+                                        "ImBotCreateBotActivity": {
+                                            "_id": "A2026_0806_0001_0003",
+                                            "botName": "{=Constant:SetupTemplateActivity_OgbJZSi53p}",
+                                            "workPosition": "",
+                                            "avatar": null,
+                                            "botCode": "{=Workflow:TemplateId}-feedback-maker",
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_5###"
+                                        }
+                                    }
+                                ],
+                                [
+                                    {
+                                        "ImBotCreateBotActivity": {
+                                            "_id": "A2026_0806_0001_0004",
+                                            "botName": "{=Constant:SetupTemplateActivity_0ioDFL4rgH}",
+                                            "workPosition": "",
+                                            "avatar": null,
+                                            "botCode": "{=Workflow:TemplateId}-feedback-interviewer",
+                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_7###"
+                                        }
+                                    }
+                                ]
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "bot_reply": {
+            "trigger": "ImBotNewMessageTrigger",
+            "trigger_props": {
+                "_id": "A4769_8071_8996_8194",
+                "BotId": null,
+                "BotCode": "{=Workflow:TemplateId}-feedback-maker",
+                "SenderIds": [
+                    "{=Constant:SetupTemplateActivity_f8J9TnkjX5}"
+                ],
+                "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_2###"
+            },
+            "steps": [
+                {
+                    "AiAssistantAgentComplexActivity": {
+                        "_id": "A7174_1517_6335_9991",
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                        "Rules": {
+                            "i0": {
+                                "portId": "i0",
+                                "ruleCards": [
+                                    {
+                                        "id": "A5251_9766_7478_1420",
+                                        "constructions": [
+                                            {
+                                                "id": "A1790_1817_2276_1205",
+                                                "type": "action",
+                                                "expression": {
+                                                    "actionId": "AiAssistantAgentActivity",
+                                                    "rawActivityData": null,
+                                                    "activityData": {
+                                                        "Name": "A6421_3735_9929_4202",
+                                                        "Type": "AiAssistantAgentActivity",
+                                                        "Activated": "Y",
+                                                        "Properties": {
+                                                            "mcpUser": "{=A4769_8071_8996_8194:SenderId}",
+                                                            "query": "{=A4769_8071_8996_8194:Message}",
+                                                            "systemPrompt": "@@@SYSTEMPROMPT_1@@@",
+                                                            "returnType": "json",
+                                                            "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for chat\"\n    },\n    \"number_of_questions\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of questions\"\n    },\n    \"topic\": {\n      \"type\": \"string\",\n      \"description\": \"Topic\"\n    },\n    \"tested_users_bbcodes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"description\": \"Tested User in bbcode format [USER=id][USER=id]name[/USER][/USER]\"\n      }\n    },\n    \"questions_is_approved\": {\n      \"type\": \"boolean\",\n      \"description\": \"questions is approved\"\n    },\n    \"input_data_is_known\": {\n      \"type\": \"boolean\",\n      \"description\": \"Input data is known\"\n    },\n    \"questions\": {\n      \"type\": \"string\",\n      \"description\": \"Questions of test\"\n    }\n  },\n  \"required\": [\n    \"message\",\n    \"number_of_questions\",\n    \"topic\",\n    \"tested_user_ids\",\n    \"questions_is_approved\",\n    \"input_data_is_known\",\n    \"questions\"\n  ]\n}",
+                                                            "jsonPath": {
+                                                                "message": {
+                                                                    "Id": "message",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:message",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "number_of_questions": {
+                                                                    "Id": "number_of_questions",
+                                                                    "Type": "json",
+                                                                    "BaseType": "int",
+                                                                    "Name": "JSON:number_of_questions",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "topic": {
+                                                                    "Id": "topic",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:topic",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "tested_users_bbcodes": {
+                                                                    "Id": "tested_users_bbcodes",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:tested_users_bbcodes",
+                                                                    "Description": null,
+                                                                    "Multiple": true,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "questions_is_approved": {
+                                                                    "Id": "questions_is_approved",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:questions_is_approved",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "input_data_is_known": {
+                                                                    "Id": "input_data_is_known",
+                                                                    "Type": "json",
+                                                                    "BaseType": "bool",
+                                                                    "Name": "JSON:input_data_is_known",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                },
+                                                                "questions": {
+                                                                    "Id": "questions",
+                                                                    "Type": "json",
+                                                                    "BaseType": "string",
+                                                                    "Name": "JSON:questions",
+                                                                    "Description": null,
+                                                                    "Multiple": false,
+                                                                    "Required": false,
+                                                                    "Options": null,
+                                                                    "Settings": null,
+                                                                    "Default": null
+                                                                }
+                                                            },
+                                                            "usePseudonymizer": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                                            "EditorComment": ""
+                                                        },
+                                                        "ReturnProperties": [
+                                                            {
+                                                                "Id": "aiResult",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "errorMessage",
+                                                                "Type": "string",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "toolsUsed",
+                                                                "Type": "bool",
+                                                                "BaseType": null,
+                                                                "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                                                "Description": null,
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": null,
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "message",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:message",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "number_of_questions",
+                                                                "Type": "json",
+                                                                "BaseType": "int",
+                                                                "Name": "JSON:number_of_questions",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "topic",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:topic",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "tested_users_bbcodes",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:tested_users_bbcodes",
+                                                                "Description": "",
+                                                                "Multiple": true,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "questions_is_approved",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:questions_is_approved",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "input_data_is_known",
+                                                                "Type": "json",
+                                                                "BaseType": "bool",
+                                                                "Name": "JSON:input_data_is_known",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            },
+                                                            {
+                                                                "Id": "questions",
+                                                                "Type": "json",
+                                                                "BaseType": "string",
+                                                                "Name": "JSON:questions",
+                                                                "Description": "",
+                                                                "Multiple": false,
+                                                                "Required": false,
+                                                                "Options": "",
+                                                                "Settings": null,
+                                                                "Default": null
+                                                            }
+                                                        ],
+                                                        "Document": null
+                                                    },
+                                                    "document": null,
+                                                    "auxPortId": null,
+                                                    "auxPortTitle": null
+                                                }
+                                            },
+                                            {
+                                                "id": "A1423_4748_6456_2357",
+                                                "type": "output",
+                                                "expression": {
+                                                    "portId": "o1",
+                                                    "title": "E1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "isFilled": true
+                            }
+                        },
+                        "InputNames": [
+                            "A6421_3735_9929_4202:i0"
+                        ],
+                        "OutputNames": {
+                            "A6421_3735_9929_4202:o0": 1
+                        },
+                        "Links": [],
+                        "branches": {
+                            "o1": [
+                                {
+                                    "Condition": {
+                                        "_id": "A9433_3697_1811_2293",
+                                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                                        "conditions": [
+                                            {
+                                                "object": "A6421_3735_9929_4202",
+                                                "field": "message",
+                                                "operator": "!empty",
+                                                "value": ""
+                                            }
+                                        ],
+                                        "fanout": {
+                                            "o0": [
+                                                [
+                                                    {
+                                                        "ImBotMessageActivity": {
+                                                            "_id": "A9833_6990_1088_4471",
+                                                            "botId": "{=A4769_8071_8996_8194:ActualBotId}",
+                                                            "botCode": "",
+                                                            "recipient": [
+                                                                "{=A4769_8071_8996_8194:SenderId}"
+                                                            ],
+                                                            "chatId": null,
+                                                            "message": "{=A6421_3735_9929_4202:message}",
+                                                            "asError": "N",
+                                                            "aiWarning": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                                        }
+                                                    }
+                                                ],
+                                                [
+                                                    {
+                                                        "Condition": {
+                                                            "_id": "A3246_1874_7458_8230",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                                                            "conditions": [
+                                                                {
+                                                                    "object": "A6421_3735_9929_4202",
+                                                                    "field": "input_data_is_known",
+                                                                    "operator": ">",
+                                                                    "value": "0"
+                                                                },
+                                                                {
+                                                                    "object": "A6421_3735_9929_4202",
+                                                                    "field": "questions_is_approved",
+                                                                    "operator": ">",
+                                                                    "value": "0"
+                                                                }
+                                                            ],
+                                                            "true": [
+                                                                {
+                                                                    "ForEach": {
+                                                                        "_id": "A2087_9399_5384_5330",
+                                                                        "Variable": "{=A6421_3735_9929_4202:tested_users_bbcodes}",
+                                                                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_16###",
+                                                                        "steps": [
+                                                                            {
+                                                                                "WriteDataStorageActivity": {
+                                                                                    "_id": "A8947_9497_6913_6578",
+                                                                                    "Author": "{=A2087_9399_5384_5330:Value > bbcodetouser}",
+                                                                                    "StorageId": "storage_{=Workflow:TemplateId}",
+                                                                                    "StorageCode": "storage_{=Workflow:TemplateId}",
+                                                                                    "RewriteMode": "newItem",
+                                                                                    "IsExpanded": "Y",
+                                                                                    "DynamicFilterFields": {
+                                                                                        "items": []
+                                                                                    },
+                                                                                    "Fields": {
+                                                                                        "title": {
+                                                                                            "FieldName": "title",
+                                                                                            "Value": "{=A6421_3735_9929_4202:topic}"
+                                                                                        },
+                                                                                        "questions": {
+                                                                                            "FieldName": "questions",
+                                                                                            "Value": "{=A6421_3735_9929_4202:questions}"
+                                                                                        },
+                                                                                        "author": {
+                                                                                            "FieldName": "author",
+                                                                                            "Value": "{=A4769_8071_8996_8194:SenderId}"
+                                                                                        }
+                                                                                    },
+                                                                                    "FieldValue": {
+                                                                                        "title": "{=A6421_3735_9929_4202:topic}",
+                                                                                        "questions": "{=A6421_3735_9929_4202:questions}",
+                                                                                        "author": "{=A4769_8071_8996_8194:SenderId}"
+                                                                                    },
+                                                                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_9###"
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "ImBotMessageActivity": {
+                                                                                    "_id": "A5846_8478_5020_2228",
+                                                                                    "botId": null,
+                                                                                    "botCode": "{=Workflow:TemplateId}-feedback-interviewer",
+                                                                                    "recipient": [
+                                                                                        "{=A2087_9399_5384_5330:Value > bbcodetouser}"
+                                                                                    ],
+                                                                                    "chatId": null,
+                                                                                    "message": "###BIZPROC_NODES_BITRIX_AI_COACH_MESSAGE_2###",
+                                                                                    "asError": null,
+                                                                                    "aiWarning": null,
+                                                                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                                                                }
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            ],
+                                                            "false": []
+                                                        }
+                                                    }
+                                                ]
+                                            ],
+                                            "o1": [
+                                                [
+                                                    {
+                                                        "ImBotMessageActivity": {
+                                                            "_id": "A1689_5301_1167_3785",
+                                                            "botId": "{=A4769_8071_8996_8194:ActualBotId}",
+                                                            "botCode": "",
+                                                            "recipient": [
+                                                                "{=A4769_8071_8996_8194:SenderId}"
+                                                            ],
+                                                            "message": "###BIZPROC_NODES_BITRIX_AI_COACH_MESSAGE_4###",
+                                                            "asError": "Y",
+                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                                        }
+                                                    }
+                                                ]
+                                            ]
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "bot_reply_2": {
+            "trigger": "ImBotNewMessageTrigger",
+            "trigger_props": {
+                "_id": "A9654_3504_4807_2932",
+                "BotId": null,
+                "BotCode": "{=Workflow:TemplateId}-feedback-interviewer",
+                "SenderIds": [
+                    "group_ua"
+                ],
+                "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_2###"
+            },
+            "steps": [
+                {
+                    "ReadDataStorageActivity": {
+                        "_id": "A4120_8802_2523_2854",
+                        "StorageId": null,
+                        "StorageCode": "storage_{=Workflow:TemplateId}",
+                        "ReturnMode": "single",
+                        "ReturnFields": [],
+                        "ReturnFieldsByStorageCode": [
+                            "title",
+                            "questions",
+                            "author",
+                            "id"
+                        ],
+                        "DynamicFilterFields": {
+                            "type": "field",
+                            "items": [
+                                [
+                                    {
+                                        "operator": "=",
+                                        "value": "{=A9654_3504_4807_2932:SenderId}",
+                                        "field": "CREATED_BY",
+                                        "object": "Document"
+                                    },
+                                    "AND"
+                                ]
+                            ],
+                            "activityNames": [],
+                            "internalized": true
+                        },
+                        "OutputFields": {
+                            "title": {
+                                "Name": "title",
+                                "FieldName": "title"
+                            },
+                            "questions": {
+                                "Name": "questions",
+                                "FieldName": "questions"
+                            },
+                            "author": {
+                                "Name": "author",
+                                "FieldName": "author"
+                            },
+                            "id": {
+                                "Name": "id",
+                                "FieldName": "id"
+                            }
+                        },
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_10###",
+                        "NodeTitle": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_11###"
+                    }
+                },
+                {
+                    "Condition": {
+                        "_id": "A7464_6478_5578_9056",
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                        "conditions": [
+                            {
+                                "object": "A4120_8802_2523_2854",
+                                "field": "questions",
+                                "operator": "!empty",
+                                "value": ""
+                            }
+                        ],
+                        "true": [
+                            {
+                                "AiAssistantAgentComplexActivity": {
+                                    "_id": "A5729_2840_7945_3020",
+                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                    "Rules": {
+                                        "i0": {
+                                            "portId": "i0",
+                                            "ruleCards": [
+                                                {
+                                                    "id": "A9143_9558_6751_2834",
+                                                    "constructions": [
+                                                        {
+                                                            "id": "A7485_6607_8030_8670",
+                                                            "type": "action",
+                                                            "expression": {
+                                                                "actionId": "AiAssistantAgentActivity",
+                                                                "rawActivityData": null,
+                                                                "activityData": {
+                                                                    "Name": "A5313_1512_1381_4864",
+                                                                    "Type": "AiAssistantAgentActivity",
+                                                                    "Activated": "Y",
+                                                                    "Properties": {
+                                                                        "mcpUser": "{=A9654_3504_4807_2932:SenderId}",
+                                                                        "query": "{=A9654_3504_4807_2932:Message}",
+                                                                        "systemPrompt": "@@@SYSTEMPROMPT_2@@@",
+                                                                        "returnType": "json",
+                                                                        "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"is_test_complete\": {\n      \"type\": \"boolean\",\n      \"description\": \"Flag is test complete\"\n    },\n    \"questions_review\": {\n      \"type\": \"array\",\n      \"description\": \"One entry per test question, in order; empty until the test is complete\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"number\": {\n            \"type\": \"integer\",\n            \"description\": \"Question number\"\n          },\n          \"is_correct\": {\n            \"type\": \"boolean\",\n            \"description\": \"Whether the user answer is correct\"\n          }\n        },\n        \"required\": [\n          \"number\",\n          \"is_correct\"\n        ]\n      }\n    },\n    \"correct_count\": {\n      \"type\": \"integer\",\n      \"description\": \"Number of entries in questions_review with is_correct=true\"\n    },\n    \"total_count\": {\n      \"type\": \"integer\",\n      \"description\": \"Total number of questions in the test\"\n    },\n    \"results_of_test\": {\n      \"type\": \"string\",\n      \"description\": \"Results of the test\"\n    },\n    \"message\": {\n      \"type\": \"string\",\n      \"description\": \"Next message for the chat\"\n    }\n  },\n  \"required\": [\n    \"is_test_complete\",\n    \"questions_review\",\n    \"correct_count\",\n    \"total_count\",\n    \"results_of_test\",\n    \"message\"\n  ]\n}",
+                                                                        "jsonPath": {
+                                                                            "message": {
+                                                                                "Id": "message",
+                                                                                "Type": "json",
+                                                                                "BaseType": "string",
+                                                                                "Name": "JSON:message",
+                                                                                "Description": null,
+                                                                                "Multiple": false,
+                                                                                "Required": false,
+                                                                                "Options": null,
+                                                                                "Settings": null,
+                                                                                "Default": null
+                                                                            },
+                                                                            "is_test_complete": {
+                                                                                "Id": "is_test_complete",
+                                                                                "Type": "json",
+                                                                                "BaseType": "bool",
+                                                                                "Name": "JSON:is_test_complete",
+                                                                                "Description": null,
+                                                                                "Multiple": false,
+                                                                                "Required": false,
+                                                                                "Options": null,
+                                                                                "Settings": null,
+                                                                                "Default": null
+                                                                            },
+                                                                            "results_of_test": {
+                                                                                "Id": "results_of_test",
+                                                                                "Type": "json",
+                                                                                "BaseType": "string",
+                                                                                "Name": "JSON:results_of_test",
+                                                                                "Description": null,
+                                                                                "Multiple": false,
+                                                                                "Required": false,
+                                                                                "Options": null,
+                                                                                "Settings": null,
+                                                                                "Default": null
+                                                                            }
+                                                                        },
+                                                                        "usePseudonymizer": "Y",
+                                                                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_15###",
+                                                                        "EditorComment": ""
+                                                                    },
+                                                                    "ReturnProperties": [
+                                                                        {
+                                                                            "Id": "aiResult",
+                                                                            "Type": "string",
+                                                                            "BaseType": null,
+                                                                            "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_7###",
+                                                                            "Description": null,
+                                                                            "Multiple": false,
+                                                                            "Required": false,
+                                                                            "Options": null,
+                                                                            "Settings": null,
+                                                                            "Default": null
+                                                                        },
+                                                                        {
+                                                                            "Id": "errorMessage",
+                                                                            "Type": "string",
+                                                                            "BaseType": null,
+                                                                            "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_8###",
+                                                                            "Description": null,
+                                                                            "Multiple": false,
+                                                                            "Required": false,
+                                                                            "Options": null,
+                                                                            "Settings": null,
+                                                                            "Default": null
+                                                                        },
+                                                                        {
+                                                                            "Id": "toolsUsed",
+                                                                            "Type": "bool",
+                                                                            "BaseType": null,
+                                                                            "Name": "###BIZPROC_NODES_BITRIX_AI_COACH_NAME_9###",
+                                                                            "Description": null,
+                                                                            "Multiple": false,
+                                                                            "Required": false,
+                                                                            "Options": null,
+                                                                            "Settings": null,
+                                                                            "Default": null
+                                                                        },
+                                                                        {
+                                                                            "Id": "message",
+                                                                            "Type": "json",
+                                                                            "BaseType": "string",
+                                                                            "Name": "JSON:message",
+                                                                            "Description": "",
+                                                                            "Multiple": false,
+                                                                            "Required": false,
+                                                                            "Options": "",
+                                                                            "Settings": null,
+                                                                            "Default": null
+                                                                        },
+                                                                        {
+                                                                            "Id": "is_test_complete",
+                                                                            "Type": "json",
+                                                                            "BaseType": "bool",
+                                                                            "Name": "JSON:is_test_complete",
+                                                                            "Description": "",
+                                                                            "Multiple": false,
+                                                                            "Required": false,
+                                                                            "Options": "",
+                                                                            "Settings": null,
+                                                                            "Default": null
+                                                                        },
+                                                                        {
+                                                                            "Id": "results_of_test",
+                                                                            "Type": "json",
+                                                                            "BaseType": "string",
+                                                                            "Name": "JSON:results_of_test",
+                                                                            "Description": "",
+                                                                            "Multiple": false,
+                                                                            "Required": false,
+                                                                            "Options": "",
+                                                                            "Settings": null,
+                                                                            "Default": null
+                                                                        }
+                                                                    ],
+                                                                    "Document": null
+                                                                },
+                                                                "document": null,
+                                                                "auxPortId": null,
+                                                                "auxPortTitle": null
+                                                            }
+                                                        },
+                                                        {
+                                                            "id": "A9738_6307_6797_9101",
+                                                            "type": "output",
+                                                            "expression": {
+                                                                "portId": "o1",
+                                                                "title": "E1"
+                                                            }
+                                                        }
+                                                    ]
+                                                }
+                                            ],
+                                            "isFilled": true
+                                        }
+                                    },
+                                    "InputNames": [
+                                        "A5313_1512_1381_4864:i0"
+                                    ],
+                                    "OutputNames": {
+                                        "A5313_1512_1381_4864:o0": 1
+                                    },
+                                    "Links": [],
+                                    "branches": {
+                                        "o1": [
+                                            {
+                                                "Condition": {
+                                                    "_id": "A1096_4690_2822_9024",
+                                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                                                    "conditions": [
+                                                        {
+                                                            "object": "A5313_1512_1381_4864",
+                                                            "field": "message",
+                                                            "operator": "!empty",
+                                                            "value": ""
+                                                        }
+                                                    ],
+                                                    "fanout": {
+                                                        "o0": [
+                                                            [
+                                                                {
+                                                                    "ImBotMessageActivity": {
+                                                                        "_id": "A6125_8815_9480_4420",
+                                                                        "botId": "{=A9654_3504_4807_2932:ActualBotId}",
+                                                                        "botCode": "",
+                                                                        "recipient": [
+                                                                            "{=A9654_3504_4807_2932:SenderId}"
+                                                                        ],
+                                                                        "chatId": null,
+                                                                        "message": "{=A5313_1512_1381_4864:message}",
+                                                                        "asError": null,
+                                                                        "aiWarning": null,
+                                                                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                                                    }
+                                                                }
+                                                            ],
+                                                            [
+                                                                {
+                                                                    "Condition": {
+                                                                        "_id": "A7586_4625_6752_3529",
+                                                                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_14###",
+                                                                        "conditions": [
+                                                                            {
+                                                                                "object": "A5313_1512_1381_4864",
+                                                                                "field": "is_test_complete",
+                                                                                "operator": ">",
+                                                                                "value": "0"
+                                                                            }
+                                                                        ],
+                                                                        "true": [
+                                                                            {
+                                                                                "ImBotMessageActivity": {
+                                                                                    "_id": "A9312_1858_2156_7551",
+                                                                                    "botId": null,
+                                                                                    "botCode": "{=Workflow:TemplateId}-feedback-maker",
+                                                                                    "recipient": [
+                                                                                        "{=A4120_8802_2523_2854:author}"
+                                                                                    ],
+                                                                                    "chatId": null,
+                                                                                    "message": "###BIZPROC_NODES_BITRIX_AI_COACH_MESSAGE_3###",
+                                                                                    "asError": "N",
+                                                                                    "aiWarning": "Y",
+                                                                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "DeleteDataStorageActivity": {
+                                                                                    "_id": "A8762_2315_5201_1662",
+                                                                                    "StorageId": 0,
+                                                                                    "StorageCode": "storage_{=Workflow:TemplateId}",
+                                                                                    "DeleteMode": "multiple",
+                                                                                    "IsExpanded": "Y",
+                                                                                    "DynamicFilterFields": {
+                                                                                        "items": [
+                                                                                            [
+                                                                                                {
+                                                                                                    "object": "Document",
+                                                                                                    "field": "ID",
+                                                                                                    "operator": "=",
+                                                                                                    "value": "{=A4120_8802_2523_2854:id}"
+                                                                                                },
+                                                                                                "AND"
+                                                                                            ]
+                                                                                        ]
+                                                                                    },
+                                                                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_12###"
+                                                                                }
+                                                                            }
+                                                                        ],
+                                                                        "false": []
+                                                                    }
+                                                                }
+                                                            ]
+                                                        ],
+                                                        "o1": [
+                                                            [
+                                                                {
+                                                                    "ImBotMessageActivity": {
+                                                                        "_id": "A8569_7164_3775_5606",
+                                                                        "botId": "{=A9654_3504_4807_2932:ActualBotId}",
+                                                                        "botCode": "",
+                                                                        "recipient": [
+                                                                            "{=A9654_3504_4807_2932:SenderId}"
+                                                                        ],
+                                                                        "message": "###BIZPROC_NODES_BITRIX_AI_COACH_MESSAGE_4###",
+                                                                        "asError": "Y",
+                                                                        "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                                                    }
+                                                                }
+                                                            ]
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        ],
+                        "false": [
+                            {
+                                "ImBotMessageActivity": {
+                                    "_id": "A8489_1316_1178_9993",
+                                    "botId": "{=A9654_3504_4807_2932:ActualBotId}",
+                                    "botCode": "",
+                                    "recipient": [
+                                        "{=A9654_3504_4807_2932:SenderId}"
+                                    ],
+                                    "message": "###BIZPROC_NODES_BITRIX_AI_COACH_MESSAGE_5###",
+                                    "asError": "N",
+                                    "Title": "###BIZPROC_NODES_BITRIX_AI_COACH_TITLE_3###"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+}

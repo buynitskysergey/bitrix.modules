@@ -2,6 +2,8 @@
 
 /** @global CMain $APPLICATION */
 
+use Bitrix\Bizproc\Internal\Service\Storage\StorageLimitsService;
+
 $module_id = "bizproc";
 $bizprocPerms = $APPLICATION::GetGroupRight($module_id);
 if ($bizprocPerms >= "R") :
@@ -38,8 +40,9 @@ if ($bizprocPerms >= "R") :
 	$arAllOptions = [
 		["log_cleanup_days", GetMessage("BIZPROC_LOG_CLEANUP_DAYS"), "90", ["text", 3]],
 		["search_cleanup_days", GetMessage("BIZPROC_SEARCH_CLEANUP_DAYS"), "180", ["text", 3]],
-		['storage_items_cleanup_days', GetMessage('BIZPROC_OPT_STORAGE_ITEMS_CLEANUP_DAYS'), '90', ['text', 3]],
 		['storage_item_data_limit', GetMessage('BIZPROC_OPT_STORAGE_ITEM_DATA_LIMIT'), '1', ['text', 3]],
+		['storage_disk_block_buffer', GetMessage('BIZPROC_OPT_STORAGE_DISK_BLOCK_BUFFER'), '1024', ['text', 5]],
+		['storage_disk_warning_buffer', GetMessage('BIZPROC_OPT_STORAGE_DISK_WARNING_BUFFER'), '2048', ['text', 5]],
 		["log_skip_types", GetMessage("BIZPROC_LOG_SKIP_TYPES"), "1,2", ["checkboxlist", [
 			1 => GetMessage("BIZPROC_LOG_SKIP_TYPES_1_1"),
 			2 => GetMessage("BIZPROC_LOG_SKIP_TYPES_2_1"),
@@ -87,8 +90,29 @@ if ($bizprocPerms >= "R") :
 		COption::SetOptionString("bizproc", "log_skip_types", ($_REQUEST['log_skip_types'] ?? '') ? implode(',', (array)$_REQUEST['log_skip_types']) : "");
 		COption::SetOptionString("bizproc", "automation_no_forced_tracking", ($_REQUEST['automation_no_forced_tracking'] ?? 'N') === "Y" ? "Y" : "N");
 		COption::SetOptionString('bizproc', 'enable_getdocument_select', ($_REQUEST['enable_getdocument_select'] ?? 'N') === 'Y' ? 'Y' : 'N');
-		COption::SetOptionString('bizproc', 'storage_items_cleanup_days', ($_REQUEST['storage_items_cleanup_days'] ?? 90));
-		COption::SetOptionString('bizproc', 'storage_item_data_limit', ($_REQUEST['storage_item_data_limit'] ?? 1));
+		COption::SetOptionString('bizproc', 'storage_item_data_limit', (string)(int)($_REQUEST['storage_item_data_limit'] ?? 1));
+
+		$blockBufferMb = (string)($_REQUEST['storage_disk_block_buffer'] ?? '');
+		$warningBufferMb = (string)($_REQUEST['storage_disk_warning_buffer'] ?? '');
+		if (
+			!StorageLimitsService::isValidDiskBufferMb($blockBufferMb)
+			|| !StorageLimitsService::isValidDiskBufferMb($warningBufferMb)
+		)
+		{
+			$strWarning .= GetMessage(
+				'BIZPROC_OPT_STORAGE_DISK_BUFFER_RANGE_ERROR',
+				['#MAX#' => (string)StorageLimitsService::MAX_DISK_BUFFER_MB],
+			) ?? '';
+		}
+		elseif ((int)$warningBufferMb < (int)$blockBufferMb)
+		{
+			$strWarning .= GetMessage('BIZPROC_OPT_STORAGE_DISK_BUFFER_ORDER_ERROR') ?? '';
+		}
+		else
+		{
+			COption::SetOptionString('bizproc', 'storage_disk_block_buffer', (string)(int)$blockBufferMb);
+			COption::SetOptionString('bizproc', 'storage_disk_warning_buffer', (string)(int)$warningBufferMb);
+		}
 
 		\Bitrix\Main\Config\Option::set("bizproc", "use_gzip_compression", $_REQUEST["use_gzip_compression"]);
 		\Bitrix\Main\Config\Option::set("bizproc", "locked_wi_path", $_REQUEST["locked_wi_path"]);
@@ -97,6 +121,35 @@ if ($bizprocPerms >= "R") :
 
 		$delayMaxDays = (int)($_REQUEST["delay_max_days"] ?? 0);
 		CBPSchedulerService::setDelayMaxDays($delayMaxDays);
+
+		$maxGraceDays = 365;
+		$graceDaysInput = trim((string)($_REQUEST['clear_stuck_pause_grace_days'] ?? ''));
+		$graceDays = (int)$graceDaysInput;
+		if (preg_match('/^[0-9]+$/D', $graceDaysInput) !== 1 || $graceDays < 1 || $graceDays > $maxGraceDays)
+		{
+			$strWarning .= GetMessage(
+				'BIZPROC_OPT_CLEAR_STUCK_PAUSE_GRACE_DAYS_RANGE_ERROR',
+				['#MAX#' => (string)$maxGraceDays],
+			) ?? '';
+		}
+		else
+		{
+			\Bitrix\Main\Config\Option::set('bizproc', 'clear_stuck_pause_grace_days', $graceDays);
+		}
+
+		// until the backfill of the resume messages is over the checkbox is disabled and submits nothing:
+		// a save must not read that as turning the sweep off, nor as turning it on
+		if (\Bitrix\Bizproc\Infrastructure\Agent\ClearStuckPauseWorkflowAgent::getActiveOptionValue() !== null)
+		{
+			if (($_REQUEST['clear_stuck_pause_agent_active'] ?? 'N') === 'Y')
+			{
+				\Bitrix\Bizproc\Infrastructure\Agent\ClearStuckPauseWorkflowAgent::register();
+			}
+			else
+			{
+				\Bitrix\Bizproc\Infrastructure\Agent\ClearStuckPauseWorkflowAgent::unregister();
+			}
+		}
 		$clearZombieAgentName = \Bitrix\Bizproc\Infrastructure\Agent\ClearZombieInstanceAgent::next();
 		if ($delayMaxDays > 0)
 		{
@@ -242,6 +295,36 @@ if ($bizprocPerms >= "R") :
 			<td width="50%" valign="top"><?= GetMessage("BIZPROC_OPT_MAX_DAYS_LIMIT") ?>:</td>
 			<td width="50%" valign="top">
 				<input type="text" name="delay_max_days" value="<?= CBPSchedulerService::getDelayMaxDays() ?>" size="5" />
+			</td>
+		</tr>
+		<tr>
+			<td width="50%" valign="top">
+				<label for="clear_stuck_pause_agent_active"><?= GetMessage("BIZPROC_OPT_CLEAR_STUCK_PAUSE_ACTIVE") ?></label>:
+			</td>
+			<td width="50%" valign="top">
+				<?php
+				$clearStuckPauseAgentActive = \Bitrix\Bizproc\Infrastructure\Agent\ClearStuckPauseWorkflowAgent::getActiveOptionValue();
+				$isClearStuckPauseSettingAvailable = $clearStuckPauseAgentActive !== null; ?>
+				<input type="checkbox" name="clear_stuck_pause_agent_active" id="clear_stuck_pause_agent_active" value="Y"<?php
+				if ($clearStuckPauseAgentActive === 'Y')
+					echo " checked";
+				if (!$isClearStuckPauseSettingAvailable)
+					echo " disabled"; ?>>
+				<?php if (!$isClearStuckPauseSettingAvailable): ?>
+					<span><?= GetMessage("BIZPROC_OPT_CLEAR_STUCK_PAUSE_ACTIVE_UPDATE_NOTE") ?></span>
+				<?php endif; ?>
+			</td>
+		</tr>
+		<tr>
+			<td width="50%" valign="top"><?= GetMessage("BIZPROC_OPT_CLEAR_STUCK_PAUSE_GRACE_DAYS") ?>:</td>
+			<td width="50%" valign="top">
+				<?php
+				$clearStuckPauseGraceDays = \Bitrix\Main\Config\Option::get(
+					'bizproc',
+					'clear_stuck_pause_grace_days',
+					\Bitrix\Bizproc\Internal\Service\WorkflowState\StuckPauseWorkflowDetector::DEFAULT_GRACE_DAYS,
+				); ?>
+				<input type="text" name="clear_stuck_pause_grace_days" value="<?= (int)$clearStuckPauseGraceDays ?>" size="5" />
 			</td>
 		</tr>
 		<tr>

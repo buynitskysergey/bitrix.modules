@@ -11,12 +11,14 @@ use Bitrix\Mobile\Menu\MenuList;
 use Bitrix\Mobile\Menu\AhaMoment;
 use Bitrix\Mobile\Menu\Service\MenuListCache;
 use Bitrix\Mobile\Menu\Service\SupportBanners;
+use Bitrix\Mobile\Internal\Integration\HumanResources\SalaryVacationService;
 use Bitrix\Mobile\Provider\CommonUserDto;
 use Bitrix\Mobile\Provider\UserRepository;
 use Bitrix\Mobile\Provider\ThemeProvider;
 use Bitrix\Timeman\Model\Schedule\Schedule;
 use Bitrix\Timeman\Model\Schedule\ScheduleTable;
 use Bitrix\Mobile\Config\Feature;
+use Bitrix\Mobile\Feature\PersonalAccountFeature;
 use Bitrix\StaffTrackMobile\Public\Features\CheckInFeature;
 use Bitrix\StaffTrack\Public\Provider\CheckInProvider;
 
@@ -85,12 +87,17 @@ class Menu extends Controller
 
 		$checkInData = $this->getCheckInData($user);
 
+		$personalAccount = $this->getPersonalAccount($user);
+
 		$response = [
 			'user' => $user,
 			'menuList' => $user->isGuest ? [] : (new MenuList($context, $cache))->build($forceRefresh),
 			'currentShift' => $this->getCurrentShift($user),
 			'workTime' => $workTime,
 			'company' => $this->getCompany($user),
+			'personalAccount' => [
+				'companies' => $personalAccount['companies'],
+			],
 			'helpdeskUrl' => Loader::includeModule('ui') ? \Bitrix\UI\Util::getHelpdeskUrl(true) : null,
 			'supportBotId' => $supportBotId,
 			'supportBanners' => $this->getSupportBanners(),
@@ -106,6 +113,7 @@ class Menu extends Controller
 				'canUseCheckIn' => $checkInData['canUseCheckIn'],
 				'canUseSupport' => $supportBotId > 0,
 				'canInvite' => $this->canInvite(),
+				'canUsePersonalAccount' => $personalAccount['canUsePersonalAccount'],
 				'canUseTelephony' => \Bitrix\Main\Loader::includeModule('voximplant') && \Bitrix\Voximplant\Security\Helper::canCurrentUserPerformCalls(),
 				'shouldShowWhatsNew' => \Bitrix\Mobile\Config\Feature::isEnabled(\Bitrix\Mobile\Feature\WhatsNewFeature::class),
 				'canManageWorkTimeOnMobile' => $canManageWorkTimeOnMobile,
@@ -268,6 +276,37 @@ class Menu extends Controller
 			'users' => $users,
 			'totalUsersCount' => $totalUsersCount,
 			'canInvite' => true,
+		];
+	}
+
+	/**
+	 * Personal account (salary/vacation) company list and its visibility flag.
+	 * A disabled feature flag short-circuits before any humanresources call.
+	 * One humanresources call per menu render: the flag is derived from the list
+	 * (empty list also covers the disabled region gate).
+	 *
+	 * @return array{canUsePersonalAccount: bool, companies: list<array>}
+	 */
+	private function getPersonalAccount(CommonUserDto $user): array
+	{
+		if (
+			!Feature::isEnabled(PersonalAccountFeature::class)
+			|| $user->isExtranet
+			|| $user->isCollaber
+			|| $user->isGuest
+		)
+		{
+			return [
+				'canUsePersonalAccount' => false,
+				'companies' => [],
+			];
+		}
+
+		$companies = (new SalaryVacationService())->getCompanyList($user->id)['companies'] ?? [];
+
+		return [
+			'canUsePersonalAccount' => !empty($companies),
+			'companies' => $companies,
 		];
 	}
 

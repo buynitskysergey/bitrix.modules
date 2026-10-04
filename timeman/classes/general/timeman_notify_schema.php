@@ -17,27 +17,30 @@ class CTimemanNotifySchema
 
 	public static function OnGetNotifySchema()
 	{
-		return array(
-			"timeman" => array(
-				"entry" => Array(
-					"NAME" => GetMessage("TIMEMAN_NS_ENTRY"),
-				),
-				"entry_comment" => Array(
-					"NAME" => GetMessage("TIMEMAN_NS_ENTRY_COMMENT"),
-				),
-				"entry_approve" => Array(
-					"NAME" => GetMessage("TIMEMAN_NS_ENTRY_APPROVE"),
-				),
-				"report" => Array(
-					"NAME" => GetMessage("TIMEMAN_NS_REPORT"),
-				),
-				"report_comment" => Array(
-					"NAME" => GetMessage("TIMEMAN_NS_REPORT_COMMENT"),
-				),
-				"report_approve" => Array(
-					"NAME" => GetMessage("TIMEMAN_NS_REPORT_APPROVE"),
-				),
-			),
-		);
+		return [
+			"timeman" => [
+				"NAME" => GetMessage("TIMEMAN_NS_GROUP"),
+				"NOTIFY" => [
+					"entry" => [
+						"NAME" => GetMessage("TIMEMAN_NS_ENTRY"),
+					],
+					"entry_comment" => [
+						"NAME" => GetMessage("TIMEMAN_NS_ENTRY_COMMENT"),
+					],
+					"entry_approve" => [
+						"NAME" => GetMessage("TIMEMAN_NS_ENTRY_APPROVE"),
+					],
+					"report" => [
+						"NAME" => GetMessage("TIMEMAN_NS_REPORT"),
+					],
+					"report_comment" => [
+						"NAME" => GetMessage("TIMEMAN_NS_REPORT_COMMENT"),
+					],
+					"report_approve" => [
+						"NAME" => GetMessage("TIMEMAN_NS_REPORT_APPROVE"),
+					],
+				],
+			],
+		];
 	}
 }

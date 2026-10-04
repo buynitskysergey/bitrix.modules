@@ -164,7 +164,7 @@ class WorkflowInstanceTable extends Entity\DataManager
 
 		$connection = Main\Application::getConnection();
 		$sqlHelper = $connection->getSqlHelper();
-		$table = $sqlHelper->forSql(static::getTableName());
+		$table = $sqlHelper->quote(static::getTableName());
 
 		$firstDocId = $sqlHelper->forSql($firstDocumentId[2]);
 		$firstEntity = $sqlHelper->forSql($firstDocumentId[1]);
@@ -195,7 +195,7 @@ class WorkflowInstanceTable extends Entity\DataManager
 
 		$connection = Main\Application::getConnection();
 		$sqlHelper = $connection->getSqlHelper();
-		$table = $sqlHelper->forSql(static::getTableName());
+		$table = $sqlHelper->quote(static::getTableName());
 
 		$firstEntity = $sqlHelper->forSql($oldType[1]);
 		$firstModule = $sqlHelper->forSql($oldType[0]);

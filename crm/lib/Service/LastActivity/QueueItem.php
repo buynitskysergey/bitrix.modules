@@ -12,10 +12,16 @@ final class QueueItem
 {
 	private int $userId;
 	private ?DateTime $time;
+	private ?string $eventId = null;
 
 	public function __construct()
 	{
-		$this->userId = Container::getInstance()->getContext()->getUserId();
+		$context = Container::getInstance()->getContext();
+		$this->userId = $context->getUserId();
+		// Capture eventId at enqueue time so the originating client can still
+		// dedupe pull events when the deferred Operation\Update fires later.
+		$eventId = $context->getEventId();
+		$this->eventId = $eventId !== '' ? $eventId : null;
 	}
 
 	public function setUserCurrent(): self
@@ -58,5 +64,10 @@ final class QueueItem
 	public function getTime(): DateTime
 	{
 		return $this->time ?? new DateTime();
+	}
+
+	public function getEventId(): ?string
+	{
+		return $this->eventId;
 	}
 }

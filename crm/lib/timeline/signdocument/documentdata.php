@@ -28,6 +28,7 @@ final class DocumentData implements \JsonSerializable, Arrayable
 	protected ?int $fieldsCount = null;
 	protected ?int $initiatorUserId = null;
 	protected string $initiatedByType = self::TYPE_COMPANY;
+	protected ?int $annulledMembersCount = null;
 
 	public function __construct(int $documentId)
 	{
@@ -125,6 +126,10 @@ final class DocumentData implements \JsonSerializable, Arrayable
 		if (!empty($data['initiatorUserId']) && is_numeric($data['initiatorUserId']))
 		{
 			$eventData->setInitiatorUserId((int)$data['initiatorUserId']);
+		}
+		if (isset($data['annulledMembersCount']) && is_numeric($data['annulledMembersCount']))
+		{
+			$eventData->setAnnulledMembersCount((int)$data['annulledMembersCount']);
 		}
 
 		return $eventData;
@@ -379,6 +384,23 @@ final class DocumentData implements \JsonSerializable, Arrayable
 		return $this->initiatorUserId;
 	}
 
+	/**
+	 * Number of signer records annulled (or restored) by a single mass action.
+	 * Null on the entries of every other event and on annulment entries written
+	 * before the counter existed.
+	 */
+	public function setAnnulledMembersCount(?int $annulledMembersCount): DocumentData
+	{
+		$this->annulledMembersCount = $annulledMembersCount;
+
+		return $this;
+	}
+
+	public function getAnnulledMembersCount(): ?int
+	{
+		return $this->annulledMembersCount;
+	}
+
 	public function toArray(): array
 	{
 		$data = [
@@ -422,6 +444,11 @@ final class DocumentData implements \JsonSerializable, Arrayable
 		if ($this->initiatorUserId)
 		{
 			$data['initiatorUserId'] = $this->initiatorUserId;
+		}
+
+		if ($this->annulledMembersCount !== null)
+		{
+			$data['annulledMembersCount'] = $this->annulledMembersCount;
 		}
 
 		return $data;

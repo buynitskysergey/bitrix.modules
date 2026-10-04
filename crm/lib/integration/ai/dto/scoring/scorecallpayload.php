@@ -4,10 +4,7 @@ namespace Bitrix\Crm\Integration\AI\Dto\Scoring;
 
 use Bitrix\Crm\Dto\Caster;
 use Bitrix\Crm\Dto\Dto;
-use Bitrix\Crm\Dto\Validator;
 use Bitrix\Crm\Dto\Validator\ObjectCollectionField;
-use Bitrix\Crm\Integration\AI\ErrorCode;
-use Bitrix\Main\Result;
 
 class ScoreCallPayload extends Dto
 {
@@ -26,21 +23,12 @@ class ScoreCallPayload extends Dto
 
 	protected function getValidators(array $fields): array
 	{
+		// An empty scoring response (no criteria and no recommendations) is a valid outcome
+		// for calls that strongly deviate from the script. It must not be rejected as a validation
+		// error: the job finishes successfully and is handled by the empty-result timeline branch
+		// (Operation\ScoreCall::onAfterSuccessfulJobFinish -> Controller::onCallScoringEmptyResult).
 		return [
 			new ObjectCollectionField($this, 'criteria'),
-			new class($this) extends Validator {
-				public function validate(array $fields): Result
-				{
-					$result = new Result();
-
-					if (empty($fields['criteria']) && empty($fields['recommendations']))
-					{
-						$result->addError(ErrorCode::getInvalidPayloadError());
-					}
-
-					return $result;
-				}
-			},
 		];
 	}
 }

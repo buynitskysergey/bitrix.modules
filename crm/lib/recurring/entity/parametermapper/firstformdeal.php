@@ -1,7 +1,7 @@
 <?php
 namespace Bitrix\Crm\Recurring\Entity\ParameterMapper;
 
-use \Bitrix\Crm\Recurring\Manager,
+use Bitrix\Crm\Recurring\Manager,
 	\Bitrix\Crm\Recurring\Calculator;
 
 class FirstFormDeal extends DealMap

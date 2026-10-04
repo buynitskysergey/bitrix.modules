@@ -145,9 +145,10 @@ class Shift extends EO_Shift
 	 */
 	public function buildUtcEndByShiftplan($shiftPlan)
 	{
-		$utcStart = $this->buildUtcStartByShiftplan($shiftPlan);
-		$utcStart->add(new \DateInterval('PT' . $this->getDuration() . 'S'));
-		return $utcStart;
+		return $this->buildUtcEndByUserId(
+			$shiftPlan->getUserId(),
+			$shiftPlan->getDateAssignedUtc()
+		);
 	}
 
 	/**
@@ -163,17 +164,56 @@ class Shift extends EO_Shift
 	}
 
 	/**
-	 * @param $userSeconds
-	 * @param $userId
-	 * @param \DateTime $utcDateTime
-	 * @return \DateTime|null
+	 * Absolute (UTC) instant of the shift start: the WORK_TIME_START wall-time on the shift's CALENDAR
+	 * date, resolved date-aware in the employee's real IANA zone (ALG-02). DATE_ASSIGNED is stored as
+	 * UTC midnight, so only its calendar date ('Y-m-d') is used; the offset is taken at the local shift
+	 * start, NOT at UTC midnight (on a DST-transition date these differ).
+	 *
+	 * @param int $userId
+	 * @param \DateTime $shiftDateTime carries the shift's calendar date (DATE_ASSIGNED, UTC midnight)
+	 * @return \DateTime
 	 */
-	public function buildUtcStartByUserId($userId, $utcDateTime)
+	public function buildUtcStartByUserId($userId, $shiftDateTime)
 	{
-		$utcStartSeconds = $this->normalizeSeconds($this->getWorkTimeStart() - TimeHelper::getInstance()->getUserUtcOffset($userId));
-		$utcDate = TimeHelper::getInstance()->createDateTimeFromFormat('Y-m-d', $utcDateTime->format('Y-m-d'), 0);
-		TimeHelper::getInstance()->setTimeFromSeconds($utcDate, $utcStartSeconds);
-		return $utcDate === false ? null : $utcDate;
+		$shiftStartTimestamp = TimeHelper::getInstance()->buildTimestampFromWallTime(
+			(int)$userId,
+			$shiftDateTime->format('Y-m-d'),
+			$this->getWorkTimeStart()
+		);
+		return new \DateTime('@' . $shiftStartTimestamp);
+	}
+
+	/**
+	 * Absolute (UTC) instant of the shift END, symmetric to buildUtcStartByUserId(): the WORK_TIME_END
+	 * wall-time resolved date-aware in the employee's real IANA zone on the shift's CALENDAR date.
+	 * For an overnight shift (WORK_TIME_END <= WORK_TIME_START) the end wall-time belongs to the NEXT local
+	 * calendar date.
+	 *
+	 * The end is built from wall-time, NOT as start + getDuration() elapsed seconds: across a DST transition
+	 * inside the shift the elapsed length differs from the wall difference (WORK_TIME_END - WORK_TIME_START),
+	 * so start + duration would land the auto-close/violation boundary an hour off. Only the calendar date of
+	 * $shiftDateTime is used (like buildUtcStartByUserId); the offset is taken at the local WORK_TIME_END,
+	 * not at UTC midnight of DATE_ASSIGNED.
+	 *
+	 * @param int $userId
+	 * @param \DateTime $shiftDateTime carries the shift's calendar date (DATE_ASSIGNED, UTC midnight)
+	 * @return \DateTime
+	 */
+	public function buildUtcEndByUserId($userId, $shiftDateTime)
+	{
+		$endDate = $shiftDateTime->format('Y-m-d');
+		if ($this->getWorkTimeEnd() <= $this->getWorkTimeStart())
+		{
+			$endDate = (new \DateTime($endDate . ' 00:00:00', new \DateTimeZone('UTC')))
+				->add(new \DateInterval('P1D'))
+				->format('Y-m-d');
+		}
+		$shiftEndTimestamp = TimeHelper::getInstance()->buildTimestampFromWallTime(
+			(int)$userId,
+			$endDate,
+			$this->getWorkTimeEnd()
+		);
+		return new \DateTime('@' . $shiftEndTimestamp);
 	}
 
 	private function normalizeSeconds($seconds)

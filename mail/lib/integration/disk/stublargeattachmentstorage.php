@@ -8,7 +8,8 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 
 /**
- * Fallback storage used until the disk contract (MR 7258) is merged.
+ * Fallback storage used when the disk module is not installed, or its version has no contract of the
+ * service attachment link.
  *
  * Every operation returns a controlled "disk unavailable" error. This is an expected mode, not a failure:
  * the stub never throws a fatal and never logs as an error.

@@ -56,6 +56,12 @@ class MailsFoldersManager extends SyncInternalManager
 
 		if (!$dir)
 		{
+			$generationCheck = $this->getActivePlacementResolver()->checkMissingFolderPath($folderToMoveName);
+			if (!$generationCheck->isSuccess())
+			{
+				return $generationCheck;
+			}
+
 			return $result->addError(new Main\Error(Loc::getMessage('MAIL_CLIENT_MAILBOX_NOT_FOUND'),
 				'MAIL_CLIENT_MAILBOX_NOT_FOUND'));
 		}
@@ -266,25 +272,35 @@ class MailsFoldersManager extends SyncInternalManager
 		$this->mailboxHelper->syncDir($folderCurrentName);
 
 		Mail\MailMessageUidTable::updateList(
-			[
+			$this->getActivePlacementResolver()->getScope()->apply([
 				'=MAILBOX_ID' => $this->mailboxId,
 				'=DIR_MD5' => md5($folderCurrentName),
 				'==MSG_UID' => 0,
 				'!@IS_OLD' => ['D','R'],
-			],
+			]),
 			[
 				'IS_OLD' => 'M',
 			],
 		);
 	}
 
-	public static function syncMovedMessages($mailboxId, $mailboxUserId, $folderName)
+	/**
+	 * @param int $generationId The generation the move was made in; 0 for a job scheduled
+	 *                          before generations existed.
+	 */
+	public static function syncMovedMessages($mailboxId, $mailboxUserId, $folderName, $generationId = 0)
 	{
 		try
 		{
 			$mailManager = new static($mailboxId, []);
 			$mailManager->setMailboxUserId($mailboxUserId);
 			if (!$mailManager->mailboxHelper)
+			{
+				return '';
+			}
+
+			// The physical source has been switched since the move: the job is stale
+			if (!$mailManager->getActivePlacementResolver()->isActiveGeneration((int)$generationId))
 			{
 				return '';
 			}
@@ -300,20 +316,14 @@ class MailsFoldersManager extends SyncInternalManager
 
 	protected function imapSyncMovedMessages($messagesToMove, $folderName)
 	{
-		$messIds = array_map(
-			function ($item)
-			{
-				return $item['ID'];
-			},
-			$messagesToMove
-		);
-
+		// The deferred job carries the generation of this move and refuses a stale context
 		\CAgent::addAgent(
 			sprintf(
-				static::class . "::syncMovedMessages(%u, %u, '%s');",
+				static::class . "::syncMovedMessages(%u, %u, '%s', %u);",
 				$this->mailbox['ID'],
 				$this->mailbox['USER_ID'],
-				base64_encode($folderName)
+				base64_encode($folderName),
+				$this->getActivePlacementResolver()->getActiveGenerationId()
 			),
 			'mail'
 		);

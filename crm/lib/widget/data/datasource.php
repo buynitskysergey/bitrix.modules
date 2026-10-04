@@ -170,6 +170,28 @@ abstract class DataSource
 		$this->enablePermissionCheck = $enable;
 	}
 	/**
+	 * List of select field names the data source allows in configurable widgets.
+	 * Subclasses that build a query from a user-supplied select must override this
+	 * to declare their whitelist; any other name is rejected in favor of a default.
+	 * @return string[]
+	 */
+	protected function getAllowedSelectNames()
+	{
+		return array();
+	}
+	/**
+	 * Validate a user-supplied select name against the whitelist.
+	 * @param mixed $name Raw name from the request.
+	 * @param string $default Fallback used when the name is not allowed.
+	 * @return string
+	 */
+	protected function sanitizeSelectName($name, $default)
+	{
+		return is_string($name) && in_array($name, $this->getAllowedSelectNames(), true)
+			? $name
+			: $default;
+	}
+	/**
 	 * Get data preset full name (Data source name + preset name)
 	 * @return string
 	 */

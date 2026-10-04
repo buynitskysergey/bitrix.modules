@@ -7,6 +7,7 @@ use Bitrix\Crm\Badge\SourceIdentifier;
 use Bitrix\Crm\Badge\Type\AiCallFieldsFillingResult;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
+use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\AIItemsBuilder;
 use Bitrix\Crm\Service\Timeline\Layout\Body\ContentBlock\ActionBar\ActionBar;
@@ -36,6 +37,28 @@ abstract class AIActivity extends Activity
 	 * @return bool
 	 */
 	abstract protected function canShowAIActions(): bool;
+
+	/**
+	 * Full AI scenario set (transcribe/summarize/scoring/analyze/full) stays limited to the classic
+	 * Deal/Lead types. Extended fill-fields target types (any Factory-based entity: contact, company,
+	 * smart process, quote, ...) expose only the fill-related actions. See fill-fields-any-entity.
+	 *
+	 * @param string[] $scenarios
+	 *
+	 * @return string[]
+	 */
+	final protected function limitScenariosForExtendedEntityTypes(array $scenarios): array
+	{
+		if (in_array($this->getContext()->getEntityTypeId(), AIManager::SUPPORTED_ENTITY_TYPE_IDS, true))
+		{
+			return $scenarios;
+		}
+
+		return array_values(array_intersect(
+			$scenarios,
+			[Scenario::FILL_FIELDS_SCENARIO, Scenario::CONFIRM_FIELDS_SCENARIO],
+		));
+	}
 
 	final public function needShowNotes(): bool
 	{
@@ -126,7 +149,7 @@ abstract class AIActivity extends Activity
 		return [];
 	}
 
-	final protected function getAIService(): AIActivityService
+	protected function getAIService(): AIActivityService
 	{
 		if ($this->aiService === null)
 		{
@@ -162,7 +185,13 @@ abstract class AIActivity extends Activity
 			return $bar;
 		}
 
-		$list = $this->getAIService()->getSummarizeTranscriptionList();
+		$summarizeActivityId = $this->getSummarizeActivityId();
+		$aiService = $summarizeActivityId !== $this->getActivityId()
+			? $this->getAIService()->withSummarizeActivityId($summarizeActivityId)
+			: $this->getAIService()
+		;
+
+		$list = $aiService->getSummarizeTranscriptionList();
 		if (empty($list))
 		{
 			return $bar;
@@ -174,10 +203,31 @@ abstract class AIActivity extends Activity
 			$bar->addItem('viewCopilotSummary', $viewSummaryItem);
 		}
 
+		$viewSummaryDrawerItem = $this->createViewCopilotSummaryDrawerItem($list);
+		if ($viewSummaryDrawerItem)
+		{
+			$bar->addItem('viewCopilotSummaryDrawer', $viewSummaryDrawerItem);
+		}
+
 		return $bar;
 	}
 
+	protected function getSummarizeActivityId(): int
+	{
+		return $this->getActivityId();
+	}
+
+	protected function getRootActivityIdForActions(): int
+	{
+		return $this->getActivityId();
+	}
+
 	protected function createViewCopilotSummaryItem(array $list): ?ActionBarItem
+	{
+		return null;
+	}
+
+	protected function createViewCopilotSummaryDrawerItem(array $list): ?ActionBarItem
 	{
 		return null;
 	}
@@ -199,7 +249,9 @@ abstract class AIActivity extends Activity
 			$this->getActivityId(),
 			$this->getContext(),
 			$this->getAssociatedEntityModel()
-		);
+		)
+			->withRootActivityId($this->getRootActivityIdForActions())
+		;
 
 		foreach ($this->getScenarios() as $scenario)
 		{

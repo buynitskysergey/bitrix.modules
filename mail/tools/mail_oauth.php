@@ -21,7 +21,19 @@ if (Loader::includeModule('mail') && Loader::includeModule('socialservices'))
 
 	if ($helper)
 	{
-		if (isset($_SESSION["MOBILE_OAUTH"]) && $_SESSION["MOBILE_OAUTH"])
+		$error = (string)($_REQUEST['error'] ?? '');
+
+		if ($error !== '')
+		{
+			// The provider refused instead of returning a code: without this branch
+			// the response body stays empty and the user sees a blank window.
+			$helper->renderError(
+				$state,
+				$error,
+				(string)($_REQUEST['error_description'] ?? '')
+			);
+		}
+		elseif (isset($_SESSION["MOBILE_OAUTH"]) && $_SESSION["MOBILE_OAUTH"])
 		{
 			$helper->handleResponse($state, OAuth::MOBILE_TYPE);
 		}

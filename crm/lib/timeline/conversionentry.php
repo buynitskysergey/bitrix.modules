@@ -13,10 +13,11 @@ class ConversionEntry extends TimelineEntry
 		$entityTypeId = self::fetchEntityTypeId($params);
 		$entityId = self::fetchEntityId($params);
 
+		$entryCreated = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => TimelineType::CONVERSION,
 			'TYPE_CATEGORY_ID' => 0,
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => $authorId,
 			'SETTINGS' => $settings,
 			'ASSOCIATED_ENTITY_TYPE_ID' => $entityTypeId,
@@ -33,7 +34,7 @@ class ConversionEntry extends TimelineEntry
 		{
 			$bindings[] = ['ENTITY_TYPE_ID' => $entityTypeId, 'ENTITY_ID' => $entityId];
 		}
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $entryCreated);
 
 		return $createdId;
 	}

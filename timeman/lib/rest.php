@@ -2,7 +2,6 @@
 namespace Bitrix\Timeman;
 
 use Bitrix\Main\Loader;
-use Bitrix\Main\Type\Date;
 use Bitrix\Rest\RestException;
 
 Loader::includeModule('rest');
@@ -89,20 +88,29 @@ class Rest extends \IRestService
 			$result['ID'] = (int)$currentInfo['ID'];
 		}
 
-		$userOffset = $tmUser->getDayStartOffset($currentInfo) + date('Z');
+		// Date-aware (API-01, Q-2): offset is taken from the record's snapshot fields
+		// (START_OFFSET/STOP_OFFSET), no longer from the call-moment getDayStartOffset() + date('Z').
+		// START_OFFSET/STOP_OFFSET are absolute UTC offsets (seconds, signed); the same value goes into
+		// the ISO suffix and TZ_OFFSET, while date and time-of-day are reconstructed from the absolute
+		// RECORDED_*_TIMESTAMP in that snapshot offset so the whole ISO string stays internally coherent.
+		$startOffset = (int)$currentInfo['START_OFFSET'];
+		$stopOffset = (int)$currentInfo['STOP_OFFSET'];
 
 		if($currentInfo['DATE_START'])
 		{
-
-			$currentInfo['DATE_START'] = ConvertTimeStamp(MakeTimeStamp($currentInfo['DATE_START'], FORMAT_DATETIME), 'SHORT');
-
-			if($currentInfo['DATE_FINISH'])
-			{
-				$currentInfo['DATE_FINISH'] = ConvertTimeStamp(MakeTimeStamp($currentInfo['DATE_FINISH'], FORMAT_DATETIME), 'SHORT');
-			}
-
-			$result['TIME_START'] = static::convertTimeToISO(intval($currentInfo['TIME_START']), $currentInfo['DATE_START'], $userOffset);
-			$result['TIME_FINISH'] = $currentInfo['TIME_FINISH'] > 0 ? static::convertTimeToISO(intval($currentInfo['TIME_FINISH']), $currentInfo['DATE_FINISH'], $userOffset) : null;
+			$result['TIME_START'] = static::convertTimestampToISO(
+				(int)$currentInfo['RECORDED_START_TIMESTAMP'],
+				$startOffset
+			);
+			// TIME_FINISH is a real ISO only when the day is actually stopped (closed/EXPIRED), i.e. the
+			// stop snapshot exists. The guard is RECORDED_STOP_TIMESTAMP > 0, NOT TIME_FINISH > 0: on pause
+			// the model sets TIME_FINISH (start+leaks+duration) and DATE_FINISH but leaves
+			// RECORDED_STOP_TIMESTAMP/STOP_OFFSET at 0, so a TIME_FINISH-based guard would format the zero
+			// stop snapshot into 1970-01-01T00:00:00+00:00. Open/paused -> null (LBS #6); stopped -> the
+			// date-aware ISO from the stop snapshot.
+			$result['TIME_FINISH'] = (int)$currentInfo['RECORDED_STOP_TIMESTAMP'] > 0
+				? static::convertTimestampToISO((int)$currentInfo['RECORDED_STOP_TIMESTAMP'], $stopOffset)
+				: null;
 			$result['DURATION'] = static::formatTime(intval($currentInfo['DURATION']));
 			$result['TIME_LEAKS'] = static::formatTime(intval($currentInfo['TIME_LEAKS']));
 			$result['ACTIVE'] = $currentInfo['ACTIVE'] == 'Y';
@@ -112,12 +120,19 @@ class Rest extends \IRestService
 			$result['LON_OPEN'] = doubleval($currentInfo['LON_OPEN']);
 			$result['LAT_CLOSE'] = doubleval($currentInfo['LAT_CLOSE']);
 			$result['LON_CLOSE'] = doubleval($currentInfo['LON_CLOSE']);
-			$result['TZ_OFFSET'] = $userOffset;
+			$result['TZ_OFFSET'] = $startOffset;
 		}
 
 		if($result['STATUS'] == 'EXPIRED')
 		{
-			$result['TIME_FINISH_DEFAULT'] = static::convertTimeToISO($tmUser->getExpiredRecommendedDate(), $currentInfo['DATE_START'], $userOffset);
+			// TIME_FINISH_DEFAULT carries day-seconds (in the employee zone) computed date-aware in
+			// CTimeManUser::GetExpiredRecommendedDate() (P4.T3); REST only formats it onto the start
+			// date with the same date-aware start snapshot offset.
+			$result['TIME_FINISH_DEFAULT'] = static::convertDaySecondsToISO(
+				$tmUser->getExpiredRecommendedDate(),
+				(int)$currentInfo['RECORDED_START_TIMESTAMP'],
+				$startOffset
+			);
 		}
 
 		return $result;
@@ -147,9 +162,12 @@ class Rest extends \IRestService
 			{
 				if(isset($query['TIME']))
 				{
-					$timeInfo = static::convertTimeFromISO($query['TIME']);
+					$timeInfo = static::convertTimeFromISO($query['TIME'], $tmUser->GetID());
 
-					if(!static::checkDate($timeInfo, ConvertTimeStamp()))
+					// Date-aware (symmetric with close): the open date is validated against "today" in the
+					// employee's zone, and the event date/time pair is threaded so the date-aware write-path
+					// rebuilds the exact absolute instant sent by the client (no call-moment correction).
+					if(!static::checkDate($timeInfo, static::getCurrentDateInUserZone($tmUser->GetID())))
 					{
 						throw new RestException(
 							'Day open date should correspond to the current date',
@@ -157,7 +175,11 @@ class Rest extends \IRestService
 						);
 					}
 
-					$result = $tmUser->openDay($timeInfo['TIME'], $query['REPORT']);
+					$result = $tmUser->openDay(
+						$timeInfo['TIME'],
+						$query['REPORT'],
+						['CUSTOM_DATE' => $timeInfo['DATE']]
+					);
 				}
 				else
 				{
@@ -201,13 +223,13 @@ class Rest extends \IRestService
 		if(isset($query['TIME']))
 		{
 			$currentInfo = $tmUser->getCurrentInfo();
-			$userOffset = $tmUser->getDayStartOffset($currentInfo) + date('Z');
 
-			$timeInfo = static::convertTimeFromISO($query['TIME']);
+			// Date-aware (symmetric with open): build the absolute instant straight from the client ISO,
+			// expressed in the employee's zone — no correctTimeOffset() to a call-moment offset. The close
+			// date is validated against the record's start date in the employee's zone (date of the event).
+			$timeInfo = static::convertTimeFromISO($query['TIME'], $tmUser->GetID());
 
-			static::correctTimeOffset($userOffset, $timeInfo);
-
-			if(!static::checkDate($timeInfo, ConvertTimeStamp(MakeTimeStamp($currentInfo['DATE_START'], FORMAT_DATETIME))))
+			if(!static::checkDate($timeInfo, static::getRecordedStartDateInUserZone($currentInfo, $tmUser->GetID())))
 			{
 				throw new RestException(
 					'Day close date should correspond to the day open date',
@@ -215,7 +237,18 @@ class Rest extends \IRestService
 				);
 			}
 
-			$result = $tmUser->CloseDay($timeInfo['TIME'], trim($query['REPORT'] ?? ''));
+			// CUSTOM_DATE is intentionally NOT passed: close validates the client date against the record's
+			// START date (LBS #13, quirk #5 — closing is allowed only on the open date), so the only
+			// calendar date the model could use is the start date. Pinning the stop to the start date breaks
+			// overnight closes (e.g. start 23:00, close 01:00): with a fixed stop date the stop would land
+			// before the start. With no CUSTOM_DATE the model's date-aware overnight branch fires
+			// (buildStopTimestampBySecondsAndDate: stop <= start -> +1 day, built wall-time in the
+			// employee's real IANA zone), restoring a positive duration without a cross-DST hour drift.
+			// $timeInfo['TIME'] is already the clock-face seconds in the employee's zone.
+			$result = $tmUser->CloseDay(
+				$timeInfo['TIME'],
+				trim($query['REPORT'] ?? '')
+			);
 		}
 		else
 		{
@@ -745,73 +778,89 @@ class Rest extends \IRestService
 		return is_array($dbRes->fetch());
 	}
 
-	protected static function correctTimeOffset($offsetTo, &$timeInfo)
+	/**
+	 * Current calendar date (site FORMAT_DATE) in the employee's real IANA zone — the date-aware
+	 * replacement for the server-local ConvertTimeStamp() anchor used by the open-date guard.
+	 */
+	protected static function getCurrentDateInUserZone($userId)
 	{
-		$timeInfo['TIME'] = $timeInfo['TIME'] - $timeInfo['OFFSET'] + $offsetTo;
+		global $DB;
 
-		if($timeInfo['TIME'] < 0)
-		{
-			$timeInfo['TIME'] += 86400;
+		$timeHelper = \Bitrix\Timeman\Helper\TimeHelper::getInstance();
+		$nowInUserZone = (new \DateTime('@' . $timeHelper->getUtcNowTimestamp()))
+			->setTimezone($timeHelper->getUserDateTimeZone((int)$userId));
 
-			$dt = new Date($timeInfo['DATE']);
-			$dt->add('-1 day');
-			$timeInfo['DATE'] = $dt->toString();
-		}
-
-		if($timeInfo['TIME'] >= 86400)
-		{
-			$timeInfo['TIME'] -= 86400;
-
-			$dt = new Date($timeInfo['DATE']);
-			$dt->add('1 day');
-			$timeInfo['DATE'] = $dt->toString();
-		}
-
-		$timeInfo['OFFSET'] = $offsetTo;
+		return $nowInUserZone->format($DB->DateFormatToPHP(FORMAT_DATE));
 	}
 
 	/**
-	 * Returns full datetime in ISO format (Y-m-dTH:i:sP) in user's timezone
+	 * The record's start calendar date (site FORMAT_DATE) reconstructed in the employee's zone from the
+	 * absolute start instant and the START_OFFSET snapshot — the date-aware replacement for the
+	 * server-local MakeTimeStamp(DATE_START) anchor used by the close-date guard.
+	 */
+	protected static function getRecordedStartDateInUserZone($currentInfo, $userId)
+	{
+		global $DB;
+
+		$timeHelper = \Bitrix\Timeman\Helper\TimeHelper::getInstance();
+		$startDateTime = $timeHelper->reconstructHistoricalDateTime(
+			(int)$currentInfo['RECORDED_START_TIMESTAMP'],
+			(int)$currentInfo['START_OFFSET']
+		);
+
+		return $startDateTime->format($DB->DateFormatToPHP(FORMAT_DATE));
+	}
+
+	/**
+	 * Builds the wire ISO string (Y-m-dTH:i:s±HH:MM) for an absolute instant in the recorded
+	 * snapshot offset. Date, time-of-day and the offset suffix are all derived from the same instant
+	 * reconstructed in the historical snapshot offset, so the triple is internally coherent (parsing
+	 * it back as RFC 3339 yields the original absolute moment) — this fixes the legacy cross-DST drift
+	 * where the time was in server-midnight coordinates but the suffix was the user offset.
 	 *
-	 * @param int $ts Short timestamp in timeman format (num of seconds from the day start)
-	 * @param string $date Date in site format
-	 * @param int $userOffset User's timezone offset
-	 *
+	 * @param int $timestamp absolute UTC Unix-seconds (RECORDED_*_TIMESTAMP)
+	 * @param int $snapshotOffset absolute UTC offset stored at recording time (START_OFFSET/STOP_OFFSET)
 	 * @return string
 	 */
-	protected static function convertTimeToISO($ts, $date, $userOffset)
+	protected static function convertTimestampToISO($timestamp, $snapshotOffset)
 	{
-		return static::formatDateToISO($date, $userOffset).'T'.static::formatTimeToISO($ts, $userOffset);
+		$dateTime = \Bitrix\Timeman\Helper\TimeHelper::getInstance()
+			->reconstructHistoricalDateTime((int)$timestamp, (int)$snapshotOffset);
+
+		return $dateTime->format('Y-m-d')
+			. 'T' . static::formatTime(\Bitrix\Timeman\Helper\TimeHelper::getInstance()->getSecondsFromDateTime($dateTime))
+			. static::formatOffsetSuffix((int)$snapshotOffset);
 	}
 
 	/**
-	 * Returns date in ISO format in user's timezone
+	 * Builds the wire ISO string for a recommended day time expressed as day-seconds in the employee
+	 * zone (TIME_FINISH_DEFAULT). The calendar date is taken from the start instant reconstructed in the
+	 * snapshot offset, so it stays consistent with TIME_START; the day-seconds become the time-of-day
+	 * and the snapshot offset becomes the suffix.
 	 *
-	 * @param string $date Date in site format
-	 * @param int $userOffset User offset
-	 *
-	 * @return false|string
-	 */
-	protected static function formatDateToISO($date, $userOffset)
-	{
-		// no timezone fix here
-		return date('Y-m-d', MakeTimeStamp($date));
-	}
-
-	/**
-	 * Returns time in ISO format with offset (H:i:sP) in user's timezone
-	 *
-	 * @param int $ts Short timestamp in timeman format (num of seconds from the day start)
-	 * @param int $offset User's timezone offset
-	 *
+	 * @param int $daySeconds seconds from midnight in the employee zone (date-aware, from P4.T3)
+	 * @param int $startTimestamp absolute UTC Unix-seconds of the start instant
+	 * @param int $snapshotOffset absolute UTC offset of the start snapshot (START_OFFSET)
 	 * @return string
 	 */
-	protected static function formatTimeToISO($ts, $offset)
+	protected static function convertDaySecondsToISO($daySeconds, $startTimestamp, $snapshotOffset)
+	{
+		$startDateTime = \Bitrix\Timeman\Helper\TimeHelper::getInstance()
+			->reconstructHistoricalDateTime((int)$startTimestamp, (int)$snapshotOffset);
+
+		return $startDateTime->format('Y-m-d')
+			. 'T' . static::formatTime((int)$daySeconds)
+			. static::formatOffsetSuffix((int)$snapshotOffset);
+	}
+
+	/**
+	 * Returns the ISO offset suffix ±HH:MM (east positive) for an absolute UTC offset in seconds.
+	 */
+	protected static function formatOffsetSuffix($offset)
 	{
 		$offsetSign = $offset >= 0 ? '+' : '-';
 
-		return static::formatTime($ts)
-			.$offsetSign
+		return $offsetSign
 			.str_pad(abs(intval($offset / 3600)), 2, '0', STR_PAD_LEFT).':'.str_pad(abs(intval($offset % 3600 / 60)), 2, '0', STR_PAD_LEFT);
 	}
 
@@ -822,7 +871,21 @@ class Rest extends \IRestService
 			.':'.str_pad(intval($ts % 60), 2, '0', STR_PAD_LEFT);
 	}
 
-	protected static function convertTimeFromISO($isoTime)
+	/**
+	 * Parses the client ISO string into a date-aware event description for the given employee.
+	 *
+	 * The absolute instant is taken straight from the ISO (which carries its own offset), then it is
+	 * re-expressed in the EMPLOYEE's real IANA zone on the event date: DATE (site format) and TIME
+	 * (wall-seconds from midnight in that zone). The downstream date-aware write-path rebuilds the same
+	 * absolute instant from this pair, so open and close are symmetric and there is no call-moment
+	 * offset correction (the legacy correctTimeOffset() step is gone). The raw ISO offset is returned
+	 * too for reference but is no longer applied to TIME.
+	 *
+	 * @param string $isoTime
+	 * @param int $userId employee whose IANA zone interprets the wall-time
+	 * @return array{DATE:string,TIME:int,OFFSET:int,TIMESTAMP:int}
+	 */
+	protected static function convertTimeFromISO($isoTime, $userId)
 	{
 		global $DB;
 
@@ -837,10 +900,18 @@ class Rest extends \IRestService
 			);
 		}
 
+		$timeHelper = \Bitrix\Timeman\Helper\TimeHelper::getInstance();
+		$timestamp = $date->getTimestamp();
+
+		// Re-express the absolute instant in the employee's real IANA zone on the event date.
+		$eventDateTime = (new \DateTime('@' . $timestamp))
+			->setTimezone($timeHelper->getUserDateTimeZone((int)$userId));
+
 		return array(
-			'DATE' => $date->format($DB->DateFormatToPHP(FORMAT_DATE)),
-			'TIME' => 3600*$date->format('G') + 60 * $date->format('i') + intval($date->format('s')),
+			'DATE' => $eventDateTime->format($DB->DateFormatToPHP(FORMAT_DATE)),
+			'TIME' => $timeHelper->getSecondsFromDateTime($eventDateTime),
 			'OFFSET' => $date->getOffset(),
+			'TIMESTAMP' => $timestamp,
 		);
 	}
 

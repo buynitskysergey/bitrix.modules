@@ -11,7 +11,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_SAMPLE_DEFAULT_1###"
+            "Default": "###BIZPROC_NODES_SAMPLE_DEFAULT_1###",
+            "Source": "SetupTemplateActivity"
         },
         "SetupTemplateActivity_BTXo5PtF6w": {
             "Name": "###BIZPROC_NODES_SAMPLE_NAME_3###",
@@ -22,7 +23,8 @@
             "Options": [],
             "Default": [
                 "group_hrr1"
-            ]
+            ],
+            "Source": "SetupTemplateActivity"
         },
         "SetupTemplateActivity_T76SEQ8ol9": {
             "Name": "###BIZPROC_NODES_SAMPLE_NAME_5###",
@@ -31,7 +33,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_SAMPLE_DEFAULT_2###"
+            "Default": "###BIZPROC_NODES_SAMPLE_DEFAULT_2###",
+            "Source": "SetupTemplateActivity"
         },
         "SetupTemplateActivity_YxMBdDhXHd": {
             "Name": "###BIZPROC_NODES_SAMPLE_NAME_6###",
@@ -40,7 +43,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_SAMPLE_DEFAULT_3###"
+            "Default": "###BIZPROC_NODES_SAMPLE_DEFAULT_3###",
+            "Source": "SetupTemplateActivity"
         },
         "SetupTemplateActivity_rgrHChbMKt": {
             "Name": "###BIZPROC_NODES_SAMPLE_NAME_7###",
@@ -49,7 +53,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": null
+            "Default": null,
+            "Source": "SetupTemplateActivity"
         }
     },
     "TEMPLATE": [

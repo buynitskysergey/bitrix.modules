@@ -33,7 +33,9 @@ use Bitrix\Crm\Service\Display\Field\StringField;
 use Bitrix\Crm\Service\Display\Field\TextField;
 use Bitrix\Crm\Service\Display\Field\UrlField;
 use Bitrix\Crm\Service\Display\Field\UserField;
+use Bitrix\Crm\Service\Display\Field\RichTextUserField;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Loader;
 use CCrmOwnerType;
 
 abstract class Field
@@ -321,6 +323,11 @@ abstract class Field
 		if ($type === CrmWebFormField::TYPE)
 		{
 			return new CrmWebFormField($id);
+		}
+
+		if ($type === RichTextUserField::TYPE && Loader::includeModule('ui'))
+		{
+			return new RichTextUserField($id);
 		}
 
 		$crmField = static::resolveCrmField($type, $id);

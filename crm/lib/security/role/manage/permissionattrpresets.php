@@ -21,15 +21,17 @@ use Bitrix\Crm\Security\Role\UIAdapters\AccessRights\ControlMapper\Variables;
 use Bitrix\Crm\Security\Role\UIAdapters\AccessRights\Variants;
 use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Ui\Public\Enum\IconSet\Outline;
 
 class PermissionAttrPresets
 {
 	/**
 	 * @return Permission[]
 	 */
-	public static function crmEntityPreset(): array
+	public static function crmEntityPreset(?string $inheritDescription = null): array
 	{
-		$permissionPreset = (new UserDepartmentAndOpened());
+		$permissionPreset = (new UserDepartmentAndOpened())
+			->setInheritDescription($inheritDescription);
 		$variants = $permissionPreset->getVariants();
 
 		$dependentVariablesAsSettings = (new DependentVariables\UserDepartmentAndOpenedAsSettings())
@@ -51,9 +53,10 @@ class PermissionAttrPresets
 		return self::createCrmEntityPreset($variants, $dependentVariablesAsSettings);
 	}
 
-	public static function crmEntityPresetWithoutTeams(): array
+	public static function crmEntityPresetWithoutTeams(?string $inheritDescription = null): array
 	{
-		$permissionPreset = (new UserDepartmentAndOpened());
+		$permissionPreset = (new UserDepartmentAndOpened())
+			->setInheritDescription($inheritDescription);
 		$permissionPreset
 			->exclude(UserDepartmentAndOpened::TEAM)
 			->exclude(UserDepartmentAndOpened::SUBTEAMS)
@@ -77,12 +80,15 @@ class PermissionAttrPresets
 		return self::createCrmEntityPreset($variants, $dependentVariablesAsSettingsWithoutTeams);
 	}
 
-	public static function crmEntityPresetAutomation(bool $withTeams = true): array
+	public static function crmEntityPresetAutomation(
+		bool $withTeams = true,
+		?string $inheritDescription = null,
+	): array
 	{
 		return array_merge(
 			$withTeams
-					? self::crmEntityPreset()
-					: self::crmEntityPresetWithoutTeams(),
+					? self::crmEntityPreset($inheritDescription)
+					: self::crmEntityPresetWithoutTeams($inheritDescription),
 			[
 				new Automation(self::readWrite()),
 			]
@@ -98,7 +104,7 @@ class PermissionAttrPresets
 		];
 	}
 
-	public static function crmStageTransition(array $stages = []): array
+	public static function crmStageTransition(array $stages = [], ?string $inheritDescription = null): array
 	{
 		$stageIds = array_keys($stages);
 
@@ -112,17 +118,27 @@ class PermissionAttrPresets
 				'useAsEmptyInSubsection' => true,
 				'secondary' => true,
 				'isUseGroupHeadValuesInHint' => true,
+				'preset' => [
+					'icon' => Outline::STAGES->value,
+					'description' => $inheritDescription,
+					'showGroupHeadItems' => true,
+				],
 			]
 		);
 		$variants->add(
 			Transition::TRANSITION_ANY,
-			(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_TRANSITION_ANY'),
+			(string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_TRANSITION_ANY_MSGVER_2'),
 			[
 				'conflictsWith' => array_merge(
 					$stageIds,
 					[Transition::TRANSITION_INHERIT, Transition::TRANSITION_BLOCKED],
 				),
 				'defaultInSection' => (new Transition())->getDefaultSettings() === [Transition::TRANSITION_ANY],
+				'preset' => [
+					'icon' => Outline::STAGES->value,
+					'description' => (string)Loc::getMessage('CRM_SECURITY_ROLE_PERMS_TYPE_TRANSITION_ANY_TAB_DESCRIPTION'),
+					'showGroupHeadItems' => false,
+				],
 			]
 		);
 		$variants->add(
@@ -154,6 +170,59 @@ class PermissionAttrPresets
 		return [
 			new Transition($variants),
 		];
+	}
+
+	/**
+	 * Builds the localized "stage inherits access rights..." description for the
+	 * given entity. Entity/funnel names are user-defined, so they are escaped and
+	 * wrapped in <b>; the surrounding phrase is a controlled localization string.
+	 * The result is rendered via v-html on the frontend.
+	 */
+	public static function stageInheritDescription(
+		?int $entityTypeId,
+		?string $entityTitle,
+		?string $funnelName,
+	): string
+	{
+		$prefix = 'CRM_SECURITY_ROLE_PERMS_TYPE_TRANSITION_INHERITED_TAB_DESCRIPTION';
+		$hasFunnel = $funnelName !== null && $funnelName !== '';
+
+		// entityTypeId => [key suffix, supports the "in funnel #FUNNEL#" variant]
+		$plainEntities = [
+			\CCrmOwnerType::Deal => ['_DEAL', true],
+			\CCrmOwnerType::SmartInvoice => ['_INVOICE', true],
+			\CCrmOwnerType::Lead => ['_LEAD', false],
+			\CCrmOwnerType::Quote => ['_QUOTE', false],
+		];
+
+		if ($entityTypeId !== null && isset($plainEntities[$entityTypeId]))
+		{
+			[$suffix, $supportsFunnel] = $plainEntities[$entityTypeId];
+			$messageId = $prefix . $suffix . ($hasFunnel && $supportsFunnel ? '_FUNNEL' : '');
+		}
+		elseif ($entityTypeId !== null && \CCrmOwnerType::isPossibleDynamicTypeId($entityTypeId))
+		{
+			$hasTitle = $entityTitle !== null && $entityTitle !== '';
+			$messageId = $prefix . match (true) {
+				!$hasTitle => '_DYNAMIC',
+				$hasFunnel => '_DYNAMIC_NAMED_FUNNEL',
+				default => '_DYNAMIC_NAMED',
+			};
+		}
+		else
+		{
+			$messageId = $prefix;
+		}
+
+		return (string)Loc::getMessage($messageId, [
+			'#ENTITY#' => self::boldName($entityTitle),
+			'#FUNNEL#' => self::boldName($funnelName),
+		]);
+	}
+
+	private static function boldName(?string $value): string
+	{
+		return '<b>' . htmlspecialcharsbx((string)$value) . '</b>';
 	}
 
 	public static function userHierarchy(): Variants
@@ -258,7 +327,7 @@ class PermissionAttrPresets
 
 		$variants->add(
 			'',
-			(string)GetMessage('CRM_SECURITY_ROLE_PERMS_TYPE_AUTOMATION_NONE'),
+			(string)GetMessage('CRM_SECURITY_ROLE_PERMS_TYPE_AUTOMATION_NONE_MSGVER_1'),
 			['useAsEmptyInSection' => true],
 		);
 

@@ -57,13 +57,19 @@ class SearchDocumentFieldsTool extends BizprocDesignerTool
 
 	public function execute(int $userId, ...$args): string
 	{
-		$documentType = $this->lastWorkflowService->getUserLastWorkflowTemplateIdentifier($userId)?->documentDescription;
+		$identifier = $this->lastWorkflowService->getUserLastWorkflowTemplateIdentifier($userId);
+		$documentType = $identifier?->documentDescription;
 		if ($documentType === null)
 		{
 			return 'Error: No user saved document type';
 		}
 
-		if (!$this->documentAccessService->canCreate($userId, $documentType))
+		if (!$this->documentAccessService->canManageDocument(
+			$userId,
+			$documentType,
+			(int)($identifier->templateId ?? 0),
+			(new \CBPWorkflowTemplateUser($userId))->isAdmin(),
+		))
 		{
 			return 'Error: User access denied for this document type';
 		}

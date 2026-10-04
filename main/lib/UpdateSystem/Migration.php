@@ -9,6 +9,7 @@ use Bitrix\Main\UpdateSystem\Migration\ConfigFactory;
 use Bitrix\Main\UpdateSystem\Migration\DatabaseUpdateMode;
 use Bitrix\Main\UpdateSystem\Migration\Event;
 use Bitrix\Main\UpdateSystem\Migration\Files;
+use Bitrix\Main\UpdateSystem\Migration\IndexNameProcessor;
 use Bitrix\Main\UpdateSystem\Migration\Module;
 use Bitrix\Main\UpdateSystem\Migration\Option;
 use Bitrix\Main\UpdateSystem\Migration\Stepper;
@@ -26,6 +27,7 @@ class Migration
 	private ?Option $option = null;
 	private ?Module $module = null;
 	private ?Files $files = null;
+	private ?IndexNameProcessor $indexNameProcessor = null;
 
 	private static array $instances = [];
 
@@ -64,10 +66,24 @@ class Migration
 	{
 		if (!isset($this->tables[$tableName]))
 		{
-			$this->tables[$tableName] = new Table($tableName, $this->context());
+			$this->tables[$tableName] = new Table(
+				$tableName,
+				$this->context(),
+				$this->indexNameProcessor(),
+			);
 		}
 
 		return $this->tables[$tableName];
+	}
+
+	private function indexNameProcessor(): IndexNameProcessor
+	{
+		if (!$this->indexNameProcessor)
+		{
+			$this->indexNameProcessor = new IndexNameProcessor($this->context());
+		}
+
+		return $this->indexNameProcessor;
 	}
 
 	public function agent(): Agent

@@ -12,6 +12,10 @@ use Bitrix\Main\ORM\Query\Query;
 
 class NodeMemberService
 {
+	/**
+	 * Membership lookup by user IDs feeds permission and integrity contours, so virtual
+	 * (system) users are included by default; pass $withVirtualUsers = false for real users only.
+	 */
 	public function findAllByEntityIds(
 		array $entityIds,
 		MemberEntityType $memberEntityType = MemberEntityType::USER,
@@ -20,6 +24,7 @@ class NodeMemberService
 		?int $structureId = null,
 		?StructureAction $structureAction = null,
 		NodeActiveFilter $nodeActiveFilter = NodeActiveFilter::ONLY_GLOBAL_ACTIVE,
+		bool $withVirtualUsers = true,
 	): NodeMemberCollection
 	{
 		return InternalContainer::getNodeMemberRepository()->findAllByEntityIds(
@@ -30,9 +35,13 @@ class NodeMemberService
 			structureId: $structureId,
 			structureAction: $structureAction,
 			nodeActiveFilter: $nodeActiveFilter,
+			withVirtualUsers: $withVirtualUsers,
 		);
 	}
 
+	/**
+	 * Virtual (system) users are hidden by default; pass $withVirtualUsers = true to include them.
+	 */
 	public function findAllByRoleIdAndNodeId(
 		int $roleId,
 		int $nodeId,
@@ -40,6 +49,7 @@ class NodeMemberService
 		?int $limit = null,
 		?int $offset = null,
 		bool $ascendingSort = true,
+		bool $withVirtualUsers = false,
 	): NodeMemberCollection
 	{
 		return InternalContainer::getNodeMemberRepository()->findAllByRoleIdAndNodeId(
@@ -49,6 +59,7 @@ class NodeMemberService
 			$limit,
 			$offset,
 			$ascendingSort,
+			$withVirtualUsers,
 		);
 	}
 

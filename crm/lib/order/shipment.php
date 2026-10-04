@@ -169,11 +169,18 @@ class Shipment extends Sale\Shipment
 			}
 		}
 
+		$originalValues = $this->fields->getOriginalValues();
+
 		if (!$this->isSystem() && !$isNew && $this->isChanged())
 		{
 			Crm\Automation\Trigger\ShipmentChangedTrigger::execute(
 				[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getField('ORDER_ID')]],
-				['SHIPMENT' => $this]
+				[
+					'SHIPMENT' => $this,
+					Crm\Automation\Trigger\ShipmentChangedTrigger::ORDER_INPUT_SHIPMENT_ID => $this->getId(),
+					Crm\Automation\Trigger\ShipmentChangedTrigger::ORDER_INPUT_STATUS_PREVIOUS => (string)($originalValues['STATUS_ID'] ?? $this->getField('STATUS_ID')),
+					Crm\Automation\Trigger\ShipmentChangedTrigger::ORDER_INPUT_STATUS_ACTUAL => (string)$this->getField('STATUS_ID'),
+				]
 			);
 		}
 
@@ -181,7 +188,12 @@ class Shipment extends Sale\Shipment
 		{
 			Crm\Automation\Trigger\AllowDeliveryTrigger::execute(
 				[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getField('ORDER_ID')]],
-				['SHIPMENT' => $this]
+				[
+					Crm\Automation\Trigger\AllowDeliveryTrigger::ORDER_INPUT_SHIPMENT_ID => $this->getId(),
+					Crm\Automation\Trigger\AllowDeliveryTrigger::ORDER_INPUT_STATUS_PREVIOUS => (string)($originalValues['ALLOW_DELIVERY'] ?? ''),
+					Crm\Automation\Trigger\AllowDeliveryTrigger::ORDER_INPUT_STATUS_ACTUAL => (string)$this->getField('ALLOW_DELIVERY'),
+					Crm\Automation\Trigger\AllowDeliveryTrigger::EVENT_INITIATOR_KEY => (int)$this->getField('EMP_ALLOW_DELIVERY_ID'),
+				]
 			);
 		}
 
@@ -192,7 +204,12 @@ class Shipment extends Sale\Shipment
 		{
 			Crm\Automation\Trigger\ShipmentChangedTrigger::execute(
 				[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getField('ORDER_ID')]],
-				['SHIPMENT' => $this]
+				[
+					'SHIPMENT' => $this,
+					Crm\Automation\Trigger\ShipmentChangedTrigger::ORDER_INPUT_SHIPMENT_ID => $this->getId(),
+					Crm\Automation\Trigger\ShipmentChangedTrigger::ORDER_INPUT_STATUS_PREVIOUS => (string)($originalValues['STATUS_ID'] ?? ''),
+					Crm\Automation\Trigger\ShipmentChangedTrigger::ORDER_INPUT_STATUS_ACTUAL => (string)$this->getField('STATUS_ID'),
+				]
 			);
 		}
 
@@ -200,7 +217,12 @@ class Shipment extends Sale\Shipment
 		{
 			Crm\Automation\Trigger\FillTrackingNumberTrigger::execute(
 				[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getField('ORDER_ID')]],
-				['SHIPMENT' => $this]
+				[
+					'SHIPMENT' => $this,
+					Crm\Automation\Trigger\FillTrackingNumberTrigger::ORDER_INPUT_TRACKING_NUMBER => (string)$this->getField('TRACKING_NUMBER'),
+					Crm\Automation\Trigger\FillTrackingNumberTrigger::ORDER_INPUT_DELIVERY_SERVICE_ID => (int)$this->getField('DELIVERY_ID'),
+					Crm\Automation\Trigger\FillTrackingNumberTrigger::ORDER_INPUT_SHIPMENT_ID => $this->getId(),
+				]
 			);
 		}
 
@@ -210,7 +232,11 @@ class Shipment extends Sale\Shipment
 			{
 				Crm\Automation\Trigger\DeductedTrigger::execute(
 					[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getField('ORDER_ID')]],
-					['SHIPMENT' => $this]
+					[
+						Crm\Automation\Trigger\DeductedTrigger::ORDER_INPUT_SHIPMENT_ID => $this->getId(),
+						Crm\Automation\Trigger\DeductedTrigger::ORDER_INPUT_ORDER_ID => (int)$this->getField('ORDER_ID'),
+						Crm\Automation\Trigger\DeductedTrigger::EVENT_INITIATOR_KEY => (int)$this->getField('EMP_DEDUCTED_ID'),
+					]
 				);
 			}
 

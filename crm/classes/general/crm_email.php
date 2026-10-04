@@ -1,6 +1,7 @@
 <?php
 
 use Bitrix\Crm\ActivityTable;
+use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Crm\Integration\Channel;
 use Bitrix\Crm\Integration\StorageManager;
 use Bitrix\Crm\Settings\ActivitySettings;
@@ -73,6 +74,82 @@ class CCrmEMail
 		$arUser = $dbUsers ? $dbUsers->Fetch() : null;
 		return $arUser ? intval($arUser['ID']) : 0;
 	}
+
+	private static function resolveActiveMailboxesByEmailAliases(array $emails): array
+	{
+		$resolverClass = \Bitrix\Mail\Public\Service\Mailbox\AddressResolver::class;
+		if (!class_exists($resolverClass))
+		{
+			return array();
+		}
+
+		$emailsByMailboxId = array();
+		$resolver = new $resolverClass();
+		if (method_exists($resolverClass, 'findBindingsForEmails'))
+		{
+			$bindingsByEmail = $resolver->findBindingsForEmails($emails);
+			foreach ($emails as $email)
+			{
+				foreach ($bindingsByEmail[mb_strtolower((string)$email)] ?? array() as $binding)
+				{
+					$emailsByMailboxId[$binding->mailboxId][] = (string)$email;
+				}
+			}
+		}
+		elseif (method_exists($resolverClass, 'findBindings'))
+		{
+			foreach ($emails as $email)
+			{
+				foreach ($resolver->findBindings((string)$email) as $binding)
+				{
+					$emailsByMailboxId[$binding->mailboxId][] = (string)$email;
+				}
+			}
+		}
+
+		if (empty($emailsByMailboxId))
+		{
+			return array();
+		}
+
+		$result = array();
+		$activeMailboxes = array();
+		if (method_exists($resolverClass, 'findActiveMailboxesByIds'))
+		{
+			$activeMailboxes = $resolver->findActiveMailboxesByIds(array_keys($emailsByMailboxId));
+		}
+		else
+		{
+			foreach (array_chunk(array_keys($emailsByMailboxId), 100) as $mailboxIdChunk)
+			{
+				$mailboxes = \Bitrix\Mail\MailboxTable::getList(array(
+					'select' => array('ID', 'EMAIL', 'NAME', 'LOGIN', 'USER_ID'),
+					'filter' => array(
+						'@ID' => $mailboxIdChunk,
+						'=ACTIVE' => 'Y',
+					),
+				));
+				while ($mailbox = $mailboxes->fetch())
+				{
+					$activeMailboxes[(int)$mailbox['ID']] = $mailbox;
+				}
+			}
+		}
+
+		foreach ($activeMailboxes as $mailbox)
+		{
+			foreach ($emailsByMailboxId[(int)$mailbox['ID']] as $email)
+			{
+				$result[] = array(
+					'MAILBOX' => $mailbox,
+					'MATCHED_EMAIL' => $email,
+				);
+			}
+		}
+
+		return $result;
+	}
+
 	private static function PrepareEntityKey($entityTypeID, $entityID)
 	{
 		return "{$entityTypeID}-{$entityID}";
@@ -590,10 +667,18 @@ class CCrmEMail
 		$to  = isset($msgFields['FIELD_TO']) ? $msgFields['FIELD_TO'] : '';
 		$cc  = isset($msgFields['FIELD_CC']) ? $msgFields['FIELD_CC'] : '';
 		$bcc = isset($msgFields['FIELD_BCC']) ? $msgFields['FIELD_BCC'] : '';
+		$originalRecipients = isset($msgFields['FIELD_RCPT']) ? $msgFields['FIELD_RCPT'] : '';
 
 		$rcptAddress = array();
 		$rcpt = array();
-		foreach (array_merge(explode(',', $to), explode(',', $cc), explode(',', $bcc)) as $item)
+		foreach (
+			array_merge(
+				explode(',', $to),
+				explode(',', $cc),
+				explode(',', $bcc),
+				explode(',', $originalRecipients)
+			) as $item
+		)
 		{
 			if (trim($item))
 			{
@@ -711,6 +796,14 @@ class CCrmEMail
 						),
 						'limit' => 1,
 					))->fetch();
+					if (empty($employee))
+					{
+						$resolvedMailboxes = self::resolveActiveMailboxesByEmailAliases($sender);
+						if (!empty($resolvedMailboxes))
+						{
+							$employee = $resolvedMailboxes[0]['MAILBOX'];
+						}
+					}
 
 					if (!empty($employee))
 					{
@@ -781,6 +874,7 @@ class CCrmEMail
 					));
 
 					$employees = array();
+					$matchedMailboxEmails = array();
 
 					while ($employee = $res->fetch())
 					{
@@ -792,6 +886,37 @@ class CCrmEMail
 							'MAILBOX_LOGIN' => $employee['LOGIN'],
 						);
 						$employeesEmails[] = (check_email($employee['EMAIL'], true) ? $employee['EMAIL'] : (check_email($employee['NAME'], true) ? $employee['NAME'] : $employee['LOGIN']));
+
+						foreach ($rcpt as $recipientEmail)
+						{
+							foreach (array('EMAIL', 'NAME', 'LOGIN') as $fieldName)
+							{
+								if (strcasecmp((string)$employee[$fieldName], (string)$recipientEmail) === 0)
+								{
+									$matchedMailboxEmails[mb_strtolower((string)$recipientEmail)] = true;
+									break;
+								}
+							}
+						}
+					}
+
+					$unmatchedEmails = array_values(array_filter(
+						$rcpt,
+						static fn($recipientEmail) =>
+							!isset($matchedMailboxEmails[mb_strtolower((string)$recipientEmail)])
+							&& !in_array(mb_strtolower((string)$recipientEmail), $employeesEmails, true),
+					));
+					foreach (self::resolveActiveMailboxesByEmailAliases($unmatchedEmails) as $resolvedMailbox)
+					{
+						$employee = $resolvedMailbox['MAILBOX'];
+						$employees[] = array(
+							'USER_ID' => $employee['USER_ID'],
+							'MAILBOX_ID' => $employee['ID'],
+							'MAILBOX_EMAIL' => $employee['EMAIL'],
+							'MAILBOX_NAME' => $employee['NAME'],
+							'MAILBOX_LOGIN' => $employee['LOGIN'],
+						);
+						$employeesEmails[] = $resolvedMailbox['MATCHED_EMAIL'];
 					}
 
 					$employeesEmails = array_unique(array_map('mb_strtolower', $employeesEmails));
@@ -1312,6 +1437,9 @@ class CCrmEMail
 				'CURRENT_USER' => $userId,
 				'DISABLE_USER_FIELD_CHECK' => true,
 				'REGISTER_SONET_EVENT' => true,
+				'ANALYTICS' => array(
+					'c_section' => Dictionary::SECTION_MAIL,
+				),
 			)
 		);
 
@@ -1704,12 +1832,15 @@ class CCrmEMail
 		$to = $arMessageFields['FIELD_TO'] ?? '';
 		$cc = $arMessageFields['FIELD_CC'] ?? '';
 		$bcc = $arMessageFields['FIELD_BCC'] ?? '';
+		$originalRecipients = $arMessageFields['FIELD_RCPT'] ?? '';
 
 		$addresseeEmails = array_unique(
 			array_merge(
 				$to !== '' ? CMailUtil::ExtractAllMailAddresses($to) : array(),
 				$cc !== '' ? CMailUtil::ExtractAllMailAddresses($cc) : array(),
-				$bcc !== '' ? CMailUtil::ExtractAllMailAddresses($bcc) : array()),
+				$bcc !== '' ? CMailUtil::ExtractAllMailAddresses($bcc) : array(),
+				$originalRecipients !== '' ? CMailUtil::ExtractAllMailAddresses($originalRecipients) : array()
+			),
 			SORT_STRING
 		);
 
@@ -3084,7 +3215,7 @@ class CCrmEMail
 				),
 				false,
 				false,
-				array('ID', 'RESPONSIBLE_ID', 'SETTINGS', 'OWNER_TYPE_ID', 'OWNER_ID')
+				array('ID', 'RESPONSIBLE_ID', 'SUBJECT', 'SETTINGS', 'OWNER_TYPE_ID', 'OWNER_ID')
 			)->fetch();
 
 			if (!empty($activity) and empty($activity['SETTINGS']['READ_CONFIRMED']) || $activity['SETTINGS']['READ_CONFIRMED'] <= 0)
@@ -3147,7 +3278,7 @@ class CCrmEMail
 				),
 				false,
 				false,
-				array('ID', 'SETTINGS')
+				array('ID', 'SUBJECT', 'SETTINGS')
 			)->fetch();
 
 			if (!empty($activity))
@@ -3162,6 +3293,8 @@ class CCrmEMail
 				$bindings = \CCrmActivity::GetBindings($activity['ID']);
 				if ($bindings)
 				{
+					$fields['SUBJECT'] = $activity['SUBJECT'] ?? '';
+					$fields['SETTINGS'] = $activity['SETTINGS'] ?? [];
 					\Bitrix\Crm\Automation\Trigger\EmailLinkTrigger::execute($bindings, $fields);
 				}
 			}

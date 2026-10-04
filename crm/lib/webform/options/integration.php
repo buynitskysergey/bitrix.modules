@@ -7,6 +7,7 @@ use Bitrix\Crm\Ads\Form\WebHookFormFillHandler;
 use Bitrix\Crm\Ads\Internals\AdsFormLinkTable;
 use Bitrix\Crm\Ads\Internals\EO_AdsFormLink;
 use Bitrix\Crm\Ads\Internals\EO_AdsFormLink_Collection;
+use Bitrix\Crm\Integration\Bitrix24\Product;
 use Bitrix\Crm\WebForm;
 use Bitrix\Crm\WebForm\Internals\FormFieldMappingTable;
 use Bitrix\Main;
@@ -314,6 +315,30 @@ final class Integration
 
 		foreach ($integrationOptions as $integration)
 		{
+			if (
+				!Product::isVkAvailable()
+				&& Service::TYPE_VKONTAKTE === $integration["ADS_TYPE"]
+			)
+			{
+				$existingLink = AdsFormLinkTable::query()
+					->setSelect(['ID'])
+					->where('WEBFORM_ID', $this->form->getId())
+					->where('ADS_TYPE', $integration['ADS_TYPE'])
+					->where('ADS_FORM_ID', $integration['ADS_FORM_ID'])
+					->exec()
+					->fetch()
+				;
+
+				if (!$existingLink)
+				{
+					$integrationResult->addError(
+						new Error(Loc::getMessage("CRM_WEBFORM_OPTIONS_LINK_WRONG_TYPE"))
+					);
+				}
+
+				continue;
+			}
+
 			if (AdsFormLinkTable::LINK_DIRECTION_IMPORT !== (int)$integration["LINK_DIRECTION"])
 			{
 				continue;

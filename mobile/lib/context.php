@@ -35,7 +35,7 @@ class Context
 		$this->version = $options['version'] ?? '1';
 		$this->isCollaber = isset($options['isCollaber'])
 			? (bool)$options['isCollaber']
-			: self::autodetectCollaber();
+			: self::autodetectCollaber($this->userId);
 		$this->isGuest = isset($options['isGuest']) ? (bool)$options['isGuest'] : false;
 		$this->requestGuestName = (bool)($options['requestGuestName'] ?? false);
 		$this->guestCode = isset($options['guestCode']) && is_string($options['guestCode'])
@@ -119,10 +119,13 @@ class Context
 			&& $USER->GetParam('EXTERNAL_AUTH_ID') === UserRole::IM_GUEST->value;
 	}
 
-	private static function autodetectCollaber(): bool
+	private static function autodetectCollaber(?int $userId = null): bool
 	{
-		global $USER;
-		$userId = (int)$USER->GetID();
+		if ($userId === null)
+		{
+			global $USER;
+			$userId = (int)$USER->GetID();
+		}
 
 		if (!Loader::includeModule('extranet') || $userId <= 0)
 		{

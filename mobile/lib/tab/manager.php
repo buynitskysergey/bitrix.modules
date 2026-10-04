@@ -392,6 +392,24 @@ class Manager
 		return $this->tabList[$tabId] && $this->tabList[$tabId]->isAvailable($this->context);
 	}
 
+	public function isTabActive(string $tabCode): bool
+	{
+		$tab = $this->getTabInstance($tabCode);
+		if ($tab === null)
+		{
+			return false;
+		}
+
+		if (!$tab->isAvailable() || !$tab->shouldShowInMenu())
+		{
+			return false;
+		}
+
+		$activeTabs = array_keys($this->getActiveTabs());
+
+		return in_array($tabCode, $activeTabs, true);
+	}
+
 	/**
 	 * Return list of available presets
 	 * @return array

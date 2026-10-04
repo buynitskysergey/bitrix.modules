@@ -11,6 +11,43 @@ Loc::loadMessages(__FILE__);
 
 class OpenLineTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use OpenLineReturnTrait;
+
+	protected static function getOpenLineReturnFieldIds(): array
+	{
+		return [
+			self::RETURN_OL_CHAT_ID,
+			self::RETURN_OL_CONFIG_ID,
+			self::RETURN_OL_CLIENT_ID,
+			self::RETURN_OL_OPERATOR_ID,
+		];
+	}
+
+	/**
+	 * The message is written by the client, and the operator behind the chat is already exposed as a
+	 * field of its own, so the node names no initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_OPENLINE_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getOpenLineReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], $this->buildOpenLineReturnValues(), [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
+	}
+
 	public static function isSupported($entityTypeId)
 	{
 		$unsupported = [\CCrmOwnerType::Quote, \CCrmOwnerType::SmartInvoice, \CCrmOwnerType::SmartDocument];

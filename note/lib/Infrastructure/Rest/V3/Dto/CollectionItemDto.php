@@ -32,4 +32,11 @@ class CollectionItemDto extends Dto
 	public ?string $createdAt;
 	public ?int $updatedBy;
 	public ?string $updatedAt;
+
+	// Read-only (no #[Editable]): the collection's knowledge base description, i.e. the raw
+	// MARKDOWN of its main document. Loaded unconditionally by the mapper (the field is
+	// VIEW-gated at the query level, not by a feature flag); non-empty markdown yields the
+	// string, empty or absent markdown yields null. Writing the description via REST is out
+	// of scope.
+	public ?string $markdownDescription;
 }

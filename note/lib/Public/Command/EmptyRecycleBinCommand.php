@@ -88,6 +88,11 @@ class EmptyRecycleBinCommand extends AbstractCommand
 		}
 		while ($cursor !== null);
 
+		// No HARD_DELETED lifecycle event for empty-recycle-bin: every document here already emitted DELETED
+		// (trash) or ARCHIVED earlier, which the RAG connector turned into a delete — so the doc has already
+		// left RAG and HARD_DELETED's fan-out would be an idempotent no-op. Emitting it only accumulated an
+		// unbounded id list (the recycle bin is not bounded by the per-base cap) for zero effect. The single
+		// HardDeleteDocumentCommand path still emits HARD_DELETED, so the connector case stays live.
 		$result = new Result();
 		$result->setData(['deletedCount' => $totalDeleted]);
 

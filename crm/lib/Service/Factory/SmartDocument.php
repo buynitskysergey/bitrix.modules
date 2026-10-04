@@ -36,15 +36,6 @@ class SmartDocument extends Dynamic
 		return static::USER_FIELD_ENTITY_ID;
 	}
 
-	public function isAutomationEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isBizProcEnabled(): bool
-	{
-		return false;
-	}
 
 	public static function createTypeIfNotExists(): void
 	{
@@ -336,8 +327,4 @@ class SmartDocument extends Dynamic
 		return true;
 	}
 
-	public function isRecurringEnabled(): bool
-	{
-		return false;
-	}
 }

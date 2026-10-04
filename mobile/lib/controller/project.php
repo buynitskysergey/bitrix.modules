@@ -41,6 +41,7 @@ final class Project extends JsonController
 		return [
 			'ownerData' => $this->getProjectReadService()->getCurrentUserData(),
 			'autoDeleteEnabledInPortalSettings' => Option::get('im', 'isAutoDeleteMessagesEnabled', 'Y') === 'Y',
+			'notifications' => $this->getProjectReadService()->getDefaultNotificationCatalog(),
 		];
 	}
 

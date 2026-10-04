@@ -11,6 +11,7 @@ class EditableDescription extends ContentBlock
 
 	public const HEIGHT_SHORT = 'short';
 	public const HEIGHT_LONG = 'long';
+	public const HEIGHT_AUTO = 'auto';
 
 	public const BG_COLOR_YELLOW = 'yellow';
 	public const BG_COLOR_WHITE = 'white';

@@ -257,6 +257,8 @@ class CExtranet
 			&& (mb_strpos($curPage, "/sheet/") !== 0)
 			&& (mb_strpos($curPage, "/pres/") !== 0)
 			&& (mb_strpos($curPage, "/file/") !== 0)
+			&& (mb_strpos($curPage, "/folder/") !== 0)
+			&& (mb_strpos($curPage, "/html/") !== 0)
 			&& (mb_strpos($curPage, "/note/") !== 0)
 			&& (!self::IsExtranetSite())
 			&& self::GetExtranetSiteID() <> ''
@@ -485,7 +487,7 @@ class CExtranet
 
 		if (!empty($urlParams))
 		{
-			$URLToRedirect = CHTTP::urlAddParams($URLToRedirect, $urlParams);
+			$URLToRedirect = (string)(new Uri($URLToRedirect))->addParams($urlParams);
 		}
 
 		LocalRedirect($URLToRedirect, true, '307 Temporary Redirect');

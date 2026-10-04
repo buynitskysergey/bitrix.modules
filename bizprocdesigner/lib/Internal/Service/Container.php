@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\BizprocDesigner\Internal\Service;
 
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AgentDraftService;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AgentWorkflowResolverService;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AiAssistantDraftConverterService;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AiAssistantDraftCreatorService;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AiAssistantWorkflowTemplateConverterService;
@@ -11,6 +13,7 @@ use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\LastWorkflow
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\UserBlockService;
 use Bitrix\BizprocDesigner\Internal\Integration\Pull\BizprocDesignerPullManager;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Repository\AiAssistantDraftRepository;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\NodeFilterAvailability;
 use Bitrix\Main\DI\Exception\CircularDependencyException;
 use Bitrix\Main\DI\Exception\ServiceNotFoundException;
 use Bitrix\Main\DI\ServiceLocator;
@@ -110,8 +113,30 @@ class Container
 		return self::getService('bizprocdesigner.ai.assistant.last.workflow.service');
 	}
 
+	public static function getAgentWorkflowResolverService(): AgentWorkflowResolverService
+	{
+		return self::getService('bizprocdesigner.ai.assistant.agent.workflow.resolver.service');
+	}
+
+	public static function getAgentDraftService(): AgentDraftService
+	{
+		return self::getService('bizprocdesigner.ai.assistant.agent.draft.service');
+	}
+
 	public static function getAiAssistantUserBlockService(): UserBlockService
 	{
 		return self::getService('bizprocdesigner.ai.assistant.user.block.service');
+	}
+
+	/**
+	 * @throws ServiceNotFoundException when lib/ arrives without the matching .settings.php entry
+	 */
+	public static function getNodeFilterAvailability(): NodeFilterAvailability
+	{
+		$name = 'bizprocdesigner.activity.node.filter.availability';
+
+		return self::getService($name)
+			?? throw new ServiceNotFoundException("Could not find service by code {$name}.")
+		;
 	}
 }

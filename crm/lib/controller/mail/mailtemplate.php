@@ -12,21 +12,32 @@ class MailTemplate extends Controller
 
 	public function toggleSaveLastUsedTemplateAction(): bool
 	{
-		if(!$this->checkAccess())
+		if (!$this->checkAccess())
 		{
 			return false;
 		}
 
-		if(!$this->checkSaveTemplateOption())
+		return $this->setSaveTemplateOption(!$this->checkSaveTemplateOption());
+	}
+
+	public function setSaveLastUsedTemplateAction(bool $enabled): bool
+	{
+		if (!$this->checkAccess())
 		{
-			\CUserOptions::SetOption('crm', self::SAVE_TEMPLATE_OPTION_NAME, 'Y');
-		}
-		else
-		{
-			\CUserOptions::DeleteOption('crm',self::SAVE_TEMPLATE_OPTION_NAME);
+			return false;
 		}
 
-		return true;
+		return $this->setSaveTemplateOption($enabled);
+	}
+
+	public function getSaveLastUsedTemplateAction(): bool
+	{
+		if (!$this->checkAccess())
+		{
+			return false;
+		}
+
+		return $this->checkSaveTemplateOption();
 	}
 
 	public function getTitleListAction(int $ownerTypeId): array
@@ -58,6 +69,17 @@ class MailTemplate extends Controller
 	{
 		return \CUserOptions::GetOption('crm', self::SAVE_TEMPLATE_OPTION_NAME) === 'Y';
 	}
+
+	private function setSaveTemplateOption(bool $enabled): bool
+	{
+		if ($enabled)
+		{
+			return \CUserOptions::SetOption('crm', self::SAVE_TEMPLATE_OPTION_NAME, 'Y');
+		}
+
+		return \CUserOptions::DeleteOption('crm', self::SAVE_TEMPLATE_OPTION_NAME);
+	}
+
 	private function checkAccess(): bool
 	{
 		$userID = \CCrmPerms::GetCurrentUserID();

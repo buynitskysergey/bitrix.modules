@@ -80,9 +80,16 @@ final class Scheduler
 				'handlerTypeId' => $handlerTypeId,
 			]);
 
-			$queueController->add($queueItem);
+			$isQueued = $queueController->add($queueItem)?->isSuccess() ?? false;
 
 			$this->sendAnalytics();
+
+			// safety net: the main path is the screening job finish handler, and the agent runs once
+			// a day, so without this a day without any finished screening job leaves children unscheduled
+			if ($isQueued)
+			{
+				$this->addChildrenJobsToQueueIfNotExists($job->getSegmentId());
+			}
 		}
 
 		if ($this->isOnlyCalc)
@@ -155,6 +162,13 @@ final class Scheduler
 
 	public function addChildrenJobsToQueueIfNotExists(int $parentSegmentId): void
 	{
+		// only-calc measures client coverage and creates no deals: an item queued in this mode would
+		// also block the normal one for a day, since the queue dedupe by JOB_ID + HASH ignores the mode
+		if ($this->isOnlyCalc)
+		{
+			return;
+		}
+
 		$segmentController = RepeatSaleSegmentController::getInstance();
 		$parentSegment = $segmentController->getById($parentSegmentId);
 
@@ -163,10 +177,18 @@ final class Scheduler
 			return;
 		}
 
+		// a user segment has no code, and a null value in the filter below turns into IS NULL,
+		// which matches every base segment instead of the children of this parent
+		if ($parentSegment->getCode() === null)
+		{
+			return;
+		}
+
 		$systemSegments = $segmentController->getList([
 			'select' => ['ID', 'CODE', 'JOB.ID'],
 			'filter' => [
 				'IS_SYSTEM' => 'Y',
+				'IS_ENABLED' => 'Y',
 				'BASE_SEGMENT_CODE' => $parentSegment->getCode(),
 			],
 		]);
@@ -179,6 +201,12 @@ final class Scheduler
 
 		foreach ($systemSegments as $systemSegment)
 		{
+			$job = $systemSegment->getJob();
+			if ($job === null)
+			{
+				continue;
+			}
+
 			$segmentCode = $systemSegment->getCode();
 			$itemParams = [
 				'segmentCode' => $segmentCode,
@@ -186,7 +214,7 @@ final class Scheduler
 			];
 
 			$queueItem = QueueItem::createFromArray([
-				'jobId' => $systemSegment->getJob()->getId(),
+				'jobId' => $job->getId(),
 				'params' => array_merge($params, $itemParams),
 				'isOnlyCalc' => $this->isOnlyCalc,
 				'handlerTypeId' => $this->getHandlerTypeId($segmentCode),
@@ -245,10 +273,42 @@ final class Scheduler
 			return false;
 		}
 
-		$segment = SegmentItem::createFromEntity($segmentEntity);
-		$segment->setIsEnabled(false);
+		$segmentController = RepeatSaleSegmentController::getInstance();
 
-		$result = RepeatSaleSegmentController::getInstance()->update($segment->getId(), $segment);
+		// reload with ASSIGNMENT_USERS: update() rebuilds responsible users from the DTO,
+		// and the entity from getSuitableJobs() has no assignment relation loaded, so without
+		// this reload the update would wipe the segment's managers.
+		$segmentEntity = $segmentController->getById($segmentEntity->getId(), true);
+		if ($segmentEntity === null)
+		{
+			return false;
+		}
+
+		$segment = SegmentItem::createFromEntity($segmentEntity);
+		$segment
+			->setIsEnabled(false)
+			->setIsAutoDisabled(true)
+		;
+
+		$result = $segmentController->update($segment->getId(), $segment);
+
+		// the child ai_approve is not scheduled directly (only base segments are),
+		// so it must be disabled and marked in sync with its ai_screening parent
+		// to keep statuses and the auto-disable "memory" consistent for restore.
+		if ($segment->getCode() === SegmentCode::AI_SCREENING->value)
+		{
+			$childSegmentEntity = $segmentController->getByCode(SegmentCode::AI_APPROVE->value, true);
+			if ($childSegmentEntity !== null)
+			{
+				$childSegment = SegmentItem::createFromEntity($childSegmentEntity);
+				$childSegment
+					->setIsEnabled(false)
+					->setIsAutoDisabled(true)
+				;
+
+				$segmentController->update($childSegment->getId(), $childSegment);
+			}
+		}
 
 		return $result->isSuccess();
 	}

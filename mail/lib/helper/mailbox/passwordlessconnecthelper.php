@@ -7,9 +7,10 @@ namespace Bitrix\Mail\Helper\Mailbox;
 use Bitrix\Mail\Helper\Enum\MailboxStatus;
 use Bitrix\Mail\Helper\Dto\MailboxConnect\CrmOptions;
 use Bitrix\Mail\Helper\Dto\MailboxConnect\MailboxConnectDTO;
-use Bitrix\Mail\Helper\Mailbox;
 use Bitrix\Mail\Imap;
 use Bitrix\Mail\Integration\Im\Notification;
+use Bitrix\Mail\Internal\Service\Mailbox\MailboxEmailOccupancy;
+use Bitrix\Mail\Internal\Service\Mailbox\MailboxEmailOccupancyService;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Mail\Smtp;
 use Bitrix\Mail\Helper\MailboxSearchIndexHelper;
@@ -63,11 +64,25 @@ final class PasswordlessConnectHelper
 			return $result;
 		}
 
-		$email = trim((string)$dto->email);
-		if ($email !== '' && !empty(Mailbox::findActiveMailbox($userId, $email, SITE_ID)))
+		$occupancyService = new MailboxEmailOccupancyService();
+
+		$occupancy = $occupancyService->checkOccupancy((string)$dto->email, $userId);
+		if ($occupancy !== MailboxEmailOccupancy::Free)
 		{
 			$result->addError(new Error(
 				Loc::getMessage('MAIL_PASSWORDLESS_ERROR_DUPLICATE') ?? '',
+				MailboxConnector::EXISTS_ERROR_KEY,
+			));
+
+			return $result;
+		}
+
+		// Requests waiting for a password hold no address portal-wide, but a second request for the same
+		// address to the same employee is still a dead end: only the newest one is offered to them.
+		if ($this->hasPendingRequest($userId, $occupancyService->normalizeEmail((string)$dto->email)))
+		{
+			$result->addError(new Error(
+				Loc::getMessage('MAIL_PASSWORDLESS_ERROR_REQUEST_ALREADY_SENT') ?? '',
 				MailboxConnector::EXISTS_ERROR_KEY,
 			));
 
@@ -195,7 +210,8 @@ final class PasswordlessConnectHelper
 			return $result;
 		}
 
-		// Temporarily mark as canceled so the connector doesn't see it as a duplicate
+		// Temporarily mark as canceled so the request itself does not take up a slot in the mailbox
+		// limit of its own user: getUserOwnedMailboxCount() counts both connected and pending records.
 		$setCanceledResult = MailboxTable::update($mailboxId, ['ACTIVE' => MailboxStatus::Canceled->value]);
 		if (!$setCanceledResult->isSuccess())
 		{
@@ -263,12 +279,95 @@ final class PasswordlessConnectHelper
 			return $result;
 		}
 
-		MailboxTable::update($mailboxId, ['ACTIVE' => MailboxStatus::Canceled->value]);
+		$updateResult = MailboxTable::update($mailboxId, ['ACTIVE' => MailboxStatus::Canceled->value]);
+		if (!$updateResult->isSuccess())
+		{
+			$result->addErrors($updateResult->getErrors());
+
+			return $result;
+		}
+
 		Notification::deletePasswordlessRequestNotification($mailboxId);
 
 		Message::setUserUnseenCounter((int)$mailbox['USER_ID'], SITE_ID);
 
 		return $result;
+	}
+
+	/**
+	 * A mailbox connected the ordinary way leaves the request its own owner is still waiting on without
+	 * a way to finish: the invitation keeps being shown, and entering the password now ends with "you
+	 * have already connected this mailbox". Such a request is withdrawn the same way a person withdraws
+	 * it by hand. Requests of other employees for the address belong to them and are left alone.
+	 */
+	public function cancelPendingRequestsForAddress(int $userId, string $email): Result
+	{
+		$result = new Result();
+
+		$normalizedEmail = (new MailboxEmailOccupancyService())->normalizeEmail($email);
+
+		foreach ($this->findPendingRequestIds($userId, $normalizedEmail) as $mailboxId)
+		{
+			$result->addErrors($this->cancelRequest($mailboxId)->getErrors());
+		}
+
+		return $result;
+	}
+
+	private function hasPendingRequest(int $userId, string $normalizedEmail, ?int $excludeMailboxId = null): bool
+	{
+		if ($normalizedEmail === '')
+		{
+			return false;
+		}
+
+		$row = $this->buildPendingRequestsQuery($userId, $normalizedEmail, $excludeMailboxId)
+			->setSelect(['ID'])
+			->setLimit(1)
+			->fetch()
+		;
+
+		return $row !== false;
+	}
+
+	/**
+	 * @return int[]
+	 */
+	private function findPendingRequestIds(int $userId, string $normalizedEmail): array
+	{
+		if ($normalizedEmail === '')
+		{
+			return [];
+		}
+
+		$rows = $this->buildPendingRequestsQuery($userId, $normalizedEmail)
+			->setSelect(['ID'])
+			->fetchAll()
+		;
+
+		return array_map('intval', array_column($rows, 'ID'));
+	}
+
+	private function buildPendingRequestsQuery(
+		int $userId,
+		string $normalizedEmail,
+		?int $excludeMailboxId = null,
+	): Query
+	{
+		$query = MailboxTable::query()
+			->registerRuntimeField(new ExpressionField('EMAIL_LOWER', 'LOWER(%s)', 'EMAIL'))
+			->where('USER_ID', $userId)
+			->where('EMAIL_LOWER', $normalizedEmail)
+			->where('ACTIVE', MailboxStatus::Pending->value)
+			->where('SERVER_TYPE', 'imap')
+		;
+
+		if ($excludeMailboxId !== null)
+		{
+			$query->where('ID', '!=', $excludeMailboxId);
+		}
+
+		return $query;
 	}
 
 	/**
@@ -410,6 +509,30 @@ final class PasswordlessConnectHelper
 		}
 
 		$userId = (int)$mailbox['USER_ID'];
+		$email = (string)$mailbox['EMAIL'];
+		$occupancyService = new MailboxEmailOccupancyService();
+
+		// The address could have been connected while the request was waiting, by this employee or by
+		// anyone else. Sending the invitation again would only lead them to a refusal at the password step.
+		if ($occupancyService->checkOccupancy($email, $userId) !== MailboxEmailOccupancy::Free)
+		{
+			$result->addError(new Error(
+				Loc::getMessage('MAIL_PASSWORDLESS_ERROR_DUPLICATE') ?? '',
+				MailboxConnector::EXISTS_ERROR_KEY,
+			));
+
+			return $result;
+		}
+
+		if ($this->hasPendingRequest($userId, $occupancyService->normalizeEmail($email), $mailboxId))
+		{
+			$result->addError(new Error(
+				Loc::getMessage('MAIL_PASSWORDLESS_ERROR_REQUEST_ALREADY_SENT') ?? '',
+				MailboxConnector::EXISTS_ERROR_KEY,
+			));
+
+			return $result;
+		}
 
 		$options = $mailbox['OPTIONS'] ?? [];
 		$options['passwordless_admin_id'] = $adminId;

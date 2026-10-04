@@ -11,6 +11,7 @@ use Bitrix\AI\Payload\IPayload;
 use Bitrix\AI\Prompt;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Web\Json;
+use Bitrix\Rest\AccessException;
 
 class Rest
 {
@@ -18,9 +19,12 @@ class Rest
 	 * Sets ON module's option for saving any requests.
 	 *
 	 * @return void
+	 * @throws AccessException
 	 */
 	public static function enable(): void
 	{
+		self::checkAdminAccess();
+
 		Config::setOptionsValue('write_history_always', 'Y');
 		Config::setOptionsValue('write_history_request', 'Y');
 		Config::setOptionsValue('write_errors', 'Y');
@@ -30,9 +34,12 @@ class Rest
 	 * Sets OFF module's option for saving any requests.
 	 *
 	 * @return void
+	 * @throws AccessException
 	 */
 	public static function disable(): void
 	{
+		self::checkAdminAccess();
+
 		Config::setOptionsValue('write_history_always', 'N');
 		Config::setOptionsValue('write_history_request', 'N');
 		Config::setOptionsValue('write_errors', 'N');
@@ -102,6 +109,20 @@ class Rest
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Checks that current user is allowed to manage module's options.
+	 *
+	 * @return void
+	 * @throws AccessException
+	 */
+	private static function checkAdminAccess(): void
+	{
+		if (!User::isAdmin())
+		{
+			throw new AccessException();
+		}
 	}
 
 	/**

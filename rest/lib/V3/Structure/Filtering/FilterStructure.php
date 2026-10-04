@@ -453,18 +453,25 @@ final class FilterStructure extends Structure
 	{
 		$operator = $operator instanceof Operator ? $operator : FilterValidator::validateOperator($operator);
 
-		$fieldType = is_scalar($fieldName) && isset($dto->getFields()[$fieldName]) ? $dto->getFields()[$fieldName]->getPropertyType() : null;
+		$field = is_scalar($fieldName) && isset($dto->getFields()[$fieldName])
+			? $dto->getFields()[$fieldName]
+			: null;
 
 		if (is_array($value))
 		{
 			foreach ($value as &$valueItem)
 			{
-				$valueItem = FieldsConverter::convertValueByType($fieldType, $valueItem);
+				$valueItem = $field !== null
+					? FieldsConverter::convertValueByDtoField($field, $valueItem)
+					: FieldsConverter::convertValueByType(null, $valueItem);
 			}
+			unset($valueItem);
 		}
 		else
 		{
-			$value = FieldsConverter::convertValueByType($fieldType, $value);
+			$value = $field !== null
+				? FieldsConverter::convertValueByDtoField($field, $value)
+				: FieldsConverter::convertValueByType(null, $value);
 		}
 
 		return new Condition($fieldName, $operator, $value);

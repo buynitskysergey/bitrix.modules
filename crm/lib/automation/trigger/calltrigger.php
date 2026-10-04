@@ -11,9 +11,59 @@ Loc::loadMessages(__FILE__);
 
 class CallTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use CallReturnTrait;
+
 	protected static function hasLines()
 	{
 		return (Loader::includeModule('voximplant') && \CVoxImplantHttp::VERSION >= 19);
+	}
+
+	/**
+	 * Incoming calls are raised by voximplant off a live VI\Call, so the lifecycle status is available.
+	 */
+	protected static function getCallReturnFieldIds(): array
+	{
+		return [self::RETURN_CALL_PHONE, self::RETURN_CALL_DIRECTION, self::RETURN_CALL_STATUS];
+	}
+
+	/**
+	 * An incoming call is placed by the client, so the node names no portal initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_CALL_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getCallReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
+	}
+
+	public function setInputData($data)
+	{
+		parent::setInputData($data);
+
+		if (is_callable([$this, 'setReturnValues']))
+		{
+			$this->setReturnValues($this->buildCallReturnValues(
+				$this->getInputData('CALL_PHONE_NUMBER'),
+				$this->getInputData('CALL_DIRECTION'),
+				$this->getInputData('CALL_STATUS'),
+			));
+		}
+
+		return $this;
 	}
 
 	public static function getCode()

@@ -8,6 +8,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Validation\Rule\PropertyValidationAttributeInterface;
 use Bitrix\Rest\V3\Attribute\AbstractAttribute;
 use Bitrix\Rest\V3\Attribute\Description;
+use Bitrix\Rest\V3\Attribute\DynamicEnum as DynamicEnumAttribute;
 use Bitrix\Rest\V3\Attribute\Editable;
 use Bitrix\Rest\V3\Attribute\ElementType;
 use Bitrix\Rest\V3\Attribute\Filterable;
@@ -19,6 +20,8 @@ use Bitrix\Rest\V3\Attribute\Sortable;
 use Bitrix\Rest\V3\Attribute\Title;
 use Bitrix\Rest\V3\CacheManager;
 use Bitrix\Rest\V3\Dto\Attribute\TypeAlias;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumRegistry;
+use Bitrix\Main\SystemException;
 
 abstract class Dto implements Arrayable
 {
@@ -260,6 +263,27 @@ abstract class Dto implements Arrayable
 				if ($attributeInstance instanceof PropertyValidationAttributeInterface)
 				{
 					$field->addValidationRule($attributeInstance);
+				}
+
+				if ($attributeInstance instanceof DynamicEnumAttribute)
+				{
+					if (is_subclass_of($propertyType, \BackedEnum::class))
+					{
+						throw new SystemException(
+							'Property ' . $property->getName() . ' cannot combine BackedEnum type with #[DynamicEnum]'
+						);
+					}
+
+					$definition = DynamicEnumRegistry::resolve($attributeInstance->provider);
+					if (!$definition->type->matchesPhpType($propertyType))
+					{
+						throw new SystemException(
+							'Property ' . $property->getName() . ' PHP type "' . $propertyType
+							. '" is incompatible with DynamicEnum type "' . $definition->type->value . '"'
+						);
+					}
+
+					$field->setDynamicEnumProvider($attributeInstance->provider);
 				}
 
 				match ($attribute->getName())

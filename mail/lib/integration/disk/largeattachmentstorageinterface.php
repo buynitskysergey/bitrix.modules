@@ -18,6 +18,12 @@ interface LargeAttachmentStorageInterface
 	public const ERROR_DISK_UNAVAILABLE = 'MAIL_LA_DISK_UNAVAILABLE';
 
 	/**
+	 * Creating the service link of the attachments is not available on the portal. The client answers with
+	 * the tariff slider, so the mail module has no phrase of its own for the code.
+	 */
+	public const ERROR_DISK_FEATURE_UNAVAILABLE = 'MAIL_LA_DISK_FEATURE_UNAVAILABLE';
+
+	/**
 	 * Returns (creating if needed) the sender's system "Mail attachments" folder.
 	 *
 	 * On success the result data holds the folder id under the "folderId" key (int).

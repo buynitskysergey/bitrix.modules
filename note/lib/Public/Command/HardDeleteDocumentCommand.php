@@ -8,6 +8,8 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
+use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
+use Bitrix\Note\Internal\Service\DomainEventPublisher;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\RecycleBin\HardDeleteService;
@@ -22,6 +24,7 @@ class HardDeleteDocumentCommand extends AbstractCommand
 		private readonly RecycleBinRepository $recycleBinRepository = new RecycleBinRepository(),
 		private readonly HardDeleteService $hardDeleteService = new HardDeleteService(),
 		private readonly PushNotificationService $pushService = new PushNotificationService(),
+		private readonly DomainEventPublisher $eventPublisher = new DomainEventPublisher(),
 	) {}
 
 	protected function execute(): Result
@@ -56,6 +59,11 @@ class HardDeleteDocumentCommand extends AbstractCommand
 		);
 
 		$this->emitHardDelete($documentId);
+		$this->eventPublisher->emitLifecycle(
+			OnDocumentLifecycleEvent::HARD_DELETED,
+			null,
+			[$documentId],
+		);
 
 		$result = new Result();
 		$result->setData(['documentId' => $documentId]);

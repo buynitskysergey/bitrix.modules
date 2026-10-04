@@ -100,7 +100,9 @@ class Callback
 					'USER_ID',
 					'APPLICATION_TOKEN',
 					'CONNECTOR_ID',
+					'INTEGRATION_ID',
 					'APP_CODE' => 'REST_APP.CLIENT_ID',
+					'APP_STATUS' => 'REST_APP.STATUS',
 					'APP_ACTIVE' => 'REST_APP.ACTIVE',
 					'APP_INSTALLED' => 'REST_APP.INSTALLED',
 				])

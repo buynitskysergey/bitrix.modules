@@ -11,16 +11,33 @@ use Bitrix\BizprocDesigner\Internal\Entity\DocumentFieldOptionCollection;
 use Bitrix\BizprocDesigner\Internal\Entity\DocumentDescription;
 use Bitrix\BizprocDesigner\Internal\Service\Container;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Config\Configuration;
 use Bitrix\Main\Loader;
 use Bitrix\Main\LoaderException;
 
-class DocumentFieldService
+final class DocumentFieldService
 {
-	private SemanticSearch\SemanticSearchInterface $semanticSearch;
+	private ?SemanticSearch\SemanticSearchInterface $semanticSearch = null;
 
-	public function __construct()
+	/**
+	 * Fields closest to the search phrase, or the whole set when there is nothing to search by or the
+	 * semantic search service is not configured.
+	 *
+	 * @throws LoaderException|ArgumentException
+	 */
+	public function findFields(DocumentDescription $documentType, string $search = ''): ?DocumentFieldCollection
 	{
-		$this->semanticSearch = new SemanticSearch\SemanticSearchService();
+		if ($search !== '' && $this->isSemanticSearchConfigured())
+		{
+			return $this->getFields($documentType, $search);
+		}
+
+		return $this->getDocumentFieldsCollection($documentType);
+	}
+
+	private function isSemanticSearchConfigured(): bool
+	{
+		return !empty(Configuration::getValue('semantic_search')['url']);
 	}
 
 	/**
@@ -76,8 +93,9 @@ class DocumentFieldService
 
 		try
 		{
-			$result =
-				$this->semanticSearch->search(
+			$this->semanticSearch ??= new SemanticSearch\SemanticSearchService();
+			$result
+				= $this->semanticSearch->search(
 					$searchField,
 					new SemanticSearch\Scope(
 						SemanticSearch\ScopeType::Fields,
@@ -115,7 +133,7 @@ class DocumentFieldService
 		catch (\Exception $e)
 		{
 			Container::getDefaultLogger()->error(
-				'Error while searching document fields: ' . $e->getMessage(),
+				'Error while searching document fields of {documentType} by "{searchField}": ' . $e->getMessage(),
 				[
 					'documentType' => $documentType->toArray(),
 					'searchField' => $searchField,
@@ -154,7 +172,6 @@ class DocumentFieldService
 
 		return $collection;
 	}
-
 
 	/**
 	 * @param DocumentDescription $documentType

@@ -81,22 +81,27 @@ class CFile
 
 	protected static function transformOriginalName(string $name): string
 	{
-		//transliteration
-		if (COption::GetOptionString("main", "translit_original_file_name", "N") == "Y")
-		{
-			$name = CUtil::translit($name, LANGUAGE_ID, [
-				"max_len" => 1024,
-				"safe_chars" => ".",
-				"replace_space" => '-',
-				"change_case" => false,
-			]);
-		}
-
 		//replace invalid characters
 		if (COption::GetOptionString("main", "convert_original_file_name", "Y") == "Y")
 		{
 			$io = CBXVirtualIo::GetInstance();
 			$name = $io->RandomizeInvalidFilename($name);
+		}
+
+		return $name;
+	}
+
+	protected static function transliterate(string $name): string
+	{
+		//transliteration
+		if (COption::GetOptionString("main", "translit_original_file_name", "N") == "Y")
+		{
+			$name = CUtil::translit($name, LANGUAGE_ID, [
+				"max_len" => 1024,
+				"safe_chars" => "._-()",
+				"replace_space" => '-',
+				"change_case" => false,
+			]);
 		}
 
 		return $name;
@@ -121,8 +126,8 @@ class CFile
 		$saveOriginalName = ($forceRandom != true && COption::GetOptionString("main", "save_original_file_name", "N") == "Y");
 		if ($saveOriginalName)
 		{
-			//use original name
-			$fileName = $originalName;
+			//use original name, possibly transliterated
+			$fileName = static::transliterate($originalName);
 		}
 
 		//.jpe is not image type on many systems
@@ -2094,6 +2099,17 @@ function ImgShw(ID, width, height, alt)
 		if (preg_match("#^(php://|phar://)#i", $path) && !preg_match("#^php://input$#i", $path))
 		{
 			return null;
+		}
+
+		if (preg_match("#^ftps?://#i", $path))
+		{
+			$uri = new Uri($path);
+			$ip = Web\IpAddress::createByUri($uri);
+			if ($ip->isPrivate())
+			{
+				return null;
+			}
+			$path = (string)$uri->setHost((string)$ip);
 		}
 
 		if (preg_match("#^https?://#i", $path))

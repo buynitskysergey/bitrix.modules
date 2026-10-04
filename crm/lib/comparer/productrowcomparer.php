@@ -25,6 +25,7 @@ class ProductRowComparer extends ComparerBase
 			&& self::areFieldsEquals($a, $b, 'DATE_RESERVE_END')
 			&& self::areFieldsEquals($a, $b, 'STORE_ID')
 			&& self::areFieldsEquals($a, $b, 'TAX_RATE')
+			&& self::areFieldsEquals($a, $b, 'TAX_NAME')
 		);
 	}
 

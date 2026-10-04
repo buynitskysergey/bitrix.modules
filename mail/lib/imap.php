@@ -664,6 +664,25 @@ class Imap
 					break;
 				}
 
+				$previous = $list[$data['id']] ?? null;
+
+				if ($previous !== null)
+				{
+					$previousUid = self::uidOfFetchItem($previous);
+					$uid = self::uidOfFetchItem($data);
+
+					/*
+						RFC 2683 3.4.4: the data of one message may arrive split across several untagged
+						FETCH responses, and unsolicited ones may arrive at any time. A repeated sequence
+						number therefore updates the entry instead of replacing it. Uids that disagree mean
+						the numbering shifted mid-command - there the newest response stands on its own.
+					*/
+					if ($previousUid === null || $uid === null || $previousUid === $uid)
+					{
+						$data = array_replace($previous, $data);
+					}
+				}
+
 				$list[$data['id']] = $data;
 			}
 		}
@@ -677,6 +696,26 @@ class Imap
 		}
 
 		return $list;
+	}
+
+	/**
+	 * The uid of a parsed untagged FETCH response, null when it carries none: RFC 3501 6.4.8 requires
+	 * the uid only in the answer to a UID command.
+	 *
+	 * @param array $item
+	 * @return string|null
+	 */
+	private static function uidOfFetchItem(array $item)
+	{
+		foreach ($item as $name => $value)
+		{
+			if (mb_strtoupper($name) === 'UID' && is_scalar($value))
+			{
+				return (string)$value;
+			}
+		}
+
+		return null;
 	}
 
 	public function getUIDsForSpecificDay($dirPath, $internalDate)
@@ -716,7 +755,21 @@ class Imap
 		return $UIDs[0];
 	}
 
-	public function getUidsSince(string $dirPath, int $sinceTimestamp, ?int $maximumUid = null): array|false
+	/**
+	 * The uids of a folder, narrowed by the server itself.
+	 *
+	 * @param int $sinceTimestamp Lower bound by the date of a letter, 0 for none.
+	 * @param int|null $maximumUid Upper bound by number, null leaves the range open at the top.
+	 * @param int|null $minimumUid Lower bound by number, null leaves it open at the bottom.
+	 *        A caller walking a folder in several passes states here where it has come to, so
+	 *        the answer of the server is the part that is left and not the folder as a whole.
+	 */
+	public function getUidsSince(
+		string $dirPath,
+		int $sinceTimestamp,
+		?int $maximumUid = null,
+		?int $minimumUid = null,
+	): array|false
 	{
 		$error = [];
 
@@ -725,13 +778,24 @@ class Imap
 			return false;
 		}
 
-		// open upper bound on purpose: the exact cutoff is applied on receive by INTERNALDATE
-		$command = 'UID SEARCH ';
-		if ($maximumUid !== null)
+		// open upper bound of the period on purpose: the exact cutoff is applied on receive by INTERNALDATE
+		$keys = [];
+		if ($minimumUid !== null || $maximumUid !== null)
 		{
-			$command .= sprintf('UID 1:%u ', $maximumUid);
+			// One range of numbers, open at whichever end the caller left open
+			$keys[] = sprintf(
+				'UID %u:%s',
+				max(1, (int)$minimumUid),
+				$maximumUid === null ? '*' : sprintf('%u', $maximumUid),
+			);
 		}
-		$command .= 'SINCE '.gmdate('j-M-Y', $sinceTimestamp);
+		if ($sinceTimestamp > 0)
+		{
+			$keys[] = 'SINCE '.gmdate('j-M-Y', $sinceTimestamp);
+		}
+
+		// Without a lower bound the folder is asked for as a whole, not since the epoch
+		$command = 'UID SEARCH '.($keys === [] ? 'ALL' : implode(' ', $keys));
 
 		$response = $this->executeCommand($command, $error);
 

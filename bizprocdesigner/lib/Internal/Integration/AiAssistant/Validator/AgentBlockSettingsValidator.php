@@ -4,10 +4,10 @@ namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator;
 
 use Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentSettingCollection;
-use Bitrix\Main\Error;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Error\GraphError;
 use Bitrix\Main\Result;
 
-class AgentBlockSettingsValidator
+final class AgentBlockSettingsValidator
 {
 	private readonly AgentBlockSettingValidator $settingValidator;
 	private ?AgentSettingCollection $validSettings = null;
@@ -22,28 +22,29 @@ class AgentBlockSettingsValidator
 	public function validate(mixed $settings, string $path, ?BlockTypeDetail $blockTypeDetail): Result
 	{
 		$this->validSettings = null;
+
 		if (!is_array($settings))
 		{
-			return (new Result())->addError(new Error("{$path} should be array"));
+			return (new Result())->addError(GraphError::at($path, "{$path} should be array"));
 		}
-		elseif (empty($settings) && $blockTypeDetail && $blockTypeDetail->settings->count() > 0)
+
+		if (empty($settings) && $blockTypeDetail && $blockTypeDetail->settings->count() > 0)
 		{
-			return (new Result())->addError(new Error("{$path} should be not empty array"));
+			return (new Result())->addError(GraphError::at($path, "{$path} should be not empty array"));
 		}
 
 		if ($blockTypeDetail)
 		{
 			$this->validSettings = new AgentSettingCollection();
 		}
+
 		$result = new Result();
+
 		foreach ($settings as $key => $setting)
 		{
-			$settingValidateResult = $this->settingValidator->validate(
-				setting: $setting,
-				path: "$path.$key",
-				blockTypeDetail: $blockTypeDetail,
-			);
+			$settingValidateResult = $this->settingValidator->validate($setting, "$path.$key", $blockTypeDetail);
 			$result->addErrors($settingValidateResult->getErrors());
+
 			if ($settingValidateResult->isSuccess() && $this->validSettings && $this->settingValidator->getValidSetting())
 			{
 				$this->validSettings->add($this->settingValidator->getValidSetting());
@@ -57,5 +58,4 @@ class AgentBlockSettingsValidator
 	{
 		return $this->validSettings;
 	}
-
 }

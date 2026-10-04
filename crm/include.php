@@ -56,6 +56,8 @@ IncludeModuleLangFile(__FILE__);
 require_once($_SERVER['DOCUMENT_ROOT'].BX_ROOT.'/modules/crm/functions.php');
 require_once __DIR__.'/autoload.php';
 
+\Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\GeneratedDtoClassLoader::register();
+
 CJSCore::RegisterExt('crm_common', array(
 	'js' => [
 		'/bitrix/js/crm/common.js'

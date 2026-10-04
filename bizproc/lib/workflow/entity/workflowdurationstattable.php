@@ -142,7 +142,7 @@ class WorkflowDurationStatTable extends DataManager
 		$connection = Application::getConnection();
 		$sqlHelper = $connection->getSqlHelper();
 
-		$tableName = $sqlHelper->forSql(static::getTableName());
+		$tableName = $sqlHelper->quote(static::getTableName());
 
 		$connection->queryExecute("DELETE FROM {$tableName} WHERE TEMPLATE_ID = {$templateId}");
 	}
@@ -170,7 +170,7 @@ class WorkflowDurationStatTable extends DataManager
 	public static function doBackgroundDurationStatCut()
 	{
 		$connection = Application::getConnection();
-		$tableName = $connection->getSqlHelper()->forSql(static::getTableName());
+		$tableName = $connection->getSqlHelper()->quote(static::getTableName());
 
 		$templateIds = array_keys(self::$cutDurationStatQueue);
 		self::$cutDurationStatQueue = [];

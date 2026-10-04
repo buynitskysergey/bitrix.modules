@@ -811,6 +811,29 @@ class UrlManager implements IErrorable
 	}
 
 	/**
+	 * Gets url to prepare or show the TIFF preview of the file.
+	 * @param File $file Target file.
+	 * @return string
+	 */
+	public function getUrlForShowTiffPreview(File $file): string
+	{
+		return $this->getUrlForShowTiffPreviewByFileId((int)$file->getId());
+	}
+
+	/**
+	 * Gets url to prepare or show the TIFF preview by disk file id.
+	 * @param int $fileId Target disk file id.
+	 * @return string
+	 */
+	public function getUrlForShowTiffPreviewByFileId(int $fileId): string
+	{
+		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
+			'disk.file.showTiffPreview',
+			['fileId' => $fileId],
+		);
+	}
+
+	/**
 	 * Gets url to show the html of the concrete version as an isolated document.
 	 * A reader who holds unified link access only has no direct rights on the file the version belongs
 	 * to, so the caller appends the `_uls` signature of that pair itself, as for the download url.
@@ -826,6 +849,19 @@ class UrlManager implements IErrorable
 	}
 
 	/**
+	 * Gets url to prepare or show the TIFF preview of the concrete version.
+	 * @param int $versionId Target version id.
+	 * @return string
+	 */
+	public function getUrlForShowTiffPreviewVersion(int $versionId): string
+	{
+		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
+			'disk.version.showTiffPreview',
+			['versionId' => $versionId],
+		);
+	}
+
+	/**
 	 * Gets url to show the html of the attached object (revision is intrinsic to it).
 	 * Access is granted by the attachment, so no signature is needed.
 	 * @param int $attachedObjectId Target attached object id.
@@ -836,6 +872,19 @@ class UrlManager implements IErrorable
 		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
 			'disk.attachedObject.showHtml',
 			['attachedObjectId' => $attachedObjectId]
+		);
+	}
+
+	/**
+	 * Gets url to prepare or show the TIFF preview of the attached object.
+	 * @param int $attachedObjectId Target attached object id.
+	 * @return string
+	 */
+	public function getUrlForShowTiffPreviewAttached(int $attachedObjectId): string
+	{
+		return (string)\Bitrix\Main\Engine\UrlManager::getInstance()->create(
+			'disk.attachedObject.showTiffPreview',
+			['attachedObjectId' => $attachedObjectId],
 		);
 	}
 

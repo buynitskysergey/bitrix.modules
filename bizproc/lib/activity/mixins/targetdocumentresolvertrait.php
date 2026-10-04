@@ -14,16 +14,16 @@ trait TargetDocumentResolverTrait
 
 	private ?array $runtimeDocumentId = null;
 
-	public function initializeFromArray($arParams)
+	public function initializeFromArray($params)
 	{
-		parent::initializeFromArray($arParams);
+		parent::initializeFromArray($params);
 
-		if (!is_array($arParams) || !array_key_exists(self::TARGET_FILTER_ID_PROPERTY, $arParams))
+		if (!is_array($params) || !array_key_exists(self::TARGET_FILTER_ID_PROPERTY, $params))
 		{
 			return;
 		}
 
-		$this->arProperties[self::TARGET_FILTER_ID_PROPERTY] = $arParams[self::TARGET_FILTER_ID_PROPERTY];
+		$this->arProperties[self::TARGET_FILTER_ID_PROPERTY] = $params[self::TARGET_FILTER_ID_PROPERTY];
 		$this->setPropertiesTypes([
 			self::TARGET_FILTER_ID_PROPERTY => [
 				'Type' => FieldType::STRING,

@@ -309,7 +309,7 @@ class Storage extends Base
 			$storageTypeEntity = StorageItem\StorageItem::mapFromArray(
 				[...$entity->toArray(), ...$storageItem],
 				$storageTypeId,
-			);
+			)->setStorageId($storageTypeId);
 		}
 		catch (Exception $exception)
 		{

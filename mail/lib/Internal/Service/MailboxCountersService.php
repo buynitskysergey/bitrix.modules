@@ -28,13 +28,18 @@ class MailboxCountersService
 		{
 			try
 			{
-				$folders = Mailbox::createInstance($mailboxId)->getDirsWithUnseenMailCounters();
+				$mailboxHelper = Mailbox::createInstance($mailboxId);
+				if ($mailboxHelper instanceof Mailbox)
+				{
+					$folders = $mailboxHelper->getDirsWithUnseenMailCounters();
+				}
 			}
 			catch (Main\ObjectException)
 			{
 			}
 		}
 
+		// No label counters here: the left menu gets them from the labelCountersUpdated pull command.
 		return [
 			'total' => (int)\CUserCounter::GetValue($userId, 'mail_unseen'),
 			'mailboxes' => $perMailbox,

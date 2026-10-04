@@ -6,6 +6,7 @@ use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Main\ArgumentException;
+use Bitrix\UI\FileUploader\CommitOptions;
 use Bitrix\UI\FileUploader\FileOwnershipCollection;
 use Bitrix\UI\FileUploader\Configuration;
 use Bitrix\UI\FileUploader\UploaderController;
@@ -20,9 +21,10 @@ abstract class EntityController extends UploaderController
 	 *     entityId: ?int,
 	 *     categoryId: ?int,
 	 * } $options
+	 * @param UserPermissions|null $userPermissions
 	 * @throws ArgumentException
 	 */
-	public function __construct(array $options)
+	public function __construct(array $options, ?UserPermissions $userPermissions = null)
 	{
 		$options['entityTypeId'] ??= \CCrmOwnerType::Undefined;
 		$options['entityTypeId'] = (int)$options['entityTypeId'];
@@ -49,7 +51,7 @@ abstract class EntityController extends UploaderController
 
 		parent::__construct($options);
 
-		$this->userPermissions = Container::getInstance()->getUserPermissions();
+		$this->userPermissions = $userPermissions ?? Container::getInstance()->getUserPermissions();
 	}
 
 	public function isAvailable(): bool
@@ -74,6 +76,14 @@ abstract class EntityController extends UploaderController
 	public function getConfiguration(): Configuration
 	{
 		return new Configuration();
+	}
+
+	public function getCommitOptions(): CommitOptions
+	{
+		return new CommitOptions([
+			'moduleId' => 'crm',
+			'savePath' => 'crm',
+		]);
 	}
 
 	public function canUpload(): bool

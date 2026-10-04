@@ -1,0 +1,74 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type;
+
+use Bitrix\Crm\Activity\Provider\Email;
+use Bitrix\Crm\Integration\AI\Operation\OperationState;
+use Bitrix\Crm\Integration\AI\Operation\Scenario;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\AIAction;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\AIOperationStateChecker;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\StateChecker\ScenarioStateChecker;
+use Bitrix\Crm\Service\Timeline\Layout\Action\JsEvent;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Ui\Public\Enum\IconSet\Outline;
+
+final class FillFieldsInEmail extends AIAction
+{
+	public static function getScenario(): string
+	{
+		return Scenario::FILL_FIELDS_SCENARIO;
+	}
+
+	public static function getSupportedProviders(): array
+	{
+		return [
+			Email::getId(),
+		];
+	}
+
+	protected function getName(): string
+	{
+		return Loc::getMessage('CRM_TIMELINE_AI_EMAIL_FILL_FIELDS') ?? 'Fill fields';
+	}
+
+	protected function getEventName(): string
+	{
+		return 'Email:LaunchCopilot';
+	}
+
+	protected function createStateChecker(): ?AIOperationStateChecker
+	{
+		$state = new OperationState($this->rootActivityId, $this->context->getIdentifier());
+
+		return new ScenarioStateChecker(
+			$state,
+			fn(OperationState $state) => $state->isFillFieldsScenarioPending(),
+			fn(OperationState $state) => $state->isFillFieldsScenarioSuccess(),
+			fn(OperationState $state) => $state->isFillFieldsScenarioErrorsLimitExceeded(),
+		);
+	}
+
+	public function isHidden(): bool
+	{
+		return $this->getStateChecker()?->isSuccess() ?? false;
+	}
+
+	protected function isDisabled(): bool
+	{
+		return ($this->getStateChecker()?->isErrorsLimitExceeded() ?? false)
+			|| ($this->getStateChecker()?->isPending() ?? false)
+		;
+	}
+
+	protected function addCustomParams(JsEvent $jsEvent): JsEvent
+	{
+		return $jsEvent->addActionParamString('scenario', Scenario::FILL_FIELDS_SCENARIO);
+	}
+
+	protected function getMenuIcon(): Outline
+	{
+		return Outline::CRM_FIELD_SIMPLE;
+	}
+}

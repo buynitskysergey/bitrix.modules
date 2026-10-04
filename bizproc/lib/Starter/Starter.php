@@ -214,6 +214,7 @@ final class Starter
 		$context = new Context(
 			$moduleId,
 			$contextDto->face,
+			$contextDto->manualStartSurface,
 		);
 
 		if ($contextDto->isManual)

@@ -1,7 +1,7 @@
 <?php
 namespace Bitrix\Crm\Recurring\Entity\ParameterMapper;
 
-use \Bitrix\Main\Type\Date;
+use Bitrix\Main\Type\Date;
 
 abstract class Map
 {

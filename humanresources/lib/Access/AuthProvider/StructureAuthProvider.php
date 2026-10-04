@@ -139,6 +139,7 @@ class StructureAuthProvider extends CAuthProvider
 						depthLevel: DepthLevel::NONE,
 					),
 					findRelatedMembers: true,
+					withVirtualUsers: true,
 				),
 			)
 			->getAll()
@@ -338,6 +339,7 @@ class StructureAuthProvider extends CAuthProvider
 						direction: Direction::CHILD,
 						depthLevel: DepthLevel::FULL,
 					),
+					withVirtualUsers: true,
 				),
 			)
 			->getAll()

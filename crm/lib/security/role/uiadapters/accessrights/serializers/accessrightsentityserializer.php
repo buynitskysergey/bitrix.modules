@@ -117,6 +117,12 @@ class AccessRightsEntitySerializer
 
 		if (!is_null($variables))
 		{
+			$presets = $this->extractPresets($variables);
+			if ($presets)
+			{
+				$options['presets'] = $presets;
+			}
+
 			$options['variables'] = $variables;
 
 			$emptyValue = $this->getEmptyValue($variables);
@@ -139,6 +145,33 @@ class AccessRightsEntitySerializer
 		}
 
 		return RightSection\RightItem::tryFromArray($options);
+	}
+
+	private function extractPresets(array &$variables): array
+	{
+		$presets = [];
+		foreach ($variables as &$variable)
+		{
+			$descriptor = $variable['preset'] ?? null;
+			unset($variable['preset']);
+
+			if (!is_array($descriptor))
+			{
+				continue;
+			}
+
+			$presets[] = [
+				'id' => $variable['id'],
+				'title' => $variable['title'] ?? '',
+				'icon' => $descriptor['icon'] ?? null,
+				'description' => $descriptor['description'] ?? null,
+				'showGroupHeadItems' => $descriptor['showGroupHeadItems'] ?? false,
+				'variableIds' => [$variable['id']],
+			];
+		}
+		unset($variable);
+
+		return $presets;
 	}
 
 	private function getEmptyValue(array $variables): ?string

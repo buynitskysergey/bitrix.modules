@@ -6,6 +6,7 @@ use Bitrix\Crm\Copilot\Pipeline\TargetResolver;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\GlobalFeatureReader;
 use Bitrix\Crm\Item;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
@@ -33,7 +34,11 @@ abstract class BaseChannelAutoStartStrategy
 	 */
 	abstract public function run(array $changedFields = []): void;
 
-	public function __construct(readonly int $activityOperation, readonly array $activityFields) {}
+	public function __construct(
+		readonly int $activityOperation,
+		readonly array $activityFields,
+		protected readonly GlobalFeatureReader $featureReader = new GlobalFeatureReader(),
+	) {}
 
 	final public function setLogger(LoggerInterface $logger): self
 	{
@@ -75,7 +80,10 @@ abstract class BaseChannelAutoStartStrategy
 
 		$factory = Container::getInstance()->getFactory($target->getEntityTypeId());
 
-		return $factory?->getItem($target->getEntityId(), [Item::FIELD_NAME_ASSIGNED])?->getAssignedById();
+		return $factory
+			?->getItem($target->getEntityId(), [Item::FIELD_NAME_ASSIGNED])
+			?->getAssignedById()
+		;
 	}
 
 	private function getFillFieldsSettingsByActivity(): ?FillFieldsSettings
@@ -85,6 +93,9 @@ abstract class BaseChannelAutoStartStrategy
 			return null;
 		}
 
-		return FillFieldsSettings::get($this->nextTarget->getEntityTypeId(), $this->nextTarget->getCategoryId());
+		return FillFieldsSettings::get(
+			$this->nextTarget->getEntityTypeId(),
+			$this->nextTarget->getCategoryId()
+		);
 	}
 }

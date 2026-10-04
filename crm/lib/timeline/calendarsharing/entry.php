@@ -18,10 +18,11 @@ final class Entry extends TimelineEntry
 		$settings = $params['SETTINGS'] ?? null;
 		$bindings = $params['BINDINGS'] ?? null;
 
+		$created = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => $params['TYPE_ID'],
 			'TYPE_CATEGORY_ID' => $params['TYPE_CATEGORY_ID'],
-			'CREATED' => new DateTime(),
+			'CREATED' => $created,
 			'AUTHOR_ID' => $authorId,
 			'SETTINGS' => $settings,
 			'ASSOCIATED_ENTITY_TYPE_ID' => $params['ASSOCIATED_ENTITY_TYPE_ID'] ?? 0,
@@ -38,7 +39,7 @@ final class Entry extends TimelineEntry
 		{
 			$bindingsArray = self::getBindingsArray($bindings);
 
-			self::registerBindings($id, $bindingsArray);
+			self::registerBindings($id, $bindingsArray, $created);
 		}
 
 		return $id;

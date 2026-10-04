@@ -30,6 +30,8 @@ use Bitrix\Crm\StatusTable;
 use Bitrix\Crm\UI\Filter\EntityHandler;
 use Bitrix\Crm\UserField\Visibility\VisibilityManager;
 use Bitrix\Crm\UtmTable;
+use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\EntityTypeSettings;
 use Bitrix\Main\Application;
 use Bitrix\Main\InvalidOperationException;
 use Bitrix\Main\Localization\Loc;
@@ -1151,9 +1153,25 @@ abstract class Factory
 	 *
 	 * @return bool
 	 */
+	/**
+	 * V2 capabilities/state for this factory's entity type, or null if the entity type is not
+	 * an Item entity in V2 (e.g. Order). Methods that have an EntityTypeSettings analog use this
+	 * helper for delegation; the `?->...` fallbacks preserve original base behavior for non-V2 types.
+	 */
+	protected function entityTypeSettings(): ?EntityTypeSettings
+	{
+		$entityTypeId = $this->getEntityTypeId();
+		if (!EntityType::isValid($entityTypeId))
+		{
+			return null;
+		}
+
+		return EntityTypeSettings::of(EntityType::fromId($entityTypeId));
+	}
+
 	public function isCategoriesSupported(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->isCategoriesSupported() ?? false;
 	}
 
 	/**
@@ -1163,7 +1181,7 @@ abstract class Factory
 	 */
 	public function isCategoriesEnabled(): bool
 	{
-		return $this->isCategoriesSupported();
+		return $this->entityTypeSettings()?->hasCategories() ?? $this->isCategoriesSupported();
 	}
 
 	/**
@@ -1748,12 +1766,12 @@ abstract class Factory
 	 */
 	public function isStagesSupported(): bool
 	{
-		return true;
+		return $this->entityTypeSettings()?->isStagesSupported() ?? true;
 	}
 
 	public function isStagesEnabled(): bool
 	{
-		return $this->isStagesSupported();
+		return $this->entityTypeSettings()?->hasStages() ?? $this->isStagesSupported();
 	}
 
 	public function getStageBroker(): Broker\Stage
@@ -1840,7 +1858,7 @@ abstract class Factory
 	 */
 	public function isLinkWithProductsEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasProducts() ?? false;
 	}
 
 	/**
@@ -1850,7 +1868,7 @@ abstract class Factory
 	 */
 	public function isBeginCloseDatesEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasBeginCloseDates() ?? false;
 	}
 
 	/**
@@ -1860,12 +1878,20 @@ abstract class Factory
 	 */
 	public function isClientEnabled(): bool
 	{
-		return false;
+		// Legacy "Client field" semantics: Contact/Company are excluded intentionally, even though
+		// Company does have contact bindings - see the explanation in
+		// EntityTypeSettings::createCompanySettings() (and createContactSettings()).
+		return match ($this->getEntityTypeId())
+		{
+			\CCrmOwnerType::Contact, \CCrmOwnerType::Company => false,
+			default => $this->entityTypeSettings()?->hasContactBindings() ?? false,
+		};
 	}
 
 	public function isClientFieldsEnabled(): bool
 	{
-		return $this->isClientContactEnabled() || $this->isClientCompanyEnabled();
+		return $this->entityTypeSettings()?->hasClientFields()
+			?? ($this->isClientContactEnabled() || $this->isClientCompanyEnabled());
 	}
 
 	/**
@@ -1875,7 +1901,7 @@ abstract class Factory
 	 */
 	public function isClientContactEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasClientContact() ?? false;
 	}
 
 	/**
@@ -1885,7 +1911,7 @@ abstract class Factory
 	 */
 	public function isClientCompanyEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasClientCompany() ?? false;
 	}
 
 	/**
@@ -1895,7 +1921,7 @@ abstract class Factory
 	 */
 	public function isCrmTrackingEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasCrmTracking() ?? false;
 	}
 
 	/**
@@ -1905,7 +1931,7 @@ abstract class Factory
 	 */
 	public function isMyCompanyEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasMyCompany() ?? false;
 	}
 
 	/**
@@ -1915,7 +1941,8 @@ abstract class Factory
 	 */
 	public function isDocumentGenerationSupported(): bool
 	{
-		return DocumentGeneratorManager::getInstance()->getCrmOwnerTypeProvider($this->getEntityTypeId(), false) !== null;
+		return $this->entityTypeSettings()?->isDocumentGenerationSupported()
+			?? (DocumentGeneratorManager::getInstance()->getCrmOwnerTypeProvider($this->getEntityTypeId(), false) !== null);
 	}
 
 	/**
@@ -1925,17 +1952,17 @@ abstract class Factory
 	 */
 	public function isDocumentGenerationEnabled(): bool
 	{
-		return true;
+		return $this->entityTypeSettings()?->hasDocumentGeneration() ?? true;
 	}
 
 	public function isRecurringEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasRecurring() ?? false;
 	}
 
 	public function isRecurringSupported(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->isRecurringSupported() ?? false;
 	}
 
 	/**
@@ -1945,7 +1972,7 @@ abstract class Factory
 	 */
 	public function isSourceEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasSource() ?? false;
 	}
 
 	/**
@@ -1956,7 +1983,7 @@ abstract class Factory
 	 */
 	public function isUseInUserfieldEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasUseInUserfield() ?? false;
 	}
 
 	/**
@@ -1966,7 +1993,7 @@ abstract class Factory
 	 */
 	public function isRecyclebinEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasRecyclebin() ?? false;
 	}
 
 	/**
@@ -1976,7 +2003,7 @@ abstract class Factory
 	 */
 	public function isAutomationEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasAutomation() ?? false;
 	}
 
 	/**
@@ -1986,7 +2013,7 @@ abstract class Factory
 	 */
 	public function isBizProcEnabled(): bool
 	{
-		return $this->isBizProcSupported();
+		return $this->entityTypeSettings()?->hasBizProc() ?? $this->isBizProcSupported();
 	}
 
 	/**
@@ -1996,7 +2023,7 @@ abstract class Factory
 	 */
 	public function isBizProcSupported(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->isBizProcSupported() ?? false;
 	}
 
 	/**
@@ -2006,7 +2033,7 @@ abstract class Factory
 	 */
 	public function isObserversEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasObservers() ?? false;
 	}
 
 	/**
@@ -2046,7 +2073,7 @@ abstract class Factory
 	 */
 	public function isMultiFieldsEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasMultifields() ?? false;
 	}
 
 	/**
@@ -2056,7 +2083,7 @@ abstract class Factory
 	 */
 	public function isPaymentsEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasPayments() ?? false;
 	}
 
 	/**
@@ -2076,7 +2103,7 @@ abstract class Factory
 	 */
 	public function isCountersEnabled(): bool
 	{
-		return false;
+		return $this->entityTypeSettings()?->hasCounters() ?? false;
 	}
 
 	/**
@@ -2086,7 +2113,7 @@ abstract class Factory
 	 */
 	public function isLastActivitySupported(): bool
 	{
-		return true;
+		return $this->entityTypeSettings()?->isLastActivitySupported() ?? true;
 	}
 
 	/**
@@ -2096,7 +2123,7 @@ abstract class Factory
 	 */
 	public function isLastActivityEnabled(): bool
 	{
-		return $this->isLastActivitySupported();
+		return $this->entityTypeSettings()?->hasLastActivity() ?? $this->isLastActivitySupported();
 	}
 
 	public function isSmartActivityNotificationEnabled(): bool

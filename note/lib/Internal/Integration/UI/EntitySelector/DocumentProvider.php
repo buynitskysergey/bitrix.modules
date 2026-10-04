@@ -6,12 +6,16 @@ namespace Bitrix\Note\Internal\Integration\UI\EntitySelector;
 
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\ORM\Fields\ExpressionField;
+use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Note\Internal\Access\AccessController;
 use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Service\Document\MainDocumentFilter;
+use Bitrix\Note\Internal\Service\License\LicenseService;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 use Bitrix\UI\EntitySelector\BaseProvider;
 use Bitrix\UI\EntitySelector\Dialog;
@@ -19,7 +23,8 @@ use Bitrix\UI\EntitySelector\Item;
 use Bitrix\UI\EntitySelector\SearchQuery;
 use Bitrix\UI\EntitySelector\Tab;
 
-final class DocumentProvider extends BaseProvider
+// Not final: unit tests subclass to override the LicenseService seam.
+class DocumentProvider extends BaseProvider
 {
 	public const ENTITY_ID = 'note-document';
 
@@ -41,6 +46,12 @@ final class DocumentProvider extends BaseProvider
 
 	public function isAvailable(): bool
 	{
+		// Tariff/tool gate before ACL: same denial as an ACL failure.
+		if ($this->createLicenseService()->isAccessBlocked())
+		{
+			return false;
+		}
+
 		$userId = (int)CurrentUser::get()->getId();
 		if ($userId <= 0)
 		{
@@ -50,6 +61,11 @@ final class DocumentProvider extends BaseProvider
 		// Gate the global selector behind the Notes tool ACL — a user without note_access
 		// must not enumerate document titles/collections through the entity-selector.
 		return AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_ACCESS);
+	}
+
+	protected function createLicenseService(): LicenseService
+	{
+		return new LicenseService();
 	}
 
 	public function doSearch(SearchQuery $searchQuery, Dialog $dialog): void
@@ -76,9 +92,12 @@ final class DocumentProvider extends BaseProvider
 			->setSelect(['ID', 'COLLECTION_ID', 'TITLE', 'COLLECTION.NAME'])
 			->whereLike('TITLE', $queryText . '%')
 			->where('IS_ARCHIVED', 'N')
-			->setOrder(['UPDATED_AT' => 'DESC', 'ID' => 'DESC'])
 			->setLimit(self::SEARCH_PREFETCH_LIMIT);
+		$this->applyRecencyOrder($query);
 		(new RecycleBinFilter())->applyExclusion($query);
+		// A collection's main document is not a standalone page: it has no tree node and
+		// /note/document/{id}/ cannot open it, so mentioning it would produce a dead link.
+		(new MainDocumentFilter())->applyExclusion($query);
 
 		$documents = $query->fetchCollection()->getAll();
 		if (empty($documents))
@@ -176,12 +195,14 @@ final class DocumentProvider extends BaseProvider
 			return [];
 		}
 
-		// Exclude archived and recycle-bin documents at the query level — symmetric with DocumentMentionResolver.
+		// Exclude archived, recycle-bin and main documents at the query level — the same set
+		// doSearch() offers, so a preselected id cannot smuggle in what search never shows.
 		$query = DocumentTable::query()
 			->setSelect(['ID', 'COLLECTION_ID', 'TITLE', 'COLLECTION.NAME'])
 			->whereIn('ID', $ids)
 			->where('IS_ARCHIVED', 'N');
 		(new RecycleBinFilter())->applyExclusion($query);
+		(new MainDocumentFilter())->applyExclusion($query);
 		$documents = $query->fetchCollection()->getAll();
 		if (empty($documents))
 		{
@@ -259,8 +280,35 @@ final class DocumentProvider extends BaseProvider
 	}
 
 	/**
-	 * Returns up to RECENT_DISPLAY_LIMIT recent VIEW-accessible documents, sorted by UPDATED_AT DESC.
-	 * Fetches RECENT_PREFETCH_LIMIT rows from DB and filters by access so the final list stays ≤20.
+	 * Ranking for "documents you touched lately", which is a different question from "when was the text
+	 * last changed" — the date lists show. Here a rename, a move or an archive IS a touch worth ranking
+	 * on, so the order takes the later of the two dates: since the freshness rework UPDATED_AT no longer
+	 * moves on patch/materialize/compaction (only CONTENT_UPDATED_AT does), and CONTENT_UPDATED_AT alone
+	 * would sink a document renamed a minute ago below one whose text was materialized last month.
+	 * COALESCE keeps legacy rows (CONTENT_UPDATED_AT still NULL — no backfill) ranked by UPDATED_AT.
+	 * Both GREATEST and COALESCE exist on MySQL 5.6 and PostgreSQL.
+	 *
+	 * The value never leaves the query: items carry a title and a collection name, no date, so this
+	 * expression cannot leak into a displayed date.
+	 */
+	private function applyRecencyOrder(Query $query): void
+	{
+		$query
+			->registerRuntimeField(
+				new ExpressionField(
+					'FRESHNESS',
+					'GREATEST(%s, COALESCE(%s, %s))',
+					['UPDATED_AT', 'CONTENT_UPDATED_AT', 'UPDATED_AT'],
+				),
+			)
+			->addSelect('FRESHNESS')
+			->setOrder(['FRESHNESS' => 'DESC', 'ID' => 'DESC']);
+	}
+
+	/**
+	 * Returns up to RECENT_DISPLAY_LIMIT recent VIEW-accessible documents, ranked by the later of
+	 * UPDATED_AT and CONTENT_UPDATED_AT (see applyRecencyOrder). Fetches RECENT_PREFETCH_LIMIT rows
+	 * from DB and filters by access so the final list stays ≤20.
 	 *
 	 * @return Item[]
 	 */
@@ -269,9 +317,12 @@ final class DocumentProvider extends BaseProvider
 		$query = DocumentTable::query()
 			->setSelect(['ID', 'COLLECTION_ID', 'TITLE', 'COLLECTION.NAME'])
 			->where('IS_ARCHIVED', 'N')
-			->setOrder(['UPDATED_AT' => 'DESC', 'ID' => 'DESC'])
 			->setLimit(self::RECENT_PREFETCH_LIMIT);
+		$this->applyRecencyOrder($query);
 		(new RecycleBinFilter())->applyExclusion($query);
+		// Main documents are touched on every About-tab edit, so without this they would
+		// dominate the recent list the dialog shows before the user types anything.
+		(new MainDocumentFilter())->applyExclusion($query);
 
 		$documents = $query->fetchCollection()->getAll();
 		if (empty($documents))

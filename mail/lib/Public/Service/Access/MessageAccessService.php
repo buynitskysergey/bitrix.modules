@@ -20,6 +20,8 @@ class MessageAccessService
 	 * @param int $mailUserFieldId
 	 * @param int $entityId
 	 * @param int $userId
+	 * @param string|null $entityType Restricts the lookup to bindings of this type. Null accepts any type,
+	 *                                so a binding of another entity whose id equals $entityId also matches.
 	 *
 	 * @return array [bool hasAccess, array|null accessData]
 	 */
@@ -29,6 +31,7 @@ class MessageAccessService
 		int $mailUserFieldId,
 		int $entityId,
 		int $userId,
+		?string $entityType = null,
 	): array
 	{
 		$filter = [
@@ -37,6 +40,11 @@ class MessageAccessService
 			'=ENTITY_UF_ID' => $mailUserFieldId,
 			'=ENTITY_ID' => $entityId,
 		];
+
+		if ($entityType !== null)
+		{
+			$filter['=ENTITY_TYPE'] = $entityType;
+		}
 
 		$access = MessageAccessTable::getList(['filter' => $filter, 'limit' => 1])->fetch();
 

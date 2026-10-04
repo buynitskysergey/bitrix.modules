@@ -58,6 +58,10 @@ class MessageUploadQueueTable extends Entity\DataManager
 			'ATTEMPTS' => array(
 				'data_type' => 'integer',
 			),
+			'GENERATION_ID' => array(
+				'data_type' => 'integer',
+				'default_value' => 0,
+			),
 			new Reference(
 				'UID_TABLE',
 				MailMessageUidTable::class,

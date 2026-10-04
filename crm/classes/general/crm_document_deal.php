@@ -578,16 +578,6 @@ class CCrmDocumentDeal extends CCrmDocument implements IBPWorkflowDocument
 			$arFields['IS_MANUAL_OPPORTUNITY'] = $arFields['OPPORTUNITY'] > 0 ? 'Y' : 'N';
 		}
 
-		$dealUpdateAction = new Crm\Reservation\Component\DealUpdateAction($arDocumentID['ID']);
-		$dealUpdateAction->before($arFields, static function () use ($useTransaction, $DB) {
-			if ($useTransaction)
-			{
-				$DB->Rollback();
-			}
-
-			throw new Exception('Reservation before error');
-		});
-
 		$CCrmEntity = new CCrmDeal(false);
 		$res = $CCrmEntity->Update(
 			$arDocumentID['ID'],
@@ -609,15 +599,6 @@ class CCrmDocumentDeal extends CCrmDocument implements IBPWorkflowDocument
 			}
 			throw new Exception($CCrmEntity->LAST_ERROR);
 		}
-
-		$dealUpdateAction->after(static function (Main\Result $processInventoryManagementResult) use ($useTransaction, $DB) {
-			if ($useTransaction)
-			{
-				$DB->Rollback();
-			}
-
-			throw new Exception(implode(', ', $processInventoryManagementResult->getErrorMessages()));
-		});
 
 		if (isset($arFields['TRACKING_SOURCE_ID']))
 		{

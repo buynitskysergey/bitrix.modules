@@ -10,6 +10,8 @@ class CAllDavVirtualFileSystem
 
 	public static function CheckLock($path)
 	{
+		// Expired locks are cleaned up by the lazy per-path delete below and by the
+		// collectExpiredLocks() agent, so no global sweep runs in the request hot path.
 		if (isset(self::$lockCache[$path]))
 		{
 			return self::$lockCache[$path];
@@ -29,7 +31,25 @@ class CAllDavVirtualFileSystem
 		return self::$lockCache[$path] = $arResult;
 	}
 
-	public static function Lock($path, $token, &$timeout, $owner, $scope, $type)
+	/**
+	 * Bitrix agent entry point: sweeps expired locks and re-schedules itself.
+	 * Idempotent — deletes only rows with EXPIRES < now.
+	 */
+	public static function collectExpiredLocks()
+	{
+		self::purgeExpired();
+
+		return "CDavVirtualFileSystem::collectExpiredLocks();";
+	}
+
+	// Delete every expired lock row in one statement (non-fatal, like Delete()).
+	protected static function purgeExpired()
+	{
+		global $DB;
+		$DB->Query("DELETE FROM b_dav_locks WHERE EXPIRES < " . time(), true);
+	}
+
+	public static function Lock($path, $token, &$timeout, $owner, $scope, $type, $userId = null)
 	{
 		if (!$path)
 		{
@@ -55,6 +75,7 @@ class CAllDavVirtualFileSystem
 				"PATH" => $path,
 				"EXPIRES" => $timeout,
 				"LOCK_OWNER" => $owner,
+				"LOCK_USER_ID" => $userId,
 				"LOCK_TYPE" => $type,
 				"LOCK_SCOPE" => $scope,
 			));
@@ -68,7 +89,7 @@ class CAllDavVirtualFileSystem
 		return false;
 	}
 
-	public static function UpdateLock($path, $token, &$timeout, &$owner, &$scope, &$type)
+	public static function UpdateLock($path, $token, &$timeout, &$owner, &$scope, &$type, $userId = null)
 	{
 		if (!$path || !$token)
 		{
@@ -91,7 +112,15 @@ class CAllDavVirtualFileSystem
 
 			try
 			{
-				self::Update($token, array("EXPIRES" => $timeout));
+				// Backfill/refresh the numeric owner on refresh (legacy rows may lack it).
+				// Only set LOCK_USER_ID when a valid principal is known; otherwise keep the
+				// previously stored owner instead of overwriting it with NULL.
+				$updateFields = array("EXPIRES" => $timeout);
+				if ($userId !== null && (int)$userId > 0)
+				{
+					$updateFields["LOCK_USER_ID"] = (int)$userId;
+				}
+				self::Update($token, $updateFields);
 				return true;
 			}
 			catch (Exception $e)
@@ -173,6 +202,12 @@ class CAllDavVirtualFileSystem
 			{
 				throw new Exception("LOCK_DEPTH");
 			}
+		}
+
+		// Optional numeric lock owner; null stays null (nullable column). Not a required field.
+		if (isset($arFields['LOCK_USER_ID']))
+		{
+			$arFields["LOCK_USER_ID"] = (int)$arFields["LOCK_USER_ID"];
 		}
 
 		if ($addMode && !isset($arFields['ID']))

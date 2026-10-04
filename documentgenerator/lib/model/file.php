@@ -79,6 +79,44 @@ class FileTable extends Main\Entity\DataManager
 	}
 
 	/**
+	 * Checks whether a document or template references the file.
+	 *
+	 * @param int $fileId
+	 * @return bool
+	 */
+	public static function isReferenced($fileId): bool
+	{
+		$fileId = (int)$fileId;
+		if ($fileId <= 0)
+		{
+			return false;
+		}
+
+		$document = DocumentTable::query()
+			->setSelect(['ID'])
+			->setFilter([
+				'LOGIC' => 'OR',
+				'=FILE_ID' => $fileId,
+				'=IMAGE_ID' => $fileId,
+				'=PDF_ID' => $fileId,
+			])
+			->setLimit(1)
+			->fetch()
+		;
+		if ($document)
+		{
+			return true;
+		}
+
+		return (bool)TemplateTable::query()
+			->setSelect(['ID'])
+			->where('FILE_ID', $fileId)
+			->setLimit(1)
+			->fetch()
+		;
+	}
+
+	/**
 	 * @param Event $event
 	 * @return Main\EventResult
 	 */
@@ -86,24 +124,18 @@ class FileTable extends Main\Entity\DataManager
 	{
 		$result = new Main\Entity\EventResult();
 		$id = $event->getParameter('primary')['ID'];
-		if(DocumentTable::getRow(['filter' => [
-			'FILE_ID' => $id,
-		]]))
+		if (static::isReferenced($id))
 		{
-			$result->addError(new Main\Entity\EntityError(Loc::getMessage('DOCUMENTGENERATOR_MODEL_FILE_DOCUMENT_EXISTS')));
-		}
-		if(TemplateTable::getRow(['filter' => [
-			'FILE_ID' => $id,
-		]]))
-		{
-			$result->addError(new Main\Entity\EntityError(Loc::getMessage('DOCUMENTGENERATOR_MODEL_FILE_TEMPLATE_EXISTS')));
+			$result->addError(
+				new Main\Entity\EntityError(Loc::getMessage('DOCUMENTGENERATOR_MODEL_FILE_DOCUMENT_EXISTS'))
+			);
 		}
 
-		if(!$result->getErrors())
+		if (!$result->getErrors())
 		{
 			$data = static::getById($id)->fetch();
 
-			if($data['STORAGE_TYPE'])
+			if ($data && $data['STORAGE_TYPE'])
 			{
 				/** @var Storage $storage */
 				$storage = new $data['STORAGE_TYPE'];

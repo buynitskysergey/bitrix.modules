@@ -12,9 +12,11 @@ final class CallAssessmentItem
 {
 	public const LOW_BORDER_DEFAULT = 30;
 	public const HIGH_BORDER_DEFAULT = 70;
+	public const STATUS_GENERATING_FROM_DIALOG = 'GENERATING_FROM_DIALOG';
 
 	private ?int $id;
 	private string $title;
+	private string $description;
 	private string $prompt;
 	private ?string $gist = null;
 	private array $clientTypeIds;
@@ -24,11 +26,14 @@ final class CallAssessmentItem
 	private array $availabilityData = [];
 	private bool $isEnabled;
 	private bool $isDefault = false;
+	private bool $isAiImprovementEnabled = true;
 	private int $jobId = 0;
 	private string $status = QueueTable::EXECUTION_STATUS_PENDING;
 	private ?string $code = null;
+	private ?string $updatedAt = null;
 	private int $lowBorder = self::LOW_BORDER_DEFAULT;
 	private int $highBorder = self::HIGH_BORDER_DEFAULT;
+	private ?array $criteria = null;
 
 	public static function createFromEntity(CopilotCallAssessment $callAssessmentItem): self
 	{
@@ -36,6 +41,7 @@ final class CallAssessmentItem
 
 		$instance->id = $callAssessmentItem->getId();
 		$instance->title = $callAssessmentItem->getTitle();
+		$instance->description = $callAssessmentItem->getDescription();
 		$instance->prompt = $callAssessmentItem->getPrompt();
 		$instance->gist = $callAssessmentItem->getGist();
 
@@ -64,9 +70,11 @@ final class CallAssessmentItem
 
 		$instance->isEnabled = $callAssessmentItem->getIsEnabled();
 		$instance->isDefault = true; // not used in Crm.Copilot.CallAssessment
+		$instance->isAiImprovementEnabled = $callAssessmentItem->getIsAiImprovementEnabled() ?? true;
 		$instance->jobId = $callAssessmentItem->getJobId();
 		$instance->status = $callAssessmentItem->getStatus();
 		$instance->code = $callAssessmentItem->getCode();
+		$instance->updatedAt = $callAssessmentItem->getUpdatedAt()?->format(DATE_ATOM);
 		$instance->lowBorder = $callAssessmentItem->getLowBorder();
 		$instance->highBorder = $callAssessmentItem->getHighBorder();
 
@@ -79,6 +87,7 @@ final class CallAssessmentItem
 
 		$instance->id = $data['id'] ?? null;
 		$instance->title = $data['title'] ?? '';
+		$instance->description = $data['description'] ?? '';
 		$instance->prompt = $data['prompt'] ?? '';
 		$instance->gist = $data['gist'] ?? null;
 		$instance->clientTypeIds = $data['clientTypeIds'] ?? [];
@@ -102,20 +111,27 @@ final class CallAssessmentItem
 
 		$instance->isEnabled = $instance->availabilityType !== AvailabilityType::INACTIVE;
 		$instance->isDefault = true; // not used in Crm.Copilot.CallAssessment
+		$instance->isAiImprovementEnabled = $data['isAiImprovementEnabled'] ?? true;
 		$instance->jobId = $data['jobId'] ?? 0;
 		$instance->status = $data['status'] ?? QueueTable::EXECUTION_STATUS_PENDING;
 		$instance->code = $data['code'] ?? null;
+		$instance->updatedAt = $data['promptUpdatedAt'] ?? null;
 		$instance->lowBorder = $data['lowBorder'] ?? self::LOW_BORDER_DEFAULT;
 		$instance->highBorder = $data['highBorder'] ?? self::HIGH_BORDER_DEFAULT;
+		if (isset($data['criteria']) && is_array($data['criteria']))
+		{
+			$instance->criteria = $data['criteria'];
+		}
 
 		return $instance;
 	}
 
 	public function toArray(): array
 	{
-		return [
+		$data = [
 			'id' => $this->id,
 			'title' => $this->title,
+			'description' => $this->description,
 			'prompt' => $this->prompt,
 			'gist' => $this->gist,
 			'clientTypeIds' => $this->clientTypeIds,
@@ -124,12 +140,21 @@ final class CallAssessmentItem
 			'availabilityType' => $this->availabilityType->value,
 			'availabilityData' => $this->availabilityData,
 			'isEnabled' => $this->availabilityType !== AvailabilityType::INACTIVE,
+			'isAiImprovementEnabled' => $this->isAiImprovementEnabled,
 			'jobId' => $this->jobId,
 			'status' => $this->status,
 			'code' => $this->code,
+			'promptUpdatedAt' => $this->updatedAt,
 			'lowBorder' => $this->lowBorder,
 			'highBorder' => $this->highBorder,
 		];
+
+		if ($this->criteria !== null)
+		{
+			$data['criteria'] = $this->criteria;
+		}
+
+		return $data;
 	}
 
 	public function getId(): ?int
@@ -142,6 +167,25 @@ final class CallAssessmentItem
 		return $this->title;
 	}
 
+	public function setTitle(string $title): self
+	{
+		$this->title = $title;
+
+		return $this;
+	}
+
+	public function getDescription(): string
+	{
+		return $this->description;
+	}
+
+	public function setDescription(string $description): self
+	{
+		$this->description = $description;
+
+		return $this;
+	}
+
 	public function getPrompt(): string
 	{
 		return $this->prompt;
@@ -152,7 +196,7 @@ final class CallAssessmentItem
 		return $this->gist;
 	}
 
-	public function setGist(?string $gist): CallAssessmentItem
+	public function setGist(?string $gist): self
 	{
 		$this->gist = $gist;
 
@@ -179,7 +223,7 @@ final class CallAssessmentItem
 		return $this->availabilityType->value;
 	}
 
-	public function setAvailabilityType(AvailabilityType $availabilityType): CallAssessmentItem
+	public function setAvailabilityType(AvailabilityType $availabilityType): self
 	{
 		$this->availabilityType = $availabilityType;
 
@@ -201,12 +245,24 @@ final class CallAssessmentItem
 		return $this->isDefault;
 	}
 
+	public function isAiImprovementEnabled(): bool
+	{
+		return $this->isAiImprovementEnabled;
+	}
+
+	public function setAiImprovementEnabled(bool $value): self
+	{
+		$this->isAiImprovementEnabled = $value;
+
+		return $this;
+	}
+
 	public function getJobId(): int
 	{
 		return $this->jobId;
 	}
 
-	public function setJobId(int $jobId): CallAssessmentItem
+	public function setJobId(int $jobId): self
 	{
 		$this->jobId = $jobId;
 
@@ -218,7 +274,7 @@ final class CallAssessmentItem
 		return $this->status;
 	}
 
-	public function setStatus(string $status): CallAssessmentItem
+	public function setStatus(string $status): self
 	{
 		$this->status = $status;
 
@@ -230,7 +286,7 @@ final class CallAssessmentItem
 		return $this->code;
 	}
 
-	public function setCode(?string $code): CallAssessmentItem
+	public function setCode(?string $code): self
 	{
 		$this->code = $code;
 
@@ -245,5 +301,17 @@ final class CallAssessmentItem
 	public function getHighBorder(): int
 	{
 		return $this->highBorder;
+	}
+
+	public function getCriteria(): ?array
+	{
+		return $this->criteria;
+	}
+
+	public function setCriteria(array $criteria): self
+	{
+		$this->criteria = $criteria;
+
+		return $this;
 	}
 }

@@ -398,6 +398,10 @@ class Base
 		$renderResult = implode('', $controls) . <<<HTML
 				<div>
 					<a onclick="BX.Bizproc.FieldType.cloneControl({$property}, '{$name}', this.parentNode); return false;"
+						onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }"
+						role="button"
+						tabindex="0"
+						data-testid="bizproc-field-clone-btn"
 						class="bizproc-type-control-clone-btn">
 						{$messageAdd}
 					</a>

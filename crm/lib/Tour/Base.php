@@ -87,6 +87,14 @@ abstract class Base
 		return static::OPTION_NAME;
 	}
 
+	/**
+	 * Override in subclasses to reset extra state (e.g. global options) on resetTour.
+	 * User-level option is removed by the reset caller; this hook is for everything else.
+	 */
+	public function onReset(): void
+	{
+	}
+
 	protected function isBuildComponentDisabled(): bool
 	{
 		return $this->isShowDeadlineExpired()

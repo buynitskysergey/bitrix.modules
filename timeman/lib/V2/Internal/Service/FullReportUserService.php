@@ -45,6 +45,11 @@ final class FullReportUserService
 	 */
 	private ?array $companyUserIdsCache = null;
 
+	/**
+	 * @var array<int, array<int, int>>
+	 */
+	private array $managerIdsCache = [];
+
 	private readonly DepartmentUsersResolver $departmentUsersResolver;
 
 	private readonly Integration\Intranet\UserChecker $intranetUserChecker;
@@ -175,14 +180,93 @@ final class FullReportUserService
 	}
 
 	/**
+	 * Whether $actorId is allowed to read $targetUserId's full report.
+	 *
+	 * Same semantics as membership in getUserIdsAccessibleToRead(), but resolved for a single target:
+	 * the "read all" branches (admin / OP_READ_WORKTIME_ALL / employeeReadLevel >= 2 / headReadLevel
+	 * escalation) short-circuit to true WITHOUT materializing the whole b_user table, which matters on
+	 * the per-click discuss path. The negative branches probe only the actor's own subtree.
+	 */
+	public function canUserReadUser(int $actorId, int $targetUserId): bool
+	{
+		if ($actorId <= 0 || $targetUserId <= 0)
+		{
+			return false;
+		}
+
+		if ($this->userHasOperation($actorId, UserPermissionsManager::OP_READ_WORKTIME_ALL))
+		{
+			return true;
+		}
+
+		if (!$this->userHasOperation($actorId, UserPermissionsManager::OP_READ_WORKTIME_SUBORDINATE))
+		{
+			return false;
+		}
+
+		// The actor is always allowed to read themselves (they are seeded into the accessible list).
+		if ($targetUserId === $actorId)
+		{
+			return true;
+		}
+
+		$accessSettings = \CTimeMan::GetAccessSettings();
+		$employeeReadLevel = (int)($accessSettings['READ']['EMPLOYEE'] ?? 0);
+		$headReadLevel = (int)($accessSettings['READ']['HEAD'] ?? 0);
+
+		if ($employeeReadLevel >= 2)
+		{
+			return true;
+		}
+
+		if (
+			$employeeReadLevel >= 1
+			&& in_array(
+				$targetUserId,
+				$this->normalizeUserIds($this->departmentUsersResolver->getDepartmentUserIds($actorId)),
+				true,
+			)
+		)
+		{
+			return true;
+		}
+
+		$subordinateUserIds = $this->normalizeUserIds(
+			$this->departmentUsersResolver->getSubordinateDepartmentUserIds($actorId, $headReadLevel === 1),
+		);
+
+		// headReadLevel === 2 escalates to company-wide read as soon as the actor has any subordinate.
+		if ($headReadLevel === 2 && !empty($subordinateUserIds))
+		{
+			return true;
+		}
+
+		if (in_array($targetUserId, $subordinateUserIds, true))
+		{
+			return true;
+		}
+
+		return in_array(
+			$targetUserId,
+			$this->normalizeUserIds((new SubordinateAccessUsersResolver())->getSubordinateAccessUsers($actorId)),
+			true,
+		);
+	}
+
+	/**
 	 * @return array<int, int>
 	 */
 	public function getManagerIds(int $userId): array
 	{
+		if (isset($this->managerIdsCache[$userId]))
+		{
+			return $this->managerIdsCache[$userId];
+		}
+
 		$managerIds = (array)\CTimeMan::getUserManagers($userId);
 		Collection::normalizeArrayValuesByInt($managerIds, false);
 
-		return array_values(array_filter(
+		return $this->managerIdsCache[$userId] = array_values(array_filter(
 			array_unique($managerIds),
 			static fn (int $managerId): bool => $managerId > 0 && $managerId !== $userId,
 		));

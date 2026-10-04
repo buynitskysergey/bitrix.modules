@@ -9,17 +9,12 @@ use Bitrix\Main\UserTable;
 use Bitrix\Note\Internal\Mention\MentionType;
 use Bitrix\Note\Internal\Service\Mention\MentionEntityResolver;
 use Bitrix\Note\Internal\Service\Mention\ResolvedMention;
-use CFile;
+use Bitrix\Note\Internal\Service\User\AvatarUrl;
 use CSite;
 use CUser;
 
 final class UserMentionResolver implements MentionEntityResolver
 {
-	// The chip renders the avatar in em, so it can grow up to ~1em of a heading and
-	// must stay crisp on HiDPI. Resize to a resolution with headroom (source is only
-	// ever downscaled for display); disk-cached after first generation.
-	private const AVATAR_SIZE = 100;
-
 	public function resolve(array $ids): array
 	{
 		$currentUserId = (int)CurrentUser::get()->getId();
@@ -76,21 +71,6 @@ final class UserMentionResolver implements MentionEntityResolver
 
 	private function resolveAvatar(int $fileId): ?string
 	{
-		if ($fileId <= 0)
-		{
-			return null;
-		}
-
-		// Per-file resize call; no batch resize API exists in Bitrix — result is disk-cached after first generation; only called for available users with a photo set.
-		$resized = CFile::ResizeImageGet(
-			$fileId,
-			['width' => self::AVATAR_SIZE, 'height' => self::AVATAR_SIZE],
-			BX_RESIZE_IMAGE_PROPORTIONAL,
-			false,
-		);
-
-		$src = $resized['src'] ?? null;
-
-		return is_string($src) && $src !== '' ? $src : null;
+		return AvatarUrl::forFile($fileId);
 	}
 }

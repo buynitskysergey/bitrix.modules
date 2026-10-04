@@ -105,7 +105,7 @@ final class ControllerData implements Arrayable
 		return new self(
 			module: $data['module'],
 			controllerFqcn: $data['controllerFqcn'],
-			dtoFqcn: $data['dto'] ?? null,
+			dtoFqcn: $data['dtoFqcn'] ?? null,
 			namespace: $data['namespace'] ?? null,
 			enabled: $data['enabled'] ?? true,
 			methods: $data['methods'] ?? [],

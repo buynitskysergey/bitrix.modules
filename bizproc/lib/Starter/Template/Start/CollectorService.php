@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Starter\Template\Start;
 
+use Bitrix\Bizproc\Public\Provider\PilotVisibilityProvider;
 use Bitrix\Bizproc\Starter\Dto\TriggerDescriptorDto;
+use Bitrix\Bizproc\Starter\Dto\TriggerUpgradeDto;
+use Bitrix\Bizproc\Starter\ModuleSettings;
 use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\AutoExecuteFilter;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTriggerTable;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
@@ -25,14 +28,19 @@ final class CollectorService
 	public function hasTemplates(CollectRequest $request): bool
 	{
 		$cacheKey = $this->buildCacheKey($request);
-		if (isset(self::$hasTemplatesCache[$cacheKey]))
+		if (!isset(self::$hasTemplatesCache[$cacheKey]))
+		{
+			self::$hasTemplatesCache[$cacheKey] = ($this->hasLegacyTemplates($request) || $this->hasTriggerTemplates($request));
+		}
+
+		if (!self::$hasTemplatesCache[$cacheKey] || $request->visibleForUserId === null)
 		{
 			return self::$hasTemplatesCache[$cacheKey];
 		}
 
-		self::$hasTemplatesCache[$cacheKey] = ($this->hasLegacyTemplates($request) || $this->hasTriggerTemplates($request));
-
-		return self::$hasTemplatesCache[$cacheKey];
+		// the cached answer belongs to the selection and stays as free of the employee as its key is, so
+		// whether any of what the selection found is visible to this one is asked of the collected list
+		return count($this->collect($request)) > 0;
 	}
 
 	public function collect(CollectRequest $request): StartableTemplateCollection
@@ -40,7 +48,7 @@ final class CollectorService
 		$cacheKey = $this->buildCacheKey($request);
 		if (isset(self::$cache[$cacheKey]))
 		{
-			return $this->buildCollectionFromCache(self::$cache[$cacheKey]);
+			return $this->narrowToVisible($this->buildCollectionFromCache(self::$cache[$cacheKey]), $request);
 		}
 
 		$templates = [];
@@ -57,7 +65,42 @@ final class CollectorService
 
 		self::$cache[$cacheKey] = $this->normalizeTemplates($templates);
 
-		return $this->buildCollectionFromTemplates($templates);
+		return $this->narrowToVisible($this->buildCollectionFromTemplates($templates), $request);
+	}
+
+	/**
+	 * Drops the templates the employee of the request may not see. The narrowing is done over the result and
+	 * never over the cache: the employee is not part of the cache key, so a cached selection narrowed once
+	 * would be handed to the next employee as his own.
+	 */
+	private function narrowToVisible(
+		StartableTemplateCollection $collection,
+		CollectRequest $request,
+	): StartableTemplateCollection
+	{
+		if ($request->visibleForUserId === null || count($collection) === 0)
+		{
+			return $collection;
+		}
+
+		$templates = $collection->getAll();
+		$visibleIds = array_flip(
+			(new PilotVisibilityProvider())->filterVisibleIds(
+				$request->visibleForUserId,
+				array_map(static fn(StartableTemplate $template): int => $template->id, $templates),
+			),
+		);
+
+		$narrowed = new StartableTemplateCollection();
+		foreach ($templates as $template)
+		{
+			if (isset($visibleIds[$template->id]))
+			{
+				$narrowed->add($template);
+			}
+		}
+
+		return $narrowed;
 	}
 
 	private function hasLegacyTemplates(CollectRequest $request): bool
@@ -97,14 +140,14 @@ final class CollectorService
 
 	private function hasTriggerTemplates(CollectRequest $request): bool
 	{
-		$triggerType = $this->getTriggerTypeByEvent($request);
-		if ($triggerType === null)
+		$triggerTypes = $this->getTriggerTypesByEvent($request);
+		if (!$triggerTypes)
 		{
 			return false;
 		}
 
 		return $this->hasMatchingRow(
-			$this->buildTriggerQuery($request, false, $triggerType),
+			$this->buildTriggerQuery($request, false, $triggerTypes),
 			function(array $row) use ($request): bool
 			{
 				return $this->isTriggerTemplateMatch($row, $request);
@@ -117,14 +160,14 @@ final class CollectorService
 	 */
 	private function collectTriggerTemplates(CollectRequest $request): StartableTemplateCollection
 	{
-		$triggerType = $this->getTriggerTypeByEvent($request);
-		if ($triggerType === null)
+		$triggerTypes = $this->getTriggerTypesByEvent($request);
+		if (!$triggerTypes)
 		{
 			return new StartableTemplateCollection();
 		}
 
 		return $this->collectMatchingTemplates(
-			$this->buildTriggerQuery($request, true, $triggerType),
+			$this->buildTriggerQuery($request, true, $triggerTypes),
 			function(array $row): StartableTemplate
 			{
 				return new StartableTemplate(
@@ -163,7 +206,10 @@ final class CollectorService
 		return $query;
 	}
 
-	private function buildTriggerQuery(CollectRequest $request, bool $forCollection, string $triggerType): Query
+	/**
+	 * @param list<string> $triggerTypes
+	 */
+	private function buildTriggerQuery(CollectRequest $request, bool $forCollection, array $triggerTypes): Query
 	{
 		[$moduleId, $entity, $documentType] = $request->complexDocumentType;
 		$query = WorkflowTemplateTriggerTable::query()
@@ -182,7 +228,7 @@ final class CollectorService
 						'TEMPLATE_PARAMETERS' => 'TEMPLATE.PARAMETERS',
 					],
 			)
-			->where('TRIGGER_TYPE', $triggerType)
+			->whereIn('TRIGGER_TYPE', $triggerTypes)
 			->where('MODULE_ID', $moduleId)
 			->where('ENTITY', $entity)
 			->where('DOCUMENT_TYPE', $documentType)
@@ -282,7 +328,10 @@ final class CollectorService
 		return true;
 	}
 
-	private function getTriggerTypeByEvent(CollectRequest $request): ?string
+	/**
+	 * @return list<string>
+	 */
+	private function getTriggerTypesByEvent(CollectRequest $request): array
 	{
 		$moduleSettings = \CBPRuntime::getRuntime()->getDocumentService()->getStarterModuleSettings(
 			$request->complexDocumentType,
@@ -290,7 +339,7 @@ final class CollectorService
 
 		if ($moduleSettings === null)
 		{
-			return null;
+			return [];
 		}
 
 		if (
@@ -305,11 +354,40 @@ final class CollectorService
 			;
 
 			return $descriptor instanceof TriggerDescriptorDto && $descriptor->triggerType !== ''
-				? $descriptor->triggerType
-				: null;
+				? $this->addDeprecatedTriggerTypes($moduleSettings, $descriptor->triggerType)
+				: [];
 		}
 
-		return null;
+		return [];
+	}
+
+	/**
+	 * A template saved before the slot moved to the actual trigger still carries the deprecated type until
+	 * its node is re-saved, so the slot type is collected together with every deprecated type the module
+	 * upgrades into it - otherwise such a template would drop out of the start surfaces of its own event.
+	 *
+	 * @return list<string>
+	 */
+	private function addDeprecatedTriggerTypes(ModuleSettings $moduleSettings, string $triggerType): array
+	{
+		$triggerTypes = [$triggerType];
+
+		foreach ($moduleSettings->getTriggerUpgradeMap() as $deprecatedType => $upgrade)
+		{
+			// An upgrade of another shape means the owner module speaks another version of the contract: only
+			// the type it names is left out of the slot, the rest of the map is still collected.
+			if (!$upgrade instanceof TriggerUpgradeDto)
+			{
+				continue;
+			}
+
+			if ($upgrade->triggerType === $triggerType)
+			{
+				$triggerTypes[] = (string)$deprecatedType;
+			}
+		}
+
+		return $triggerTypes;
 	}
 
 	private function isMatchingCategory(array $applyRules, ?int $categoryId): bool

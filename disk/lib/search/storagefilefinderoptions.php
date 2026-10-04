@@ -22,6 +22,7 @@ final class StorageFileFinderOptions
 		private readonly ?int $folderId = null,
 		private readonly ?array $proxyTypes = null,
 		private readonly ?string $folderExcludedProxyType = null,
+		private readonly array $additionalFilter = [],
 		private readonly ?array $typeFileValues = null,
 	)
 	{
@@ -62,6 +63,11 @@ final class StorageFileFinderOptions
 	public function getFolderExcludedProxyType(): ?string
 	{
 		return $this->folderExcludedProxyType;
+	}
+
+	public function getAdditionalFilter(): array
+	{
+		return $this->additionalFilter;
 	}
 
 	/**

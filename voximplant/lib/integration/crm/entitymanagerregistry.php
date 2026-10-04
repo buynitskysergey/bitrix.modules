@@ -96,4 +96,9 @@ class EntityManagerRegistry
 		static::$instances[$call->getCallId()] = $facilityInstance;
 		return $facilityInstance;
 	}
+
+	public static function forget(Call $call): void
+	{
+		unset(static::$instances[$call->getCallId()]);
+	}
 }

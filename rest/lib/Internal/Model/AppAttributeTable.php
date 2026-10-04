@@ -13,12 +13,11 @@ use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\StringField;
 use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
-use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Rest\AppTable;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 
 /**
- *
  * DO NOT WRITE ANYTHING BELOW THIS
  *
  * <<< ORMENTITYANNOTATION
@@ -93,9 +92,10 @@ class AppAttributeTable extends DataManager
 			sprintf(
 				'DELETE FROM %s WHERE APP_ID = %d',
 				static::getTableName(),
-				$appId
-			)
+				$appId,
+			),
 		);
+		self::resetScannerComputedState();
 	}
 
 	/**
@@ -114,8 +114,9 @@ class AppAttributeTable extends DataManager
 					static::getTableName(),
 					$appId,
 					$helper->forSql($type),
-				)
+				),
 			);
+			self::resetScannerComputedState();
 
 			return;
 		}
@@ -135,7 +136,28 @@ class AppAttributeTable extends DataManager
 				$appId,
 				$helper->forSql($type),
 				$escapedCodes,
-			)
+			),
 		);
+		self::resetScannerComputedState();
+	}
+
+	public static function onAfterAdd(Main\ORM\Event $event): void
+	{
+		self::resetScannerComputedState();
+	}
+
+	public static function onAfterUpdate(Main\ORM\Event $event): void
+	{
+		self::resetScannerComputedState();
+	}
+
+	public static function onAfterDelete(Main\ORM\Event $event): void
+	{
+		self::resetScannerComputedState();
+	}
+
+	private static function resetScannerComputedState(): void
+	{
+		LicenseScannerStateInvalidator::reset();
 	}
 }

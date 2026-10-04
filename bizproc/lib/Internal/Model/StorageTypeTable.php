@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Internal\Model;
 
-use Bitrix\Bizproc\Internal\Container;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\ORM\Entity;
@@ -113,16 +112,6 @@ class StorageTypeTable  extends DataManager
 	{
 		$fields = $event->getParameter('fields');
 		$result = new EventResult();
-
-		$limitsService = Container::getStorageLimitsService();
-		if ($limitsService && !$limitsService->canAddStorage())
-		{
-			$result->addError(new EntityError(
-				Loc::getMessage('BIZPROC_STORAGE_TYPE_MODEL_FIELD_LIMIT_EXCEEDED', [
-					'#LIMIT#' => $limitsService->getMaxStorages(),
-				])
-			));
-		}
 
 		$code = trim($fields['CODE'] ?? '');
 		if ($code !== '' && !preg_match(self::CODE_PATTERN, $code))

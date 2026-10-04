@@ -44,7 +44,7 @@ class CommentEntry extends TimelineEntry
 			self::attachFiles($createdId, $params['FILES']);
 		}
 
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $created);
 		self::buildSearchContent($createdId);
 
 		$event = new Main\Event("crm", self::ON_CRM_TIMELINE_COMMENT_ADD_EVENT, ['ID' => $createdId]);

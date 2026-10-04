@@ -16,6 +16,7 @@ final class HiddenAiAgentsRegistry
 		return [
 			'bitrix_ai_day_planner'  => AiAgentVisibility::hiddenEverywhere(),
 			'bitrix_booking_ai_call' => AiAgentVisibility::hiddenEverywhere(),
+			'bitrix_crm_call_assessment' => AiAgentVisibility::hiddenEverywhere(),
 		];
 	}
 

@@ -20,6 +20,13 @@ class Workflow implements \IBPWorkflowDocument
 	private const DOCUMENT_TYPE = 'WORKFLOW';
 	private const MODULE_ID = 'bizproc';
 
+	// Authoring operations on the WORKFLOW pseudo type are admin-only; view/start stay open.
+	private const AUTHORING_OPERATIONS = [
+		\CBPCanUserOperateOperation::CreateWorkflow,
+		\CBPCanUserOperateOperation::CreateAutomation,
+		\CBPCanUserOperateOperation::WriteDocument,
+	];
+
 	public static function getEntityName(): string
 	{
 		return Loc::getMessage('BIZPROC_PUBLIC_ENTITY_DOCUMENT_WORKFLOW_ENTITY_NAME') ?? '';
@@ -143,14 +150,22 @@ class Workflow implements \IBPWorkflowDocument
 
 	public static function canUserOperateDocument($operation, $userId, $documentId, $arParameters = []): bool
 	{
-		// TODO: some logic here.
-		return true;
+		return self::canUserOperate($operation, $userId);
 	}
 
 	public static function canUserOperateDocumentType($operation, $userId, $documentType, $arParameters = []): bool
 	{
-		// TODO: some logic here.
-		return true;
+		return self::canUserOperate($operation, $userId);
+	}
+
+	private static function canUserOperate($operation, $userId): bool
+	{
+		if (!in_array((int)$operation, self::AUTHORING_OPERATIONS, true))
+		{
+			return true;
+		}
+
+		return (new \CBPWorkflowTemplateUser((int)$userId))->isAdmin();
 	}
 
 	public static function getDocumentAdminPage($documentId): string

@@ -54,6 +54,15 @@ class CTempFile
 		}
 	}
 
+	/**
+	 * @param int $hours_to_keep_files
+	 * @param string|string[] $subdir Deterministic sub-path tied to the current session.
+	 *     Prefer leaving it empty: pass $subdir ONLY when you have to re-derive the same
+	 *     directory on a later request WITHOUT storing its name. It makes the method scan
+	 *     every hour bucket in the keep window to re-find a previously created directory.
+	 *     If you persist the returned path (session/DB) and reuse it, call it without $subdir.
+	 * @return string
+	 */
 	public static function GetDirectoryName($hours_to_keep_files = 0, $subdir = "")
 	{
 		if ($hours_to_keep_files <= 0)

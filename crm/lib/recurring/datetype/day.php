@@ -19,13 +19,13 @@ class Day extends Base
 	 *
 	 * @return Date
 	 */
-	public static function calculateDate(array $params, Date $startDate)
+	public static function calculateDate(array $params, Date $startDate, ?Date $currentDate = null)
 	{
 		$week = new self($params);
 		$week->setType($params[self::FIELD_TYPE_NAME]);
 		$week->setStartDate($startDate);
 		$week->setInterval($params[self::FIELD_INTERVAL_NAME]);
-		return $week->calculate();
+		return $week->calculate($currentDate);
 	}
 
 	/**
@@ -55,7 +55,7 @@ class Day extends Base
 	 *
 	 * @return Date
 	 */
-	public function calculate()
+	public function calculate(?Date $currentDate = null)
 	{
 		if ($this->isWorkdayType() && $this->type === self::TYPE_ALTERNATING_DAYS)
 		{
@@ -65,7 +65,7 @@ class Day extends Base
 		{
 			if ($this->type === self::TYPE_ALTERNATING_DAYS)
 			{
-				$today = new Date();
+				$today = $currentDate === null ? new Date() : clone $currentDate;
 				if ($this->interval > 1 || $this->startDate->getTimestamp() !== $today->getTimestamp())
 				{
 					$this->interval--;

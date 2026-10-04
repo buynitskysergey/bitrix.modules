@@ -35,6 +35,11 @@ class ICalMailManager
 	 */
 	public static function parseRequest(string $content): ?Calendar
 	{
+		if (!Loader::includeModule('calendar'))
+		{
+			return null;
+		}
+
 		return InboxManager::createInstance($content)
 			->parseContent()
 			->getComponent();

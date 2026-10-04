@@ -4,6 +4,7 @@ namespace Bitrix\Mail\Internals;
 
 use Bitrix\Mail\Internals\Entity\UserSignature;
 use Bitrix\Mail\Service\SharedSignature\AssignmentResolver;
+use Bitrix\Mail\Service\SharedSignature\SenderIdentityResolver;
 use Bitrix\Mail\Service\SharedSignature\SignatureMigrator;
 use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\Entity;
@@ -391,18 +392,52 @@ class UserSignatureTable extends DataManager
 	private static function buildRows(array $signatures, array $conditions): array
 	{
 		$assignments = self::loadAssignments(array_keys($signatures));
+		$resolver = new SenderIdentityResolver();
+		$identitiesByOwner = self::resolveSenderIdentities($signatures, $assignments, $resolver);
+		$mailboxEmails = self::resolveMailboxEmails($signatures, $assignments, $resolver);
 
-		$rows = [];
+		$candidatesBySender = [];
+		$strongSenderKeys = [];
 		foreach ($signatures as $id => $signature)
 		{
-			foreach (self::resolveSenders($assignments[$id] ?? []) as $sender)
+			$ownerId = (int)$signature['OWNER_ID'];
+			foreach (
+				self::resolveSenders(
+					$assignments[$id] ?? [],
+					$identitiesByOwner[$ownerId] ?? [],
+					$mailboxEmails,
+				) as $candidate
+			)
 			{
 				$row = [
 					'ID' => (int)$id,
-					'USER_ID' => (int)$signature['OWNER_ID'],
-					'SENDER' => $sender,
+					'USER_ID' => $ownerId,
+					'SENDER' => $candidate['sender'],
 					'SIGNATURE' => (string)$signature['SIGNATURE'],
 				];
+
+				$senderKey = $ownerId . "\0" . AssignmentResolver::normalizeSenderKey($candidate['sender']);
+				$key = $id . "\0" . $senderKey;
+				$row['_SENDER_KEY'] = $senderKey;
+				$candidatesBySender[$key][$candidate['rank']][] = $row;
+				if ($candidate['rank'] > 1)
+				{
+					$strongSenderKeys[$senderKey] = true;
+				}
+			}
+		}
+
+		$rows = [];
+		foreach ($candidatesBySender as $rankedCandidates)
+		{
+			$rank = max(array_keys($rankedCandidates));
+			foreach ($rankedCandidates[$rank] as $row)
+			{
+				if ($rank === 1 && isset($strongSenderKeys[$row['_SENDER_KEY']]))
+				{
+					continue;
+				}
+				unset($row['_SENDER_KEY']);
 
 				if (self::matchesConditions($row, $conditions))
 				{
@@ -498,31 +533,131 @@ class UserSignatureTable extends DataManager
 	 * Targets that the legacy shape cannot express (a mailbox, a department, a user) hide the
 	 * signature from this adapter instead of turning it into the general one.
 	 *
-	 * @param array{sender?: string[], other?: bool} $assignments
-	 * @return string[]
+	 * @param array{sender?: string[], mailbox?: array<int, string>, other?: bool} $assignments
+	 * @param array<string, array<string, mixed>> $identities
+	 * @param array<int, string> $mailboxEmails
+	 * @return array<array{sender: string, rank: int}>
 	 */
-	private static function resolveSenders(array $assignments): array
+	private static function resolveSenders(
+		array $assignments,
+		array $identities,
+		array $mailboxEmails,
+	): array
 	{
-		$senders = $assignments['sender'] ?? [];
-
-		if (!empty($senders))
+		$candidates = [];
+		foreach ($assignments['sender'] ?? [] as $sender)
 		{
-			return $senders;
+			$candidates[] = ['sender' => $sender, 'rank' => 2];
+			$identity = $identities[AssignmentResolver::normalizeSenderKey($sender)] ?? null;
+			if (($identity['isAlias'] ?? false) && !empty($identity['currentEmail']))
+			{
+				$candidates[] = [
+					'sender' => self::formatSender((string)($identity['name'] ?? ''), $identity['currentEmail']),
+					'rank' => 1,
+				];
+			}
 		}
 
-		return empty($assignments['other']) ? [''] : [];
+		foreach ($assignments['mailbox'] ?? [] as $mailboxId => $name)
+		{
+			if (isset($mailboxEmails[$mailboxId]))
+			{
+				$candidates[] = [
+					'sender' => self::formatSender($name, $mailboxEmails[$mailboxId]),
+					'rank' => 3,
+				];
+			}
+		}
+
+		if ($candidates !== [])
+		{
+			return $candidates;
+		}
+		if (isset($assignments['sender']) || isset($assignments['mailbox']))
+		{
+			return [];
+		}
+
+		return empty($assignments['other']) ? [['sender' => '', 'rank' => 0]] : [];
+	}
+
+	private static function formatSender(string $name, string $email): string
+	{
+		$name = trim($name);
+
+		return $name === '' ? $email : sprintf('%s <%s>', $name, $email);
+	}
+
+	private static function resolveSenderIdentities(
+		array $signatures,
+		array $assignments,
+		SenderIdentityResolver $resolver,
+	): array
+	{
+		$sendersByOwner = [];
+		foreach ($signatures as $signatureId => $signature)
+		{
+			foreach ($assignments[$signatureId]['sender'] ?? [] as $sender)
+			{
+				$sendersByOwner[(int)$signature['OWNER_ID']][] = $sender;
+			}
+		}
+
+		$result = [];
+		foreach ($sendersByOwner as $ownerId => $senders)
+		{
+			try
+			{
+				$result[$ownerId] = $resolver->resolveForOwner($ownerId, $senders);
+			}
+			catch (\Throwable)
+			{
+				$result[$ownerId] = [];
+			}
+		}
+
+		return $result;
+	}
+
+	private static function resolveMailboxEmails(
+		array $signatures,
+		array $assignments,
+		SenderIdentityResolver $resolver,
+	): array
+	{
+		$ownerIdsByMailboxId = [];
+		foreach ($signatures as $signatureId => $signature)
+		{
+			foreach (array_keys($assignments[$signatureId]['mailbox'] ?? []) as $mailboxId)
+			{
+				$ownerId = (int)$signature['OWNER_ID'];
+				$ownerIdsByMailboxId[$mailboxId] = isset($ownerIdsByMailboxId[$mailboxId])
+					&& $ownerIdsByMailboxId[$mailboxId] !== $ownerId
+						? 0
+						: $ownerId;
+			}
+		}
+
+		try
+		{
+			return $resolver->resolveMailboxEmails($ownerIdsByMailboxId);
+		}
+		catch (\Throwable)
+		{
+			return [];
+		}
 	}
 
 	/**
 	 * @param int[] $signatureIds
-	 * @return array<int, array{sender?: string[], other?: bool}>
+	 * @return array<int, array{sender?: string[], mailbox?: array<int, string>, other?: bool}>
 	 */
 	private static function loadAssignments(array $signatureIds): array
 	{
 		$grouped = [];
 
 		$result = SharedSignatureAssignmentTable::getList([
-			'select' => ['SIGNATURE_ID', 'TARGET_TYPE', 'TARGET_VALUE'],
+			'select' => ['SIGNATURE_ID', 'TARGET_TYPE', 'TARGET_ID', 'TARGET_VALUE'],
 			'filter' => ['=SIGNATURE_ID' => $signatureIds],
 			'order' => ['ID' => 'ASC'],
 		]);
@@ -533,6 +668,11 @@ class UserSignatureTable extends DataManager
 			if ((string)$row['TARGET_TYPE'] === SharedSignatureAssignmentTable::TARGET_SENDER)
 			{
 				$grouped[$signatureId]['sender'][] = (string)($row['TARGET_VALUE'] ?? '');
+			}
+			elseif ((string)$row['TARGET_TYPE'] === SharedSignatureAssignmentTable::TARGET_MAILBOX)
+			{
+				$grouped[$signatureId]['mailbox'][(int)$row['TARGET_ID']] =
+					(string)($row['TARGET_VALUE'] ?? '');
 			}
 			else
 			{

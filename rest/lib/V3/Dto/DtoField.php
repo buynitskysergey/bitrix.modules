@@ -34,6 +34,7 @@ class DtoField implements Arrayable
 		private bool $nullable = false,
 		private ?string $elementType = null,
 		null|array|DtoFieldRelation $relation = null,
+		private ?string $dynamicEnumProvider = null,
 	) {
 		if (!in_array($type, [self::DTO_FIELD_TYPE_PROPERTY, self::DTO_FIELD_TYPE_USER_FIELD, self::DTO_FIELD_TYPE_DYNAMIC_FIELD], true))
 		{
@@ -205,6 +206,18 @@ class DtoField implements Arrayable
 		return $this;
 	}
 
+	public function getDynamicEnumProvider(): ?string
+	{
+		return $this->dynamicEnumProvider;
+	}
+
+	public function setDynamicEnumProvider(?string $provider): self
+	{
+		$this->dynamicEnumProvider = $provider;
+
+		return $this;
+	}
+
 	public function getRequiredGroups(): ?array
 	{
 		return $this->requiredGroups;
@@ -252,6 +265,7 @@ class DtoField implements Arrayable
 			nullable: $data['nullable'] ?? false,
 			elementType: $data['elementType'] ?? null,
 			relation: $data['relation'] ?? null,
+			dynamicEnumProvider: $data['dynamicEnumProvider'] ?? null,
 		);
 	}
 
@@ -272,6 +286,7 @@ class DtoField implements Arrayable
 			'nullable' => $this->nullable,
 			'elementType' => $this->elementType,
 			'relation' => $this->relation?->toArray(),
+			'dynamicEnumProvider' => $this->dynamicEnumProvider,
 		];
 	}
 }

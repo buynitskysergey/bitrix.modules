@@ -405,6 +405,12 @@ class ChannelOpenLine implements iProvider
 			return null;
 		}
 
+		$title = self::getLiveChatTitle((int)$lineId);
+		if ($title !== '')
+		{
+			$widget['title'] = $title;
+		}
+
 		$widget['show'] = 'window.BX.LiveChat.openLiveChat();';
 		$widget['hide'] = 'window.BX.LiveChat.closeLiveChat();';
 		$widget['freeze'] = true;
@@ -412,6 +418,30 @@ class ChannelOpenLine implements iProvider
 		$widget['useColors'] = true;
 
 		return $widget;
+	}
+
+	/**
+	 * Returns the actual open line name to use as the live chat button title.
+	 * Reads LINE_NAME only and is independent of the pull queue, so the logic stays unit-testable.
+	 * Returns raw (unescaped) name; output escaping is the consumer's responsibility.
+	 *
+	 * @param int $lineId
+	 * @return string
+	 */
+	protected static function getLiveChatTitle(int $lineId): string
+	{
+		if ($lineId <= 0)
+		{
+			return '';
+		}
+
+		$row = ImOpenLines\Model\ConfigTable::getList([
+			'select' => ['LINE_NAME'],
+			'filter' => ['=ID' => $lineId],
+			'limit' => 1,
+		])->fetch();
+
+		return $row ? trim((string)($row['LINE_NAME'] ?? '')) : '';
 	}
 
 	/**

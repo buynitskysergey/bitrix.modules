@@ -6,14 +6,21 @@ namespace Bitrix\Note\Internal\Service\Sidebar;
 
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
+use Bitrix\Note\Internal\Entity\Document\BreadcrumbAncestor;
 use Bitrix\Note\Internal\Entity\RecycleBin\RecycleBinRecord;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Model\FavoriteTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Internal\Service\Document\DocumentBacklinksSnapshotResolver;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
+use Bitrix\Note\Internal\Service\Document\DocumentLastChangeResolver;
+use Bitrix\Note\Internal\Service\Document\DocumentSubscriptionStateResolver;
+use Bitrix\Note\Internal\Service\Document\DocumentViewsSnapshotResolver;
 use Bitrix\Note\Public\Provider\CollaborationProvider;
 class DirectOpenContextService
 {
@@ -23,17 +30,41 @@ class DirectOpenContextService
 	private CollectionRepository $collectionRepository;
 	private RecycleBinRepository $recycleBinRepository;
 	private DocumentCardMetaResolver $cardMetaResolver;
+	private DocumentViewsSnapshotResolver $viewsSnapshotResolver;
+	private DocumentLastChangeResolver $lastChangeResolver;
+	private DocumentSubscriptionStateResolver $subscriptionStateResolver;
+	private DocumentBacklinksSnapshotResolver $backlinksSnapshotResolver;
+	private FavoriteRepository $favoriteRepository;
 	public function __construct(
 		?DocumentRepository $documentRepository = null,
 		?CollectionRepository $collectionRepository = null,
 		?RecycleBinRepository $recycleBinRepository = null,
 		?DocumentCardMetaResolver $cardMetaResolver = null,
+		?DocumentViewsSnapshotResolver $viewsSnapshotResolver = null,
+		?DocumentLastChangeResolver $lastChangeResolver = null,
+		?DocumentSubscriptionStateResolver $subscriptionStateResolver = null,
+		?DocumentBacklinksSnapshotResolver $backlinksSnapshotResolver = null,
+		?FavoriteRepository $favoriteRepository = null,
 	)
 	{
 		$this->documentRepository = $documentRepository ?? new DocumentRepository();
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
 		$this->recycleBinRepository = $recycleBinRepository ?? new RecycleBinRepository();
 		$this->cardMetaResolver = $cardMetaResolver ?? new DocumentCardMetaResolver();
+		// [#6] Same initial "who viewed" snapshot DocumentController bundles for the plain
+		// getAction bootstrap — the direct-open (sidebar deep-link) path needs it too, since
+		// both feed the same DocumentEditorComponent/ActivityLineComponent tree on the client.
+		$this->viewsSnapshotResolver = $viewsSnapshotResolver ?? new DocumentViewsSnapshotResolver();
+		// Same bundling rationale as viewsSnapshotResolver above, for the activity-line chip's
+		// "last change" (author(s) + time).
+		$this->lastChangeResolver = $lastChangeResolver ?? new DocumentLastChangeResolver();
+		// Same bundling rationale again, for the subscription bell state.
+		$this->subscriptionStateResolver = $subscriptionStateResolver ?? new DocumentSubscriptionStateResolver();
+		// [DTO-01] Same bundling once more, for the incoming-links counter. Without it the chip is
+		// absent on first paint and pops in after its own request — the direct-open path feeds the
+		// very same activity line as getAction.
+		$this->backlinksSnapshotResolver = $backlinksSnapshotResolver ?? new DocumentBacklinksSnapshotResolver();
+		$this->favoriteRepository = $favoriteRepository ?? new FavoriteRepository();
 	}
 
 	public function resolve(int $documentId): ?array
@@ -117,10 +148,7 @@ class DirectOpenContextService
 				}
 
 				$ancestorIds[] = $ancestorId;
-				$ancestorPairs[] = [
-					'id' => $ancestorId,
-					'title' => (string)$ancestorDocument->getTitle(),
-				];
+				$ancestorPairs[] = new BreadcrumbAncestor($ancestorId, (string)$ancestorDocument->getTitle());
 			}
 		}
 
@@ -247,11 +275,16 @@ class DirectOpenContextService
 		}
 
 		$userId = $this->getCurrentUserId();
+		// The document is read through the ORM cache here (DocumentRepository::getById), so the
+		// `canEnableCollaboration` this carries is a hint; the uncached verdict rides on
+		// CollaborationSyncController::loadForCollaboration.
 		$collabMeta = (new CollaborationProvider())->buildCollaborationMeta(
 			$targetDocumentId,
 			$collectionId,
 			$userId,
 			$canEditDocument,
+			$targetDocument->getContentFormat(),
+			$targetDocument->getMaterializedUptoId(),
 		);
 
 		$targetArchivedAt = $targetDocument->getArchivedAt();
@@ -264,13 +297,21 @@ class DirectOpenContextService
 			'canManagePermissions' => $canManagePermissions,
 			'parentId' => $this->toNullableInt($targetDocumentEntity->getParentId()),
 			'title' => $targetDocumentEntity->getTitle(),
+			// Mirrors DocumentController::getAction so the activity-line "Создан …" fallback
+			// works on the direct-open / server-render bootstrap path, not only via getAction.
+			'createdAt' => $targetDocument->getCreatedAt()->format('c'),
 			'contentFormat' => $targetDocument->getContentFormat(),
 			'position' => $targetDocumentEntity->getPosition(),
 			'isArchived' => $isTargetArchived,
 			'archivedAt' => $targetArchivedAt?->format('c'),
 			'isTrashed' => false,
 			'hasChildren' =>(bool)($hasChildrenMap[$targetDocumentId] ?? false),
-			'ancestors' => $ancestorPairs,
+			'ancestors' => BreadcrumbAncestor::listToArray($ancestorPairs),
+			'views' => $this->viewsSnapshotResolver->resolve($targetDocumentId),
+			'lastChange' => $this->lastChangeResolver->resolve($targetDocumentId),
+			'subscription' => $this->subscriptionStateResolver->resolve($targetDocumentId, $this->getCurrentUserId()),
+			'backlinks' => $this->backlinksSnapshotResolver->resolve($targetDocumentId),
+			'isFavorite' => $this->isFavorite($targetDocumentId),
 		];
 
 		$yjsState = $targetDocument->getYjsState();
@@ -325,12 +366,33 @@ class DirectOpenContextService
 	{
 		$canEdit = $snapshot['canEdit'];
 		$userId = $this->getCurrentUserId();
+		// Same ORM-cached read as the collection path above, so `canEnableCollaboration` is a hint here too.
 		$collabMeta = (new CollaborationProvider())->buildCollaborationMeta(
 			$documentId,
 			$collectionId,
 			$userId,
 			$canEdit,
+			$document->getContentFormat(),
+			$document->getMaterializedUptoId(),
 		);
+
+		// Breadcrumb for a shared document: the container collection is a label only (no
+		// collectionId — the crumb renders as plain text since the workspace is closed to this
+		// user), and the ancestor chain stops at the first ancestor they may not see. parentId
+		// follows the same rule, so it never points at a hidden document.
+		$ancestors = (new AccessibleAncestorResolver($this->documentRepository))
+			->resolve($documentId, $collectionId, $userId)
+		;
+		$parentId = (int)$document->getParentId();
+		$visibleParentId = null;
+		foreach ($ancestors as $ancestor)
+		{
+			if ($ancestor->id === $parentId)
+			{
+				$visibleParentId = $parentId;
+				break;
+			}
+		}
 
 		$archivedAt = $document->getArchivedAt();
 		$targetDocumentPayload = [
@@ -339,15 +401,25 @@ class DirectOpenContextService
 			'canEditCollection' => false,
 			'canManagePermissions' => false,
 			'sharedAccess' => true,
-			'parentId' => null,
+			'parentId' => $visibleParentId,
 			'title' => $document->getTitle(),
+			'createdAt' => $document->getCreatedAt()->format('c'),
 			'contentFormat' => $document->getContentFormat(),
 			'position' => $document->getPosition(),
 			'isArchived' => (bool)$document->getIsArchived(),
 			'archivedAt' => $archivedAt?->format('c'),
 			'isTrashed' => false,
 			'hasChildren' =>false,
-			'ancestors' => [],
+			'collectionTitle' => $this->resolveCollectionTitle($collectionId),
+			// Container id for the accessible-tree namespace (children block / shared branches).
+			// Not collectionId: that field is what would make the breadcrumb container clickable.
+			'sharedCollectionId' => $collectionId,
+			'ancestors' => BreadcrumbAncestor::listToArray($ancestors),
+			'views' => $this->viewsSnapshotResolver->resolve($documentId),
+			'lastChange' => $this->lastChangeResolver->resolve($documentId),
+			'subscription' => $this->subscriptionStateResolver->resolve($documentId, $this->getCurrentUserId()),
+			'backlinks' => $this->backlinksSnapshotResolver->resolve($documentId),
+			'isFavorite' => $this->isFavorite($documentId),
 		];
 
 		$yjsState = $document->getYjsState();
@@ -378,6 +450,23 @@ class DirectOpenContextService
 			'branches' => [],
 			'document' => $targetDocumentPayload,
 		];
+	}
+
+	private function resolveCollectionTitle(int $collectionId): string
+	{
+		if ($collectionId <= 0)
+		{
+			return '';
+		}
+
+		$row = CollectionTable::query()
+			->setSelect(['NAME'])
+			->where('ID', $collectionId)
+			->setCacheTtl(60)
+			->fetch()
+		;
+
+		return $row === false ? '' : trim((string)($row['NAME'] ?? ''));
 	}
 
 	private function buildTrashedContext(
@@ -417,6 +506,7 @@ class DirectOpenContextService
 			'canEditCollection' => false,
 			'parentId' => $this->toNullableInt($document->getParentId()),
 			'title' => $document->getTitle(),
+			'createdAt' => $document->getCreatedAt()->format('c'),
 			'contentFormat' => $document->getContentFormat(),
 			'position' => $document->getPosition(),
 			'isArchived' => (bool)$document->getIsArchived(),
@@ -429,6 +519,11 @@ class DirectOpenContextService
 			'canHardDelete' => $canHardDelete,
 			'hasChildren' => false,
 			'ancestors' => [],
+			'views' => $this->viewsSnapshotResolver->resolve($documentId),
+			'lastChange' => $this->lastChangeResolver->resolve($documentId),
+			'subscription' => $this->subscriptionStateResolver->resolve($documentId, $this->getCurrentUserId()),
+			'backlinks' => $this->backlinksSnapshotResolver->resolve($documentId),
+			'isFavorite' => $this->isFavorite($documentId),
 		];
 
 		$yjsState = $document->getYjsState();
@@ -464,6 +559,19 @@ class DirectOpenContextService
 		}
 
 		return (int)$value;
+	}
+
+	/**
+	 * [TPL-01] Star state of the opened document, bundled next to the bell state for the same
+	 * reason: the header adopts it instead of asking for it on mount. Unknown means not starred.
+	 */
+	private function isFavorite(int $documentId): bool
+	{
+		return $this->favoriteRepository->findRow(
+			$this->getCurrentUserId(),
+			FavoriteTable::ENTITY_TYPE_DOCUMENT,
+			$documentId,
+		) !== null;
 	}
 
 	private function branchKey(int $collectionId, ?int $parentId): string

@@ -4,6 +4,324 @@
     "description": "BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_DESCRIPTION_1",
     "wizard_title": "BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_NAME_1",
     "wizard_description": "BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TEXT_2",
+    "activity_descriptors": {
+        "AiAgentStartTrigger": {
+            "node_type": "trigger",
+            "icon": "AI_ROBOT",
+            "color_index": 0,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "AiAssistantAgentComplexActivity": {
+            "node_type": "complex",
+            "icon": "AI_ROBOT",
+            "color_index": 0,
+            "dimensions": {
+                "width": 260,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "title": "G1",
+                    "type": "input",
+                    "isActive": true
+                },
+                {
+                    "id": "a0",
+                    "title": "T1",
+                    "type": "aux",
+                    "isActive": true
+                },
+                {
+                    "id": "o1",
+                    "title": "E1",
+                    "type": "output",
+                    "isActive": true
+                }
+            ]
+        },
+        "CalendarGetInform": {
+            "node_type": "simple",
+            "icon": "PLANNING_2",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "CreateStorageNode": {
+            "node_type": "simple",
+            "icon": "DATABASE",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "DeleteDataStorageActivity": {
+            "node_type": "simple",
+            "icon": "TRASHCAN",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "IMNotifyActivity": {
+            "node_type": "simple",
+            "icon": "NOTIFICATION",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "IfElseBranchActivity": {
+            "node_type": "operators",
+            "icon": "CONDITION",
+            "color_index": 3,
+            "dimensions": {
+                "width": 230,
+                "height": 46
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "title": "",
+                    "type": "input",
+                    "isActive": true
+                },
+                {
+                    "id": "o0",
+                    "title": "true",
+                    "type": "output",
+                    "isActive": true
+                },
+                {
+                    "id": "o1",
+                    "title": "false",
+                    "type": "output",
+                    "isActive": true
+                }
+            ]
+        },
+        "ImBotCreateBotActivity": {
+            "node_type": "simple",
+            "icon": "MESSENGER",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ImBotMessageActivity": {
+            "node_type": "simple",
+            "icon": "GO_TO_MESSAGE",
+            "color_index": 2,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ReadDataStorageActivity": {
+            "node_type": "simple",
+            "icon": "DATA_READING",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "ScheduledTrigger": {
+            "node_type": "trigger",
+            "icon": "CALENDAR_WITH_SLOTS",
+            "color_index": 3,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "SetupTemplateActivity": {
+            "node_type": "simple",
+            "icon": "SETTINGS",
+            "color_index": 8,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "SocialnetworkAddBotToProjectChatActivity": {
+            "node_type": "simple",
+            "icon": "GROUP",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "SocialnetworkGetProjectInfoActivity": {
+            "node_type": "simple",
+            "icon": "TASK_LIST",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "TasksGetInfoActivity": {
+            "node_type": "simple",
+            "icon": "TASK",
+            "color_index": 1,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        },
+        "WriteDataStorageActivity": {
+            "node_type": "simple",
+            "icon": "EDIT_L",
+            "color_index": 5,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "i0",
+                    "type": "input"
+                },
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        }
+    },
     "constants": {
         "Project": {
             "label": "BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_NAME_2",
@@ -150,287 +468,6 @@
                             }
                         ],
                         "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_14###"
-                    }
-                }
-            ]
-        },
-        "bot_reply": {
-            "trigger": "ImBotNewMessageTrigger",
-            "trigger_props": {
-                "_id": "A4779_5099_8251_9257",
-                "BotId": null,
-                "BotCode": "BOT_PULSE_INFO_{=Workflow:TemplateId}",
-                "SenderIds": [
-                    "{=Constant:Project > user}"
-                ],
-                "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_19###"
-            },
-            "steps": [
-                {
-                    "CalendarGetInform": {
-                        "_id": "A8392_8917_2556_4465",
-                        "CalendarUser": null,
-                        "CalendarGroup": "{=Constant:Project}",
-                        "CalendarFrom": "{=System:Now}",
-                        "CalendarTo": "{{=dateadd({=System:Now}, \"7d\")}}",
-                        "EventField": [
-                            "description",
-                            "location",
-                            "attendees",
-                            "comments",
-                            "chat",
-                            "url"
-                        ],
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_7###"
-                    }
-                },
-                {
-                    "TasksGetInfoActivity": {
-                        "_id": "A2380_7033_9726_1953",
-                        "PARAM_USER_ID": null,
-                        "ProjectId": "{=Constant:Project}",
-                        "MESSAGE_COUNT_LIMIT": 30,
-                        "TaskLimit": 20,
-                        "TaskActivityDays": 10,
-                        "MessagesDays": 10,
-                        "UserTaskRole": [
-                            "O",
-                            "R",
-                            "A",
-                            "U"
-                        ],
-                        "TaskStatusFilter": [
-                            "2",
-                            "3",
-                            "4"
-                        ],
-                        "TaskSelectField": [
-                            "status",
-                            "deadline",
-                            "originator",
-                            "responsible",
-                            "accomplice",
-                            "auditor",
-                            "chat",
-                            "activityDate",
-                            "isOverdue",
-                            "url",
-                            "priority",
-                            "project",
-                            "daysWithoutUpdates",
-                            "daysOnControl"
-                        ],
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_6###"
-                    }
-                },
-                {
-                    "SocialnetworkGetProjectInfoActivity": {
-                        "_id": "A6480_1799_8235_6056",
-                        "ProjectId": "{=Constant:Project}",
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_12###"
-                    }
-                },
-                {
-                    "Condition": {
-                        "_id": "A1531_8694_9864_9513",
-                        "conditions": [
-                            {
-                                "object": "A6480_1799_8235_6056",
-                                "field": "CanMembersViewAllTasks",
-                                "operator": "=",
-                                "value": "Y"
-                            }
-                        ],
-                        "true": [
-                            {
-                                "Condition": {
-                                    "_id": "A1662_3103_2598_3797",
-                                    "conditions": [
-                                        {
-                                            "object": "A2380_7033_9726_1953",
-                                            "field": "COUNTER_TASKS_INFO",
-                                            "operator": ">",
-                                            "value": 0
-                                        },
-                                        {
-                                            "object": "A8392_8917_2556_4465",
-                                            "field": "EventsCount",
-                                            "operator": ">",
-                                            "value": "0",
-                                            "joiner": 1
-                                        }
-                                    ],
-                                    "true": [
-                                        {
-                                            "AiAssistantAgentComplexActivity": {
-                                                "_id": "A1027_5455_1122_1072",
-                                                "Rules": {
-                                                    "i0": {
-                                                        "portId": "i0",
-                                                        "ruleCards": [
-                                                            {
-                                                                "id": "A2009_1469_7077_4528",
-                                                                "constructions": [
-                                                                    {
-                                                                        "id": "A7287_7024_5101_9624",
-                                                                        "type": "action",
-                                                                        "expression": {
-                                                                            "actionId": "AiAssistantAgentActivity",
-                                                                            "rawActivityData": null,
-                                                                            "activityData": {
-                                                                                "Name": "A6300_4262_5650_2290",
-                                                                                "Type": "AiAssistantAgentActivity",
-                                                                                "Activated": "Y",
-                                                                                "Properties": {
-                                                                                    "mcpUser": "{=A4779_5099_8251_9257:SenderId}",
-                                                                                    "query": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_QUERY_2###",
-                                                                                    "systemPrompt": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_SYSTEMPROMPT_2###",
-                                                                                    "returnType": "text",
-                                                                                    "jsonSchema": "",
-                                                                                    "jsonPath": null,
-                                                                                    "usePseudonymizer": "Y",
-                                                                                    "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_9###"
-                                                                                },
-                                                                                "ReturnProperties": [
-                                                                                    {
-                                                                                        "Id": "aiResult",
-                                                                                        "Type": "string",
-                                                                                        "BaseType": null,
-                                                                                        "Name": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_NAME_4###",
-                                                                                        "Description": null,
-                                                                                        "Multiple": false,
-                                                                                        "Required": false,
-                                                                                        "Options": null,
-                                                                                        "Settings": null,
-                                                                                        "Default": null
-                                                                                    },
-                                                                                    {
-                                                                                        "Id": "errorMessage",
-                                                                                        "Type": "string",
-                                                                                        "BaseType": null,
-                                                                                        "Name": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_NAME_7###",
-                                                                                        "Description": null,
-                                                                                        "Multiple": false,
-                                                                                        "Required": false,
-                                                                                        "Options": null,
-                                                                                        "Settings": null,
-                                                                                        "Default": null
-                                                                                    },
-                                                                                    {
-                                                                                        "Id": "toolsUsed",
-                                                                                        "Type": "bool",
-                                                                                        "BaseType": null,
-                                                                                        "Name": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_NAME_8###",
-                                                                                        "Description": null,
-                                                                                        "Multiple": false,
-                                                                                        "Required": false,
-                                                                                        "Options": null,
-                                                                                        "Settings": null,
-                                                                                        "Default": null
-                                                                                    }
-                                                                                ],
-                                                                                "Document": null
-                                                                            },
-                                                                            "document": null
-                                                                        }
-                                                                    },
-                                                                    {
-                                                                        "id": "A6514_9246_7732_9400",
-                                                                        "type": "output",
-                                                                        "expression": {
-                                                                            "portId": "o1",
-                                                                            "title": "E1"
-                                                                        }
-                                                                    }
-                                                                ]
-                                                            }
-                                                        ],
-                                                        "isFilled": true
-                                                    }
-                                                },
-                                                "InputNames": [
-                                                    "A6300_4262_5650_2290:i0"
-                                                ],
-                                                "OutputNames": {
-                                                    "A6300_4262_5650_2290:o0": 1
-                                                },
-                                                "Links": [],
-                                                "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_9###",
-                                                "branches": {
-                                                    "o1": [
-                                                        {
-                                                            "Condition": {
-                                                                "_id": "A1535_7269_7838_1392",
-                                                                "conditions": [
-                                                                    {
-                                                                        "object": "A6300_4262_5650_2290",
-                                                                        "field": "errorMessage",
-                                                                        "operator": "empty",
-                                                                        "value": ""
-                                                                    }
-                                                                ],
-                                                                "true": [
-                                                                    {
-                                                                        "ImBotMessageActivity": {
-                                                                            "_id": "A9195_6258_1520_4086",
-                                                                            "botId": null,
-                                                                            "botCode": "BOT_PULSE_INFO_{=Workflow:TemplateId}",
-                                                                            "recipient": null,
-                                                                            "chatId": "{=A6480_1799_8235_6056:ProjectChatId}",
-                                                                            "message": "{=A6300_4262_5650_2290:aiResult}",
-                                                                            "asError": null,
-                                                                            "aiWarning": "Y",
-                                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_20###"
-                                                                        }
-                                                                    }
-                                                                ],
-                                                                "false": [
-                                                                    {
-                                                                        "ImBotMessageActivity": {
-                                                                            "_id": "A6256_6152_6928_3311",
-                                                                            "botId": null,
-                                                                            "botCode": "BOT_PULSE_INFO_{=Workflow:TemplateId}",
-                                                                            "recipient": null,
-                                                                            "chatId": "{=A6480_1799_8235_6056:ProjectChatId}",
-                                                                            "message": "{=A6300_4262_5650_2290:errorMessage}",
-                                                                            "asError": "Y",
-                                                                            "aiWarning": "Y",
-                                                                            "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_20###"
-                                                                        }
-                                                                    }
-                                                                ],
-                                                                "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_10###",
-                                                                "NodeTitle": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_14###"
-                                                            }
-                                                        }
-                                                    ]
-                                                }
-                                            }
-                                        }
-                                    ],
-                                    "false": [
-                                        {
-                                            "ImBotMessageActivity": {
-                                                "_id": "A5515_5400_2573_5586",
-                                                "botId": null,
-                                                "botCode": "BOT_PULSE_INFO_{=Workflow:TemplateId}",
-                                                "recipient": null,
-                                                "chatId": "{=A6480_1799_8235_6056:ProjectChatId}",
-                                                "message": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_MESSAGE_3###",
-                                                "asError": "Y",
-                                                "aiWarning": "Y",
-                                                "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_20###"
-                                            }
-                                        }
-                                    ],
-                                    "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_8###",
-                                    "NodeTitle": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_14###"
-                                }
-                            }
-                        ],
-                        "false": [],
-                        "Title": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_13###",
-                        "NodeTitle": "###BIZPROC_NODES_BITRIX_AI_PROJECT_PULSE_TITLE_14###"
                     }
                 }
             ]

@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Service\UnifiedLink\FileHandler;
 
-use Bitrix\Disk\Controller\Integration\Flipchart;
 use Bitrix\Disk\Document\DocumentSource;
 use Bitrix\Disk\Document\Flipchart\BoardService;
-use Bitrix\Disk\Document\Flipchart\Configuration;
+use Bitrix\Disk\Document\Flipchart\DocumentDownloadUrlService;
+use Bitrix\Disk\Document\Flipchart\DualMode\PilotLog;
+use Bitrix\Disk\Document\Flipchart\DualMode\ServiceProfileResolver;
 use Bitrix\Disk\Document\Flipchart\SessionManager;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Driver;
@@ -19,6 +20,8 @@ use Bitrix\Main\Command\Exception\CommandException;
 use Bitrix\Main\Command\Exception\CommandValidationException;
 use Bitrix\Main\Diag\ExceptionHandler;
 use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\Main\Error;
+use Bitrix\Main\ErrorCollection;
 use Bitrix\Main\Web\Uri;
 
 class BoardHtmlRenderableFileHandler implements HtmlRenderableFileHandler
@@ -69,6 +72,24 @@ class BoardHtmlRenderableFileHandler implements HtmlRenderableFileHandler
 
 		/** @var DocumentSession $documentSession */
 		$documentSession = $sessionCreationResult->getDocumentSession();
+
+		// The editor component decides the same way and throws, but includeComponent() swallows that on
+		// an ordinary request: without this the visitor of a unified link is answered with a blank page.
+		if (ServiceProfileResolver::createFromOptions()->resolveForEditor($documentSession->getObject()) === null)
+		{
+			PilotLog::error(
+				'Board service profile is not resolved: {entryPoint}, object {objectId}',
+				[
+					'entryPoint' => 'unifiedLink',
+					'objectId' => (int)$documentSession->getObjectId(),
+				],
+			);
+
+			return FileHandlerOperationResult::createError(
+				new ErrorCollection([new Error('Board service profile is not resolved')]),
+			);
+		}
+
 		if ($documentSession->canUserRead($this->getCurrentUser()))
 		{
 			$this->trackObject();
@@ -92,18 +113,7 @@ class BoardHtmlRenderableFileHandler implements HtmlRenderableFileHandler
 
 	private function showEditor(DocumentSession $documentSession): FileHandlerOperationResult
 	{
-		$downloadUrl = (new Flipchart())->getActionUri('getDocument',
-			[
-				'sessionId' => $documentSession->getExternalHash(),
-				'userId' => $documentSession->getUserId(),
-			],
-			true,
-		);
-
-		if (Configuration::isForceHttpForDocumentUrl())
-		{
-			$downloadUrl = $downloadUrl->withScheme('http');
-		}
+		$downloadUrl = (new DocumentDownloadUrlService())->build($documentSession, applyLegacyHttpDowngrade: true);
 
 		$avatarUri = (new Uri($documentSession->getUser()->getAvatarSrc()))->toAbsolute();
 

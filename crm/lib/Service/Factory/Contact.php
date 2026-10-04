@@ -30,11 +30,6 @@ class Contact extends Service\Factory
 		Loc::loadMessages(Path::combine(__DIR__, '..', '..', '..', 'classes', 'general', 'crm_contact.php'));
 	}
 
-	public function isSourceEnabled(): bool
-	{
-		return true;
-	}
-
 	public function isNewRoutingForDetailEnabled(): bool
 	{
 		return false;
@@ -50,49 +45,9 @@ class Contact extends Service\Factory
 		return false;
 	}
 
-	public function isRecyclebinEnabled(): bool
-	{
-		return ContactSettings::getCurrent()->isRecycleBinEnabled();
-	}
-
 	public function isDeferredCleaningEnabled(): bool
 	{
 		return ContactSettings::getCurrent()->isDeferredCleaningEnabled();
-	}
-
-	public function isUseInUserfieldEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isCrmTrackingEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isStagesSupported(): bool
-	{
-		return false;
-	}
-
-	public function isBizProcSupported(): bool
-	{
-		return true;
-	}
-
-	public function isObserversEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isMultiFieldsEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isCountersEnabled(): bool
-	{
-		return true;
 	}
 
 	public function getDataClass(): string
@@ -385,16 +340,6 @@ class Contact extends Service\Factory
 	}
 
 	//region categories
-
-	/**
-	 * Returns true if this entity supports categories.
-	 *
-	 * @return bool
-	 */
-	public function isCategoriesSupported(): bool
-	{
-		return true;
-	}
 
 	public function createCategory(array $data = []): Category
 	{

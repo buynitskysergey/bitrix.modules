@@ -4,6 +4,7 @@ namespace Bitrix\HumanResources\Repository;
 
 use Bitrix\HumanResources\Access\AuthProvider\StructureAuthProvider;
 use Bitrix\HumanResources\Compatibility\Event\NewToOldEventHandler;
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Contract\Service\SemaphoreService;
 use Bitrix\HumanResources\Service\EventSenderService;
 use Bitrix\HumanResources\Contract\Repository\RoleRepository;
@@ -17,9 +18,9 @@ use Bitrix\HumanResources\Item\NodeMember;
 use Bitrix\HumanResources\Item\Structure;
 use Bitrix\HumanResources\Model;
 use Bitrix\HumanResources\Model\NodeMemberTable;
-use Bitrix\HumanResources\Public\Service\Container as PublicContainer;
 use Bitrix\HumanResources\Result\PropertyResult;
 use Bitrix\HumanResources\Result\Repository\UpdateNodeMemberResult;
+use Bitrix\HumanResources\Public\Service\Container as PublicContainer;
 use Bitrix\HumanResources\Service\Container;
 use Bitrix\HumanResources\Enum\EventName;
 use Bitrix\HumanResources\Type\MemberEntityType;
@@ -322,13 +323,19 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 			$offset,
 			$onlyActive,
 		)
+		->where('ENTITY_TYPE', MemberEntityType::USER->value)
 		->setCacheTtl(self::CACHE_TTL)
 		->cacheJoins(true)
 		;
+		RealUserFilter::applyToMemberQuery($nodeMemberQuery);
 
+		return $this->hydrateNodeMemberCollection($nodeMemberQuery);
+	}
+
+	private function hydrateNodeMemberCollection(Query $query): Item\Collection\NodeMemberCollection
+	{
 		$nodeMemberCollection = new Item\Collection\NodeMemberCollection();
-		$nodeMemberEntities = $nodeMemberQuery->fetchAll();
-		foreach ($nodeMemberEntities as $nodeMember)
+		foreach ($query->fetchAll() as $nodeMember)
 		{
 			$nodeMemberCollection->add($this->convertModelArrayToItem($nodeMember));
 		}
@@ -457,12 +464,17 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 
 		$offset = 0;
 
-		while (($collection = $this->findAllByNodeId(
-			nodeId: $nodeId,
-			limit: 1000,
-			offset: $offset,
-			onlyActive: false,
-		)) && !$collection->empty())
+		while (
+			($collection = $this->hydrateNodeMemberCollection(
+				$this->getBaseQuery(
+					nodeId: $nodeId,
+					limit: 1000,
+					offset: $offset,
+					onlyActive: false,
+				),
+			))
+			&& !$collection->empty()
+		)
 		{
 			foreach ($collection as $nodeMember)
 			{
@@ -525,6 +537,7 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 			$limit,
 			$offset,
 			$ascendingSort,
+			withVirtualUsers: false,
 		);
 	}
 
@@ -557,9 +570,11 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 			->whereIn('ROLE.ID', $roleIds)
 			->where('NODE_ID', $nodeId)
 			->where('ACTIVE', 'Y')
+			->where('ENTITY_TYPE', MemberEntityType::USER->value)
 			->setCacheTtl(self::CACHE_TTL)
 			->cacheJoins(true)
 		;
+		RealUserFilter::applyToMemberQuery($nodeMemberQuery);
 
 		if ($limit > 0)
 		{
@@ -614,7 +629,9 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 			->where('ROLE.ID', $roleId)
 			->whereIn('NODE_ID', $nodeIds)
 			->where('ACTIVE', 'Y')
+			->where('ENTITY_TYPE', MemberEntityType::USER->value)
 		;
+		RealUserFilter::applyToMemberQuery($nodeMemberQuery);
 
 		if ($limit > 0)
 		{
@@ -922,6 +939,11 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 			->whereIn('NODE.TYPE' , $node->type->value)
 		;
 
+		if ($entityType === MemberEntityType::USER)
+		{
+			RealUserFilter::applyToMemberQuery($nodeMemberQuery);
+		}
+
 		$nodeMemberCollection = new Item\Collection\NodeMemberCollection();
 		$this->calculateCount($nodeMemberQuery, $nodeMemberCollection);
 
@@ -1065,7 +1087,9 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 			->where('ACTIVE', 'Y')
 			->where('role.ROLE_ID', $roleId)
 			->where('node.STRUCTURE_ID', $structureId)
+			->where('ENTITY_TYPE', MemberEntityType::USER->value)
 		;
+		RealUserFilter::applyToMemberQuery($nodeMemberQuery);
 
 		$nodeMemberCollection = new Item\Collection\NodeMemberCollection();
 		foreach ($nodeMemberQuery->fetchAll() as $nodeMember)
@@ -1098,10 +1122,13 @@ class NodeMemberRepository implements Contract\Repository\NodeMemberRepository
 				)
 				->where('NODE.STRUCTURE_ID', $structure->id)
 				->where('ACTIVE', 'Y')
+				->where('ENTITY_TYPE', MemberEntityType::USER->value)
 				->setGroup('NODE_ID')
 				->setCacheTtl(self::CACHE_TTL)
 				->cacheJoins(true)
 		;
+
+		RealUserFilter::applyToMemberQuery($countQuery);
 
 		$nodeMemberCount = $countQuery->fetchAll();
 		$result = [];

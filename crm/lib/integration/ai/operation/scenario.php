@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Integration\AI\Operation;
 
 use Bitrix\Crm\Activity\Provider\Call;
+use Bitrix\Crm\Activity\Provider\Email;
 use Bitrix\Crm\Activity\Provider\OpenLine;
 use Bitrix\Crm\Copilot\Pipeline\ScenarioRegistry;
 use Bitrix\Crm\Integration\AI\AIManager;
@@ -17,8 +18,15 @@ final class Scenario
 	public const TRANSCRIBE_RECORD_SCENARIO = 'transcribe_record';
 	public const SUMMARIZE_SCENARIO = 'summarize';
 	public const FILL_FIELDS_SCENARIO = 'fill_fields';
+	// `CALL_SCORING_SCENARIO` is the legacy V1 id (Transcribe → ScoreCall). Kept for
+	// backward compatibility: widely referenced as the symbolic "scoring scenario" id.
+	// `CALL_SCORING_V2_SCENARIO` is the new V2 chain (Transcribe → Summarize → ScoreCallV2).
+	// New launches pick V1 vs V2 via `resolveCallScoringScenarioName()` by global flag;
+	// `ScenarioResolver` matches in-flight chains statically by (TYPE_ID, NEXT_TYPE_ID).
 	public const CALL_SCORING_SCENARIO = 'call_scoring';
+	public const CALL_SCORING_V2_SCENARIO = 'call_scoring_v2';
 	public const EXTRACT_SCORING_CRITERIA_SCENARIO = 'extract_scoring_criteria';
+	public const SELECT_CALL_SCORING_SCRIPT_SCENARIO = 'select_call_scoring_script';
 	public const REPEAT_SALE_TIPS_SCENARIO = 'repeat_sale_tips';
 	public const REPEAT_SALE_SCREENING_SCENARIO = 'repeat_sale_screening';
 	public const CONFIRM_FIELDS_SCENARIO = 'confirm_fields';
@@ -43,6 +51,21 @@ final class Scenario
 	public static function isScenarioRequiresTranscription(?string $providerId): bool
 	{
 		return $providerId === Call::getId();
+	}
+
+	public static function resolveCallScoringScenarioName(): string
+	{
+		return AIManager::isCallScoringV2Enabled()
+			? self::CALL_SCORING_V2_SCENARIO
+			: self::CALL_SCORING_SCENARIO
+		;
+	}
+
+	public static function isCallScoringScenario(?string $scenarioName): bool
+	{
+		return $scenarioName === self::CALL_SCORING_SCENARIO
+			|| $scenarioName === self::CALL_SCORING_V2_SCENARIO
+		;
 	}
 
 	public static function isEnabledScenario(string $scenario): bool
@@ -78,7 +101,7 @@ final class Scenario
 				GlobalSetting::AnalyzeCommunication,
 				GlobalSetting::Summarize,
 			],
-			OpenLine::ACTIVITY_PROVIDER_ID => [
+			OpenLine::ACTIVITY_PROVIDER_ID, Email::getId() => [
 				GlobalSetting::FillItemFromCall,
 				GlobalSetting::AnalyzeCommunication,
 				GlobalSetting::Summarize,
@@ -125,7 +148,7 @@ final class Scenario
 				&& !$analyzeCommunicationEnabled
 			)
 			{
-				return self::CALL_SCORING_SCENARIO;
+				return self::resolveCallScoringScenarioName();
 			}
 
 			if (

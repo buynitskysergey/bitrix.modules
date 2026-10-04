@@ -1,10 +1,12 @@
 <?php
 
+use Bitrix\Bizproc\Activity\Enum\ResumeWorkflowQueue;
 use Bitrix\Bizproc\Activity\Enum\SchedulerTransport;
 use Bitrix\Bizproc\SchedulerEventTable;
 use Bitrix\Bizproc\Internal\Service\Scheduler\Messenger\Entity\WorkflowStartMessage;
 use Bitrix\Bizproc\Internal\Service\Scheduler\Messenger\Entity\WorkflowResumeMessage;
 use Bitrix\Main\Loader;
+use Bitrix\Main\Messenger\Entity\ProcessingParam\ItemIdParam;
 
 class CBPSchedulerService extends CBPRuntimeService
 {
@@ -156,6 +158,7 @@ class CBPSchedulerService extends CBPRuntimeService
 		$entityId = null,
 		int $sort = self::DEFAULT_SORT,
 		?SchedulerTransport $schedulerTransport = null,
+		?ResumeWorkflowQueue $resumeWorkflowQueue = null,
 	): ?int
 	{
 		$resultId = null;
@@ -177,23 +180,27 @@ class CBPSchedulerService extends CBPRuntimeService
 
 		if (!SchedulerEventTable::isSubscribed($workflowId, $eventHandlerName, $eventModule, $eventName, $entityId))
 		{
-			$result = SchedulerEventTable::add([
+			$row = [
 				'WORKFLOW_ID' => (string)$workflowId,
 				'HANDLER' => (string)$eventHandlerName,
 				'EVENT_MODULE' => (string)$eventModule,
 				'EVENT_TYPE' => (string)$eventName,
 				'ENTITY_ID' => (string)$entityId,
-			]);
+			];
+			if ($resumeWorkflowQueue !== null)
+			{
+				$row['EVENT_PARAMETERS'] = ['resumeWorkflowQueue' => $resumeWorkflowQueue->value];
+			}
+			$result = SchedulerEventTable::add($row);
 			$resultId = (int)$result->getId();
 		}
 
-		$methodName = 'sendEvents';
-		$args = [$eventModule, $eventName, $entityKey];
-		if ($schedulerTransport !== null)
-		{
-			$methodName = 'sendEventsWithTransport';
-			$args[] = $schedulerTransport->value;
-		}
+		[$methodName, $args] = self::buildEventSenderBinding(
+			$eventModule,
+			$eventName,
+			$entityKey,
+			$schedulerTransport,
+		);
 
 		RegisterModuleDependences(
 			$eventModule,
@@ -249,13 +256,12 @@ class CBPSchedulerService extends CBPRuntimeService
 
 		if (!SchedulerEventTable::hasSubscriptions($eventModule, $eventName))
 		{
-			$methodName = 'sendEvents';
-			$args = [$eventModule, $eventName, $entityKey];
-			if ($schedulerTransport !== null)
-			{
-				$methodName = 'sendEventsWithTransport';
-				$args[] = $schedulerTransport->value;
-			}
+			[$methodName, $args] = self::buildEventSenderBinding(
+				$eventModule,
+				$eventName,
+				$entityKey,
+				$schedulerTransport,
+			);
 
 			UnRegisterModuleDependences(
 				$eventModule,
@@ -264,12 +270,57 @@ class CBPSchedulerService extends CBPRuntimeService
 				'CBPSchedulerService',
 				$methodName,
 				'',
-				$args
+				$args,
 			);
+
+			// Clean up old-style bindings where queue was embedded in the binding args
+			// (registered before this fix). Safe to call even if entries don't exist.
+			if ($schedulerTransport !== null)
+			{
+				$baseOldArgs = [$eventModule, $eventName, $entityKey, $schedulerTransport->value];
+				foreach (ResumeWorkflowQueue::cases() as $oldQueue)
+				{
+					UnRegisterModuleDependences(
+						$eventModule,
+						$eventName,
+						'bizproc',
+						'CBPSchedulerService',
+						'sendEventsWithTransport',
+						'',
+						[...$baseOldArgs, $oldQueue->value],
+					);
+				}
+			}
 		}
 	}
 
-	public function unSubscribeByEventId(int $eventId, $entityKey = null, ?SchedulerTransport $schedulerTransport = null)
+	/**
+	 * @return array{0: string, 1: array}
+	 */
+	private static function buildEventSenderBinding(
+		string $eventModule,
+		string $eventName,
+		mixed $entityKey,
+		?SchedulerTransport $schedulerTransport,
+	): array
+	{
+		$methodName = 'sendEvents';
+		$args = [$eventModule, $eventName, $entityKey];
+
+		if ($schedulerTransport !== null)
+		{
+			$methodName = 'sendEventsWithTransport';
+			$args[] = $schedulerTransport->value;
+		}
+
+		return [$methodName, $args];
+	}
+
+	public function unSubscribeByEventId(
+		int $eventId,
+		$entityKey = null,
+		?SchedulerTransport $schedulerTransport = null,
+	)
 	{
 		$event = SchedulerEventTable::getList([
 			'select' => ['WORKFLOW_ID', 'HANDLER','EVENT_MODULE', 'EVENT_TYPE', 'ENTITY_ID'],
@@ -408,14 +459,24 @@ class CBPSchedulerService extends CBPRuntimeService
 			return;
 		}
 
-		$args = [];
-		$num = func_num_args();
-		if ($num > 4)
+		// Args starting at position 4 may be: [queueId, ...realArgs] for new subscriptions,
+		// or [...realArgs] for old b_module_to_module records that predate the queue parameter.
+		$extraArgs = array_slice(func_get_args(), 4);
+		$resumeWorkflowQueue = null;
+
+		if (!empty($extraArgs) && is_string($extraArgs[0]) && ResumeWorkflowQueue::tryFrom($extraArgs[0]) !== null)
 		{
-			$args = array_slice(func_get_args(), 4);
+			$resumeWorkflowQueue = array_shift($extraArgs);
 		}
 
-		self::sendEventsInternal($eventModule, $eventName, $entityKey, $args, $schedulerTransport->value);
+		self::sendEventsInternal(
+			$eventModule,
+			$eventName,
+			$entityKey,
+			$extraArgs,
+			$schedulerTransport->value,
+			$resumeWorkflowQueue,
+		);
 	}
 
 	private static function sendEventsInternal(
@@ -424,9 +485,10 @@ class CBPSchedulerService extends CBPRuntimeService
 		mixed $entityKey,
 		array $args,
 		?string $schedulerTransport = null,
+		?string $resumeWorkflowQueue = null,
 	): void
 	{
-		$eventParameters = [
+		$baseParameters = [
 			'SchedulerService' => 'OnEvent',
 			'eventModule' => $eventModule,
 			'eventName' => $eventName,
@@ -434,10 +496,10 @@ class CBPSchedulerService extends CBPRuntimeService
 
 		if ($schedulerTransport !== null)
 		{
-			$eventParameters['schedulerTransport'] = $schedulerTransport;
+			$baseParameters['schedulerTransport'] = $schedulerTransport;
 		}
 
-		$eventParameters += array_values($args);
+		$baseParameters += array_values($args);
 
 		$filter = [
 			'=EVENT_MODULE' => $eventModule,
@@ -445,13 +507,13 @@ class CBPSchedulerService extends CBPRuntimeService
 		];
 
 		$entityId = null;
-		if ($entityKey === 0 && isset($eventParameters[0]))
+		if ($entityKey === 0 && isset($baseParameters[0]))
 		{
-			$entityId = (string)$eventParameters[0];
+			$entityId = (string)$baseParameters[0];
 		}
-		elseif ($entityKey !== null && isset($eventParameters[0][$entityKey]))
+		elseif ($entityKey !== null && isset($baseParameters[0][$entityKey]))
 		{
-			$entityId = (string)$eventParameters[0][$entityKey];
+			$entityId = (string)$baseParameters[0][$entityKey];
 		}
 
 		if ($entityId !== null)
@@ -463,6 +525,15 @@ class CBPSchedulerService extends CBPRuntimeService
 
 		while ($event = $iterator->fetch())
 		{
+			$eventParameters = $baseParameters;
+			// Use the per-row queue stored during subscription so retries stay in
+			// the correct queue. Fall back to the binding-level queue for rows that
+			// predate this fix (created when queue was stored only in binding args).
+			$rowQueue = $event['EVENT_PARAMETERS']['resumeWorkflowQueue'] ?? $resumeWorkflowQueue;
+			if ($rowQueue !== null)
+			{
+				$eventParameters['resumeWorkflowQueue'] = $rowQueue;
+			}
 			$event['EVENT_PARAMETERS'] = $eventParameters;
 			self::sendEventToWorkflow($event);
 		}
@@ -554,7 +625,15 @@ class CBPSchedulerService extends CBPRuntimeService
 			if ($schedulerTransport === SchedulerTransport::Messenger->value)
 			{
 				$delay = $expiresAt - time();
-				self::enqueueResumeWorkflow($event['WORKFLOW_ID'], $event['HANDLER'], $delay);
+				$resumeWorkflowQueue = self::resolveResumeWorkflowQueue(
+					$event['EVENT_PARAMETERS']['resumeWorkflowQueue'] ?? null,
+				);
+				self::enqueueResumeWorkflow(
+					$event['WORKFLOW_ID'],
+					$event['HANDLER'],
+					$delay,
+					$resumeWorkflowQueue,
+				);
 
 				return;
 			}
@@ -598,10 +677,15 @@ class CBPSchedulerService extends CBPRuntimeService
 		\Bitrix\Main\Application::getInstance()->getExceptionHandler()->writeToLog($exception);
 	}
 
-	public static function enqueueResumeWorkflow(string $workflowId, string $eventName, int $delay = 0): void
+	public static function enqueueResumeWorkflow(
+		string $workflowId,
+		string $eventName,
+		int $delay = 0,
+		ResumeWorkflowQueue $resumeWorkflowQueue = ResumeWorkflowQueue::Legacy,
+	): void
 	{
 		$message = new WorkflowResumeMessage($workflowId, $eventName);
-		$params = [];
+		$params = [new ItemIdParam($workflowId)];
 
 		$delay = self::calculateDelay($delay);
 		if ($delay > 0)
@@ -609,12 +693,30 @@ class CBPSchedulerService extends CBPRuntimeService
 			$params[] = new Bitrix\Main\Messenger\Entity\ProcessingParam\DelayParam($delay);
 		}
 
-		$message->send('resume_workflow_queue', $params);
+		$message->send($resumeWorkflowQueue->value, $params);
 	}
 
-	public function sendResumeWorkflowMessage(string $workflowId, string $eventName, int $delay = 0)
+	public function sendResumeWorkflowMessage(
+		string $workflowId,
+		string $eventName,
+		int $delay = 0,
+		ResumeWorkflowQueue $resumeWorkflowQueue = ResumeWorkflowQueue::Legacy,
+	): void
 	{
-		self::enqueueResumeWorkflow($workflowId, $eventName, $delay);
+		self::enqueueResumeWorkflow($workflowId, $eventName, $delay, $resumeWorkflowQueue);
+	}
+
+	private static function resolveResumeWorkflowQueue(?string $queueId): ResumeWorkflowQueue
+	{
+		if ($queueId === null)
+		{
+			return ResumeWorkflowQueue::Legacy;
+		}
+
+		$queue = ResumeWorkflowQueue::tryFrom($queueId);
+
+		return $queue ?: ResumeWorkflowQueue::Legacy
+		;
 	}
 
 	private static function clamp(int $value, ?int $min = null, ?int $max = null): int

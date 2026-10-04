@@ -6,6 +6,7 @@ use Bitrix\Main;
 use Bitrix\Intranet;
 use Bitrix\Mail\Helper\Message\Loader\QueryBuilder;
 use Bitrix\Mail\Internal\Service\FavoritesService;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\MailMessageUidTable;
 use Bitrix\Main\Engine\Controller;
 
@@ -238,13 +239,14 @@ class Message extends Controller
 
 		$row = MailMessageUidTable::getList([
 			'select' => ['ID', 'MAILBOX_ID', 'MESSAGE_ID'],
-			'filter' => array_merge(
+			// Exactly the letters the list shows, so a row id of a retained generation resolves to nothing
+			'filter' => GenerationScope::forMailbox($mailboxId)->apply(array_merge(
 				QueryBuilder::VISIBLE_UID_FILTERS_DRIVER,
 				[
 					'=ID' => $uidId,
 					'=MAILBOX_ID' => $mailboxId,
 				],
-			),
+			)),
 			'limit' => 1,
 		])->fetch();
 

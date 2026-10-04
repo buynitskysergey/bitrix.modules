@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Internal\Service\Directory;
 
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\MailboxDirectoryTable;
 use Bitrix\Mail\Helper\MailboxDirectoryHelper;
 use Bitrix\Mail\MailboxDirectory;
@@ -13,11 +14,15 @@ use Bitrix\Main\Result;
 final readonly class TypesAssigner
 {
 	/**
+	 * Resets and assigns the system roles only inside the given generation,
+	 * so configuring a prepared generation never changes the active one.
+	 *
 	 * @param array<int, array{dirMd5?: string, type?: string}> $dirs
 	 */
-	public function assign(int $mailboxId, array $dirs): Result
+	public function assign(int $mailboxId, array $dirs, ?GenerationScope $scope = null): Result
 	{
 		$result = new Result();
+		$scope ??= GenerationScope::forMailbox($mailboxId);
 
 		foreach ($dirs as $dir)
 		{
@@ -29,7 +34,7 @@ final readonly class TypesAssigner
 				continue;
 			}
 
-			$row = MailboxDirectory::fetchOneByMailboxIdAndHash($mailboxId, $hash);
+			$row = MailboxDirectory::fetchOneByMailboxIdAndHash($mailboxId, $hash, $scope);
 			if ($row === null)
 			{
 				continue;
@@ -37,7 +42,7 @@ final readonly class TypesAssigner
 
 			try
 			{
-				MailboxDirectory::resetDirsTypes($mailboxId, $type);
+				MailboxDirectory::resetDirsTypes($mailboxId, $type, $scope);
 
 				$updateResult = MailboxDirectory::update(
 					$row->getId(),

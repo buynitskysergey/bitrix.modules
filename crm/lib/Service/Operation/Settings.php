@@ -32,6 +32,7 @@ class Settings
 	protected $isActivitiesAutocompletionEnabled = true;
 	/** @var string[] */
 	protected $activityProvidersToAutocomplete = [];
+	protected $isSystemUpdate = false;
 
 	/**
 	 * Settings constructor.
@@ -562,5 +563,24 @@ class Settings
 		$this->activityProvidersToAutocomplete = $providersIds;
 
 		return $this;
+	}
+
+	/**
+	 * Marks the Operation as a system update. A system update is an internal,
+	 * non-user-initiated modification (e.g. recalculation of last activity)
+	 * that must not pollute the "modified by" / "modified time" fields of the entity.
+	 *
+	 * @return $this
+	 */
+	public function markAsSystemUpdate(): self
+	{
+		$this->isSystemUpdate = true;
+
+		return $this;
+	}
+
+	public function isSystemUpdate(): bool
+	{
+		return $this->isSystemUpdate;
 	}
 }

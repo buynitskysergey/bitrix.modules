@@ -14,6 +14,8 @@ enum ConstructionType: string
 	case FILTER = 'filter';
 	case OUTPUT = 'output';
 
+	case BASE_SETTINGS = 'base-settings';
+
 	public function isCondition(): bool
 	{
 		return in_array($this, [

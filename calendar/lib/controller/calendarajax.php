@@ -24,6 +24,7 @@ use Bitrix\Calendar\Rooms;
 use Bitrix\Calendar\Sharing;
 use Bitrix\Calendar\Ui\CalendarFilter;
 use Bitrix\Calendar\Util;
+use Bitrix\Calendar\View\EventViewData;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Error;
@@ -716,13 +717,11 @@ class CalendarAjax extends \Bitrix\Main\Engine\Controller
 			return [];
 		}
 
-		// for personal context only
 		$type = Dictionary::CALENDAR_TYPE['user'];
-		$ownerId = \CCalendar::GetCurUserId();
 		$userId = \CCalendar::GetCurUserId();
 
 		$isCollabUser = Util::isCollabUser($userId);
-		$sections = \CCalendarSect::prepareSectionListResponse($type, (string)$ownerId);
+		$sections = $this->getSectionsForStandaloneForm($userId, $isCollabUser);
 
 		$responseParams = [];
 		$responseParams['sections'] = $sections;
@@ -748,9 +747,97 @@ class CalendarAjax extends \Bitrix\Main\Engine\Controller
 		$responseParams['eventWithEmailGuestEnabled'] = Bitrix24Manager::isFeatureEnabled(FeatureDictionary::CALENDAR_EVENTS_WITH_EMAIL_GUESTS);
 		$responseParams['isCollabFeatureEnabled'] = \Bitrix\Calendar\Integration\SocialNetwork\Collab\CollabFeature::isAvailable();
 		$responseParams['projectFeatureEnabled'] = SocialNetwork\FeatureService::isProjectFeatureEnabled();
+		$responseParams['isNewProjectsOn'] = SocialNetwork\FeatureService::isNewProjectsOn();
 		$responseParams['teamsAsAttendeeEnabled'] = HumanResources\FeatureService::isTeamsAsAttendeeEnabled();
 
 		return $responseParams;
+	}
+
+	/**
+	 * The compact form is opened outside the calendar screen, so this action is the only place
+	 * that can guarantee a container the event will be saved into.
+	 *
+	 * The lists of the two branches mean different things. The personal one is everything the user
+	 * sees: the portal section of open events, followed calendars of colleagues and virtual Google
+	 * sections come with it, and not all of them take an event. The collab one carries sections with
+	 * the write right only. Picking a section by that right is left to the client.
+	 */
+	private function getSectionsForStandaloneForm(int $userId, bool $isCollabUser): array
+	{
+		return $isCollabUser
+			? $this->getCollabSectionsForStandaloneForm($userId)
+			: $this->getPersonalSectionsForStandaloneForm($userId)
+		;
+	}
+
+	private function getPersonalSectionsForStandaloneForm(int $userId): array
+	{
+		$type = Dictionary::CALENDAR_TYPE['user'];
+
+		// user calendars are denied to an external user by the same policy that builds the list
+		// below, so a container created for them would never be offered
+		if (Loader::includeModule('extranet') && !\CExtranet::IsIntranetUser(SITE_ID, $userId))
+		{
+			return [];
+		}
+
+		// the section list is wider than the personal container (open events add the portal
+		// section to it), so the container is probed by the method that also creates it
+		$container = \CCalendarSect::GetSectionForOwner($type, $userId, true);
+		if (empty($container['sectionId']))
+		{
+			// the guarantee is the whole point of this action, so its refusal must not reach the client
+			// as the empty list an external user or a collaber without a single collab legally gets
+			$this->addError(new Error('[sc01] Personal calendar section is unavailable', 'section_guarantee_failed'));
+
+			return [];
+		}
+
+		if ($container['autoCreated'])
+		{
+			\CCalendarSect::SetClearOperationCache(true);
+		}
+
+		return \CCalendarSect::prepareSectionListResponse($type, (string)$userId);
+	}
+
+	// a personal section is rejected on save for a collab user, so only collab sections are offered
+	private function getCollabSectionsForStandaloneForm(int $userId): array
+	{
+		$collabIds = UserCollabs::getInstance()->getIds($userId);
+		if (empty($collabIds))
+		{
+			return [];
+		}
+
+		// section access rules ask for the group role of an external user one section at a time;
+		// the batch form fills the same static role cache in a single query
+		\CSocNetUserToGroup::GetUserRole($userId, $collabIds);
+
+		$sectionList = \CCalendar::getSectionList([
+			'CAL_TYPE' => Dictionary::CALENDAR_TYPE['group'],
+			'OWNER_ID' => $collabIds,
+			'ACTIVE' => 'Y',
+			'checkPermissions' => true,
+			'getPermissions' => true,
+		]);
+
+		$sections = [];
+		foreach ($sectionList as $section)
+		{
+			if (
+				($section['PERM']['edit'] ?? false)
+				&& !\CCalendarSect::CheckGoogleVirtualSection(
+					$section['GAPI_CALENDAR_ID'] ?? null,
+					$section['EXTERNAL_TYPE'] ?? null,
+				)
+			)
+			{
+				$sections[] = $section;
+			}
+		}
+
+		return $sections;
 	}
 
 	private function getEventEditFormHiddenFields(array $entry): array
@@ -834,6 +921,31 @@ class CalendarAjax extends \Bitrix\Main\Engine\Controller
 
 			$responseParams['section'] = isset($sections[0]) ? $sections[0] : null;
 
+			if (!$responseParams['section'])
+			{
+				$this->addError(new Error(Loc::getMessage('EC_EVENT_NOT_FOUND'), 'SECTION_NOT_FOUND'));
+
+				return [];
+			}
+
+			$permissions = \CCalendarEvent::getEventPermissions($entry, $userId);
+			$entry['permissions'] = $permissions;
+			$viewData = EventViewData::prepare(
+				$entry,
+				$responseParams['section'],
+				$permissions,
+				$responseParams['userIndex'],
+				$userId,
+			);
+			$entry = $viewData['entry'];
+			$responseParams['entry'] = $entry;
+			$responseParams['section'] = $viewData['section'];
+			$responseParams['userIndex'] = $viewData['userIndex'];
+			if ($viewData['restricted'])
+			{
+				$responseParams['entryUrl'] = '';
+			}
+
 			return new \Bitrix\Main\Engine\Response\Component(
 				'bitrix:calendar.view.slider',
 				'',
@@ -841,7 +953,9 @@ class CalendarAjax extends \Bitrix\Main\Engine\Controller
 					'id' => $uniqueId,
 					'event' => $entry,
 					'type' => \CCalendar::GetType(),
-					'sectionName' => $_REQUEST['section_name'],
+					'sectionName' => $viewData['restricted'] ? '' : $_REQUEST['section_name'],
+					'isRestrictedEventView' => $viewData['restricted'],
+					'userIndex' => $viewData['userIndex'],
 					'bIntranet' => \CCalendar::IsIntranetEnabled(),
 					'bSocNet' => \CCalendar::IsSocNet(),
 					'AVATAR_SIZE' => 21,
@@ -890,19 +1004,42 @@ class CalendarAjax extends \Bitrix\Main\Engine\Controller
 		$isExtranetUser = Loader::includeModule('intranet') && !\Bitrix\Intranet\Util::isIntranetUser($userId);
 
 		$hostId = (int)$request['hostId'];
-		if (!$hostId && $type === Dictionary::CALENDAR_TYPE['user'] && !$entryId)
+		if (!$entryId && $request['cur_event_id'])
 		{
-			$hostId = $ownerId;
+			$entryId = (int)$request['cur_event_id'];
+		}
+
+		if ($entryId > 0)
+		{
+			$event = \CCalendarEvent::GetById($entryId);
+			$hostId = $event ? (int)($event['MEETING_HOST'] ?? 0) : 0;
+			// The rights cost two reads and a batch check, so they are asked for the viewers alone
+			// who may not be told the host by their own relation to the event.
+			if ($hostId > 0 && $hostId !== $userId && !EventViewData::isOwnEntry($event, $userId))
+			{
+				$canReadFullEntry = EventViewData::canReadFullEntry(
+					$event,
+					\CCalendarEvent::getEventPermissions($event, $userId),
+					$userId,
+				);
+				$hostId = $canReadFullEntry ? $hostId : 0;
+			}
+		}
+		else
+		{
+			if (!$hostId && $type === Dictionary::CALENDAR_TYPE['user'])
+			{
+				$hostId = $ownerId ?: $userId;
+			}
+			elseif (!$hostId && $type !== Dictionary::CALENDAR_TYPE['open_event'])
+			{
+				$hostId = $userId;
+			}
 		}
 
 		if ($isExtranetUser)
 		{
 			$entries = \CExtranet::getMyGroupsUsersSimple(\CExtranet::GetExtranetSiteID());
-		}
-
-		if (!$entryId && $request['cur_event_id'])
-		{
-			$entryId = (int)$request['cur_event_id'];
 		}
 
 		$codes = [];

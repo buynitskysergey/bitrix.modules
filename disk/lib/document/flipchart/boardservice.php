@@ -5,6 +5,11 @@ declare(strict_types=1);
 namespace Bitrix\Disk\Document\Flipchart;
 
 use Bitrix\Disk\AttachedObject;
+use Bitrix\Disk\Document\Flipchart\DualMode\BoardApiServiceFactory;
+use Bitrix\Disk\Document\Flipchart\DualMode\ConfigurationException;
+use Bitrix\Disk\Document\Flipchart\DualMode\PilotLog;
+use Bitrix\Disk\Document\Flipchart\DualMode\ServiceProfile;
+use Bitrix\Disk\Document\Flipchart\DualMode\ServiceProfileResolver;
 use Bitrix\Disk\Document\Flipchart\Enum\BoardReadyStatus;
 use Bitrix\Disk\Document\Flipchart\Messenger\DownloadBoardMessage;
 use Bitrix\Disk\Document\Models\DocumentSession;
@@ -12,6 +17,7 @@ use Bitrix\Disk\File;
 use Bitrix\Disk\Folder;
 use Bitrix\Disk\TypeFile;
 use Bitrix\Disk\User;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
@@ -76,9 +82,28 @@ class BoardService
 			return new Error('Could not find the file.');
 		}
 
+		$profile = ServiceProfileResolver::createFromOptions()->resolveForObject($this->session->getObject());
+		if ($profile === null)
+		{
+			self::logUnresolvedProfile('saveDocument', (int)$this->session->getObject()->getId());
+
+			return new Error('Board service profile is not resolved.');
+		}
+
 		$boardId = $this->session->getObject()->getId();
 		$boardId = self::convertDocumentIdToExternal($boardId);
-		$boardApiService = new BoardApiService();
+
+		try
+		{
+			$boardApiService = self::createApiService($profile);
+		}
+		catch (ConfigurationException $exception)
+		{
+			self::logUnconfiguredProfile('saveDocument', (int)$this->session->getObject()->getId(), $exception);
+
+			return new Error('Board service profile is not configured.');
+		}
+
 		$boardStatus = $boardApiService->getBoardReadyStatus($boardId);
 		switch ($boardStatus) {
 			case BoardReadyStatus::ERROR:
@@ -123,7 +148,30 @@ class BoardService
 
 		$result = new Result();
 
-		$downloadResult = (new BoardApiService())->downloadBlank();
+		// The object does not exist yet, so the destination folder decides the instance: the blank
+		// is requested before the file is created.
+		$profile = ServiceProfileResolver::createFromOptions()->resolveForDestination($folder);
+		if ($profile === null)
+		{
+			self::logUnresolvedProfile('createNewDocument', (int)$folder->getId());
+			$result->addError(new Error('Board service profile is not resolved.'));
+
+			return $result;
+		}
+
+		try
+		{
+			$boardApiService = self::createApiService($profile);
+		}
+		catch (ConfigurationException $exception)
+		{
+			self::logUnconfiguredProfile('createNewDocument', (int)$folder->getId(), $exception);
+			$result->addError(new Error('Board service profile is not configured.'));
+
+			return $result;
+		}
+
+		$downloadResult = $boardApiService->downloadBlank();
 		if (!$downloadResult->isSuccess())
 		{
 			$result->addErrors($downloadResult->getErrors());
@@ -173,8 +221,27 @@ class BoardService
 			return;
 		}
 
-		$apiService = new BoardApiService();
-		$apiService->kickUsers(static::convertDocumentIdToExternal($file->getId()), $userIds);
+		$profile = ServiceProfileResolver::createFromOptions()->resolveForObject($file);
+		if ($profile === null)
+		{
+			// Batch paths (folder-wide rights change) must skip the object rather than contact any
+			// instance: touching the old one would break the invariant for a clean board.
+			self::logUnresolvedProfile('kickUsers', (int)$file->getId());
+
+			return;
+		}
+
+		// An active pilot whose address is not configured yet must skip the object as well: an exception
+		// here would abort the folder-wide walk and leave the remaining boards with live sessions.
+		try
+		{
+			$apiService = self::createApiService($profile);
+			$apiService->kickUsers(static::convertDocumentIdToExternal($file->getId()), $userIds);
+		}
+		catch (ConfigurationException $exception)
+		{
+			self::logUnconfiguredProfile('kickUsers', (int)$file->getId(), $exception);
+		}
 	}
 
 	public static function kickUnallowedUsers(array $sessions, File|AttachedObject $object): void
@@ -210,8 +277,25 @@ class BoardService
 		{
 			$object = $object->getFile();
 		}
+		$profile = ServiceProfileResolver::createFromOptions()->resolveForObject($object);
+		if ($profile === null)
+		{
+			self::logUnresolvedProfile('kickGuestsUsers', (int)$object->getId());
+
+			return;
+		}
+
 		$documentId = static::convertDocumentIdToExternal($object->getId());
-		$userIds = (new BoardApiService())->getActiveUsersByDocumentId($documentId);
+		try
+		{
+			$userIds = self::createApiService($profile)->getActiveUsersByDocumentId($documentId);
+		}
+		catch (ConfigurationException $exception)
+		{
+			self::logUnconfiguredProfile('kickGuestsUsers', (int)$object->getId(), $exception);
+
+			return;
+		}
 
 		if (!$userIds)
 		{
@@ -246,5 +330,37 @@ class BoardService
 			&& $isCreatedByCurrentUser
 			&& $isRealObject
 			&& $isSmallNewBoard;
+	}
+
+	private static function createApiService(ServiceProfile $profile): BoardApiService
+	{
+		return ServiceLocator::getInstance()->get(BoardApiServiceFactory::class)->create($profile);
+	}
+
+	private static function logUnresolvedProfile(string $entryPoint, int $objectId): void
+	{
+		PilotLog::error(
+			'Board service profile is not resolved: {entryPoint}, object {objectId}',
+			[
+				'entryPoint' => $entryPoint,
+				'objectId' => $objectId,
+			],
+		);
+	}
+
+	private static function logUnconfiguredProfile(
+		string $entryPoint,
+		int $objectId,
+		ConfigurationException $exception,
+	): void
+	{
+		PilotLog::error(
+			'Board service profile is not configured: {entryPoint}, object {objectId}, {reason}',
+			[
+				'entryPoint' => $entryPoint,
+				'objectId' => $objectId,
+				'reason' => $exception->getMessage(),
+			],
+		);
 	}
 }

@@ -9,6 +9,11 @@ use Bitrix\Main\ORM\Fields\FieldTypeMask;
 use Bitrix\Main\ORM\Objectify\EntityObject;
 use Bitrix\Main\ORM\Objectify\Values;
 use Bitrix\Main\Result;
+use Bitrix\Main\Loader;
+use Bitrix\Catalog\ProductTable;
+use Bitrix\Catalog\VatTable;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Join;
 
 class ProductRow extends EO_ProductRow implements \JsonSerializable
 {
@@ -159,10 +164,112 @@ class ProductRow extends EO_ProductRow implements \JsonSerializable
 	{
 		$normalizationResult = new Result();
 
+		$this->normalizeTax();
 		$this->normalizeMeasure($normalizationResult);
 		$this->normalizePrices($normalizationResult, $currencyId, $exchRate);
 
 		return $normalizationResult;
+	}
+
+	protected function normalizeTax(): void
+	{
+		if (!$this->isChanged('TAX_RATE') && !$this->isNew() || $this->isChanged('TAX_NAME'))
+		{
+			return;
+		}
+
+		$catalogProductVat = $this->getCatalogProductVat();
+		$taxRate = $this->get('TAX_RATE');
+		if (
+			$catalogProductVat
+			&& $catalogProductVat['RATE'] === $taxRate
+		)
+		{
+			$this->set('TAX_NAME', $catalogProductVat['NAME']);
+
+			return;
+		}
+
+		$vat = $this->getVatByRate($taxRate);
+		if ($vat)
+		{
+			$this->set('TAX_NAME', $vat['NAME']);
+		}
+	}
+
+	private function getCatalogProductVat(): ?array
+	{
+		if (!Loader::includeModule('catalog'))
+		{
+			return null;
+		}
+
+		$productId = (int)($this->get('PRODUCT_ID') ?? 0);
+		if ($productId <= 0)
+		{
+			return null;
+		}
+
+		$catalogProductVat = ProductTable::getRow([
+			'select' => [
+				'RATE' => 'VAT.RATE',
+				'NAME' => 'VAT.NAME',
+			],
+			'filter' => ['=ID' => $productId],
+			'cache' => [
+				'ttl' => 86400,
+				'cache_joins' => true,
+			],
+			'runtime' => [
+				new Reference(
+					'VAT',
+					VatTable::class,
+					Join::on('this.VAT_ID', 'ref.ID')
+				),
+			],
+		]);
+
+		if (!$catalogProductVat)
+		{
+			return null;
+		}
+
+		$catalogProductVat['RATE'] =
+			$catalogProductVat['RATE'] !== null
+				? (float)$catalogProductVat['RATE']
+				: null
+		;
+
+		return $catalogProductVat;
+	}
+
+	private function getVatByRate($taxRate): ?array
+	{
+		if (!Loader::includeModule('catalog'))
+		{
+			return null;
+		}
+
+		$filter = ['=ACTIVE' => 'Y'];
+		if ($taxRate === null)
+		{
+			$filter['=EXCLUDE_VAT'] = 'Y';
+		}
+		else
+		{
+			$filter['=EXCLUDE_VAT'] = 'N';
+			$filter['=RATE'] = (float)$taxRate;
+		}
+
+		return VatTable::getRow([
+			'select' => ['ID', 'NAME'],
+			'filter' => $filter,
+			'order' => [
+				'SORT' => 'ASC',
+				'ID' => 'ASC',
+			],
+			'cache' => ['ttl' => 86400],
+		]);
 	}
 
 	protected function normalizeMeasure(Result $result): void

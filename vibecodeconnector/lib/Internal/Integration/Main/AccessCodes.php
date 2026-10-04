@@ -12,7 +12,7 @@ use CAccess;
  */
 class AccessCodes
 {
-	private const ACCESS_CODE_AUTHORIZED = 'AU';
+	public const ACCESS_CODE_AUTHORIZED = 'AU';
 
 	/**
 	 * @return string[]

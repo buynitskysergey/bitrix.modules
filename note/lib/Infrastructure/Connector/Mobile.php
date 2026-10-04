@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Connector;
 
-use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Note\Internal\Access\AccessController;
 use Bitrix\Note\Internal\Access\ActionDictionary;
+use Bitrix\Note\Internal\Service\License\LicenseService;
 
 class Mobile
 {
@@ -18,7 +18,6 @@ class Mobile
 	private const ENTRY_URL = '/mobile/note/';
 	private const ICON_NAME = 'library_base';
 	private const ICON_COLOR = '#7a7adc';
-	private const TOOL_MENU_ID = 'menu_note_base';
 
 	public static function onMobileMenuStructureBuilt($menu): array
 	{
@@ -74,12 +73,8 @@ class Mobile
 
 	private static function isToolEnabled(): bool
 	{
-		if (!Loader::includeModule('intranet'))
-		{
-			return true;
-		}
-
-		return ToolsManager::getInstance()->checkAvailabilityByMenuId(self::TOOL_MENU_ID);
+		// Delegates to the single tariff/tool source of truth (behavior-identical).
+		return (new LicenseService())->isToolEnabled();
 	}
 
 	private static function findSectionIndex(array $menu, string $code): ?int

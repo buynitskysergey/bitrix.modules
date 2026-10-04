@@ -10,7 +10,7 @@ use Bitrix\Crm\RepeatSale\DataCollector\Mapper\SystemFieldsMapper;
 use Bitrix\Crm\RepeatSale\DataCollector\Mapper\UserFieldsMapper;
 use CCrmOwnerType;
 
-final class EntityDataCollector extends BaseDataCollector
+class EntityDataCollector extends BaseDataCollector
 {
 	protected const DEFAULT_LIMIT = 5;
 

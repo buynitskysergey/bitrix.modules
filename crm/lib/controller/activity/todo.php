@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Controller\Activity;
 
 use Bitrix\Calendar\UserSettings;
+use Bitrix\Crm\Activity\CalendarEventEditPermissionChecker;
 use Bitrix\Crm\Activity\Entity;
 use Bitrix\Crm\Activity\Provider;
 use Bitrix\Crm\Activity\Provider\ToDo\Block\Calendar;
@@ -23,6 +24,7 @@ use Bitrix\Crm\Multifield\Type\Phone;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Service\Factory;
+use Bitrix\Intranet\Util;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
@@ -529,6 +531,13 @@ class ToDo extends Base
 
 		if ($responsibleId)
 		{
+			if (!$this->isResponsibleUserAvailable($responsibleId))
+			{
+				$this->addError(new Error('The specified user cannot be assigned as responsible'));
+
+				return null;
+			}
+
 			$todo->setResponsibleId($responsibleId);
 		}
 
@@ -677,6 +686,13 @@ class ToDo extends Base
 			return null;
 		}
 
+		if (!$this->isResponsibleUserAvailable($responsibleId))
+		{
+			$this->addError(new Error('The specified user cannot be assigned as responsible'));
+
+			return null;
+		}
+
 		$prevResponsibleId = $todo->getResponsibleId();
 		$todo->setResponsibleId($responsibleId);
 
@@ -745,6 +761,16 @@ class ToDo extends Base
 		$todo = (BlocksManager::createFromEntity($todo))->enrichEntityWithBlocks(null, true);
 
 		return $this->saveTodo($todo, [], true);
+	}
+
+	private function isResponsibleUserAvailable(int $responsibleId): bool
+	{
+		if (!Loader::includeModule('intranet'))
+		{
+			return true;
+		}
+
+		return Util::isIntranetUser($responsibleId);
 	}
 
 	protected function loadEntity(int $ownerTypeId, int $ownerId, int $id): ?Entity\ToDo
@@ -845,9 +871,23 @@ class ToDo extends Base
 				'colorId' => $todo->getSettings()['COLOR'] ?? null,
 				'currentUser' => $this->getTodoCurrentUser($todo->getResponsibleId()),
 				'pingOffsets' => $this->getPingOffsets($todo),
+				'canChangeDeadline' => $this->canChangeDeadline($todo),
 			 ],
 			 'blocksData' => BlocksManager::createFromEntity($todo)->fetch(),
 		];
+	}
+
+	private function canChangeDeadline(Entity\ToDo $todo): bool
+	{
+		$calendarEventId = (int)$todo->getCalendarEventId();
+		if ($calendarEventId <= 0)
+		{
+			return true;
+		}
+
+		$userId = (int)(CurrentUser::get()->getId() ?? 0);
+
+		return (new CalendarEventEditPermissionChecker())->canChangeDeadline($userId, $calendarEventId);
 	}
 
 	private function getPingOffsets(Entity\ToDo $todo): array

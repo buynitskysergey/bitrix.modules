@@ -9,6 +9,7 @@ use Bitrix\Note\Internal\Model\Collection;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\PortalAdmin;
+use Bitrix\Note\Internal\Service\Document\MainDocumentService;
 
 class CollectionProvider
 {
@@ -17,9 +18,15 @@ class CollectionProvider
 
 	private CollectionRepository $repository;
 
-	public function __construct(?CollectionRepository $repository = null)
+	private MainDocumentService $mainDocumentService;
+
+	public function __construct(
+		?CollectionRepository $repository = null,
+		?MainDocumentService $mainDocumentService = null,
+	)
 	{
 		$this->repository = $repository ?? new CollectionRepository();
+		$this->mainDocumentService = $mainDocumentService ?? new MainDocumentService();
 	}
 
 	public function getById(int $id): ?Collection
@@ -215,11 +222,13 @@ class CollectionProvider
 
 	public function mapCollectionWithLevels(Collection $collection, int $effectiveLevel, int $policyLevel): array
 	{
-		return $this->enrichWithAccess(
+		$row = $this->enrichWithAccess(
 			$this->mapCollectionBase($collection),
 			$effectiveLevel,
 			$policyLevel,
 		);
+
+		return $this->enrichRowsWithMainDocument([$row])[0];
 	}
 
 	public function mapCollectionsWithAccess(
@@ -245,6 +254,39 @@ class CollectionProvider
 				$policyLevel,
 			);
 		}
+
+		return $this->enrichRowsWithMainDocument($rows);
+	}
+
+	/**
+	 * Adds the mainDocumentId and hasDescription fields to already-mapped collection rows
+	 * using a single batch query - no per-collection round trips.
+	 *
+	 * @param array<int, array<string, mixed>> $rows each row must carry an 'id' key
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function enrichRowsWithMainDocument(array $rows): array
+	{
+		if (empty($rows))
+		{
+			return $rows;
+		}
+
+		$collectionIds = [];
+		foreach ($rows as $row)
+		{
+			$collectionIds[] = (int)($row['id'] ?? 0);
+		}
+
+		$summary = $this->mainDocumentService->getSummaryByCollectionIds($collectionIds);
+
+		foreach ($rows as &$row)
+		{
+			$meta = $summary[(int)($row['id'] ?? 0)] ?? null;
+			$row['mainDocumentId'] = $meta['id'] ?? null;
+			$row['hasDescription'] = $meta['hasDescription'] ?? false;
+		}
+		unset($row);
 
 		return $rows;
 	}

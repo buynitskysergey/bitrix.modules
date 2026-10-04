@@ -12,6 +12,7 @@ use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Fields\StringField;
 use Bitrix\Main\ORM\Fields\TextField;
 use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
+use Bitrix\Main\Text\Emoji;
 use Bitrix\Main\Type\DateTime;
 
 /**
@@ -26,8 +27,12 @@ use Bitrix\Main\Type\DateTime;
  * <li> MARKDOWN text optional
  * <li> POSITION int mandatory
  * <li> IS_ARCHIVED bool mandatory
+ * <li> IS_MAIN bool mandatory
  * <li> ARCHIVED_AT datetime optional
  * <li> ARCHIVED_BY int optional
+ * <li> CONTENT_UPDATED_AT datetime optional
+ * <li> MATERIALIZED_UPTO_ID int optional
+ * <li> IS_DERIVED_STALE bool mandatory
  * <li> CREATED_BY int mandatory
  * <li> UPDATED_BY int mandatory
  * <li> CONTENT_FORMAT string optional default 'yjs'
@@ -56,6 +61,16 @@ class DocumentTable extends DataManager
 	/** @deprecated Legacy format, read-only. New documents use CONTENT_FORMAT_YJS. */
 	public const CONTENT_FORMAT_JSON = 'json';
 	public const CONTENT_FORMAT_MD = 'md';
+
+	// IS_MAIN flag values (BooleanField CHAR(1)). 'Y' marks the single per-collection
+	// "main document" that carries the knowledge base description; 'N' is a regular document.
+	public const IS_MAIN_YES = 'Y';
+	public const IS_MAIN_NO = 'N';
+
+	// IS_DERIVED_STALE flag values (BooleanField CHAR(1)). 'Y' means the derived projections
+	// (full-text search, link index) need a rebuild; 'N' means they are in step with MARKDOWN.
+	public const DERIVED_STALE_YES = 'Y';
+	public const DERIVED_STALE_NO = 'N';
 
 	public static function getTableName()
 	{
@@ -89,19 +104,25 @@ class DocumentTable extends DataManager
 				],
 			),
 			(new IntegerField('PARENT_ID'))->configureNullable(),
-			new StringField(
+			// 4-byte UTF-8 (emoji) is silently truncated over the utf8mb3 MySQL
+			// connection; encode to an ASCII :hex: shortcode on save, decode on fetch.
+			(new StringField(
 				'TITLE',
 				[
 					'required' => true,
 					'validation' => [__CLASS__, 'validateTitle'],
 				],
-			),
-			new TextField(
+			))
+				->addSaveDataModifier([Emoji::class, 'encode'])
+				->addFetchDataModifier([Emoji::class, 'decode']),
+			(new TextField(
 				'MARKDOWN',
 				[
 					'default_value' => '',
 				],
-			),
+			))
+				->addSaveDataModifier([Emoji::class, 'encode'])
+				->addFetchDataModifier([Emoji::class, 'decode']),
 			(new TextField('YJS_STATE'))->configureNullable(),
 			new StringField(
 				'CONTENT_FORMAT',
@@ -124,8 +145,30 @@ class DocumentTable extends DataManager
 					'default_value' => 'N',
 				],
 			),
+			new BooleanField(
+				'IS_MAIN',
+				[
+					'required' => true,
+					'values' => [self::IS_MAIN_NO, self::IS_MAIN_YES],
+					'default_value' => self::IS_MAIN_NO,
+				],
+			),
 			(new DatetimeField('ARCHIVED_AT'))->configureNullable(),
 			(new IntegerField('ARCHIVED_BY'))->configureNullable(),
+			// Moment the MARKDOWN projection was built (distinct from UPDATED_AT). NULL until first written.
+			(new DatetimeField('CONTENT_UPDATED_AT'))->configureNullable(),
+			// Internal materialization cursor: last patch id folded into MARKDOWN (yjs only).
+			// Size 8 - the column is bigint in the schema (see install/migrations/tables.php).
+			(new IntegerField('MATERIALIZED_UPTO_ID'))->configureNullable()->configureSize(8),
+			// Dirty flag: derived projections (search, links) require a rebuild by the freshness agent.
+			new BooleanField(
+				'IS_DERIVED_STALE',
+				[
+					'required' => true,
+					'values' => [self::DERIVED_STALE_NO, self::DERIVED_STALE_YES],
+					'default_value' => self::DERIVED_STALE_NO,
+				],
+			),
 			new IntegerField(
 				'CREATED_BY',
 				[

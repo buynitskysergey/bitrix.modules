@@ -188,6 +188,8 @@ class ProductRowTable extends DataManager
 				->configureDefaultValue(ProductType::TYPE_PRODUCT)
 				->configureRequired()
 				->addValidator([static::class, 'validateSupportedProductType']),
+			(new StringField('TAX_NAME'))
+				->configureSize(50),
 			$fieldRepository->getProductRowReservation(),
 		];
 	}

@@ -21,6 +21,11 @@ class CopilotCallAssessmentMapping
 					'FIELD_NAME' => 'CCA.TITLE',
 					'FIELD_TYPE' => 'string',
 				],
+				// DESCRIPTION varchar(2000) NOT NULL,
+				'DESCRIPTION' => [
+					'FIELD_NAME' => 'CCA.DESCRIPTION',
+					'FIELD_TYPE' => 'string',
+				],
 				// PROMPT text NOT NULL,
 				'PROMPT' => [
 					'FIELD_NAME' => 'CCA.PROMPT',

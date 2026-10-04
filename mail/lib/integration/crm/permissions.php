@@ -57,7 +57,7 @@ class Permissions
 			&& Container::getInstance()->getUserPermissions($userId)->entityType()->canDeleteItems(\CCrmOwnerType::Activity);
 	}
 
-	private function __construct()
+	public function __construct()
 	{
 		$this->isCrmInstalled = Loader::includeModule('crm');
 	}

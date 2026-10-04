@@ -36,6 +36,14 @@ class FactoryBasedMerger extends EntityMerger
 		$this->factory = $factory;
 	}
 
+	public static function shouldMergeClientBindingsFromAllItems(int $entityTypeID): bool
+	{
+		return $entityTypeID === \CCrmOwnerType::Quote
+			|| $entityTypeID === \CCrmOwnerType::SmartInvoice
+			|| \CCrmOwnerType::isPossibleDynamicTypeId($entityTypeID)
+		;
+	}
+
 	public function getFieldCaption(string $fieldId): string
 	{
 		return $this->factory->getFieldCaption($fieldId);
@@ -58,7 +66,24 @@ class FactoryBasedMerger extends EntityMerger
 
 	protected function getEntityFields($entityID, $roleID): array
 	{
-		$data = $this->getItemWithException($entityID, $roleID)->toArray();
+		$item = $this->getItemWithException($entityID, $roleID);
+		$data = $item->toArray();
+
+		if ($this->factory->isClientEnabled())
+		{
+			if ($item->hasField(Item::FIELD_NAME_CONTACT_BINDINGS))
+			{
+				$data[Item::FIELD_NAME_CONTACT_BINDINGS] = $item->get(Item::FIELD_NAME_CONTACT_BINDINGS);
+			}
+			if ($item->hasField(Item::FIELD_NAME_CONTACT_IDS))
+			{
+				$data[Item::FIELD_NAME_CONTACT_IDS] = $item->getContactIds();
+			}
+			if ($item->hasField(Item::FIELD_NAME_CONTACT_ID))
+			{
+				$data[Item::FIELD_NAME_CONTACT_ID] = $item->getContactId();
+			}
+		}
 
 		return Container::getInstance()
 			->getOrmObjectConverter()
@@ -183,6 +208,62 @@ class FactoryBasedMerger extends EntityMerger
 		return null;
 	}
 
+	protected function innerPrepareEntityFieldMergeData(
+		$fieldID,
+		array $fieldParams,
+		array $seeds,
+		array $targ,
+		array $options = null,
+	)
+	{
+		if ($fieldID === 'CONTACT_IDS' && $this->factory->isClientEnabled())
+		{
+			$options ??= [];
+			if (isset($options['enabledIds']) && is_array($options['enabledIds']))
+			{
+				$options['map']['CONTACT_IDS']['SOURCE_ENTITY_IDS'] = $options['enabledIds'];
+			}
+			$options = $this->removeContactIdsMapForFactoryBasedClientBindings($options);
+
+			$mergeData = (new FactoryBasedContactBindingMerger(
+				self::shouldMergeClientBindingsFromAllItems($this->entityTypeID),
+			))->prepareMergeData(
+				$seeds,
+				$targ,
+				false,
+				$options,
+			);
+
+			return [
+				'FIELD_ID' => 'CONTACT_IDS',
+				'TYPE' => 'crm_contact',
+				'IS_MERGED' => true,
+				'IS_MULTIPLE' => true,
+				'SOURCE_ENTITY_IDS' => $mergeData['SOURCE_ENTITY_IDS'],
+				'VALUE' => $mergeData['VALUE'],
+			];
+		}
+
+		return parent::innerPrepareEntityFieldMergeData($fieldID, $fieldParams, $seeds, $targ, $options);
+	}
+
+	protected function mergeEntityFieldsBatch(
+		array &$seeds,
+		array &$targ,
+		array &$fieldInfos,
+		$skipEmpty = false,
+		array $options = null,
+	)
+	{
+		parent::mergeEntityFieldsBatch(
+			$seeds,
+			$targ,
+			$fieldInfos,
+			$skipEmpty,
+			$this->removeContactIdsMapForFactoryBasedClientBindings($options ?? []),
+		);
+	}
+
 	protected function getFieldConflictResolver(string $fieldId, string $type): ConflictResolver\Base
 	{
 		$userDefinedResolver = static::getUserDefinedConflictResolver(
@@ -280,10 +361,40 @@ class FactoryBasedMerger extends EntityMerger
 		array $options = [],
 	): void
 	{
+		$optionsWithoutContactIdsMap = $this->removeContactIdsMapForFactoryBasedClientBindings($options);
+
+		if ($this->factory->isClientEnabled())
+		{
+			$contactBindingMerger = new FactoryBasedContactBindingMerger(
+				self::shouldMergeClientBindingsFromAllItems($this->entityTypeID),
+			);
+			$contactBindingMerger->merge($seeds, $targ, $skipEmpty, $optionsWithoutContactIdsMap);
+		}
+
 		$targ[Item::FIELD_NAME_OBSERVERS] = $this->getMergedObservers($seeds, $targ);
 		$targ[Item::FIELD_NAME_PRODUCTS] = $this->getMergedProductRows($seeds, $targ);
 
-		parent::mergeBoundEntitiesBatch($seeds, $targ, $skipEmpty, $options);
+		parent::mergeBoundEntitiesBatch($seeds, $targ, $skipEmpty, $optionsWithoutContactIdsMap);
+	}
+
+	private function removeContactIdsMapForFactoryBasedClientBindings(array $options): array
+	{
+		if (
+			!self::shouldMergeClientBindingsFromAllItems($this->entityTypeID)
+			|| !isset($options['map'])
+			|| !is_array($options['map'])
+		)
+		{
+			return $options;
+		}
+
+		unset($options['map'][Item::FIELD_NAME_CONTACT_IDS]);
+		if (empty($options['map']))
+		{
+			unset($options['map']);
+		}
+
+		return $options;
 	}
 
 	protected function getMergedObservers(array $seedItems, array $targetItem): array

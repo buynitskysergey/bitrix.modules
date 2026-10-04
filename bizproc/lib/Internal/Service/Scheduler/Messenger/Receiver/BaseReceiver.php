@@ -12,6 +12,8 @@ use Bitrix\Main\Messenger\Receiver\AbstractReceiver;
 
 class BaseReceiver extends AbstractReceiver
 {
+	public const INSTANCE_LOCKED_RETRY_DELAY = 60;
+
 	protected function process(MessageInterface $message): void
 	{
 	}
@@ -49,7 +51,10 @@ class BaseReceiver extends AbstractReceiver
 	{
 		return match ($exception->getCode())
 		{
-			\CBPRuntime::EXCEPTION_CODE_INSTANCE_LOCKED => new RecoverableMessageException(previous: $exception),
+			\CBPRuntime::EXCEPTION_CODE_INSTANCE_LOCKED => new RecoverableMessageException(
+				retryDelay: self::INSTANCE_LOCKED_RETRY_DELAY,
+				previous: $exception,
+			),
 			default => new UnrecoverableMessageException(previous: $exception),
 		};
 	}

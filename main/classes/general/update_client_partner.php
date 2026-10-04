@@ -303,7 +303,7 @@ class CUpdateClientPartner
 
 		if ($strError_tmp <> '')
 		{
-			CUpdateSystem::AddMessage2Log($strError_tmp, "CURV");
+			CUpdateClientPartner::AddMessage2Log($strError_tmp, "CURV");
 			$strError .= $strError_tmp;
 			return false;
 		}

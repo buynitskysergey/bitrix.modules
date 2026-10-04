@@ -4,9 +4,36 @@ namespace Bitrix\Rest\V3\Structure;
 
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Rest\V3\Dto\DtoField;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumDefinition;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumRegistry;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumType;
 
 class FieldsValidator
 {
+	public static function validateDtoFieldValue(DtoField $field, mixed $value): bool
+	{
+		if ($field->getDynamicEnumProvider() !== null)
+		{
+			$definition = DynamicEnumRegistry::resolve($field->getDynamicEnumProvider());
+
+			return self::validateDynamicEnumValue($definition, $value);
+		}
+
+		return self::validateTypeAndValue($field->getPropertyType(), $value);
+	}
+
+	public static function validateDynamicEnumValue(DynamicEnumDefinition $definition, mixed $value): bool
+	{
+		$typeOk = match ($definition->type)
+		{
+			DynamicEnumType::String => is_string($value),
+			DynamicEnumType::Int => is_int($value),
+		};
+
+		return $typeOk && $definition->contains($value);
+	}
+
 	public static function validateTypeAndValue(?string $type, mixed $value): bool
 	{
 		if ($type !== null && is_subclass_of($type, \BackedEnum::class))

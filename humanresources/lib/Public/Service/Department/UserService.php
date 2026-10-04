@@ -234,7 +234,11 @@ class UserService
 		return InternalContainer::getNodeMemberRepository()->getExistingEntityIds($intIds);
 	}
 
-	public function getTotalEmployeeCount(): int
+	/**
+	 * Counts unique employees of the whole company structure. Virtual (system) users
+	 * are excluded by default; pass $withVirtualUsers = true to count them too.
+	 */
+	public function getTotalEmployeeCount(bool $withVirtualUsers = false): int
 	{
 		$structure = StructureHelper::getDefaultStructure();
 		if (!$structure)
@@ -248,7 +252,7 @@ class UserService
 			return 0;
 		}
 
-		return InternalContainer::getNodeMemberRepository()->countUniqueUsersByNodeIdWithSubNodes($rootDepartment->id);
+		return InternalContainer::getNodeMemberRepository()->countUniqueUsersByNodeIdWithSubNodes($rootDepartment->id, $withVirtualUsers);
 	}
 
 	/**

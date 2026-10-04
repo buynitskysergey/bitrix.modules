@@ -10,7 +10,6 @@ use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Integration\Sign;
 use Bitrix\Crm\Settings\InvoiceSettings;
 use Bitrix\Crm\Settings\LeadSettings;
-use Bitrix\Crm\Settings\QuoteSettings;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\NotSupportedException;
@@ -44,10 +43,7 @@ class Factory
 				static::$supportedEntityTypes[] = \CCrmOwnerType::Lead;
 			}
 
-			if (QuoteSettings::getCurrent()->isFactoryEnabled())
-			{
-				static::$supportedEntityTypes[] = \CCrmOwnerType::Quote;
-			}
+			static::$supportedEntityTypes[] = \CCrmOwnerType::Quote;
 
 			if (InvoiceSettings::getCurrent()->isSmartInvoiceEnabled())
 			{
@@ -280,7 +276,7 @@ class Factory
 		return $context;
 	}
 
-	public static function runOnStatusChanged($entityTypeId, $entityId)
+	public static function runOnStatusChanged($entityTypeId, $entityId, ?int $userId = null)
 	{
 		$result = new Result();
 
@@ -293,7 +289,9 @@ class Factory
 		static::doAutocompleteActivities($entityTypeId, $entityId);
 
 		$automationTarget = static::getTarget($entityTypeId, $entityId);
-		$automationTarget->getRuntime()->onDocumentStatusChanged();
+		// Pass the user who initiated the status change so a stage robot writes
+		// history under them, not the responsible user/System.
+		$automationTarget->getRuntime()->onDocumentStatusChanged($userId);
 
 		if ($conversionResult = self::shiftConversionResult($entityTypeId, $entityId))
 		{

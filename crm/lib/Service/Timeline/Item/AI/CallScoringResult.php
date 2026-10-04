@@ -48,6 +48,8 @@ final class CallScoringResult extends Base
 			->addActionParamInt('activityCreated', $createdTimestamp)
 			->addActionParamString('userPhotoUrl', $userData['PHOTO_URL'] ?? '')
 			->addActionParamInt('jobId', $this->getJobId())
+			->addActionParamInt('assessmentSettingsId', $this->getScoringResult()['ASSESSMENT_SETTING_ID'] ?? null)
+			->addActionParamBoolean('isV2', AIManager::isCallScoringV2Enabled())
 		;
 	}
 

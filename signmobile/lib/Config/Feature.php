@@ -49,4 +49,16 @@ final class Feature
 
 		return false;
 	}
+
+	public function isDocumentAnnulEnabled(): bool
+	{
+		if (class_exists(FeatureResolver::class))
+		{
+			return Mobile::getInstance()::getApiVersion() >= 54
+				&& FeatureResolver::instance()->released('kedoDocumentAnnul')
+			;
+		}
+
+		return false;
+	}
 }

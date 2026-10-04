@@ -3,10 +3,11 @@
 namespace Bitrix\Main\UI\Viewer\Renderer;
 
 use Bitrix\Main\Loader;
+use Bitrix\Main\Web\MimeType;
 
 class Audio extends Renderer
 {
-	const JS_TYPE_AUDIO = 'audio';
+	public const JS_TYPE_AUDIO = 'audio';
 
 	public static function getJsType()
 	{
@@ -21,6 +22,8 @@ class Audio extends Renderer
 			'audio/mpeg',
 			'audio/mp4',
 			'audio/x-m4a',
+			'audio/wav',
+			'audio/x-wav',
 		];
 	}
 
@@ -33,7 +36,14 @@ class Audio extends Renderer
 
 	public function getData()
 	{
+		$contentType = $this->getOption('contentType');
+		if (!in_array($contentType, self::getAllowedContentTypes(), true))
+		{
+			$contentType = MimeType::getByFilename($this->name);
+		}
+
 		return [
+			'contentType' => $contentType,
 			'src' => $this->sourceUri,
 		];
 	}

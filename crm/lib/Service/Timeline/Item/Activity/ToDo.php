@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Service\Timeline\Item\Activity;
 use Bitrix\Calendar\Rooms\Manager;
 use Bitrix\Calendar\Rooms\Util;
 use Bitrix\Crm\Activity\Analytics\Dictionary;
+use Bitrix\Crm\Activity\CalendarEventEditPermissionChecker;
 use Bitrix\Crm\Activity\Provider;
 use Bitrix\Crm\Activity\ToDo\ColorSettings\ColorSettingsProvider;
 use Bitrix\Crm\Activity\TodoPingSettingsProvider;
@@ -401,17 +402,40 @@ class ToDo extends Activity
 			}
 		}
 
+		$editable = $this->isScheduled() && $this->hasUpdatePermission();
+
 		return (new EditableDate())
-			->setReadonly(!$this->isScheduled() || !$this->hasUpdatePermission())
+			->setReadonly(!$editable)
 			->setStyle(EditableDate::STYLE_PILL)
 			->setDate($deadline)
 			->setDuration($this->getDeadlineEditableDateDuration())
 			->setAction($updateDeadlineAction)
+			->setCanChangeDeadline($editable ? $this->canChangeCalendarEventDeadline() : true)
 			->setBackgroundColor(
 				$this->isScheduled() ?
 					EditableDate::BACKGROUND_COLOR_WARNING
 					: null
 			)
+		;
+	}
+
+	private ?bool $canChangeCalendarEventDeadline = null;
+
+	private function canChangeCalendarEventDeadline(): bool
+	{
+		if ($this->canChangeCalendarEventDeadline !== null)
+		{
+			return $this->canChangeCalendarEventDeadline;
+		}
+
+		$calendarEventId = $this->getCalendarEventId();
+		if (!$calendarEventId)
+		{
+			return $this->canChangeCalendarEventDeadline = true;
+		}
+
+		return $this->canChangeCalendarEventDeadline = (new CalendarEventEditPermissionChecker())
+			->canChangeDeadline($this->getContext()->getUserId(), $calendarEventId)
 		;
 	}
 

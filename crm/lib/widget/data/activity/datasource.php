@@ -8,6 +8,7 @@ use Bitrix\Crm\Activity\StatisticsMark;
 use Bitrix\Crm\Activity\StatisticsStatus;
 use Bitrix\Crm\Activity\StatisticsStream;
 use Bitrix\Crm\Widget\Filter;
+use Bitrix\Main\Web\Uri;
 
 abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 {
@@ -109,7 +110,7 @@ abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 			}
 		}
 
-		return \CHTTP::urlAddParams(self::getEntityListPath(), $urlParams);
+		return (string)(new Uri(self::getEntityListPath()))->addParams($urlParams);
 	}
 	/**
 	 * Extract details page URL params from request.
@@ -176,7 +177,7 @@ abstract class DataSource extends \Bitrix\Crm\Widget\Data\DataSource
 		if (isset($filterParams['PN']))
 		{
 			// filter Calls, Meetings and Emails by TYPE_ID (not by PROVIDER_TYPE_ID) for compatibility.
-			list($providerId, $providerTypeId) = static::parsePresetName($filterParams['PN']);
+			[$providerId, $providerTypeId] = static::parsePresetName($filterParams['PN']);
 			if (
 				$providerId === Activity\Provider\Call::getId()
 				&& $providerTypeId === Activity\Provider\Call::ACTIVITY_PROVIDER_TYPE_CALL

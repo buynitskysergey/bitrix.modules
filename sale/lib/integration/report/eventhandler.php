@@ -6,6 +6,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Report\ReportTable;
 use Bitrix\Report\VisualConstructor\AnalyticBoard;
 use Bitrix\Report\VisualConstructor\AnalyticBoardBatch;
+use Bitrix\Main\Web\Uri;
 
 class EventHandler
 {
@@ -77,9 +78,9 @@ class EventHandler
 			$reportPage->setExternal(true);
 
 			$reportViewUrl = static::REPORT_VIEW_URL;
-			$reportViewUrl = \CHTTP::urlAddParams($reportViewUrl, [
+			$reportViewUrl = (string)(new Uri($reportViewUrl))->addParams([
 				'ID' => $row['ID'],
-				'publicSidePanel' => 'Y'
+				'publicSidePanel' => 'Y',
 			]);
 			$reportPage->setExternalUrl($reportViewUrl);
 

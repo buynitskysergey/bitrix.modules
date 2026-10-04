@@ -68,7 +68,7 @@ class SchedulerEventTable extends Main\Entity\DataManager
 		$connection = Main\Application::getConnection();
 		$sqlHelper = $connection->getSqlHelper();
 
-		$table = $sqlHelper->forSql(static::getTableName());
+		$table = $sqlHelper->quote(static::getTableName());
 		$workflowId = $sqlHelper->forSql($workflowId);
 		$handler = $sqlHelper->forSql($handler);
 		$eventModule = $sqlHelper->forSql($eventModule);
@@ -91,7 +91,7 @@ class SchedulerEventTable extends Main\Entity\DataManager
 		$connection = Main\Application::getConnection();
 		$sqlHelper = $connection->getSqlHelper();
 
-		$table = $sqlHelper->forSql(static::getTableName());
+		$table = $sqlHelper->quote(static::getTableName());
 		$workflowId = $sqlHelper->forSql($workflowId);
 
 		$connection->queryExecute("DELETE FROM {$table} WHERE WORKFLOW_ID = '{$workflowId}'");

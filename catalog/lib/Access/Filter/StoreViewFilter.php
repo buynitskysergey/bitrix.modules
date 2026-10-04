@@ -4,6 +4,7 @@ namespace Bitrix\Catalog\Access\Filter;
 
 use Bitrix\Catalog\Access\AccessController;
 use Bitrix\Catalog\Access\Permission\PermissionDictionary;
+use Bitrix\Catalog\StoreDocumentElementTable;
 use Bitrix\Catalog\StoreDocumentTable;
 use Bitrix\Catalog\StoreProductTable;
 use Bitrix\Catalog\StoreTable;
@@ -35,7 +36,12 @@ class StoreViewFilter extends AbstractAccessFilter
 
 		$this->validateEntity($entity);
 
-		if ($this->user->isAdmin())
+		if ($entity === StoreProductTable::class)
+		{
+			return $this->getProductFilter($action);
+		}
+
+		if ($this->controller->checkCompleteRight($action))
 		{
 			return [];
 		}
@@ -47,12 +53,12 @@ class StoreViewFilter extends AbstractAccessFilter
 
 		if ($entity === StoreDocumentTable::class)
 		{
-			return $this->getDocumentFilter($action);
+			return $this->getDocumentFilter($action, 'ID');
 		}
 
-		if ($entity === StoreProductTable::class)
+		if ($entity === StoreDocumentElementTable::class)
 		{
-			return $this->getProductFilter($action);
+			return $this->getDocumentFilter($action, 'DOC_ID');
 		}
 
 		if (Loader::includeModule('sale'))
@@ -80,6 +86,7 @@ class StoreViewFilter extends AbstractAccessFilter
 			StoreTable::class,
 			StoreProductTable::class,
 			StoreDocumentTable::class,
+			StoreDocumentElementTable::class,
 			// sale
 			ShipmentTable::class,
 		];
@@ -121,10 +128,11 @@ class StoreViewFilter extends AbstractAccessFilter
 	 * Filter for store documents.
 	 *
 	 * @param string $action
+	 * @param string $documentIdField
 	 *
 	 * @return array
 	 */
-	private function getDocumentFilter(string $action): array
+	private function getDocumentFilter(string $action, string $documentIdField): array
 	{
 		$allowedStores = $this->controller->getPermissionValue($action);
 		if (empty($allowedStores))
@@ -164,7 +172,7 @@ class StoreViewFilter extends AbstractAccessFilter
 		;
 
 		return [
-			'@ID' => new SqlExpression($query),
+			'@' . $documentIdField => new SqlExpression($query),
 		];
 	}
 
@@ -177,6 +185,11 @@ class StoreViewFilter extends AbstractAccessFilter
 	 */
 	private function getProductFilter(string $action): array
 	{
+		if ($this->controller->isLegacyAccessMode() || $this->controller->isAdmin())
+		{
+			return [];
+		}
+
 		$allowedStores = $this->controller->getPermissionValue($action);
 		if (empty($allowedStores))
 		{

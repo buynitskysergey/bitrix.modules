@@ -107,6 +107,7 @@ class User extends Broker
 				'SECOND_NAME',
 				'LAST_NAME',
 				'TITLE',
+				'PERSONAL_GENDER',
 				'PERSONAL_PHOTO',
 				'WORK_POSITION',
 				'IS_REAL_USER',

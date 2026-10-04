@@ -56,7 +56,7 @@ class JobService implements Contract\Service\HcmLink\JobService
 		$company = $this->companyRepository->getById($companyId);
 		if ($company === null)
 		{
-			return (new Result())->addError(new Error('Company not found'));
+			return (new Result())->addError(new Error('Company not found', self::ERROR_COMPANY_NOT_FOUND));
 		}
 
 		if (!$isForced) {
@@ -109,7 +109,7 @@ class JobService implements Contract\Service\HcmLink\JobService
 		$company = $this->companyRepository->getById($companyId);
 		if($company === null)
 		{
-			return (new Result())->addError(new Error('Company not found'));
+			return (new Result())->addError(new Error('Company not found', self::ERROR_COMPANY_NOT_FOUND));
 		}
 
 		if (empty($employeeUids))
@@ -176,7 +176,7 @@ class JobService implements Contract\Service\HcmLink\JobService
 		$company = $this->companyRepository->getById($companyId);
 		if(!$company)
 		{
-			return (new Result())->addError(new Error('Company not found'));
+			return (new Result())->addError(new Error('Company not found', self::ERROR_COMPANY_NOT_FOUND));
 		}
 
 		$data = [
@@ -233,6 +233,8 @@ class JobService implements Contract\Service\HcmLink\JobService
 			JobType::FIELD_VALUES => RestEventType::onFieldValueRequested,
 			JobType::COMPLETE_MAPPING => RestEventType::onEmployeeListMapped,
 			JobType::USER_LIST => RestEventType::onEmployeeListRequested,
+			JobType::PIN_REQUEST => RestEventType::onPinRequested,
+			JobType::SALARY_VACATION_REQUEST => RestEventType::onSalaryVacationRequested,
 			default => null
 		};
 

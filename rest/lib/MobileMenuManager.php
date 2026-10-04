@@ -11,8 +11,11 @@ class MobileMenuManager
 			return $menu;
 		}
 
-		$marketItems = self::prepareMarketItems();
-		$menu = self::addMenuItems($menu, 'marketplace', $marketItems);
+		if ($context->extranet === false && $context->isCollaber === false)
+		{
+			$marketItems = self::prepareMarketItems();
+			$menu = self::addMenuItems($menu, 'marketplace', $marketItems);
+		}
 
 		return $menu;
 	}

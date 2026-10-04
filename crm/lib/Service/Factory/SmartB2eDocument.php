@@ -36,20 +36,6 @@ class SmartB2eDocument extends Dynamic
 		return static::USER_FIELD_ENTITY_ID;
 	}
 
-	public function isAutomationEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isBizProcEnabled(): bool
-	{
-		return false;
-	}
-
-	public function isLinkWithProductsEnabled(): bool
-	{
-		return false;
-	}
 
 	public static function createTypeIfNotExists(): void
 	{
@@ -394,8 +380,4 @@ class SmartB2eDocument extends Dynamic
 		return true;
 	}
 
-	public function isRecurringEnabled(): bool
-	{
-		return false;
-	}
 }

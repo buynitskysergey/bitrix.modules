@@ -19,6 +19,7 @@ class EditableDate extends Date
 	private string $style = self::STYLE_TEXT;
 	private ?string $backgroundColor = null;
 	protected ?bool $readonly = null;
+	private ?bool $canChangeDeadline = null;
 
 	public function getRendererName(): string
 	{
@@ -65,6 +66,18 @@ class EditableDate extends Date
 		return $this;
 	}
 
+	public function canChangeDeadline(): ?bool
+	{
+		return $this->canChangeDeadline;
+	}
+
+	public function setCanChangeDeadline(bool $canChangeDeadline): self
+	{
+		$this->canChangeDeadline = $canChangeDeadline;
+
+		return $this;
+	}
+
 	protected function getProperties(): array
 	{
 		return array_merge(
@@ -74,6 +87,7 @@ class EditableDate extends Date
 				'backgroundColor' => $this->getBackgroundColor(),
 				'isReadonly' => $this->isReadonly(),
 				'styleValue' => $this->getStyle(),
+				'canChangeDeadline' => $this->canChangeDeadline() ?? true,
 			]
 		);
 	}

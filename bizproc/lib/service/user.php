@@ -496,11 +496,17 @@ class User extends \CBPRuntimeService
 			return null;
 		}
 
-		$employeesCollection = Container::getNodeMemberService()->getPagedEmployees($nodeId, $recursive);
+		$node = Container::getNodeRepository()->getById($nodeId);
+		if (!$node)
+		{
+			return [];
+		}
+
+		$employeesCollection = Container::getNodeMemberService()->getAllEmployees($nodeId, $recursive);
 
 		return array_values(
 			array_unique(
-				array_map(static fn(NodeMember $item) => $item->entityId, [...$employeesCollection->getItemMap()])
+				array_map(static fn(NodeMember $item) => (int)$item->entityId, [...$employeesCollection->getItemMap()])
 			)
 		);
 	}

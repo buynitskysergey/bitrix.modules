@@ -11,6 +11,7 @@ use Bitrix\Note\Internal\Access\AccessController;
 use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\Component\PermissionConfig;
 use Bitrix\Note\Internal\Access\Service\RolePermissionService;
+use Bitrix\Note\Internal\Service\License\LicenseService;
 
 class PermissionsController extends Controller
 {
@@ -80,6 +81,14 @@ class PermissionsController extends Controller
 
 	private function checkAccessPermissions(): bool
 	{
+		// Tariff/tool gate before ACL: same denial as an ACL failure.
+		if ($this->createLicenseService()->isAccessBlocked())
+		{
+			$this->addError(new Error((string)(Loc::getMessage('NOTE_ACCESS_DENIED'))));
+
+			return false;
+		}
+
 		if (AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_EDIT_PERMISSIONS))
 		{
 			return true;
@@ -88,5 +97,10 @@ class PermissionsController extends Controller
 		$this->addError(new Error((string)(Loc::getMessage('NOTE_ACCESS_DENIED'))));
 
 		return false;
+	}
+
+	protected function createLicenseService(): LicenseService
+	{
+		return new LicenseService();
 	}
 }

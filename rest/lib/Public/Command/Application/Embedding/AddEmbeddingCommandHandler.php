@@ -49,7 +49,7 @@ class AddEmbeddingCommandHandler
 			placement: $command->placement,
 			handler: $command->handler,
 			appId: $command->app->getId(),
-			userId: $command->userId,
+			userId: $command->targetUserId,
 			title: $command->title,
 			groupName: $command->groupName,
 			description: $command->description,
@@ -60,6 +60,7 @@ class AddEmbeddingCommandHandler
 		return $this->installer->install(
 			app: $command->app,
 			embedding: $embedding,
+			userId: $command->userId,
 		);
 	}
 }

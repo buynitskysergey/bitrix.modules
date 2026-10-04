@@ -26,6 +26,7 @@ use Bitrix\Main\ORM\Fields\DatetimeField;
 class WorkflowFilterTable extends DataManager
 {
 	use \Bitrix\Main\ORM\Data\Internal\MergeTrait;
+	use \Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
 
 	public static function getTableName()
 	{

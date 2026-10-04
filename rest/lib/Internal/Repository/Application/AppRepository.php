@@ -223,14 +223,35 @@ class AppRepository implements RepositoryInterface
 		;
 	}
 
-	public function getCount(AppFilter $filter): int
+	public function getCount(AppFilter $filter, int $cacheTtl = 0): int
 	{
-		return (int)$this->buildFilterQuery($filter)
+		$query = $this->buildFilterQuery($filter)
 			->addSelect('ID')
 			->countTotal(true)
-			->exec()
+		;
+		if ($cacheTtl > 0)
+		{
+			$query->setCacheTtl($cacheTtl);
+		}
+
+		return (int)$query->exec()
 			->getCount()
 		;
+	}
+
+	/**
+	 * @return array<int, array{ID: int, CODE: ?string}>
+	 */
+	public function getCodePage(AppFilter $filter, int $afterId, int $limit): array
+	{
+		$query = $this->buildFilterQuery($filter)
+			->setSelect(['ID', 'CODE'])
+			->where('ID', '>', $afterId)
+			->addOrder('ID', 'ASC')
+			->setLimit($limit)
+		;
+
+		return $query->fetchAll();
 	}
 
 	public function getInstalledList(int $offset = 0, int $limit = 50): AppCollection
@@ -273,6 +294,14 @@ class AppRepository implements RepositoryInterface
 				->origin(AppOrigin::Marketplace)
 			,
 		);
+	}
+
+	public function exists(AppFilter $filter): bool
+	{
+		return $this->buildFilterQuery($filter)
+			->setSelect(['ID'])
+			->setLimit(1)
+			->fetch() !== false;
 	}
 
 	private function createAttributeLoader(): \Closure

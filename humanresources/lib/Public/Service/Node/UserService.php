@@ -45,6 +45,7 @@ class UserService
 					new NodeMemberFilter(
 						entityIdFilter: EntityIdFilter::fromEntityId($userId),
 						roleFilter: RoleFilter::fromRoles(...$roles),
+						withVirtualUsers: true,
 					),
 				)
 				->get()
@@ -78,6 +79,7 @@ class UserService
 						entityIdFilter: EntityIdFilter::fromEntityId($userId),
 						entityType: MemberEntityType::USER,
 						roleFilter: RoleFilter::fromRoles(...$roles),
+						withVirtualUsers: true,
 					),
 				)
 				->getAll()

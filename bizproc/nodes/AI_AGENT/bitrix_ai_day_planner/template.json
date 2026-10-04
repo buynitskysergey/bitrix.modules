@@ -11,7 +11,8 @@
             "Required": 1,
             "Multiple": 0,
             "Options": null,
-            "Default": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOT_NAME_DEFAULT###"
+            "Default": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOT_NAME_DEFAULT###",
+            "Source": "SetupTemplateActivity"
         },
         "BotAvatar": {
             "Name": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOT_AVATAR###",
@@ -20,7 +21,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": null,
-            "Default": ""
+            "Default": "",
+            "Source": "SetupTemplateActivity"
         },
         "ScheduleType": {
             "Name": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_SCHEDULE_TYPE###",
@@ -59,7 +61,8 @@
             "Required": 1,
             "Multiple": 0,
             "Options": null,
-            "Default": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOSS_BOT_NAME_DEFAULT###"
+            "Default": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOSS_BOT_NAME_DEFAULT###",
+            "Source": "SetupTemplateActivity"
         },
         "BossBotAvatar": {
             "Name": "###BIZPROC_NODES_BITRIX_AI_DAY_PLANNER_CONST_BOSS_BOT_AVATAR###",
@@ -68,7 +71,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": null,
-            "Default": ""
+            "Default": "",
+            "Source": "SetupTemplateActivity"
         }
     },
     "TEMPLATE": [
@@ -536,10 +540,6 @@
                     ],
                     [
                         "A0000_0000_0000_0055:o1",
-                        "A7001_0001_0001_0005:i0"
-                    ],
-                    [
-                        "A7001_0001_0001_0005:o0",
                         "A7001_0001_0001_0050:i0"
                     ],
                     [
@@ -584,10 +584,6 @@
                     ],
                     [
                         "A0000_0000_0000_0064:o0",
-                        "A8001_0001_0001_0003:i0"
-                    ],
-                    [
-                        "A8001_0001_0001_0003:o0",
                         "A8001_0001_0001_0050:i0"
                     ],
                     [
@@ -615,7 +611,7 @@
                         "A0000_0000_0000_0069:i0"
                     ],
                     [
-                        "A0000_0000_0000_0068:o1",
+                        "A0000_0000_0000_0069:o0",
                         "A0000_0000_0000_0070:i0"
                     ],
                     [
@@ -623,8 +619,16 @@
                         "A0000_0000_0000_0071:i0"
                     ],
                     [
-                        "A0000_0000_0000_0070:o1",
+                        "A0000_0000_0000_0068:o1",
                         "A0000_0000_0000_0072:i0"
+                    ],
+                    [
+                        "A0000_0000_0000_0072:o0",
+                        "A0000_0000_0000_0073:i0"
+                    ],
+                    [
+                        "A0000_0000_0000_0072:o1",
+                        "A0000_0000_0000_0074:i0"
                     ]
                 ]
             },
@@ -921,7 +925,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0002",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1700,
                             "y": 200
@@ -951,7 +955,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -1198,7 +1202,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A2001_0001_0001_0010",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 900,
                             "y": 700
@@ -1234,7 +1238,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_FOREACHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -1263,7 +1267,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0004",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1300,
                             "y": 700
@@ -1293,7 +1297,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -1455,7 +1459,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0005",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2500,
                             "y": 700
@@ -1485,7 +1489,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -1773,7 +1777,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0007",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 3700,
                             "y": 700
@@ -1803,7 +1807,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -2123,7 +2127,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0009",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2900,
                             "y": 1100
@@ -2153,7 +2157,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -2504,7 +2508,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0012",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1300,
                             "y": 1500
@@ -2534,7 +2538,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -2563,7 +2567,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0013",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1700,
                             "y": 1500
@@ -2593,7 +2597,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -2742,7 +2746,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_PLAN_FROM_STORAGE_MESSAGE###",
                         "asError": "N",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -2837,7 +2841,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0017",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 3700,
                             "y": 1500
@@ -2867,7 +2871,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -2912,11 +2916,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -2955,11 +2959,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -3084,7 +3088,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0019",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2100,
                             "y": 1900
@@ -3114,7 +3118,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -3269,7 +3273,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0022",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 3300,
                             "y": 1900
@@ -3299,7 +3303,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -3461,7 +3465,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0023",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 4500,
                             "y": 1900
@@ -3491,7 +3495,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -3724,7 +3728,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0024",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 5300,
                             "y": 1900
@@ -3754,7 +3758,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -3777,7 +3781,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_PLAN_AI_MESSAGE###",
                         "asError": "N",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -3848,11 +3852,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -4001,7 +4005,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_START_ERRORMESSAGE###",
                         "asError": "Y",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -4072,11 +4076,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -4164,11 +4168,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -4191,7 +4195,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0030",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 3700,
                             "y": 2500
@@ -4221,7 +4225,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -4464,7 +4468,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0031",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 5300,
                             "y": 2500
@@ -4494,7 +4498,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -4517,7 +4521,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_USER_PLAN_DELIVERY_WDS###",
                         "asError": "N",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -4588,11 +4592,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -4812,11 +4816,11 @@
                         "node": {
                             "type": "simple",
                             "title": "###BITRIX_AI_DAY_PLANNER_SAVEDAYPLANACTIVITY_TITLE###",
-                            "colorIndex": 0,
+                            "colorIndex": 2,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
-                            "icon": "DEFAULT"
+                            "icon": "MY_PLAN"
                         }
                     }
                 },
@@ -4998,7 +5002,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0036",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1300,
                             "y": 2900
@@ -5028,7 +5032,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -5183,7 +5187,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0039",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2500,
                             "y": 2900
@@ -5213,7 +5217,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -5229,8 +5233,8 @@
                     "Activated": "Y",
                     "Properties": {
                         "CalendarUser": "{=A6001_0001_0001_0001:USER}",
-                        "CalendarFrom": "{=System:Date}",
-                        "CalendarTo": "{{=dateadd({=System:Date}, \"1d\")}}",
+                        "CalendarFrom": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), {=System:Date})}}",
+                        "CalendarTo": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))}}",
                         "EventField": [
                             "url"
                         ],
@@ -5547,7 +5551,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0040",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 4500,
                             "y": 2900
@@ -5577,7 +5581,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -5810,7 +5814,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0041",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 5300,
                             "y": 2900
@@ -5840,7 +5844,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -5863,7 +5867,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_END_AI_MESSAGE###",
                         "asError": "N",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -5955,7 +5959,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_DAY_END_ERRORMESSAGE###",
                         "asError": "Y",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -6145,7 +6149,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0045",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2900,
                             "y": 3500
@@ -6175,7 +6179,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -6191,8 +6195,8 @@
                     "Activated": "Y",
                     "Properties": {
                         "CalendarUser": "{=A6001_0001_0001_0001:USER}",
-                        "CalendarFrom": "{=System:Date}",
-                        "CalendarTo": "{{=dateadd({=System:Date}, \"1d\")}}",
+                        "CalendarFrom": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), {=System:Date})}}",
+                        "CalendarTo": "{{=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))}}",
                         "EventField": [
                             "url"
                         ],
@@ -6258,7 +6262,16 @@
                                         "object": "Document",
                                         "field": "CREATED_DATE",
                                         "operator": ">",
-                                        "value": "=settime({=System:Date}, 00, 00, 7200)"
+                                        "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, {=A6001_0001_0001_0001:WORKDAY_START}, settime({=System:Date}, 00, 00, 7200))"
+                                    },
+                                    "AND"
+                                ],
+                                [
+                                    {
+                                        "object": "Document",
+                                        "field": "CREATED_DATE",
+                                        "operator": "<",
+                                        "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))"
                                     },
                                     "AND"
                                 ]
@@ -6326,7 +6339,16 @@
                                         "object": "Document",
                                         "field": "CLOSED_DATE",
                                         "operator": ">",
-                                        "value": "=settime({=System:Date}, 00, 00, 7200)"
+                                        "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, {=A6001_0001_0001_0001:WORKDAY_START}, settime({=System:Date}, 00, 00, 7200))"
+                                    },
+                                    "AND"
+                                ],
+                                [
+                                    {
+                                        "object": "Document",
+                                        "field": "CLOSED_DATE",
+                                        "operator": "<",
+                                        "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))"
                                     },
                                     "AND"
                                 ]
@@ -6395,7 +6417,16 @@
                                         "object": "Document",
                                         "field": "CLOSED_DATE",
                                         "operator": ">",
-                                        "value": "=settime({=System:Date}, 00, 00, 7200)"
+                                        "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, {=A6001_0001_0001_0001:WORKDAY_START}, settime({=System:Date}, 00, 00, 7200))"
+                                    },
+                                    "AND"
+                                ],
+                                [
+                                    {
+                                        "object": "Document",
+                                        "field": "CLOSED_DATE",
+                                        "operator": "<",
+                                        "value": "=if(strlen({=A6001_0001_0001_0001:WORKDAY_START} & \"\") > 0, dateadd(settime({=A6001_0001_0001_0001:WORKDAY_START}, 00, 00, 00), \"1d\"), dateadd({=System:Date}, \"1d\"))"
                                     },
                                     "AND"
                                 ]
@@ -6551,7 +6582,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0046",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 5300,
                             "y": 3500
@@ -6581,7 +6612,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -6604,7 +6635,7 @@
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_USER_ENDDAY_DELIVERY_FALLBACK###",
                         "asError": "N",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -6911,7 +6942,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0049",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1300,
                             "y": 3900
@@ -6941,7 +6972,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -6970,7 +7001,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0050",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1700,
                             "y": 3900
@@ -7000,7 +7031,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -7029,7 +7060,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0051",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2100,
                             "y": 3900
@@ -7059,7 +7090,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -7174,7 +7205,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0054",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 1700,
                             "y": 4300
@@ -7204,7 +7235,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -7437,7 +7468,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0055",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2500,
                             "y": 4300
@@ -7467,7 +7498,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -7521,53 +7552,6 @@
                     }
                 },
                 {
-                    "Name": "A7001_0001_0001_0005",
-                    "Type": "GetUserActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "UserType": "boss",
-                        "MaxLevel": "1",
-                        "UserParameter": [
-                            "{=A7001_0001_0001_0001:USER}"
-                        ],
-                        "SkipAbsent": "Y",
-                        "SkipTimeman": "N",
-                        "Title": "###BITRIX_AI_DAY_PLANNER_GETUSERACTIVITY_TITLE###"
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A7001_0001_0001_0005",
-                        "type": "simple",
-                        "position": {
-                            "x": 2900,
-                            "y": 4500
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 48
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "type": "input"
-                            },
-                            {
-                                "id": "o0",
-                                "type": "output"
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BITRIX_AI_DAY_PLANNER_GETUSERACTIVITY_TITLE###",
-                            "colorIndex": 2,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "PERSON_SEARCH"
-                        }
-                    }
-                },
-                {
                     "Name": "A7001_0001_0001_0050",
                     "Type": "ReadDataStorageActivity",
                     "Activated": "Y",
@@ -7585,7 +7569,7 @@
                                         "object": "Document",
                                         "field": "UserId",
                                         "operator": "=",
-                                        "value": "{=A7001_0001_0001_0005:GetUser}"
+                                        "value": "{=A7001_0001_0001_0001:MANAGER}"
                                     },
                                     "AND"
                                 ],
@@ -7614,7 +7598,7 @@
                         "id": "A7001_0001_0001_0050",
                         "type": "simple",
                         "position": {
-                            "x": 3300,
+                            "x": 2900,
                             "y": 4500
                         },
                         "dimensions": {
@@ -7661,9 +7645,9 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0057",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
-                            "x": 3700,
+                            "x": 3300,
                             "y": 4500
                         },
                         "dimensions": {
@@ -7691,7 +7675,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -7709,7 +7693,7 @@
                         "botId": null,
                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                         "recipient": [
-                            "{=A7001_0001_0001_0005:GetUser}"
+                            "{=A7001_0001_0001_0001:MANAGER}"
                         ],
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_BOSSWELCOMEMESSAGE###",
@@ -7722,7 +7706,7 @@
                         "id": "A0000_0000_0000_0058",
                         "type": "simple",
                         "position": {
-                            "x": 4100,
+                            "x": 3700,
                             "y": 4500
                         },
                         "dimensions": {
@@ -7759,15 +7743,15 @@
                         "StorageCode": "DAY_PLANNER_WELCOMES_{=Workflow:TemplateId}",
                         "RewriteMode": "newItem",
                         "IsExpanded": "Y",
-                        "Author": "{=A7001_0001_0001_0005:GetUser}",
+                        "Author": "{=A7001_0001_0001_0001:MANAGER}",
                         "FieldValue": {
-                            "UserId": "{=A7001_0001_0001_0005:GetUser}",
+                            "UserId": "{=A7001_0001_0001_0001:MANAGER}",
                             "BotKind": "boss",
                             "WelcomeSentAt": "{=System:Now}"
                         },
                         "Fields": {
                             "UserId": {
-                                "Value": "{=A7001_0001_0001_0005:GetUser}",
+                                "Value": "{=A7001_0001_0001_0001:MANAGER}",
                                 "FieldName": "UserId"
                             },
                             "BotKind": {
@@ -7786,7 +7770,7 @@
                                         "object": "Document",
                                         "field": "UserId",
                                         "operator": "=",
-                                        "value": "{=A7001_0001_0001_0005:GetUser}"
+                                        "value": "{=A7001_0001_0001_0001:MANAGER}"
                                     },
                                     "AND"
                                 ]
@@ -7799,7 +7783,7 @@
                         "id": "A0000_0000_0000_0059",
                         "type": "simple",
                         "position": {
-                            "x": 4500,
+                            "x": 4100,
                             "y": 4500
                         },
                         "dimensions": {
@@ -7835,12 +7819,12 @@
                         "botId": null,
                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                         "recipient": [
-                            "{=A7001_0001_0001_0005:GetUser}"
+                            "{=A7001_0001_0001_0001:MANAGER}"
                         ],
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_ERRORMESSAGE###",
                         "asError": "Y",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -7848,7 +7832,7 @@
                         "id": "A0000_0000_0000_0060",
                         "type": "simple",
                         "position": {
-                            "x": 4900,
+                            "x": 4500,
                             "y": 4500
                         },
                         "dimensions": {
@@ -7891,7 +7875,7 @@
                         "id": "A0000_0000_0000_0061",
                         "type": "simple",
                         "position": {
-                            "x": 5300,
+                            "x": 4900,
                             "y": 4500
                         },
                         "dimensions": {
@@ -7938,7 +7922,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0062",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 2100,
                             "y": 4700
@@ -7968,7 +7952,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -8116,7 +8100,7 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0064",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 900,
                             "y": 4900
@@ -8146,60 +8130,13 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
                             "frameTextAlign": null,
                             "frameSeparatorPosition": null,
                             "icon": "CONDITION"
-                        }
-                    }
-                },
-                {
-                    "Name": "A8001_0001_0001_0003",
-                    "Type": "GetUserActivity",
-                    "Activated": "Y",
-                    "Properties": {
-                        "UserType": "boss",
-                        "MaxLevel": "1",
-                        "UserParameter": [
-                            "{=A8001_0001_0001_0001:USER}"
-                        ],
-                        "SkipAbsent": "Y",
-                        "SkipTimeman": "N",
-                        "Title": "###BITRIX_AI_DAY_PLANNER_GETUSERACTIVITY_TITLE###"
-                    },
-                    "Document": null,
-                    "Node": {
-                        "id": "A8001_0001_0001_0003",
-                        "type": "simple",
-                        "position": {
-                            "x": 1300,
-                            "y": 4900
-                        },
-                        "dimensions": {
-                            "width": 200,
-                            "height": 48
-                        },
-                        "ports": [
-                            {
-                                "id": "i0",
-                                "type": "input"
-                            },
-                            {
-                                "id": "o0",
-                                "type": "output"
-                            }
-                        ],
-                        "node": {
-                            "type": "simple",
-                            "title": "###BITRIX_AI_DAY_PLANNER_GETUSERACTIVITY_TITLE###",
-                            "colorIndex": 2,
-                            "frameColorName": null,
-                            "frameTextAlign": null,
-                            "frameSeparatorPosition": null,
-                            "icon": "PERSON_SEARCH"
                         }
                     }
                 },
@@ -8221,7 +8158,7 @@
                                         "object": "Document",
                                         "field": "UserId",
                                         "operator": "=",
-                                        "value": "{=A8001_0001_0001_0003:GetUser}"
+                                        "value": "{=A8001_0001_0001_0001:MANAGER}"
                                     },
                                     "AND"
                                 ],
@@ -8250,7 +8187,7 @@
                         "id": "A8001_0001_0001_0050",
                         "type": "simple",
                         "position": {
-                            "x": 1700,
+                            "x": 1300,
                             "y": 4900
                         },
                         "dimensions": {
@@ -8297,9 +8234,9 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0065",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
-                            "x": 2100,
+                            "x": 1700,
                             "y": 4900
                         },
                         "dimensions": {
@@ -8327,7 +8264,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -8345,7 +8282,7 @@
                         "botId": null,
                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                         "recipient": [
-                            "{=A8001_0001_0001_0003:GetUser}"
+                            "{=A8001_0001_0001_0001:MANAGER}"
                         ],
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_BOSSWELCOMEMESSAGE###",
@@ -8358,7 +8295,7 @@
                         "id": "A0000_0000_0000_0066",
                         "type": "simple",
                         "position": {
-                            "x": 2500,
+                            "x": 2100,
                             "y": 4900
                         },
                         "dimensions": {
@@ -8395,15 +8332,15 @@
                         "StorageCode": "DAY_PLANNER_WELCOMES_{=Workflow:TemplateId}",
                         "RewriteMode": "newItem",
                         "IsExpanded": "Y",
-                        "Author": "{=A8001_0001_0001_0003:GetUser}",
+                        "Author": "{=A8001_0001_0001_0001:MANAGER}",
                         "FieldValue": {
-                            "UserId": "{=A8001_0001_0001_0003:GetUser}",
+                            "UserId": "{=A8001_0001_0001_0001:MANAGER}",
                             "BotKind": "boss",
                             "WelcomeSentAt": "{=System:Now}"
                         },
                         "Fields": {
                             "UserId": {
-                                "Value": "{=A8001_0001_0001_0003:GetUser}",
+                                "Value": "{=A8001_0001_0001_0001:MANAGER}",
                                 "FieldName": "UserId"
                             },
                             "BotKind": {
@@ -8422,7 +8359,7 @@
                                         "object": "Document",
                                         "field": "UserId",
                                         "operator": "=",
-                                        "value": "{=A8001_0001_0001_0003:GetUser}"
+                                        "value": "{=A8001_0001_0001_0001:MANAGER}"
                                     },
                                     "AND"
                                 ]
@@ -8435,7 +8372,7 @@
                         "id": "A0000_0000_0000_0067",
                         "type": "simple",
                         "position": {
-                            "x": 2900,
+                            "x": 2500,
                             "y": 4900
                         },
                         "dimensions": {
@@ -8482,9 +8419,9 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0068",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
-                            "x": 3300,
+                            "x": 2900,
                             "y": 4900
                         },
                         "dimensions": {
@@ -8512,7 +8449,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -8530,12 +8467,20 @@
                         "botId": null,
                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                         "recipient": [
-                            "{=A8001_0001_0001_0003:GetUser}"
+                            "{=A8001_0001_0001_0001:MANAGER}"
                         ],
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_MESSAGE###",
                         "asError": "N",
-                        "aiWarning": "Y",
+                        "aiWarning": "N",
+                        "buttons": [
+                            {
+                                "COMMAND": "discussReport",
+                                "COMMAND_PARAMS": "{=A8001_0001_0001_0001:REPORT_ID}",
+                                "TEXT": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_DISCUSS_BUTTON###",
+                                "CONTEXT": "ALL"
+                            }
+                        ],
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -8543,7 +8488,7 @@
                         "id": "A0000_0000_0000_0069",
                         "type": "simple",
                         "position": {
-                            "x": 3700,
+                            "x": 3300,
                             "y": 4900
                         },
                         "dimensions": {
@@ -8590,10 +8535,10 @@
                     "Document": null,
                     "Node": {
                         "id": "A0000_0000_0000_0070",
-                        "type": "complex",
+                        "type": "operators",
                         "position": {
                             "x": 3700,
-                            "y": 5100
+                            "y": 4900
                         },
                         "dimensions": {
                             "width": 230,
@@ -8620,7 +8565,7 @@
                             }
                         ],
                         "node": {
-                            "type": "complex",
+                            "type": "operators",
                             "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
                             "colorIndex": 3,
                             "frameColorName": null,
@@ -8638,12 +8583,20 @@
                         "botId": null,
                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                         "recipient": [
-                            "{=A8001_0001_0001_0003:GetUser}"
+                            "{=A8001_0001_0001_0001:MANAGER}"
                         ],
                         "chatId": null,
-                        "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_BASIC_MESSAGE###",
+                        "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_HANDWRITTEN_MESSAGE###",
                         "asError": "N",
                         "aiWarning": "N",
+                        "buttons": [
+                            {
+                                "COMMAND": "discussReport",
+                                "COMMAND_PARAMS": "{=A8001_0001_0001_0001:REPORT_ID}",
+                                "TEXT": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_DISCUSS_BUTTON###",
+                                "CONTEXT": "ALL"
+                            }
+                        ],
                         "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
                     },
                     "Document": null,
@@ -8652,7 +8605,7 @@
                         "type": "simple",
                         "position": {
                             "x": 4100,
-                            "y": 5100
+                            "y": 4900
                         },
                         "dimensions": {
                             "width": 200,
@@ -8681,13 +8634,129 @@
                 },
                 {
                     "Name": "A0000_0000_0000_0072",
+                    "Type": "IfElseBranchActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "Title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
+                        "mixedcondition": [
+                            {
+                                "field": "REPORT",
+                                "operator": "!empty",
+                                "value": "",
+                                "joiner": 0,
+                                "object": "A8001_0001_0001_0001"
+                            }
+                        ]
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A0000_0000_0000_0072",
+                        "type": "operators",
+                        "position": {
+                            "x": 3300,
+                            "y": 5100
+                        },
+                        "dimensions": {
+                            "width": 230,
+                            "height": 46
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "title": "",
+                                "type": "input",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o0",
+                                "title": "true",
+                                "type": "output",
+                                "isActive": true
+                            },
+                            {
+                                "id": "o1",
+                                "title": "false",
+                                "type": "output",
+                                "isActive": true
+                            }
+                        ],
+                        "node": {
+                            "type": "operators",
+                            "title": "###BITRIX_AI_DAY_PLANNER_IFELSEBRANCHACTIVITY_TITLE###",
+                            "colorIndex": 3,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "CONDITION"
+                        }
+                    }
+                },
+                {
+                    "Name": "A0000_0000_0000_0073",
                     "Type": "ImBotMessageActivity",
                     "Activated": "Y",
                     "Properties": {
                         "botId": null,
                         "botCode": "BOSSBOT_{=Workflow:TemplateId}",
                         "recipient": [
-                            "{=A8001_0001_0001_0003:GetUser}"
+                            "{=A8001_0001_0001_0001:MANAGER}"
+                        ],
+                        "chatId": null,
+                        "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_BASIC_MESSAGE###",
+                        "asError": "N",
+                        "aiWarning": "N",
+                        "buttons": [
+                            {
+                                "COMMAND": "discussReport",
+                                "COMMAND_PARAMS": "{=A8001_0001_0001_0001:REPORT_ID}",
+                                "TEXT": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_DISCUSS_BUTTON###",
+                                "CONTEXT": "ALL"
+                            }
+                        ],
+                        "Title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###"
+                    },
+                    "Document": null,
+                    "Node": {
+                        "id": "A0000_0000_0000_0073",
+                        "type": "simple",
+                        "position": {
+                            "x": 3700,
+                            "y": 5100
+                        },
+                        "dimensions": {
+                            "width": 200,
+                            "height": 48
+                        },
+                        "ports": [
+                            {
+                                "id": "i0",
+                                "type": "input"
+                            },
+                            {
+                                "id": "o0",
+                                "type": "output"
+                            }
+                        ],
+                        "node": {
+                            "type": "simple",
+                            "title": "###BITRIX_AI_DAY_PLANNER_IMBOTMESSAGEACTIVITY_TITLE###",
+                            "colorIndex": 2,
+                            "frameColorName": null,
+                            "frameTextAlign": null,
+                            "frameSeparatorPosition": null,
+                            "icon": "GO_TO_MESSAGE"
+                        }
+                    }
+                },
+                {
+                    "Name": "A0000_0000_0000_0074",
+                    "Type": "ImBotMessageActivity",
+                    "Activated": "Y",
+                    "Properties": {
+                        "botId": null,
+                        "botCode": "BOSSBOT_{=Workflow:TemplateId}",
+                        "recipient": [
+                            "{=A8001_0001_0001_0001:MANAGER}"
                         ],
                         "chatId": null,
                         "message": "###BITRIX_AI_DAY_PLANNER_FULLREPORT_SENT_EMPTY_MESSAGE###",
@@ -8697,10 +8766,10 @@
                     },
                     "Document": null,
                     "Node": {
-                        "id": "A0000_0000_0000_0072",
+                        "id": "A0000_0000_0000_0074",
                         "type": "simple",
                         "position": {
-                            "x": 4100,
+                            "x": 3700,
                             "y": 5300
                         },
                         "dimensions": {

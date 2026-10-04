@@ -313,7 +313,12 @@ class FullReportService
 
 	private function buildAgentNextExec(int $executeTime): string
 	{
-		return \ConvertTimeStamp($executeTime + \CTimeZone::GetOffset(), 'FULL');
+		// b_agent.NEXT_EXEC is stored and compared in the SERVER zone (DB NOW), so the absolute UTC
+		// $executeTime is formatted as the server-local wall-clock of that instant. ConvertTimeStamp()
+		// already does this via the server's date() zone; the legacy "+ CTimeZone::GetOffset()" shifted
+		// it by the CURRENT user's "as of now" delta (call-moment, $USER-dependent) and is removed — the
+		// server-zone convention is preserved while the call-moment DST/user drift is eliminated (P5.T2).
+		return \ConvertTimeStamp($executeTime, 'FULL');
 	}
 
 	private function buildUpdateFields(FullReportForm $reportForm): array

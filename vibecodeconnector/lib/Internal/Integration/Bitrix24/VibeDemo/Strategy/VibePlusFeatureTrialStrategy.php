@@ -1,0 +1,81 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Bitrix\Vibecodeconnector\Internal\Integration\Bitrix24\VibeDemo\Strategy;
+
+use Bitrix\Main\Type\DateTime;
+use Bitrix\Vibecodeconnector\Internal\Integration\Bitrix24\VibeDemo\Portal;
+use Bitrix\Vibecodeconnector\Internal\Integration\Bitrix24\VibeDemo\TrialExpireDate;
+use Bitrix\Vibecodeconnector\Internal\Integration\Bitrix24\VibeDemo\VibePlusFeatureSet;
+use Bitrix\Vibecodeconnector\Internal\Service\Licensing\VibeDemo\ActivationStrategy;
+
+final class VibePlusFeatureTrialStrategy implements ActivationStrategy
+{
+	private bool $granted = false;
+
+	private readonly Portal $portal;
+
+	public function __construct(?Portal $portal = null)
+	{
+		$this->portal = $portal ?? new Portal();
+	}
+
+	public function isApplicable(): bool
+	{
+		return $this->portal->isCloudPortal() && $this->portal->isPaidLicense();
+	}
+
+	public function isActivated(): bool
+	{
+		return VibePlusFeatureSet::hasFullAccess();
+	}
+
+	public function findExpireDate(): ?DateTime
+	{
+		$earliest = null;
+		foreach (VibePlusFeatureSet::FEATURE_IDS as $featureId)
+		{
+			$expireDate = TrialExpireDate::forFeature($featureId);
+			if ($expireDate !== null && ($earliest === null || $expireDate->getTimestamp() < $earliest->getTimestamp()))
+			{
+				$earliest = $expireDate;
+			}
+		}
+
+		return $earliest;
+	}
+
+	public function activate(int $days): void
+	{
+		$featureIds = VibePlusFeatureSet::getDisabledFeatureIds();
+		if ($featureIds === [])
+		{
+			return;
+		}
+
+		try
+		{
+			$this->granted = $this->portal->grantFeatures($featureIds, $days);
+		}
+		catch (\Throwable $exception)
+		{
+			$this->markGrantedFeatures($featureIds);
+
+			throw $exception;
+		}
+	}
+
+	public function hasGrantedTrial(): bool
+	{
+		return $this->granted;
+	}
+
+	private function markGrantedFeatures(array $featureIdsBeforeActivation): void
+	{
+		if (VibePlusFeatureSet::getDisabledFeatureIds() !== $featureIdsBeforeActivation)
+		{
+			$this->granted = true;
+		}
+	}
+}

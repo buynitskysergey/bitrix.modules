@@ -7,6 +7,7 @@ use Bitrix\Main\Repository\RepositoryInterface;
 use Bitrix\Main\UserTable;
 use Bitrix\Rest\Internal\Entity\User;
 use Bitrix\Rest\Internal\Exceptions\Service\SystemUser\UserNotGeneratedException;
+use Bitrix\Rest\Internal\Exceptions\Service\SystemUser\UserNotUpdatedException;
 use Bitrix\Rest\Internal\Repository\Mapper\UserMapper;
 use CUser;
 
@@ -26,7 +27,10 @@ final class UserRepository implements RepositoryInterface
 		if ($entity->getId())
 		{
 			$user = new CUser();
-			$user->Update($entity->getId(), $entity->toArray());
+			if (!$user->Update($entity->getId(), $entity->toArray()))
+			{
+				throw new UserNotUpdatedException($user->LAST_ERROR);
+			}
 		}
 		else
 		{

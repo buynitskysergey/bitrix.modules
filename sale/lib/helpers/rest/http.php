@@ -5,6 +5,7 @@ namespace Bitrix\Sale\Helpers\Rest;
 use Bitrix\Main;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Json;
+use Bitrix\Rest;
 use Bitrix\Sale;
 
 /**
@@ -29,7 +30,7 @@ class Http
 			$httpClientOptions = $options['HTTP_CLIENT_OPTIONS'];
 		}
 
-		$httpClient = new HttpClient($httpClientOptions);
+		$httpClient = static::createHttpClient($httpClientOptions);
 
 		$isJsonRequest = isset($options['JSON_REQUEST']) && $options['JSON_REQUEST'] === true;
 
@@ -73,5 +74,18 @@ class Http
 		}
 
 		return $result;
+	}
+
+	private static function createHttpClient(array $httpClientOptions): HttpClient
+	{
+		if (
+			!Main\Loader::includeModule('rest')
+			|| !class_exists(Rest\Public\Provider\Application\HandlerHttpFactory::class)
+		)
+		{
+			return new HttpClient($httpClientOptions);
+		}
+
+		return Rest\Public\Provider\Application\HandlerHttpFactory::create($httpClientOptions);
 	}
 }

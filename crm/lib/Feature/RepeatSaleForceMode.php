@@ -90,11 +90,12 @@ final class RepeatSaleForceMode extends BaseFeature
 
 			if (in_array($segmentItem->getCode(), $enableSegments, true))
 			{
-				$segmentItem->setIsEnabled(true);
 				$segmentItem->setAssignmentUserIds([$userId]);
 			}
 
 			$segmentController->update($segmentItem->getId(), $segmentItem);
 		}
+
+		(new SegmentManager())->enableSegmentsByCodes($enableSegments);
 	}
 }

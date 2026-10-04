@@ -12,10 +12,11 @@ class ModificationEntry extends TimelineEntry
 		$entityTypeId = self::fetchEntityTypeId($params);
 		$entityId = self::fetchEntityId($params);
 
+		$entryCreated = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => TimelineType::MODIFICATION,
 			'TYPE_CATEGORY_ID' => 0,
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => $authorId,
 			'SETTINGS' => $settings,
 			'COMMENT' => $params['TEXT'] ?? null,
@@ -33,7 +34,7 @@ class ModificationEntry extends TimelineEntry
 		{
 			$bindings[] = ['ENTITY_TYPE_ID' => $entityTypeId, 'ENTITY_ID' => $entityId];
 		}
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $entryCreated);
 
 		if ($entityTypeId === \CCrmOwnerType::Activity)
 		{

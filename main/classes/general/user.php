@@ -2334,6 +2334,7 @@ class CUser extends CDBResult
 			$params = [
 				"USER_ID" => $context->getUserId(),
 				"AUTH_CONTEXT" => json_encode($context),
+				'REMEMBER' => ($bSave ? 'Y' : 'N'),
 			];
 			$doAuthorize = \Bitrix\Security\Mfa\Otp::verifyUser($params);
 		}

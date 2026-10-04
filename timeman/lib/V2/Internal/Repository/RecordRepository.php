@@ -122,6 +122,42 @@ class RecordRepository
 		return ['entryIds' => $entryIds, 'startById' => $startById];
 	}
 
+	/**
+	 * Closed records of the user within the given UTC range, only the columns needed to average the
+	 * local start of the day: RECORDED_START_TIMESTAMP (unix UTC) and START_OFFSET (user utc offset).
+	 *
+	 * @return array<int, array{RECORDED_START_TIMESTAMP: int, START_OFFSET: int}>
+	 */
+	public function getClosedStartTimestampsByUserAndRange(int $userId, int $fromTs, int $toTs): array
+	{
+		if ($userId <= 0 || $fromTs <= 0 || $toTs <= 0)
+		{
+			return [];
+		}
+
+		$rows = WorktimeRecordTable::query()
+			->addSelect('RECORDED_START_TIMESTAMP')
+			->addSelect('START_OFFSET')
+			->where('USER_ID', $userId)
+			->where('CURRENT_STATUS', WorktimeRecordTable::STATUS_CLOSED)
+			->where('RECORDED_START_TIMESTAMP', '>=', $fromTs)
+			->where('RECORDED_START_TIMESTAMP', '<=', $toTs)
+			->addOrder('RECORDED_START_TIMESTAMP', 'ASC')
+			->exec()
+			->fetchAll();
+
+		$result = [];
+		foreach ($rows as $row)
+		{
+			$result[] = [
+				'RECORDED_START_TIMESTAMP' => (int)($row['RECORDED_START_TIMESTAMP'] ?? 0),
+				'START_OFFSET' => (int)($row['START_OFFSET'] ?? 0),
+			];
+		}
+
+		return $result;
+	}
+
 	public function getCurrentRecord(
 		int $userId,
 		bool $includeSchedule = true,

@@ -30,7 +30,10 @@ class InitialCollectionsService
 		$this->wikiImportAvailability = $wikiImportAvailability ?? new WikiImportAvailability();
 	}
 
-	public function resolve(int $pageSize = self::INITIAL_COLLECTIONS_PAGE_SIZE): array
+	public function resolve(
+		int $pageSize = self::INITIAL_COLLECTIONS_PAGE_SIZE,
+		bool $registerPullWatches = true,
+	): array
 	{
 		$normalizedPageSize = $pageSize > 0 ? $pageSize : 50;
 		$globalPermissions = $this->resolveGlobalPermissions();
@@ -51,6 +54,7 @@ class InitialCollectionsService
 					$collections,
 					$normalizedPageSize,
 					$globalPermissions,
+					$registerPullWatches,
 				);
 			}
 
@@ -84,6 +88,7 @@ class InitialCollectionsService
 				$collections,
 				$normalizedPageSize,
 				$globalPermissions,
+				$registerPullWatches,
 			);
 		}
 		catch (\Throwable)
@@ -101,6 +106,7 @@ class InitialCollectionsService
 		array $collections,
 		int $pageSize,
 		array $globalPermissions,
+		bool $registerPullWatches = true,
 	): array
 	{
 		$hasMore = count($collections) > $pageSize;
@@ -121,7 +127,13 @@ class InitialCollectionsService
 		}
 
 		$items = array_values($rows);
-		$this->registerPullWatches($items);
+		// Pull-watch registration is a side-effect write (~one row per collection).
+		// Skip it when the caller only needs a read-only teaser payload (e.g. a
+		// tariff-blocked entry that redirects away on slider close).
+		if ($registerPullWatches)
+		{
+			$this->registerPullWatches($items);
+		}
 
 		return [
 			'items' => $items,

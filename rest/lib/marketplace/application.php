@@ -8,6 +8,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Main;
 use Bitrix\Rest\Internal\Access\AppAccessChecker;
+use Bitrix\Rest\Internal\Service\Application\ApplicationInstallationFinalizer;
 use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\Engine\Access;
 use Bitrix\Rest\AppLangTable;
@@ -193,20 +194,41 @@ class Application
 							$appFields['INSTALLED'] = AppTable::NOT_INSTALLED;
 						}
 
+						$shouldFinalizeInstallation = $appFields['INSTALLED'] === AppTable::INSTALLED;
 						$existingApp = AppTable::getByClientId($appFields['CLIENT_ID']);
+						$appFieldsToSave = $appFields;
+						$requiresFinalization = $shouldFinalizeInstallation
+							&& (!$existingApp || $existingApp['INSTALLED'] !== AppTable::INSTALLED);
+						if ($requiresFinalization)
+						{
+							$appFieldsToSave['ACTIVE'] = AppTable::INACTIVE;
+							$appFieldsToSave['INSTALLED'] = AppTable::NOT_INSTALLED;
+						}
+
 						if ($existingApp)
 						{
-							$addResult = AppTable::update($existingApp['ID'], $appFields);
+							$addResult = AppTable::update($existingApp['ID'], $appFieldsToSave);
 						}
 						else
 						{
-							$addResult = AppTable::add($appFields);
+							$addResult = AppTable::add($appFieldsToSave);
+						}
+
+						$appId = $addResult->isSuccess() ? (int)$addResult->getId() : 0;
+						if ($appId > 0 && $requiresFinalization)
+						{
+							$addResult = (new ApplicationInstallationFinalizer())->finalize(
+								$appId,
+								true,
+							);
+						}
+						if (!$addResult->isSuccess() && $requiresFinalization)
+						{
+							self::rollbackRemoteInstallation($appFields['CLIENT_ID']);
 						}
 
 						if ($addResult->isSuccess())
 						{
-							$appId = $addResult->getId();
-
 							if ($existingApp)
 							{
 								AppLogTable::log($appId, AppLogTable::ACTION_TYPE_UPDATE);
@@ -355,7 +377,41 @@ class Application
 						}
 						else
 						{
-							$result['errorDescription'] = implode('<br />', $addResult->getErrorMessages());
+							$limitError = $addResult->getErrorCollection()->getErrorByCode(
+								ApplicationInstallationFinalizer::ERROR_MARKET_APPLICATION_LIMIT_EXCEEDED,
+							);
+							if ($limitError !== null)
+							{
+								$result = [
+									'error' => ApplicationInstallationFinalizer::ERROR_MARKET_APPLICATION_LIMIT_EXCEEDED,
+									'errorDescription' => Loc::getMessage('RMP_ERROR_ACCESS_DENIED'),
+									'helperCode' => Access::getHelperCode(
+										Access::ACTION_INSTALL,
+										Access::ENTITY_TYPE_APP,
+										$appDetailInfo,
+									),
+								];
+								$vibePlusApplicationLimit = self::getVibePlusApplicationLimitProjection();
+								if ($vibePlusApplicationLimit !== null)
+								{
+									$result['vibePlusApplicationLimit'] = $vibePlusApplicationLimit;
+								}
+							}
+							elseif (
+								$addResult->getErrorCollection()->getErrorByCode(
+									ApplicationInstallationFinalizer::ERROR_LOCK_NOT_ACQUIRED,
+								) !== null
+								|| $addResult->getErrorCollection()->getErrorByCode(
+									ApplicationInstallationFinalizer::ERROR_UPDATE_FAILED,
+								) !== null
+							)
+							{
+								$result['errorDescription'] = Loc::getMessage('RMP_INSTALL_ERROR');
+							}
+							else
+							{
+								$result['errorDescription'] = implode('<br />', $addResult->getErrorMessages());
+							}
 						}
 					}
 				}
@@ -404,6 +460,36 @@ class Application
 		}
 
 		return $result;
+	}
+
+	private static function rollbackRemoteInstallation(string $clientId): void
+	{
+		try
+		{
+			OAuthService::getEngine()->getClient()->unInstallApplication([
+				'CLIENT_ID' => $clientId,
+			]);
+		}
+		catch (\Throwable)
+		{
+		}
+	}
+
+	private static function getVibePlusApplicationLimitProjection(): ?array
+	{
+		try
+		{
+			if (!Main\Loader::includeModule('market'))
+			{
+				return null;
+			}
+
+			return (new \Bitrix\Market\Application\VibePlusApplicationLimit())->getProjection();
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
 	}
 
 	public static function uninstall($code, bool $clean = false, $from = null) : array

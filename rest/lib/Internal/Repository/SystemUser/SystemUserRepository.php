@@ -34,6 +34,28 @@ class SystemUserRepository implements RepositoryInterface
 		return null;
 	}
 
+	/**
+	 * USER_ID is not unique in b_rest_system_user: one user may own rows of different resource types,
+	 * so the resource type must be part of the filter. The latest record of the type wins.
+	 */
+	public function getByUserIdAndResourceType(int $userId, ResourceType $resourceType): ?SystemUser
+	{
+		$systemUserObject = SystemUserTable::query()
+			->where('USER_ID', $userId)
+			->where('RESOURCE_TYPE', $resourceType->value)
+			->setOrder(['ID' => 'DESC'])
+			->setLimit(1)
+			->fetchObject()
+		;
+
+		if ($systemUserObject !== null)
+		{
+			return $this->mapper->convertFromOrm($systemUserObject);
+		}
+
+		return null;
+	}
+
 	public function deleteByUserId(int $userId): void
 	{
 		$systemUser = SystemUserTable::query()->where('USER_ID', $userId)->fetchObject();

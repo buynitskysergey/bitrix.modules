@@ -6,6 +6,9 @@ namespace Bitrix\Note\Public\Command;
 
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
+use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
+use Bitrix\Note\Internal\Service\DomainEventPublisher;
+use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
@@ -21,6 +24,8 @@ class ArchiveCollectionCommand extends AbstractCommand
 	private readonly DocumentRepository $documentRepository;
 	private readonly SearchIndexService $searchIndexService;
 	private readonly PushNotificationService $pushService;
+	private readonly DomainEventPublisher $eventPublisher;
+	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
 	private readonly string $analyticsType;
 	// Failure is signalled via data['success']=false, so track the real archive outcome here.
 	private bool $succeeded = false;
@@ -32,7 +37,9 @@ class ArchiveCollectionCommand extends AbstractCommand
 		?DocumentRepository $documentRepository = null,
 		?SearchIndexService $searchIndexService = null,
 		?PushNotificationService $pushService = null,
+		?DomainEventPublisher $eventPublisher = null,
 		string $analyticsType = AnalyticsDictionary::TYPE_BK,
+		?BacklinkLifecycleNotifier $backlinkNotifier = null,
 	)
 	{
 		$this->analyticsType = $analyticsType;
@@ -42,6 +49,8 @@ class ArchiveCollectionCommand extends AbstractCommand
 		$this->documentRepository = $documentRepository ?? new DocumentRepository();
 		$this->searchIndexService = $searchIndexService ?? new SearchIndexService();
 		$this->pushService = $pushService ?? new PushNotificationService();
+		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
+		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
 	}
 
 	protected function execute(): Result
@@ -76,6 +85,13 @@ class ArchiveCollectionCommand extends AbstractCommand
 		if ($collectionArchived)
 		{
 			$this->emitCollectionArchive($this->collectionId, $documentIds);
+			$this->eventPublisher->emitLifecycle(
+				OnDocumentLifecycleEvent::ARCHIVED,
+				$this->collectionId,
+				$documentIds,
+			);
+			// [D1] archiving the collection changes its documents' visibility; refresh their targets.
+			$this->backlinkNotifier->sourcesChanged($documentIds);
 		}
 
 		$this->succeeded = $collectionArchived;

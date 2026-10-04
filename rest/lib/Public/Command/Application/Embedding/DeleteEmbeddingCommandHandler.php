@@ -25,6 +25,7 @@ class DeleteEmbeddingCommandHandler
 			app: $command->app,
 			placement: $command->placement,
 			handler: $command->handler,
+			targetUserId: $command->targetUserId,
 			userId: $command->userId,
 		);
 	}

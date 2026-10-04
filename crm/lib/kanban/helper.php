@@ -1,10 +1,10 @@
 <?php
 namespace Bitrix\Crm\Kanban;
 
-use \Bitrix\Main\Localization\Loc;
-use \Bitrix\Crm\Counter\EntityCounterType;
-use \Bitrix\Crm\PhaseSemantics;
-use \Bitrix\Crm\Order;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Crm\Counter\EntityCounterType;
+use Bitrix\Crm\PhaseSemantics;
+use Bitrix\Crm\Order;
 
 Loc::loadMessages(__FILE__);
 

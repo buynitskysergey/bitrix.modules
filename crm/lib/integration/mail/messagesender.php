@@ -4,16 +4,30 @@ namespace Bitrix\Crm\Integration\Mail;
 
 use Bitrix\Mail\Helper;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Error;
+use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Mail;
+use Bitrix\Main\Mail\Sender\UserSenderDataProvider;
+use Bitrix\Main\Result;
 use CCrmActivity;
 use CCrmEMailCodeAllocation;
 
 class MessageSender
 {
+	private const CONTROLLED_TRANSPORT_ERROR_CODES = [
+		'MAIL_SENDER_ADDRESS_MISMATCH',
+		'MAIL_SENDER_UNAVAILABLE',
+	];
+
+	private static array $availableSendersByUserId = [];
+
 	/**
 	 * @param array $input {
 	 * @param string $emptySubjectPlaceholder Fallback when body cannot produce a subject.
 	 * @param Helper\Mailbox|null $mailboxHelper
+	 * @param Result|null $transportResult Detailed transport outcome for callers that can display controlled errors.
+	 * @param int|null $senderId Selected standalone sender record. Ignored when a mailbox is selected.
+	 * @param int|null $senderUserId User whose available sender list must contain the standalone record.
 	 * @return bool|array Mail::send return value.
 	 * @throws ArgumentException
 	 * @var string $subject Finalized subject (already passed through getOutgoingSubject).
@@ -37,6 +51,9 @@ class MessageSender
 		array $input,
 		string $emptySubjectPlaceholder,
 		?Helper\Mailbox $mailboxHelper = null,
+		?Result &$transportResult = null,
+		?int $senderId = null,
+		?int $senderUserId = null,
 	): bool|array
 	{
 		$rcpt    = [];
@@ -125,6 +142,19 @@ class MessageSender
 				->setEntityType('act')
 				->setEntityId($input['urn']),
 		);
+		$identityApplied = self::applySenderIdentity(
+			$context,
+			(int)$mailboxHelper?->getMailboxId(),
+			$senderId,
+			(string)($input['fromEmail'] ?? ''),
+			$senderUserId,
+		);
+		if (!$identityApplied)
+		{
+			$transportResult = self::createSenderUnavailableResult();
+
+			return false;
+		}
 
 		$outgoingParams['SUBJECT'] = Helper\Message::getOutgoingSubject(
 			$outgoingParams['SUBJECT'],
@@ -132,7 +162,7 @@ class MessageSender
 			$emptySubjectPlaceholder,
 		);
 
-		$result = Mail\Mail::send(array_merge(
+		$mailParams = array_merge(
 			$outgoingParams,
 			[
 				'TRACK_READ' => [
@@ -147,7 +177,16 @@ class MessageSender
 				],
 				'CONTEXT' => $context,
 			],
-		));
+		);
+		if (method_exists(Mail\Mail::class, 'sendResult'))
+		{
+			$transportResult = Mail\Mail::sendResult($mailParams);
+			$result = $transportResult->isSuccess();
+		}
+		else
+		{
+			$result = Mail\Mail::send($mailParams);
+		}
 
 		if ($result && $mailboxHelper !== null)
 		{
@@ -155,6 +194,156 @@ class MessageSender
 		}
 
 		return $result;
+	}
+
+	public static function getControlledTransportError(?Result $transportResult): ?Error
+	{
+		if ($transportResult === null || $transportResult->isSuccess())
+		{
+			return null;
+		}
+
+		foreach ($transportResult->getErrors() as $error)
+		{
+			if (in_array((string)$error->getCode(), self::CONTROLLED_TRANSPORT_ERROR_CODES, true))
+			{
+				return $error;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Tells the kernel which mailbox or standalone sender owns the message, so that the transport,
+	 * the limit and the counter are scoped to its own sender record instead of being picked by the address.
+	 * Older kernels have no identity and keep selecting by the address.
+	 */
+	public static function applySenderIdentity(
+		Mail\Context $context,
+		int $mailboxId,
+		?int $senderId = null,
+		?string $fromEmail = null,
+		?int $senderUserId = null,
+	): bool
+	{
+		if (
+			!class_exists(Mail\Sender\Identity::class)
+			|| !method_exists($context, 'setSenderIdentity')
+		)
+		{
+			return true;
+		}
+
+		if ($mailboxId > 0)
+		{
+			$context->setSenderIdentity(Mail\Sender\Identity::fromMailbox($mailboxId));
+
+			return true;
+		}
+
+		if ($senderId === null)
+		{
+			return true;
+		}
+		if ($senderId <= 0)
+		{
+			return false;
+		}
+
+		$fromAddress = new Mail\Address((string)$fromEmail);
+		if (!$fromAddress->validate())
+		{
+			return false;
+		}
+
+		$sender = self::findAvailableSender($senderId, (string)$fromAddress->getEmail(), $senderUserId);
+		if ($sender !== null)
+		{
+			$context->setSenderIdentity(Mail\Sender\Identity::fromSender($senderId));
+
+			return true;
+		}
+
+		return false;
+	}
+
+	public static function findAvailableSender(int $senderId, string $fromEmail, ?int $userId = null): ?array
+	{
+		$fromAddress = new Mail\Address($fromEmail);
+		if ($senderId <= 0 || !$fromAddress->validate())
+		{
+			return null;
+		}
+
+		$normalizedFrom = mb_strtolower((string)$fromAddress->getEmail());
+		foreach (self::getUserAvailableSenders($userId) as $sender)
+		{
+			if (
+				(int)($sender['id'] ?? 0) === $senderId
+				&& mb_strtolower((string)($sender['email'] ?? '')) === $normalizedFrom
+			)
+			{
+				return $sender;
+			}
+		}
+
+		return null;
+	}
+
+	public static function findAvailableMailbox(int $mailboxId, string $fromEmail, ?int $userId = null): ?array
+	{
+		$fromAddress = new Mail\Address($fromEmail);
+		if ($mailboxId <= 0 || !$fromAddress->validate())
+		{
+			return null;
+		}
+
+		$normalizedFrom = mb_strtolower((string)$fromAddress->getEmail());
+		foreach (self::getUserAvailableSenders($userId) as $sender)
+		{
+			if (
+				(int)($sender['mailboxId'] ?? 0) === $mailboxId
+				&& mb_strtolower((string)($sender['email'] ?? '')) === $normalizedFrom
+			)
+			{
+				return $sender;
+			}
+		}
+
+		return null;
+	}
+
+	/** @internal */
+	public static function clearAvailableSendersRuntimeCache(): void
+	{
+		self::$availableSendersByUserId = [];
+	}
+
+	private static function getUserAvailableSenders(?int $userId): array
+	{
+		$userId = $userId > 0
+			? $userId
+			: (int)\Bitrix\Main\Engine\CurrentUser::get()->getId();
+		if ($userId <= 0)
+		{
+			return [];
+		}
+
+		if (!array_key_exists($userId, self::$availableSendersByUserId))
+		{
+			self::$availableSendersByUserId[$userId] = UserSenderDataProvider::getUserAvailableSenderIdentities($userId);
+		}
+
+		return self::$availableSendersByUserId[$userId];
+	}
+
+	private static function createSenderUnavailableResult(): Result
+	{
+		Loc::loadMessages((new \ReflectionClass(Mail\Sender::class))->getFileName());
+		$message = (string)Loc::getMessage('MAIN_MAIL_SENDER_UNAVAILABLE_ERROR');
+
+		return (new Result())->addError(new Error($message, Mail\Sender::SENDER_UNAVAILABLE_ERROR));
 	}
 
 	private static function uploadToSentFolder(

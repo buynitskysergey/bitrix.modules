@@ -1,7 +1,7 @@
 <?php
 namespace Bitrix\Crm\Recycling;
 
-use \Bitrix\Main;
+use Bitrix\Main;
 use Bitrix\Crm;
 
 class ActivityRelationManager extends BaseRelationManager

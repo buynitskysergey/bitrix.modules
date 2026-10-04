@@ -1,0 +1,8 @@
+{
+    "defaultTableName": "b_hr_structure_node_backward_access_code",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js",
+        "install/activities": "activities"
+    }
+}

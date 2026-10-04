@@ -49,11 +49,17 @@ class MessageDeleteQueueTable extends ORM\Data\DataManager
 
 	public static function getMap()
 	{
+		// Mirrors the physical schema shipped since 2019: PK is the auto increment
+		// primary key, ID is the varchar uid row id copied from b_mail_message_uid.
 		return array(
-			'ID' => array(
+			'PK' => array(
 				'data_type' => 'integer',
 				'primary'   => true,
 				'autocomplete' => true,
+			),
+			'ID' => array(
+				'data_type' => 'string',
+				'required'  => true,
 			),
 			'MAILBOX_ID' => array(
 				'data_type' => 'integer',
@@ -62,6 +68,10 @@ class MessageDeleteQueueTable extends ORM\Data\DataManager
 			'MESSAGE_ID' => array(
 				'data_type' => 'integer',
 				'required'  => true,
+			),
+			'GENERATION_ID' => array(
+				'data_type' => 'integer',
+				'default_value' => 0,
 			),
 		);
 	}

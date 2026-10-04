@@ -7,27 +7,28 @@ use Bitrix\Crm\Security\EntityAuthorization;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Crm\V2\Public\OwnerType;
 
 class CCrmOwnerType
 {
-	public const Undefined = 0;
-	public const Lead = 1;
-	public const Deal = 2;
-	public const Contact = 3;
-	public const Company = 4;
-	public const Invoice = 5;
-	public const Activity = 6;
-	public const Quote = 7;
-	public const Requisite = 8;
+	public const Undefined = OwnerType::UNDEFINED;
+	public const Lead = OwnerType::LEAD;
+	public const Deal = OwnerType::DEAL;
+	public const Contact = OwnerType::CONTACT;
+	public const Company = OwnerType::COMPANY;
+	public const Invoice = OwnerType::INVOICE;
+	public const Activity = OwnerType::ACTIVITY;
+	public const Quote = OwnerType::QUOTE;
+	public const Requisite = OwnerType::REQUISITE;
 	public const DealCategory = 9;
 	public const CustomActivityType = 10;
 	public const Wait = 11;
-	public const CallList = 12;
-	public const DealRecurring = 13;
-	public const Order = 14;
-	public const OrderCheck = 15;
-	public const OrderShipment = 16;
-	public const OrderPayment = 17;
+	public const CallList = OwnerType::CALL_LIST;
+	public const DealRecurring = OwnerType::DEAL_RECURRING;
+	public const Order = OwnerType::ORDER;
+	public const OrderCheck = OwnerType::ORDER_CHECK;
+	public const OrderShipment = OwnerType::ORDER_SHIPMENT;
+	public const OrderPayment = OwnerType::ORDER_PAYMENT;
 
 	//Types for suspended state (moved to recycle bin)
 	public const SuspendedLead = 18;
@@ -40,61 +41,61 @@ class CCrmOwnerType
 	public const SuspendedActivity = 25;
 	public const SuspendedRequisite = 26;
 
-	public const InvoiceRecurring = 27;
+	public const InvoiceRecurring = OwnerType::INVOICE_RECURRING;
 	public const Scoring = 28;
-	public const CheckCorrection = 29;
-	public const DeliveryRequest = 30;
-	public const SmartInvoice = 31;
+	public const CheckCorrection = OwnerType::CHECK_CORRECTION;
+	public const DeliveryRequest = OwnerType::DELIVERY_REQUEST;
+	public const SmartInvoice = OwnerType::SMART_INVOICE;
 	public const SuspendedSmartInvoice = 32;
 
-	public const StoreDocument = 33;
-	public const ShipmentDocument = 34;
-	public const BankDetail = 35;
-	public const SmartDocument = 36;
+	public const StoreDocument = OwnerType::STORE_DOCUMENT;
+	public const ShipmentDocument = OwnerType::SHIPMENT_DOCUMENT;
+	public const BankDetail = OwnerType::BANK_DETAIL;
+	public const SmartDocument = OwnerType::SMART_DOCUMENT;
 	public const SuspendedSmartDocument = 37;
 
-	public const AgentContractDocument = 38;
+	public const AgentContractDocument = OwnerType::AGENT_CONTRACT_DOCUMENT;
 
-	public const SmartB2eDocument = 39;
+	public const SmartB2eDocument = OwnerType::SMART_B2E_DOCUMENT;
 	public const SuspendedSmartB2eDocument = 40;
-	public const CopilotCallAssessment = 41;
+	public const CopilotCallAssessment = OwnerType::COPILOT_CALL_ASSESSMENT;
 
 	public const FirstOwnerType = 1;
 	public const LastOwnerType = 41;
 
-	public const DynamicTypeStart = 128;
-	public const DynamicTypeEnd = 192;
+	public const DynamicTypeStart = OwnerType::SMART_PROCESS_TYPE_START;
+	public const DynamicTypeEnd = OwnerType::SMART_PROCESS_TYPE_END;
 	public const SuspendedDynamicTypeStart = 192;
 	public const SuspendedDynamicTypeEnd = 256;
 
 	//Special quasi-types
-	public const System = 1024;
+	public const System = OwnerType::SYSTEM;
 
-	public const UnlimitedTypeStart = 1030;
+	public const UnlimitedTypeStart = OwnerType::UNLIMITED_TYPE_START;
 
-	public const LeadName = 'LEAD';
-	public const DealName = 'DEAL';
-	public const ContactName = 'CONTACT';
-	public const CompanyName = 'COMPANY';
-	public const InvoiceName = 'INVOICE';
-	public const ActivityName = 'ACTIVITY';
-	public const QuoteName = 'QUOTE';
-	public const RequisiteName = 'REQUISITE';
+	public const LeadName = OwnerType::LEAD_NAME;
+	public const DealName = OwnerType::DEAL_NAME;
+	public const ContactName = OwnerType::CONTACT_NAME;
+	public const CompanyName = OwnerType::COMPANY_NAME;
+	public const InvoiceName = OwnerType::INVOICE_NAME;
+	public const ActivityName = OwnerType::ACTIVITY_NAME;
+	public const QuoteName = OwnerType::QUOTE_NAME;
+	public const RequisiteName = OwnerType::REQUISITE_NAME;
 	public const DealCategoryName = 'DEAL_CATEGORY';
 	public const CustomActivityTypeName = 'CUSTOM_ACTIVITY_TYPE';
 	public const WaitTypeName = 'WAIT';
-	public const CallListTypeName = 'CALL_LIST';
-	public const SystemName = 'SYSTEM';
-	public const DealRecurringName = 'DEAL_RECURRING';
-	public const InvoiceRecurringName = 'INVOICE_RECURRING';
-	public const OrderName = 'ORDER';
-	public const OrderCheckName = 'ORDER_CHECK';
-	public const CheckCorrectionName = 'CHECK_CORRECTION';
-	public const OrderShipmentName = 'ORDER_SHIPMENT';
-	public const OrderPaymentName = 'ORDER_PAYMENT';
-	public const SmartInvoiceName = 'SMART_INVOICE';
-	public const SmartDocumentName = 'SMART_DOCUMENT';
-	public const SmartB2eDocumentName = 'SMART_B2E_DOC';
+	public const CallListTypeName = OwnerType::CALL_LIST_NAME;
+	public const SystemName = OwnerType::SYSTEM_NAME;
+	public const DealRecurringName = OwnerType::DEAL_RECURRING_NAME;
+	public const InvoiceRecurringName = OwnerType::INVOICE_RECURRING_NAME;
+	public const OrderName = OwnerType::ORDER_NAME;
+	public const OrderCheckName = OwnerType::ORDER_CHECK_NAME;
+	public const CheckCorrectionName = OwnerType::CHECK_CORRECTION_NAME;
+	public const OrderShipmentName = OwnerType::ORDER_SHIPMENT_NAME;
+	public const OrderPaymentName = OwnerType::ORDER_PAYMENT_NAME;
+	public const SmartInvoiceName = OwnerType::SMART_INVOICE_NAME;
+	public const SmartDocumentName = OwnerType::SMART_DOCUMENT_NAME;
+	public const SmartB2eDocumentName = OwnerType::SMART_B2E_DOCUMENT_NAME;
 	public const CommonDynamicName = 'DYNAMIC';
 
 	public const SuspendedLeadName = 'SUS_LEAD';
@@ -110,17 +111,17 @@ class CCrmOwnerType
 	public const SuspendedSmartDocumentName = 'SUS_SMART_DOCUMENT';
 	public const SuspendedSmartB2eDocumentName = 'SUS_SMART_B2E_DOC';
 
-	public const StoreDocumentName = 'STORE_DOCUMENT';
-	public const ShipmentDocumentName = 'SHIPMENT_DOCUMENT';
+	public const StoreDocumentName = OwnerType::STORE_DOCUMENT_NAME;
+	public const ShipmentDocumentName = OwnerType::SHIPMENT_DOCUMENT_NAME;
 
-	public const BankDetailName = 'BANK_DETAIL';
+	public const BankDetailName = OwnerType::BANK_DETAIL_NAME;
 
 	public const ScoringName = 'SCORING';
 
-	public const DynamicTypePrefixName = 'DYNAMIC_';
+	public const DynamicTypePrefixName = OwnerType::DYNAMIC_NAME_PREFIX;
 	public const SuspendedDynamicTypePrefixName = 'SUS_DYNAMIC_';
 
-	public const AgentContractDocumentName = 'AGENT_CONTRACT';
+	public const AgentContractDocumentName = OwnerType::AGENT_CONTRACT_NAME;
 
 	private static $ALL_DESCRIPTIONS = array();
 	private static $ALL_CATEGORY_CAPTION = array();
@@ -214,12 +215,7 @@ class CCrmOwnerType
 
 	public static function isPossibleDynamicTypeId(int $typeId): bool
 	{
-		if ($typeId >= self::UnlimitedTypeStart)
-		{
-			return $typeId % 2 === 0;
-		}
-
-		return ($typeId >= static::DynamicTypeStart && $typeId < static::DynamicTypeEnd);
+		return OwnerType::isPossibleSmartProcessTypeId($typeId);
 	}
 
 	public static function isPossibleSuspendedDynamicTypeId(int $typeId): bool
@@ -265,318 +261,153 @@ class CCrmOwnerType
 	public static function ResolveID($name): int
 	{
 		$name = mb_strtoupper(trim((string)$name));
-		if($name === '')
+		if ($name === '')
 		{
 			return self::Undefined;
 		}
 
-		switch($name)
+		// Try OwnerType first (handles standard names and DYNAMIC_* patterns)
+		$ownerType = OwnerType::fromName($name);
+		if ($ownerType !== null)
 		{
-			case CCrmOwnerTypeAbbr::Lead:
-			case self::LeadName:
-				return self::Lead;
-
-			case CCrmOwnerTypeAbbr::Deal:
-			case self::DealName:
-				return self::Deal;
-
-			case CCrmOwnerTypeAbbr::Contact:
-			case self::ContactName:
-				return self::Contact;
-
-			case CCrmOwnerTypeAbbr::Company:
-			case self::CompanyName:
-				return self::Company;
-
-			case CCrmOwnerTypeAbbr::Invoice:
-			case self::InvoiceName:
-				return self::Invoice;
-
-			case self::ActivityName:
-				return self::Activity;
-
-			case CCrmOwnerTypeAbbr::Quote:
-			case self::QuoteName:
-				return self::Quote;
-
-			case CCrmOwnerTypeAbbr::Order:
-			case self::OrderName:
-				return self::Order;
-
-			case CCrmOwnerTypeAbbr::OrderPayment:
-			case self::OrderPaymentName:
-				return self::OrderPayment;
-
-			case CCrmOwnerTypeAbbr::OrderShipment:
-			case self::OrderShipmentName:
-				return self::OrderShipment;
-
-			case CCrmOwnerTypeAbbr::Requisite:
-			case self::RequisiteName:
-				return self::Requisite;
-
-			case CCrmOwnerTypeAbbr::DealCategory:
-			case self::DealCategoryName:
-				return self::DealCategory;
-
-			case self::DealRecurringName:
-				return self::DealRecurring;
-
-			case self::InvoiceRecurringName:
-				return self::InvoiceRecurring;
-
-			case CCrmOwnerTypeAbbr::CustomActivityType:
-			case self::CustomActivityTypeName:
-				return self::CustomActivityType;
-
-			case self::CallListTypeName:
-				return self::CallList;
-
-			case CCrmOwnerTypeAbbr::SuspendedLead:
-			case self::SuspendedLeadName:
-				return self::SuspendedLead;
-
-			case CCrmOwnerTypeAbbr::SuspendedDeal:
-			case self::SuspendedDealName:
-				return self::SuspendedDeal;
-
-			case self::SuspendedContactName:
-				return self::SuspendedContact;
-
-			case self::SuspendedCompanyName:
-				return self::SuspendedCompany;
-
-			case self::SuspendedQuoteName:
-				return self::SuspendedQuote;
-
-			case self::SuspendedInvoiceName:
-				return self::SuspendedInvoice;
-
-			case self::SuspendedOrderName:
-				return self::SuspendedOrder;
-
-			case self::SuspendedActivityName:
-				return self::SuspendedActivity;
-
-			case self::ScoringName:
-				return self::Scoring;
-
-			case CCrmOwnerTypeAbbr::SmartInvoice:
-			case self::SmartInvoiceName:
-				return self::SmartInvoice;
-
-			case CCrmOwnerTypeAbbr::SuspendedSmartInvoice:
-			case self::SuspendedSmartInvoiceName:
-				return self::SuspendedSmartInvoice;
-
-			case CCrmOwnerTypeAbbr::BankDetail:
-			case self::BankDetailName:
-				return self::BankDetail;
-
-			case CCrmOwnerTypeAbbr::SmartDocument:
-			case self::SmartDocumentName:
-				return self::SmartDocument;
-
-			case CCrmOwnerTypeAbbr::SuspendedSmartDocument:
-			case self::SuspendedSmartDocumentName:
-				return self::SuspendedSmartDocument;
-
-			case CCrmOwnerTypeAbbr::SmartB2eDocument:
-			case self::SmartB2eDocumentName:
-				return self::SmartB2eDocument;
-
-			case CCrmOwnerTypeAbbr::SuspendedSmartB2eDocument:
-			case self::SuspendedSmartB2eDocumentName:
-				return self::SuspendedSmartB2eDocument;
-
-			case self::StoreDocumentName:
-				return self::StoreDocument;
-
-			case self::ShipmentDocumentName:
-				return self::ShipmentDocument;
-
-			case CCrmOwnerTypeAbbr::System:
-			case self::SystemName:
-				return self::System;
-
-			case self::AgentContractDocumentName:
-				return self::AgentContractDocument;
-
-			default:
-
-				$isDynamicType = preg_match('/^'.static::DynamicTypePrefixName.'(\d+)$/', $name, $matches);
-
-				if (
-					$isDynamicType &&
-					(
-						CCrmOwnerTypeAbbr::isDynamicTypeAbbreviation($name)
-						|| CCrmOwnerTypeAbbr::isSuspendedDynamicTypeAbbreviation($name)
-					)
-				)
-				{
-					$name = CCrmOwnerTypeAbbr::ResolveName($name);
-				}
-
-				$isSuspendedDynamicType = false;
-
-				if(!$isDynamicType)
-				{
-					$isSuspendedDynamicType = preg_match('/^'.static::SuspendedDynamicTypePrefixName.'(\d+)$/', $name, $matches);
-				}
-				if($isDynamicType || $isSuspendedDynamicType)
-				{
-					return $matches[1];
-				}
-
-				return self::Undefined;
+			return $ownerType->getId();
 		}
+
+		// Legacy and suspended names (not in OwnerType — handled here)
+		$legacyId = self::resolveLegacyName($name);
+		if ($legacyId !== null)
+		{
+			return $legacyId;
+		}
+
+		// Resolve abbreviations (L, D, C, CO, etc.) → standard name → OwnerType
+		$resolvedName = CCrmOwnerTypeAbbr::ResolveName($name);
+		if ($resolvedName !== '')
+		{
+			$ownerType = OwnerType::fromName($resolvedName);
+			if ($ownerType !== null)
+			{
+				return $ownerType->getId();
+			}
+
+			$legacyId = self::resolveLegacyName($resolvedName);
+			if ($legacyId !== null)
+			{
+				return $legacyId;
+			}
+		}
+
+		return self::Undefined;
+	}
+
+	/**
+	 * Resolves names not handled by OwnerType: legacy types without V2 constants + suspended types.
+	 */
+	private static function resolveLegacyName(string $name): ?int
+	{
+		$map = [
+			// Legacy types not in OwnerType
+			self::DealCategoryName => self::DealCategory,
+			self::CustomActivityTypeName => self::CustomActivityType,
+			self::WaitTypeName => self::Wait,
+			self::ScoringName => self::Scoring,
+			// Suspended types
+			self::SuspendedLeadName => self::SuspendedLead,
+			self::SuspendedDealName => self::SuspendedDeal,
+			self::SuspendedContactName => self::SuspendedContact,
+			self::SuspendedCompanyName => self::SuspendedCompany,
+			self::SuspendedQuoteName => self::SuspendedQuote,
+			self::SuspendedInvoiceName => self::SuspendedInvoice,
+			self::SuspendedOrderName => self::SuspendedOrder,
+			self::SuspendedActivityName => self::SuspendedActivity,
+			self::SuspendedRequisiteName => self::SuspendedRequisite,
+			self::SuspendedSmartInvoiceName => self::SuspendedSmartInvoice,
+			self::SuspendedSmartDocumentName => self::SuspendedSmartDocument,
+			self::SuspendedSmartB2eDocumentName => self::SuspendedSmartB2eDocument,
+		];
+
+		if (isset($map[$name]))
+		{
+			return $map[$name];
+		}
+
+		// SUS_DYNAMIC_192, SUS_DYNAMIC_193, etc.
+		if (preg_match('/^' . self::SuspendedDynamicTypePrefixName . '(\d+)$/', $name, $matches))
+		{
+			return (int)$matches[1];
+		}
+
+		return null;
 	}
 
 	public static function ResolveName($typeID): string
 	{
-		if(!is_numeric($typeID))
+		if (!is_numeric($typeID))
 		{
 			return '';
 		}
 
 		$typeID = (int)$typeID;
-		if($typeID <= 0)
+		if ($typeID <= 0)
 		{
 			return '';
 		}
 
-		switch($typeID)
+		// Try OwnerType first (handles standard names and DYNAMIC_* patterns)
+		$name = (new OwnerType($typeID))->getName();
+		if ($name !== '')
 		{
-			case self::Lead:
-				return self::LeadName;
-
-			case self::Deal:
-				return self::DealName;
-
-			case self::Contact:
-				return self::ContactName;
-
-			case self::Company:
-				return self::CompanyName;
-
-			case self::Invoice:
-				return self::InvoiceName;
-
-			case self::Activity:
-				return self::ActivityName;
-
-			case self::Quote:
-				return self::QuoteName;
-
-			case self::Order:
-				return self::OrderName;
-
-			case self::OrderCheck:
-				return self::OrderCheckName;
-
-			case self::OrderShipment:
-				return self::OrderShipmentName;
-
-			case self::OrderPayment:
-				return self::OrderPaymentName;
-
-			case self::Requisite:
-				return self::RequisiteName;
-
-			case self::DealCategory:
-				return self::DealCategoryName;
-
-			case self::DealRecurring:
-				return self::DealRecurringName;
-
-			case self::InvoiceRecurring:
-				return self::InvoiceRecurringName;
-
-			case self::CustomActivityType:
-				return self::CustomActivityTypeName;
-
-			case self::CallList:
-				return self::CallListTypeName;
-
-			case self::SuspendedLead:
-				return self::SuspendedLeadName;
-
-			case self::SuspendedDeal:
-				return self::SuspendedDealName;
-
-			case self::SuspendedContact:
-				return self::SuspendedContactName;
-
-			case self::SuspendedCompany:
-				return self::SuspendedCompanyName;
-
-			case self::SuspendedQuote:
-				return self::SuspendedQuoteName;
-
-			case self::SuspendedInvoice:
-				return self::SuspendedInvoiceName;
-
-			case self::SuspendedOrder:
-				return self::SuspendedOrderName;
-
-			case self::SuspendedActivity:
-				return self::SuspendedActivityName;
-
-			case self::Scoring:
-				return self::ScoringName;
-
-			case self::SmartInvoice:
-				return self::SmartInvoiceName;
-
-			case self::SuspendedSmartInvoice:
-				return self::SuspendedSmartInvoiceName;
-
-			case self::StoreDocument:
-				return self::StoreDocumentName;
-
-			case self::ShipmentDocument:
-				return self::ShipmentDocumentName;
-
-			case self::SmartDocument:
-				return self::SmartDocumentName;
-
-			case self::SuspendedSmartDocument:
-				return self::SuspendedSmartDocumentName;
-
-			case self::SmartB2eDocument:
-				return self::SmartB2eDocumentName;
-
-			case self::SuspendedSmartB2eDocument:
-				return self::SuspendedSmartB2eDocumentName;
-
-			case self::System:
-				return self::SystemName;
-
-			case self::AgentContractDocument:
-				return self::AgentContractDocumentName;
-
-			case self::Undefined:
-				return '';
-
-			default:
-				$isPossibleDynamicTypeId = static::isPossibleDynamicTypeId($typeID);
-				$isPossibleSuspendedDynamicTypeId = static::isPossibleSuspendedDynamicTypeId($typeID);
-				if($isPossibleDynamicTypeId || $isPossibleSuspendedDynamicTypeId)
-				{
-					return (
-						$isPossibleDynamicTypeId ? static::DynamicTypePrefixName : static::SuspendedDynamicTypePrefixName
-					) . $typeID;
-				}
-
-				return '';
+			return $name;
 		}
+
+		// Legacy and suspended types (not in OwnerType)
+		return self::resolveLegacyTypeIdToName($typeID);
+	}
+
+	/**
+	 * Resolves type IDs not handled by OwnerType: legacy types without V2 constants + suspended types.
+	 */
+	private static function resolveLegacyTypeIdToName(int $typeID): string
+	{
+		$map = [
+			// Legacy types not in OwnerType
+			self::DealCategory => self::DealCategoryName,
+			self::CustomActivityType => self::CustomActivityTypeName,
+			self::Wait => self::WaitTypeName,
+			self::Scoring => self::ScoringName,
+			// Suspended types
+			self::SuspendedLead => self::SuspendedLeadName,
+			self::SuspendedDeal => self::SuspendedDealName,
+			self::SuspendedContact => self::SuspendedContactName,
+			self::SuspendedCompany => self::SuspendedCompanyName,
+			self::SuspendedQuote => self::SuspendedQuoteName,
+			self::SuspendedInvoice => self::SuspendedInvoiceName,
+			self::SuspendedOrder => self::SuspendedOrderName,
+			self::SuspendedActivity => self::SuspendedActivityName,
+			self::SuspendedRequisite => self::SuspendedRequisiteName,
+			self::SuspendedSmartInvoice => self::SuspendedSmartInvoiceName,
+			self::SuspendedSmartDocument => self::SuspendedSmartDocumentName,
+			self::SuspendedSmartB2eDocument => self::SuspendedSmartB2eDocumentName,
+		];
+
+		if (isset($map[$typeID]))
+		{
+			return $map[$typeID];
+		}
+
+		if (static::isPossibleSuspendedDynamicTypeId($typeID))
+		{
+			return self::SuspendedDynamicTypePrefixName . $typeID;
+		}
+
+		return '';
 	}
 
 	public static function ResolveSuspended($typeID): int
 	{
 		$typeID = (int)$typeID;
 
-		if($typeID <= 0)
+		if ($typeID <= 0)
 		{
 			return self::Undefined;
 		}
@@ -645,7 +476,7 @@ class CCrmOwnerType
 					return static::getSuspendedDynamicTypeId($typeID);
 				}
 
-				return self::Undefined;
+			return self::Undefined;
 		}
 	}
 
@@ -1307,11 +1138,6 @@ class CCrmOwnerType
 			return false;
 		}
 
-		if ($typeID === static::Quote)
-		{
-			return \Bitrix\Crm\Settings\QuoteSettings::getCurrent()->isFactoryEnabled();
-		}
-
 		return $typeID === CCrmOwnerType::Lead
 			|| $typeID === CCrmOwnerType::Deal
 			|| $typeID === CCrmOwnerType::Quote
@@ -1789,9 +1615,9 @@ class CCrmOwnerType
 					array(),
 					array(
 						'=ID' => $ID, 'CHECK_PERMISSIONS' => 'N'),
-						false,
-						false,
-						array('ID', 'TITLE', 'COMPANY_TYPE', 'INDUSTRY',  'LOGO', 'ASSIGNED_BY_ID')
+					false,
+					false,
+					array('ID', 'TITLE', 'COMPANY_TYPE', 'INDUSTRY',  'LOGO', 'ASSIGNED_BY_ID')
 				);
 
 				$arRes = $dbRes ? $dbRes->Fetch() : null;
@@ -3591,11 +3417,11 @@ class CCrmOwnerType
 	{
 		return (
 			self::isUseDynamicTypeBasedApproach($entityTypeId)
-			|| $entityTypeId === self::Lead
-			|| $entityTypeId === self::Deal
-			|| $entityTypeId === self::Contact
-			|| $entityTypeId === self::Company
-			|| $entityTypeId === self::Quote
+			|| $entityTypeId === OwnerType::LEAD
+			|| $entityTypeId === OwnerType::DEAL
+			|| $entityTypeId === OwnerType::CONTACT
+			|| $entityTypeId === OwnerType::COMPANY
+			|| $entityTypeId === OwnerType::QUOTE
 		);
 	}
 
@@ -3608,10 +3434,14 @@ class CCrmOwnerType
 	 */
 	public static function isUseDynamicTypeBasedApproach(int $entityTypeId): bool
 	{
-		return (
-			self::isDynamicTypeBasedStaticEntity($entityTypeId)
-			|| self::isPossibleDynamicTypeId($entityTypeId)
-		);
+		try
+		{
+			return \Bitrix\Crm\V2\Public\EntityType::fromId($entityTypeId)->isSmartProcessBasedApproach();
+		}
+		catch (\Bitrix\Main\ArgumentException)
+		{
+			return false;
+		}
 	}
 
 	/**
@@ -3633,7 +3463,7 @@ class CCrmOwnerType
 	 */
 	public static function getDynamicTypeBasedStaticEntityTypeIds(): array
 	{
-		return [self::SmartInvoice, self::SmartDocument, self::SmartB2eDocument];
+		return \Bitrix\Crm\V2\Public\EntityType::getSmartProcessBasedStaticEntityTypeIds();
 	}
 }
 

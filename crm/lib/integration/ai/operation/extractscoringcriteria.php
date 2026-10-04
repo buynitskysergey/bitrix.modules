@@ -130,7 +130,7 @@ final class ExtractScoringCriteria extends AbstractOperation
 		}
 	}
 
-	protected static function notifyAboutJobError(Result $result, bool $withSyncBadges = true, bool $withSendAnalytics = true): void
+	protected static function notifyAboutJobError(Result $result, bool $withSyncBadges = true, bool $withSendAnalytics = true, ?ItemIdentifier $target = null): void
 	{
 		$scriptId = $result->getTarget()?->getEntityId() ?? 0;
 		$scriptData = CopilotCallAssessmentController::getInstance()->getById($scriptId);

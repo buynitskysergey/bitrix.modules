@@ -169,6 +169,23 @@ final class FullReportProvider
 		return $this->mapEntityReportToDto($report, $participantData);
 	}
 
+	/**
+	 * Same as getById() but without participant hydration (no extra user/photo queries) and with
+	 * a narrow repository read that skips the heavy serialized payload (TASKS, EVENTS, FILES,
+	 * PLANS). Use when the caller needs only report scalar fields and texts, not fromUser/toUsers.
+	 */
+	public function getByIdWithoutParticipants(int $reportId): ?FullReport
+	{
+		$report = $this->repository->getByIdWithoutPayload($reportId);
+
+		if (!$report)
+		{
+			return null;
+		}
+
+		return $this->mapEntityReportToDto($report, null);
+	}
+
 	public function getReportToSend(int $userId, bool $force = false, bool $withDraftFallback = false): FullReport
 	{
 		return $this->mapLegacyReportToDto(

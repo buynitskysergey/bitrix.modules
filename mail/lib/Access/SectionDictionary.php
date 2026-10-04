@@ -21,6 +21,10 @@ class SectionDictionary
 			PermissionDictionary::MAIL_MAILBOX_LIST_ITEM_EDIT,
 			PermissionDictionary::MAIL_MAILBOX_CONNECT,
 		];
+		if (Feature::isSharedSignaturePermissionAvailable())
+		{
+			$mailPermissions[] = PermissionDictionary::MAIL_SHARED_SIGNATURES_MANAGE;
+		}
 
 		if (Feature::isCrmAvailable())
 		{

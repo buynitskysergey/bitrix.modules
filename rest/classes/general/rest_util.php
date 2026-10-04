@@ -801,21 +801,41 @@ class CRestUtil
 						$appFields['DATE_FINISH'] = '';
 					}
 
+					$shouldFinalizeInstallation = $appFields['INSTALLED'] === \Bitrix\Rest\AppTable::INSTALLED;
 					$existingApp = \Bitrix\Rest\AppTable::getByClientId($appFields['CLIENT_ID']);
+					$appFieldsToSave = $appFields;
+					$requiresFinalization = $shouldFinalizeInstallation
+						&& (!$existingApp || $existingApp['INSTALLED'] !== \Bitrix\Rest\AppTable::INSTALLED);
+					if ($requiresFinalization)
+					{
+						$appFieldsToSave['ACTIVE'] = \Bitrix\Rest\AppTable::INACTIVE;
+						$appFieldsToSave['INSTALLED'] = \Bitrix\Rest\AppTable::NOT_INSTALLED;
+					}
 
 					if($existingApp)
 					{
-						$addResult = \Bitrix\Rest\AppTable::update($existingApp['ID'], $appFields);
+						$addResult = \Bitrix\Rest\AppTable::update($existingApp['ID'], $appFieldsToSave);
 						\Bitrix\Rest\AppLangTable::deleteByApp($existingApp['ID']);
 					}
 					else
 					{
-						$addResult = \Bitrix\Rest\AppTable::add($appFields);
+						$addResult = \Bitrix\Rest\AppTable::add($appFieldsToSave);
+					}
+
+					$appId = $addResult->isSuccess() ? (int)$addResult->getId() : 0;
+					if ($appId > 0 && $requiresFinalization)
+					{
+						$addResult = (new \Bitrix\Rest\Internal\Service\Application\ApplicationInstallationFinalizer())
+							->finalize($appId, true)
+						;
+					}
+					if (!$addResult->isSuccess() && $requiresFinalization)
+					{
+						self::rollbackRemoteInstallation($appFields['CLIENT_ID']);
 					}
 
 					if($addResult->isSuccess())
 					{
-						$appId = $addResult->getId();
 						if(is_array($appDetailInfo['MENU_TITLE']))
 						{
 							foreach($appDetailInfo['MENU_TITLE'] as $lang => $langName)
@@ -867,6 +887,19 @@ class CRestUtil
 		}
 
 		return $result;
+	}
+
+	private static function rollbackRemoteInstallation(string $clientId): void
+	{
+		try
+		{
+			\Bitrix\Rest\OAuthService::getEngine()->getClient()->unInstallApplication([
+				'CLIENT_ID' => $clientId,
+			]);
+		}
+		catch (\Throwable)
+		{
+		}
 	}
 
 	/**

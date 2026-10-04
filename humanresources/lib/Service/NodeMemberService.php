@@ -5,12 +5,15 @@ namespace Bitrix\HumanResources\Service;
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\EntityIdFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\IdFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\Node\NodeTypeFilter;
+use Bitrix\HumanResources\Builder\Structure\Filter\Column\RoleFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\NodeFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\NodeMemberFilter;
 use Bitrix\HumanResources\Builder\Structure\Sort\NodeSort;
 use Bitrix\HumanResources\Enum\DepthLevel;
 use Bitrix\HumanResources\Enum\Direction;
+use Bitrix\HumanResources\Enum\NodeActiveFilter;
 use Bitrix\HumanResources\Enum\SortDirection;
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Exception\UpdateFailedException;
 use Bitrix\HumanResources\Exception\WrongStructureItemException;
 use Bitrix\HumanResources\Item;
@@ -292,39 +295,34 @@ class NodeMemberService implements Contract\Service\NodeMemberService
 
 	public function getDefaultHeadRoleEmployees(int $nodeId): Item\Collection\NodeMemberCollection
 	{
-		$headRole = null;
-		static $departmentHeadRole = null;
-		static $teamHeadRole = null;
-
 		$node = $this->nodeRepository->getById($nodeId);
 		if (!$node)
 		{
 			return new Item\Collection\NodeMemberCollection();
 		}
 
-		if ($node->type === NodeEntityType::DEPARTMENT)
+		$headRole = match ($node->type)
 		{
-			if ($departmentHeadRole === null)
-			{
-				$departmentHeadRole = Container::getRoleRepository()->findByXmlId(NodeMember::DEFAULT_ROLE_XML_ID['HEAD'])?->id;
-			}
-			$headRole = $departmentHeadRole;
-		}
-		elseif ($node->type === NodeEntityType::TEAM)
-		{
-			if ($teamHeadRole === null)
-			{
-				$teamHeadRole = Container::getRoleRepository()->findByXmlId(NodeMember::TEAM_ROLE_XML_ID['TEAM_HEAD'])?->id;
-			}
-			$headRole = $teamHeadRole;
-		}
+			NodeEntityType::DEPARTMENT => Type\NodeMemberRole::Head,
+			NodeEntityType::TEAM => Type\NodeMemberRole::TeamHead,
+			default => null,
+		};
 
 		if ($headRole === null)
 		{
 			return new Item\Collection\NodeMemberCollection();
 		}
 
-		return $this->nodeMemberRepository->findAllByRoleIdAndNodeId($headRole, $node->id);
+		return NodeMemberDataBuilder::createWithFilter(
+			new NodeMemberFilter(
+				entityType: MemberEntityType::USER,
+				nodeFilter: new NodeFilter(
+					idFilter: IdFilter::fromId($node->id),
+					structureId: $node->structureId,
+				),
+				roleFilter: RoleFilter::fromRole($headRole),
+			),
+		)->getAll();
 	}
 
 	/**
@@ -361,6 +359,7 @@ class NodeMemberService implements Contract\Service\NodeMemberService
 				new NodeMemberFilter(
 					entityIdFilter: EntityIdFilter::fromEntityIds($userIds),
 					nodeFilter: new NodeFilter(idFilter: IdFilter::fromId($nodeId)),
+					withVirtualUsers: true,
 				),
 			)->setCacheTtl(0)
 			->getAll()
@@ -493,13 +492,17 @@ class NodeMemberService implements Contract\Service\NodeMemberService
 	{
 		$nodeMemberCollection = new Item\Collection\NodeMemberCollection();
 
-		$oldMembersCollection =
-			$this->nodeMemberRepository->findAllByNodeIdAndEntityType(
-				$node->id,
-				MemberEntityType::USER,
-				false,
-				0,
-			);
+		$oldMembersCollection = NodeMemberDataBuilder::createWithFilter(
+			new NodeMemberFilter(
+				entityType: MemberEntityType::USER,
+				nodeFilter: new NodeFilter(
+					idFilter: IdFilter::fromId($node->id),
+					structureId: $node->structureId,
+					active: NodeActiveFilter::ALL,
+				),
+				withVirtualUsers: false,
+			),
+		)->getAll();
 		$newUserIdList = [];
 
 		$nodeMemberCollectionToAdd = new Item\Collection\NodeMemberCollection();
@@ -508,6 +511,11 @@ class NodeMemberService implements Contract\Service\NodeMemberService
 		$addedMemberRoles = [];
 		/** @var array<array{member: Item\NodeMember, oldRoleId: int, newRole: Item\Role}> $roleChanges */
 		$roleChanges = [];
+		$realUserIds = array_flip(
+			RealUserFilter::filterRealUserIds(
+				array_merge(...array_values($departmentUserIds)),
+			),
+		);
 		foreach ($departmentUserIds as $roleXmlId => $userIds)
 		{
 			$isRoleAllowedForNodeType = in_array(
@@ -529,6 +537,10 @@ class NodeMemberService implements Contract\Service\NodeMemberService
 			}
 
 			$userIds = PublicContainer::getUserDepartmentService()->filterEmployeeIds($userIds);
+			$userIds = array_values(array_filter(
+				array_unique(array_map('intval', $userIds)),
+				static fn(int $userId): bool => isset($realUserIds[$userId]),
+			));
 			if (empty($userIds))
 			{
 				continue;
@@ -834,6 +846,7 @@ class NodeMemberService implements Contract\Service\NodeMemberService
 				entityType: MemberEntityType::USER,
 				nodeFilter: $nodeFilter,
 				findRelatedMembers: true,
+				withVirtualUsers: true,
 			))
 			->addStructureRole($structureRole)
 			->setSort(new NodeSort(depth: SortDirection::Desc))

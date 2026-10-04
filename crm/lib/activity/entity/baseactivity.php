@@ -2,6 +2,7 @@
 
 namespace Bitrix\Crm\Activity\Entity;
 
+use Bitrix\Crm\Activity\CalendarEventEditPermissionChecker;
 use Bitrix\Crm\Activity\Provider\Base as ActivityProvider;
 use Bitrix\Crm\Activity\Provider\ToDo\OptionallyConfigurable;
 use Bitrix\Crm\Activity\ToDo\ColorSettings\ColorSettingsProvider;
@@ -11,6 +12,7 @@ use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Context;
 use Bitrix\Main\Error;
+use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
@@ -495,6 +497,12 @@ class BaseActivity implements OptionallyConfigurable
 			return $result;
 		}
 
+		$calendarEventId = (int)$this->getCalendarEventId();
+		$optionsContext = $options['CONTEXT'] ?? null;
+		$context = $optionsContext instanceof Context ? $optionsContext : $this->getContext();
+		$isAutomation = $context !== null && $context->getScope() === Context::SCOPE_AUTOMATION;
+
+		$existedActivity = null;
 		if ($this->getId())
 		{
 			$existedActivity = CCrmActivity::GetList(
@@ -509,6 +517,7 @@ class BaseActivity implements OptionallyConfigurable
 					'ID',
 					'COMPLETED',
 					'PROVIDER_ID',
+					'DEADLINE',
 				]
 			)->Fetch();
 
@@ -532,7 +541,40 @@ class BaseActivity implements OptionallyConfigurable
 
 				return $result;
 			}
+		}
 
+		// gate calendar-event editing for a bound event when the editor lacks rights on the event itself
+		if (
+			$this->checkPermissions
+			&& $calendarEventId > 0
+			&& !$isAutomation
+			&& Loader::includeModule('calendar')
+		)
+		{
+			$editorUserId = $context?->getUserId() ?? Container::getInstance()->getContext()->getUserId();
+			if (!$this->canEditCalendarEvent($editorUserId, $calendarEventId))
+			{
+				// moving the linked event's date (synced as START_TIME/END_TIME) requires edit rights on the event
+				if ($this->isDeadlineChanged($existedActivity, $fields))
+				{
+					$result->addError(
+						new Error(
+							Loc::getMessage('CRM_TODO_ENTITY_ACTIVITY_CALENDAR_EVENT_ACCESS_DENIED'),
+							ErrorCode::ACCESS_DENIED,
+						),
+					);
+
+					return $result;
+				}
+
+				// date unchanged: keep the CRM activity update, but do not propagate other fields
+				// (name, description, color, attendees) to the calendar event without edit rights
+				$options['SKIP_CALENDAR_EVENT'] = true;
+			}
+		}
+
+		if ($this->getId())
+		{
 			$isSuccess = CCrmActivity::Update($this->getId(), $fields, $this->checkPermissions, true, $options);
 
 			if (!$isSuccess)
@@ -631,5 +673,57 @@ class BaseActivity implements OptionallyConfigurable
 	public function getContext(): ?Context
 	{
 		return $this->context;
+	}
+
+	private function canEditCalendarEvent(int $editorUserId, int $calendarEventId): bool
+	{
+		return (new CalendarEventEditPermissionChecker())->canChangeDeadline($editorUserId, $calendarEventId);
+	}
+
+	private function isDeadlineChanged(?array $existedActivity, array $fields): bool
+	{
+		// a new activity has nothing to compare against, keep the gate unconditional
+		if ($existedActivity === null)
+		{
+			return true;
+		}
+
+		// The stored DEADLINE comes from CCrmActivity::GetList in the current user's timezone, while the
+		// written DEADLINE (assembled from additionalFields, e.g. by the calendar block via
+		// DateTime::toString()) is rendered in the server timezone. Parsing each in its own timezone
+		// compares the same absolute instant even when the user and server timezones differ; fall back
+		// to the entity deadline when no field-level DEADLINE is produced (unbound activity).
+		$storedDeadline = $this->parseDeadlineValue($existedActivity['DEADLINE'] ?? null, true);
+
+		$writtenDeadline = array_key_exists('DEADLINE', $fields)
+			? $this->parseDeadlineValue($fields['DEADLINE'], false)
+			: $this->getDeadline();
+
+		return $this->normalizeDeadlineTimestamp($storedDeadline) !== $this->normalizeDeadlineTimestamp($writtenDeadline);
+	}
+
+	private function parseDeadlineValue($value, bool $inUserTime): ?DateTime
+	{
+		if ($value instanceof DateTime)
+		{
+			return $value;
+		}
+
+		if (empty($value) || CCrmDateTimeHelper::IsMaxDatabaseDate($value))
+		{
+			return null;
+		}
+
+		return $inUserTime ? DateTime::createFromUserTime($value) : new DateTime($value);
+	}
+
+	private function normalizeDeadlineTimestamp(?DateTime $deadline): ?int
+	{
+		if ($deadline === null || CCrmDateTimeHelper::IsMaxDatabaseDate($deadline->toString()))
+		{
+			return null;
+		}
+
+		return $deadline->getTimestamp();
 	}
 }

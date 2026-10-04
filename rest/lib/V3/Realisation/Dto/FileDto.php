@@ -14,6 +14,8 @@ final class FileDto extends Dto
 
 	public ?string $url;
 
+	public ?string $downloadUrl;
+
 	#[Required]
 	#[Editable]
 	public UploadFileDto $upload;

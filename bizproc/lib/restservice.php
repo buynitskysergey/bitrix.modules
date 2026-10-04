@@ -3,8 +3,16 @@
 namespace Bitrix\Bizproc;
 
 use Bitrix\Bizproc\Api\Enum\ErrorMessage;
+use Bitrix\Bizproc\Internal\Entity\WorkflowTemplate\VersionChoice;
+use Bitrix\Bizproc\Internal\Access\Permission\PermissionDictionary;
+use Bitrix\Bizproc\Internal\Service\Pilot\StartFormParameters;
+use Bitrix\Bizproc\Public\Provider\PilotVisibilityProvider;
+use Bitrix\Bizproc\Public\Provider\TemplateAccessProvider;
 use Bitrix\Bizproc\Public\Service\Workflow\StarterService;
+use Bitrix\Bizproc\Starter\Dto\ContextDto;
 use Bitrix\Bizproc\Starter\Dto\DocumentDto;
+use Bitrix\Bizproc\Starter\Enum\Face;
+use Bitrix\Bizproc\Starter\Enum\ManualStartSurface;
 use Bitrix\Bizproc\Workflow\Entity\WorkflowInstanceTable;
 use Bitrix\Main\DB\DuplicateEntryException;
 use Bitrix\Main\Loader;
@@ -269,7 +277,7 @@ class RestService extends \IRestService
 		{
 			$result = RestActivityTable::add($params);
 		}
-		catch (SqlQueryException $exception)
+		catch (DuplicateEntryException $exception)
 		{
 			throw new RestException('Activity or Robot already added!', self::ERROR_ACTIVITY_ADD_FAILURE);
 		}
@@ -843,21 +851,33 @@ class RestService extends \IRestService
 
 		$currentUserId = self::getCurrentUserId();
 		$workflowParameters = isset($params['PARAMETERS']) && is_array($params['PARAMETERS']) ? $params['PARAMETERS'] : [];
+		$workflowParameters = self::matchParametersToStartedVersion(
+			$templateId,
+			$currentUserId,
+			$workflowParameters,
+			is_array($templateInfo['PARAMETERS'] ?? null) ? $templateInfo['PARAMETERS'] : [],
+		);
 		$starterService = new StarterService();
 		$document = new DocumentDto(complexDocumentId: $documentId, complexDocumentType: $documentType);
 		$isAutomationTemplate = ((int)($templateInfo['AUTO_EXECUTE'] ?? 0)) === \CBPDocumentEventType::Automation;
+
+		// the start is attributed to the employee of the calling context; a call with no employee behind
+		// it keeps the mark off and runs the common version of the template
+		$context = new ContextDto('bizproc', Face::REST, manualStartSurface: ManualStartSurface::Rest);
 
 		$starter = (
 			$isAutomationTemplate
 				? $starterService->getAutomationStarterForManualRestDocumentScenario(
 					templateIds: [$templateId],
 					document: $document,
+					context: $context,
 					userId: $currentUserId,
 					parameters: $workflowParameters,
 				)
 				: $starterService->getProcessStarterForManualRestDocumentScenario(
 					templateIds: [$templateId],
 					document: $document,
+					context: $context,
 					userId: $currentUserId,
 					parameters: $workflowParameters,
 				)
@@ -879,6 +899,36 @@ class RestService extends \IRestService
 		}
 
 		throw new RestException($startResult->getErrorMessages()[0]);
+	}
+
+	/**
+	 * The values of the call are matched against the parameters of the version that will be executed for
+	 * the employee of the calling context : the starter matches them against the live row, and a
+	 * field that exists only in the pilot version would be dropped on the way.
+	 *
+	 * The set is keyed by the template so that the starter takes it as it is instead of matching it a
+	 * second time. The schema token lets the runtime detect a version change before it starts the process.
+	 */
+	private static function matchParametersToStartedVersion(
+		int $templateId,
+		int $userId,
+		array $values,
+		array $commonParameters,
+	): array
+	{
+		$templateParameters = (new StartFormParameters())
+			->pilotParametersFor($templateId, $userId, ManualStartSurface::Rest)
+			?? $commonParameters
+		;
+
+		$matched = [];
+		foreach ($templateParameters as $key => $property)
+		{
+			$matched[$key] = $values[$key] ?? null;
+		}
+		$matched[VersionChoice::PARAMETER_SCHEMA_TOKEN] = VersionChoice::parameterSchemaToken($templateParameters);
+
+		return [$templateId => $matched];
 	}
 
 	private static function checkStartWorkflowPermissions(array $documentId, $templateId)
@@ -915,7 +965,6 @@ class RestService extends \IRestService
 	 */
 	public static function getWorkflowTemplates($params, $n, $server)
 	{
-		self::checkAdminPermissions();
 		$params = array_change_key_case($params, CASE_UPPER);
 
 		$fields = array(
@@ -939,6 +988,32 @@ class RestService extends \IRestService
 		$select = static::getSelect($params['SELECT'] ?? null, $fields, ['ID']);
 		$filter = static::getFilter($params['FILTER'] ?? null, $fields, ['MODIFIED']);
 		$filter['<AUTO_EXECUTE'] = \CBPDocumentEventType::Automation;
+
+		if (!static::isAdmin())
+		{
+			$filter['=TYPE'] = \Bitrix\Bizproc\Api\Enum\Template\WorkflowTemplateType::Nodes->value;
+			$filter['=SYSTEM_CODE'] = null;
+		}
+
+		// Visibility scope by the caller's edit area. Non-admin REST callers can only see user Nodes
+		// templates within their editable area.
+		$entityFilter = (new TemplateAccessProvider())->getEntityFilter(
+			static::getCurrentUserId(),
+			PermissionDictionary::BIZPROC_TEMPLATE_EDIT,
+		);
+		foreach ($entityFilter as $filterKey => $filterValue)
+		{
+			$filter[$filterKey] = $filterValue;
+		}
+
+		// The templates a pilot acts on are narrowed to the ones the employee of the calling context may
+		// see; a call with no employee behind it sees none of them. The key of the condition is its own and
+		// meets neither the scope of the rights above nor an operation the caller is allowed to name.
+		$visibilityFilter = (new PilotVisibilityProvider())->getVisibilityFilter(static::getCurrentUserId());
+		foreach ($visibilityFilter as $filterKey => $filterValue)
+		{
+			$filter[$filterKey] = $filterValue;
+		}
 
 		$order = static::getOrder($params['ORDER'] ?? null, $fields, ['ID' => 'ASC']);
 		$shouldCountTotal = ($n >= 0);
@@ -1861,10 +1936,21 @@ class RestService extends \IRestService
 		return null;
 	}
 
+	/**
+	 * The identifier comes from the call and no list is built on the way, so the templates a pilot acts on
+	 * are asked about here one by one: the narrowing of the lists alone would be bypassed by naming the
+	 * identifier directly. A template the employee of the calling context may not see is answered exactly
+	 * as a template that does not exist - same reason, same code, same message.
+	 */
 	private static function getTemplateInfoForStart(int $id): ?array
 	{
+		if (!(new PilotVisibilityProvider())->isVisible(static::getCurrentUserId(), $id))
+		{
+			return null;
+		}
+
 		$tpl = WorkflowTemplateTable::getList([
-			'select' => ['MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'AUTO_EXECUTE'],
+			'select' => ['MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE', 'AUTO_EXECUTE', 'PARAMETERS'],
 			'filter' => ['=ID' => $id],
 		])->fetch();
 

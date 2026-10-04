@@ -569,5 +569,20 @@ class App implements EntityInterface, RestApplicationInterface
 		return $this;
 	}
 
-	// endregion
+	public function getOwnerUserId(): ?int
+	{
+		$value = $this->getAttributeValue(AppAttributeCode::OwnerUserId->value);
+
+		return $value !== null ? (int)$value : null;
+	}
+
+	public function isPersonal(): bool
+	{
+		return $this->getOwnerUserId() !== null;
+	}
+
+	public function isOwnedBy(int $userId): bool
+	{
+		return $this->getOwnerUserId() === $userId;
+	}
 }

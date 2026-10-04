@@ -36,6 +36,8 @@ use CCrmOwnerType;
 
 final class ScoreCall extends AbstractOperation
 {
+	use JobCallAssessmentBindingTrait;
+
 	public const TYPE_ID = 4;
 	public const CONTEXT_ID = 'score_call';
 
@@ -170,7 +172,7 @@ final class ScoreCall extends AbstractOperation
 		}
 	}
 
-	protected static function notifyAboutJobError(Result $result, bool $withSyncBadges = true, bool $withSendAnalytics = true): void
+	protected static function notifyAboutJobError(Result $result, bool $withSyncBadges = true, bool $withSendAnalytics = true, ?ItemIdentifier $target = null): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();
 		$nextTarget = (new TargetResolver())->findTarget($activityId);
@@ -356,10 +358,7 @@ final class ScoreCall extends AbstractOperation
 			);
 		}
 
-		if ($activityId !== null && $result->getParentJobId() !== null)
-		{
-			MultiValueStoreService::getInstance()->deleteAll(self::generateJobCallAssessmentBindKey($result->getParentJobId(), $activityId));
-		}
+		self::cleanupJobCallAssessmentBinding($result->getParentJobId(), $activityId);
 	}
 
 	private static function getAssessmentSettings(int $activityId, ?int $assessmentSettingsId = null, ?int $parentJobId = null): ?CallAssessmentItem
@@ -462,8 +461,4 @@ final class ScoreCall extends AbstractOperation
 		$badge->bind($itemIdentifier, $sourceIdentifier);
 	}
 
-	public static function generateJobCallAssessmentBindKey(int $jobId, int $activityId): string
-	{
-		return "job_{$jobId}_activity_{$activityId}_bind_call_assessment";
-	}
 }

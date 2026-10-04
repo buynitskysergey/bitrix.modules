@@ -349,6 +349,12 @@ class AdsForm extends AdsService
 	{
 		static::resetErrors();
 
+		if ($type === LeadAds\Service::TYPE_VKONTAKTE && self::isDisabled())
+		{
+			static::$errors[] = 'VKontakte integration is not available in the current portal region.';
+			return false;
+		}
+
 		// 0. Prepare fields.
 		$crmForm = new Form;
 		if (!$crmForm->load($crmFormId))
@@ -521,7 +527,7 @@ class AdsForm extends AdsService
 	 */
 	protected static function isDisabled()
 	{
-		return false;
+		return !Integration\Bitrix24\Product::isVkAvailable();
 	}
 
 	/**

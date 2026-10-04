@@ -11,6 +11,7 @@ use Bitrix\Main\UpdateSystem\Migration\Config;
 use Bitrix\Main\UpdateSystem\Migration\ConfigFactory;
 use Bitrix\Main\UpdateSystem\Migration\Context;
 use Bitrix\Main\UpdateSystem\Migration\DatabaseUpdateMode;
+use Bitrix\Main\UpdateSystem\Migration\IndexNameProcessor;
 use Bitrix\Main\UpdateSystem\Migration\Table;
 
 /**
@@ -163,12 +164,19 @@ class SpyMigration extends MigrationFacade
 
 	/** @var string[] */
 	private array $capturedQueries = [];
+	private ?IndexNameProcessor $indexNameProcessor = null;
 
 	public function table(string $tableName): Table
 	{
 		if (!isset($this->spyTables[$tableName]))
 		{
-			$this->spyTables[$tableName] = new SpyTable($tableName, $this->context(), $this);
+			$this->indexNameProcessor ??= new IndexNameProcessor($this->context());
+			$this->spyTables[$tableName] = new SpyTable(
+				$tableName,
+				$this->context(),
+				$this,
+				$this->indexNameProcessor,
+			);
 		}
 
 		return $this->spyTables[$tableName];
@@ -200,9 +208,10 @@ class SpyTable extends Table
 		string $tableName,
 		Context $context,
 		private readonly SpyMigration $spy,
+		IndexNameProcessor $indexNameProcessor,
 	)
 	{
-		parent::__construct($tableName, $context);
+		parent::__construct($tableName, $context, $indexNameProcessor);
 	}
 
 	protected function executeQuery(string $sql): void

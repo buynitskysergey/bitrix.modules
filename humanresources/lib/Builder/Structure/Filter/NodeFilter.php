@@ -227,12 +227,12 @@ final class NodeFilter extends BaseFilter
 
 		if ($this->active === NodeActiveFilter::ONLY_ACTIVE)
 		{
-			$conditionTree->where($this->getFieldByQueryContext('GLOBAL_ACTIVE'), true);
+			$conditionTree->where($this->getFieldByQueryContext('ACTIVE'), true);
 
 			return;
 		}
 
-		$conditionTree->where($this->getFieldByQueryContext('ACTIVE'), true);
+		$conditionTree->where($this->getFieldByQueryContext('GLOBAL_ACTIVE'), true);
 	}
 
 	private function addConditionForNameFilter(ConditionTree $conditionTree): void

@@ -66,12 +66,16 @@ class TimelineEntry
 		$query->addFilter('=ASSOCIATED_ENTITY_ID', $entityID);
 		$query->addFilter('=ASSOCIATED_ENTITY_TYPE_ID', $entityTypeID);
 		$query->addSelect('ID');
+		$query->addSelect('CREATED');
 		$dbResult = $query->exec();
 
 		$entryIDs = array();
+		$entryCreated = [];
 		while($entry = $dbResult->fetch())
 		{
-			$entryIDs[] = (int)$entry['ID'];
+			$entryID = (int)$entry['ID'];
+			$entryIDs[] = $entryID;
+			$entryCreated[$entryID] = $entry['CREATED'] ?? null;
 		}
 
 		if(empty($entryIDs))
@@ -111,13 +115,16 @@ class TimelineEntry
 
 			foreach($added as $binding)
 			{
-				Entity\TimelineBindingTable::upsert(
-					array(
-						'OWNER_ID' => $entryID,
-						'ENTITY_TYPE_ID' => $binding['ENTITY_TYPE_ID'],
-						'ENTITY_ID' => $binding['ENTITY_ID']
-					)
-				);
+				$fields = [
+					'OWNER_ID' => $entryID,
+					'ENTITY_TYPE_ID' => $binding['ENTITY_TYPE_ID'],
+					'ENTITY_ID' => $binding['ENTITY_ID'],
+				];
+				if (isset($entryCreated[$entryID]))
+				{
+					$fields['CREATED'] = $entryCreated[$entryID];
+				}
+				Entity\TimelineBindingTable::upsert($fields);
 			}
 		}
 	}
@@ -393,14 +400,20 @@ class TimelineEntry
 			$added[] = $currentMap[$key];
 		}
 	}
-	public static function registerBindings($entryID, array $bindings)
+	public static function registerBindings(
+		$entryID,
+		array $bindings,
+		?\Bitrix\Main\Type\DateTime $created = null
+	)
 	{
 		$monitor = Crm\Service\Timeline\Monitor::getInstance();
 
 		foreach($bindings as $binding)
 		{
 			$entityID = isset($binding['ENTITY_ID']) ? (int)$binding['ENTITY_ID'] : 0;
-			$entityTypeID = isset($binding['ENTITY_TYPE_ID']) ? (int)$binding['ENTITY_TYPE_ID'] : \CCrmOwnerType::Undefined;
+			$entityTypeID = isset($binding['ENTITY_TYPE_ID'])
+				? (int)$binding['ENTITY_TYPE_ID']
+				: \CCrmOwnerType::Undefined;
 
 			if($entityID > 0 && \CCrmOwnerType::IsDefined($entityTypeID))
 			{
@@ -413,9 +426,16 @@ class TimelineEntry
 				{
 					$parameters['IS_FIXED'] = $binding['IS_FIXED'] ? 'Y' : 'N';
 				}
+				if ($created !== null)
+				{
+					$parameters['CREATED'] = $created;
+				}
 				Entity\TimelineBindingTable::upsert($parameters);
 
-				$monitor->onTimelineEntryAddIfSuitable(new Crm\ItemIdentifier($entityTypeID, $entityID), (int)$entryID);
+				$monitor->onTimelineEntryAddIfSuitable(
+					new Crm\ItemIdentifier($entityTypeID, $entityID),
+					(int)$entryID
+				);
 			}
 		}
 	}
@@ -423,6 +443,15 @@ class TimelineEntry
 	public static function shift($ID, DateTime $time)
 	{
 		Entity\TimelineTable::update($ID, array('CREATED' => $time));
+
+		$connection = \Bitrix\Main\Application::getConnection();
+		$dateStr = $connection->getSqlHelper()->convertToDbDateTime($time);
+		$connection->queryExecute(
+			'UPDATE b_crm_timeline_bind SET CREATED = ' . $dateStr
+			. ' WHERE OWNER_ID = ' . (int)$ID
+		);
+
+		Entity\TimelineBindingTable::cleanCache();
 	}
 
 	public static function buildSearchContent($ID)
@@ -503,8 +532,16 @@ class TimelineEntry
 
 	protected static function fetchParams(array $params): array
 	{
-		$authorId = $params['AUTHOR_ID'] ?? 0;
-		$authorId = $authorId <= 0 ? \CCrmSecurityHelper::GetCurrentUserID() : (int)$authorId;
+		$authorId = (int)($params['AUTHOR_ID'] ?? 0);
+		if ($authorId <= 0)
+		{
+			$context = \Bitrix\Crm\Service\Container::getInstance()->getContext();
+			$authorId = (int)($context->getExplicitUserId() ?? 0);
+		}
+		if ($authorId <= 0)
+		{
+			$authorId = \Bitrix\Crm\Service\SystemUser::getDefaultAuthorId();
+		}
 
 		$created = isset($params['CREATED']) && ($params['CREATED'] instanceof DateTime)
 			? $params['CREATED']

@@ -164,6 +164,7 @@ class CSiteCheckerTest
 			['check_mysql_time' => GetMessage('SC_T_TIME')],
 			['check_pgsql_db_charset' => GetMessage('SC_DB_CHARSET')],
 			['check_pgsql_connection_charset' => GetMessage('SC_CONNECTION_CHARSET')],
+			['check_pgsql_standard_conforming_strings' => GetMessage('SC_T_PGSQL_STANDARD_CONFORMING_STRINGS')],
 		];
 
 		if ($this->fix_mode)
@@ -2374,6 +2375,19 @@ class CSiteCheckerTest
 		$this->arTestVars['check_connection_charset_fail'] = true;
 
 		return $this->Result(false, $strError);
+	}
+
+	function check_pgsql_standard_conforming_strings()
+	{
+		$connection = Application::getConnection();
+
+		$option = $connection->query("select setting from pg_settings where name = 'standard_conforming_strings'")->fetch();
+		if (!isset($option['SETTING']) || $option['SETTING'] != 'on')
+		{
+			return $this->Result(false, GetMessage('SC_PGSQL_ERR_STANDARD_CONFORMING_STRINGS'));
+		}
+
+		return true;
 	}
 
 	##############################

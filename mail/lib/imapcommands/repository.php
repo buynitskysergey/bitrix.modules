@@ -2,6 +2,8 @@
 namespace Bitrix\Mail\ImapCommands;
 
 use Bitrix\Mail;
+use Bitrix\Mail\Internal\Service\Label\LabelCountersService;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Main;
 use Bitrix\Main\Entity\ReferenceField;
 use \Bitrix\Mail\Helper\MessageFolder;
@@ -17,6 +19,24 @@ class Repository
 		$this->messagesIds = $messagesIds;
 	}
 
+	/**
+	 * The generation of the physical rows a user command may touch: the active source of
+	 * the mailbox. A prepared generation is filled by the migration import only and stays
+	 * invisible here.
+	 */
+	private function getGenerationScope(): GenerationScope
+	{
+		return GenerationScope::forMailbox((int)$this->mailboxId);
+	}
+
+	private function applyGenerationScope(Main\ORM\Query\Query $query): void
+	{
+		foreach ($this->getGenerationScope()->apply([]) as $condition => $value)
+		{
+			$query->addFilter($condition, $value);
+		}
+	}
+
 	public function getMailbox($mailboxUserId = null)
 	{
 		return Mail\MailboxTable::getUserMailbox($this->mailboxId, $mailboxUserId);
@@ -25,12 +45,18 @@ class Repository
 	public function deleteOldMessages($folderCurrentName)
 	{
 		$connection = Main\Application::getInstance()->getConnection();
-		$sqlHelper = $connection->getSqlHelper();
-		$sql = 'DELETE from ' . Mail\MailMessageUidTable::getTableName() .
-			' WHERE MAILBOX_ID = ' . intval($this->mailboxId) .
-			" AND DIR_MD5 = '" . $sqlHelper->forSql(md5($folderCurrentName)) . "'" .
-			' AND MSG_UID = 0;';
-		$connection->query($sql);
+		$entity = Mail\MailMessageUidTable::getEntity();
+
+		$connection->query(sprintf(
+			'DELETE FROM %s WHERE %s',
+			$connection->getSqlHelper()->quote($entity->getDbTableName()),
+			Main\Entity\Query::buildFilterSql($entity, $this->getGenerationScope()->apply([
+				'=MAILBOX_ID' => (int)$this->mailboxId,
+				'=DIR_MD5' => md5($folderCurrentName),
+				'=MSG_UID' => 0,
+			]))
+		));
+
 		return $connection->getAffectedRowsCount();
 	}
 
@@ -72,10 +98,10 @@ class Repository
 		$mailboxId = intval($this->mailboxId);
 
 		Mail\MailMessageUidTable::updateList(
-			[
+			$this->getGenerationScope()->apply([
 				'=MAILBOX_ID' => $mailboxId,
 				'@ID' => $messagesIds,
-			],
+			]),
 			[
 				'IS_SEEN' => $isSeen,
 			],
@@ -94,6 +120,9 @@ class Repository
 		}
 
 		\Bitrix\Mail\Helper::updateMailboxUnseenCounter($mailboxId);
+
+		(new \Bitrix\Mail\Internal\Service\Label\LabelCountersService())
+			->recalculateForUidRows($mailboxId, $messagesIds);
 	}
 
 	public function updateMessageFieldsAfterMove($messages, $folderNewName, $mailbox)
@@ -117,14 +146,16 @@ class Repository
 				'OLD_DIR_MD5' => $messageData['DIR_MD5'],
 				'INTERNALDATE' => $messageData['INTERNALDATE'],
 				'IS_OLD' => $messageData['IS_OLD'],
+				'DELETE_TIME' => $messageData['DELETE_TIME'],
+				'MESSAGE_ID' => $messageData['MESSAGE_ID'],
 			];
 		}
 
 		Mail\MailMessageUidTable::updateList(
-			[
+			$this->getGenerationScope()->apply([
 				'=MAILBOX_ID' => intval($this->mailboxId),
 				'@ID' => $messagesIds,
-			],
+			]),
 			[
 				'MSG_UID' => 0,
 				'DIR_MD5' => md5($folderNewName),
@@ -146,7 +177,7 @@ class Repository
 	 * @param array $messagesToDelete Each message in the array must be represented by an associative array containing the "MESSAGE_ID" field.
 	 * @param $mailboxUserId
 	 *
-	 * @return ?int (affected rows count)
+	 * @return ?int Deleted logical messages, null when the sample holds none.
 	 */
 	public function deleteMailsCompletely(array $messagesToDelete, $mailboxUserId): ?int
 	{
@@ -182,6 +213,11 @@ class Repository
 			];
 		}
 
+		/*
+			The only deliberately generation-wide deletion: the user removes the logical letter,
+			not one of its physical positions, so every generation loses its placement of it.
+			The command that got here was still admitted through the active generation alone.
+		*/
 		Mail\MailMessageUidTable::deleteList(
 			[
 				'=MAILBOX_ID' => $this->mailboxId,
@@ -192,10 +228,46 @@ class Repository
 		);
 
 		Mail\Internals\MailMessageMarkTable::deleteByMessages((int)$this->mailboxId, $ids);
+		$this->clearClassifyPending($ids);
+
+		// The uid rows are gone from the server, not from deleteList above: it gets event data without ID.
+		(new LabelCountersService())->handleMessagesDeleted((int)$this->mailboxId, $ids);
 
 		return $this->deleteMailMessageRows($ids);
 	}
 
+	/**
+	 * Cleaned here for the same reason as the marks: the deleted rows never reach an onMailMessageDeleted
+	 * handler. Best effort: a broken cleanup must not break the deletion itself.
+	 *
+	 * @param int[] $ids
+	 */
+	private function clearClassifyPending(array $ids): void
+	{
+		try
+		{
+			$pendingService = new Mail\Internal\Service\Message\ClassifyPendingService();
+			$pendingService->clearMany((int)$this->mailboxId, $ids);
+		}
+		catch (\Throwable $exception)
+		{
+			AddMessage2Log(
+				sprintf(
+					'clearClassifyPending failed: mailboxId=%d, messages=%d, error=%s',
+					(int)$this->mailboxId,
+					count($ids),
+					$exception->getMessage()
+				),
+				'mail',
+				2,
+				false
+			);
+		}
+	}
+
+	/**
+	 * @return int Logical messages that have been deleted.
+	 */
 	private function deleteMailMessageRows(array $ids): int
 	{
 		$ids = array_filter(array_map('intval', $ids));
@@ -205,15 +277,17 @@ class Repository
 			return 0;
 		}
 
-		$connection = Main\Application::getInstance()->getConnection();
-		$tableName = Mail\MailMessageTable::getTableName();
+		/*
+			Through the shared deletion of a logical message, so the letter takes its attachments,
+			bindings and thread closure with it. The background cleanup cannot do it later: it
+			works from the placements, and they are already gone.
+		*/
+		foreach ($ids as $id)
+		{
+			\CMailMessage::delete($id);
+		}
 
-		$inList = implode(',', $ids);
-
-		$sql = 'DELETE FROM ' . $tableName . ' WHERE ID IN (' . $inList . ');';
-		$connection->query($sql);
-
-		return $connection->getAffectedRowsCount();
+		return count($ids);
 	}
 
 	public function getMessages()
@@ -223,15 +297,19 @@ class Repository
 			return [];
 		}
 		$messages = [];
-		$messagesSelected = Mail\MailMessageUidTable::query()
+
+		// The command names uid rows of the active generation only, in any order
+		$selectedQuery = Mail\MailMessageUidTable::query()
 			->addSelect('MESSAGE_ID')
 			->where('MAILBOX_ID', $this->mailboxId)
 			->whereIn('ID', $this->messagesIds)
 			->whereNot('MSG_UID', 0)
 			->where('MESSAGE_ID', '>', 0)
 			->addFilter('==DELETE_TIME', 0)
-			->exec()
-			->fetchAll();
+		;
+		$this->applyGenerationScope($selectedQuery);
+
+		$messagesSelected = $selectedQuery->exec()->fetchAll();
 		if ($messagesSelected)
 		{
 			$messagesSelectedIds = array_map(
@@ -245,7 +323,11 @@ class Repository
 			{
 				return [];
 			}
-			$messages = Mail\MailMessageUidTable::query()
+			/*
+				The sibling placements of the same logical message: the active generation
+				only, so a copy left by a previous physical source is never commanded.
+			*/
+			$placementsQuery = Mail\MailMessageUidTable::query()
 				->registerRuntimeField(
 					'',
 					new ReferenceField(
@@ -265,12 +347,15 @@ class Repository
 				->addSelect('MESSAGE_ID')
 				->addSelect('INTERNALDATE')
 				->addSelect('IS_OLD')
+				->addSelect('DELETE_TIME')
 				->addSelect('ref.FIELD_FROM', 'FIELD_FROM')
 				->whereIn('MESSAGE_ID', $messagesSelectedIds)
 				->where('MAILBOX_ID', $this->mailboxId)
 				->whereNot('MSG_UID', 0)
-				->exec()
-				->fetchAll();
+			;
+			$this->applyGenerationScope($placementsQuery);
+
+			$messages = $placementsQuery->exec()->fetchAll();
 		}
 
 		return $messages;

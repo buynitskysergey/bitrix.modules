@@ -122,6 +122,14 @@ class User extends \IRestService
 	private static $nameFieldFullPrefix = 'UF_USR_';
 	private static $userUserFieldList;
 	private static ?array $userFieldDateTypes = null;
+	private const USER_FIELDS_REQUIRING_METADATA = [
+		'UF_EMPLOYMENT_DATE',
+	];
+
+	// Built-in user fields created by the intranet installer; their values need no metadata-based formatting.
+	private const ALWAYS_PRESENT_USER_FIELDS_WITHOUT_METADATA = [
+		'UF_DEPARTMENT',
+	];
 
 	protected static $allowedUserFields = array(
 		'ID',
@@ -224,7 +232,7 @@ class User extends \IRestService
 		];
 	}
 
-	private static function getAllowedUserFields($scopeList): array
+	private static function getAllowedUserFields($scopeList, bool $includeUserFields = true): array
 	{
 		$result = [];
 		if (in_array(static::SCOPE_USER, $scopeList))
@@ -247,7 +255,7 @@ class User extends \IRestService
 				$result[] = 'USER_TYPE';
 			}
 
-			if (in_array(UserField::SCOPE_USER_USERFIELD, $scopeList))
+			if ($includeUserFields && in_array(UserField::SCOPE_USER_USERFIELD, $scopeList))
 			{
 				$result = array_merge($result, static::getUserFields());
 			}
@@ -547,8 +555,6 @@ class User extends \IRestService
 	{
 		global $USER;
 
-		static::checkAllowedFields();
-
 		static $moduleAdminList = false;
 
 		$query = array_change_key_case($query, CASE_UPPER);
@@ -557,6 +563,12 @@ class User extends \IRestService
 		$order = $query['ORDER'] ?? null;
 		$select = $query['SELECT'] ?? null;
 		$adminMode = false;
+		$shouldUseUserFieldMetadata = static::shouldCheckAllowedFieldsForUserGet($query, $select);
+
+		if ($shouldUseUserFieldMetadata)
+		{
+			static::checkAllowedFields();
+		}
 
 		//getting resize preset before user data preparing
 		$resizePresets = [
@@ -583,7 +595,7 @@ class User extends \IRestService
 			}
 		}
 
-		$allowedUserFields = static::getAllowedUserFields($server->getAuthScope());
+		$allowedUserFields = static::getAllowedUserFields($server->getAuthScope(), $shouldUseUserFieldMetadata);
 		$allowedUserFields[] = 'IS_ONLINE';
 		$allowedUserFields[] = 'HAS_DEPARTAMENT';
 		$allowedUserFields[] = 'NAME_SEARCH';
@@ -647,8 +659,6 @@ class User extends \IRestService
 			&& Loader::includeModule("extranet")
 		)
 		{
-			$filteredUserIDs = \CExtranet::getMyGroupsUsersSimple(\CExtranet::getExtranetSiteID());
-
 			if (\CExtranet::isIntranetUser())
 			{
 				if (
@@ -657,6 +667,8 @@ class User extends \IRestService
 					|| !\CSocNetUser::IsCurrentUserModuleAdmin(\CSite::getDefSite(), false)
 				)
 				{
+					$filteredUserIDs = \CExtranet::getMyGroupsUsersSimple(\CExtranet::getExtranetSiteID());
+
 					if (!empty($filteredUserIDs))
 					{
 						$filter[] = [
@@ -676,6 +688,7 @@ class User extends \IRestService
 			}
 			else
 			{
+				$filteredUserIDs = \CExtranet::getMyGroupsUsersSimple(\CExtranet::getExtranetSiteID());
 				$filteredUserIDs[] = $USER->getId();
 				$filter["ID"] = (isset($filter["ID"]) ? array_intersect((is_array($filter["ID"]) ? $filter["ID"] : array($filter["ID"])), $filteredUserIDs) : $filteredUserIDs);
 			}
@@ -699,47 +712,45 @@ class User extends \IRestService
 		{
 			$getListClassName = '\Bitrix\Intranet\UserTable';
 		}
-		$getListMethodName = 'getList';
 
 		$navParams = self::getNavData($nav, true);
 
 		$querySort = self::prepareUserGetOrder($sort, $order);
 
-		$allowedFields = static::getAllowedUserFields($server->getAuthScope());
+		$allowedFields = static::getAllowedUserFields($server->getAuthScope(), $shouldUseUserFieldMetadata);
+		$allowedFields = static::prepareSelectedAllowedFields($allowedFields, $select);
+		$userFieldMetadata = static::getUserFieldMetadata($allowedFields);
 
-		if (is_array($select) && !empty($select) && !in_array('*',  $select, true))
-		{
-			if (in_array('UF_*', $select, true))
-			{
-				$allowedAllUF = array_filter(
-					$allowedFields,
-					static fn($value) => $value && str_starts_with($value, 'UF_'),
-				);
-			}
+		$exactUserIdCount = static::getExactUserIdCount($filter, $navParams);
+		$isSingleUserRequest = $exactUserIdCount === 1;
+		$canCountLocally = $exactUserIdCount !== null;
+		$countTotal = $nav !== -1 && !$canCountLocally;
 
-			$allowedFields = array_merge(array_intersect($allowedFields, $select), $allowedAllUF ?? []);
-		}
-
-		$dbRes = $getListClassName::query()
+		$userQuery = $getListClassName::query()
 			->setSelect($allowedFields)
 			->setFilter($filter)
 			->where('REAL_USER', 'expr', true)
 			->setOrder($querySort)
-			->setLimit($navParams['limit'])
-			->setOffset($navParams['offset'])
+			->setLimit($isSingleUserRequest ? 1 : $navParams['limit'])
 			->disableDataDoubling()
-			->countTotal($nav !== -1)
-			->exec()
+			->countTotal($countTotal)
 		;
+
+		if (isset($navParams['offset']))
+		{
+			$userQuery->setOffset($navParams['offset']);
+		}
+
+		$dbRes = $userQuery->exec();
 
 		$result = [];
 		$files = [];
 
 		while ($userInfo = $dbRes->fetch())
 		{
-			$result[] = self::getUserData($userInfo, $allowedFields);
+			$result[] = self::getUserData($userInfo, $allowedFields, $userFieldMetadata);
 
-			if ($userInfo['PERSONAL_PHOTO'] > 0)
+			if (!empty($userInfo['PERSONAL_PHOTO']))
 			{
 				$files[] = $userInfo['PERSONAL_PHOTO'];
 			}
@@ -751,17 +762,21 @@ class User extends \IRestService
 
 			foreach ($result as $key => $userInfo)
 			{
-				if (isset($userInfo['PERSONAL_PHOTO']) && $userInfo['PERSONAL_PHOTO'] > 0)
+				if (!empty($userInfo['PERSONAL_PHOTO']))
 				{
 					$result[$key]['PERSONAL_PHOTO'] = $files[$userInfo['PERSONAL_PHOTO']];
 				}
 			}
 		}
 
-		if ($result)
+		$count = 0;
+		if ($nav !== -1)
 		{
-			$count = 0;
-			if ($nav !== -1)
+			if ($canCountLocally)
+			{
+				$count = count($result);
+			}
+			else
 			{
 				try
 				{
@@ -771,17 +786,9 @@ class User extends \IRestService
 				{
 				}
 			}
-
-			return self::setNavData(
-				$result,
-				[
-					'count' => $count,
-					'offset' => $navParams['offset'],
-				],
-			);
 		}
 
-		return $result;
+		return self::prepareUserGetResult($result, $navParams, $count);
 	}
 
 	public static function userOnline()
@@ -1196,6 +1203,178 @@ class User extends \IRestService
 		return ['ID' => 'ASC'];
 	}
 
+	private static function prepareSelectedAllowedFields(array $allowedFields, $select): array
+	{
+		if (!is_array($select) || empty($select) || in_array('*', $select, true))
+		{
+			return $allowedFields;
+		}
+
+		$selectedFields = array_values(array_intersect($allowedFields, $select));
+
+		if (in_array('UF_*', $select, true))
+		{
+			$selectedFields = array_merge(
+				$selectedFields,
+				array_filter(
+					$allowedFields,
+					static fn($value) => $value && str_starts_with($value, 'UF_'),
+				),
+			);
+		}
+
+		return array_values(array_unique($selectedFields));
+	}
+
+	private static function shouldLoadUserFieldMetadata(array $allowedFields): bool
+	{
+		foreach ($allowedFields as $field)
+		{
+			if (
+				is_string($field)
+				&& (
+					in_array($field, self::USER_FIELDS_REQUIRING_METADATA, true)
+					|| str_starts_with($field, static::$nameFieldFullPrefix)
+					|| (
+						str_starts_with($field, 'UF_')
+						&& !in_array($field, self::ALWAYS_PRESENT_USER_FIELDS_WITHOUT_METADATA, true)
+					)
+				)
+			)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function getUserFieldMetadata(array $allowedFields): array
+	{
+		if (!static::shouldLoadUserFieldMetadata($allowedFields))
+		{
+			return [];
+		}
+
+		global $USER_FIELD_MANAGER;
+
+		// Only USER_TYPE_ID and MULTIPLE are read downstream; skipping the localized labels keeps
+		// this lookup on the same cache entry as the other user.get metadata reads.
+		return $USER_FIELD_MANAGER->getUserFields(static::$entityUser);
+	}
+
+	private static function shouldCheckAllowedFieldsForUserGet(array $query, $select): bool
+	{
+		if (!is_array($select) || empty($select) || in_array('*', $select, true))
+		{
+			return true;
+		}
+
+		foreach ($select as $field)
+		{
+			if (
+				is_string($field)
+				&& str_starts_with($field, 'UF_')
+				&& !in_array($field, self::ALWAYS_PRESENT_USER_FIELDS_WITHOUT_METADATA, true)
+			)
+			{
+				return true;
+			}
+		}
+
+		$sort = $query['SORT'] ?? null;
+		if (is_string($sort) && str_starts_with($sort, 'UF_'))
+		{
+			return true;
+		}
+
+		$filter = $query;
+		if (isset($query['FILTER']) && is_array($query['FILTER']))
+		{
+			$filter = array_change_key_case($query['FILTER'], CASE_UPPER);
+		}
+
+		foreach ($filter as $code => $value)
+		{
+			if (!is_string($code))
+			{
+				continue;
+			}
+
+			$matches = [];
+			if (preg_match('/^([\W]{1,2})(.+)/', $code, $matches) && $matches[2])
+			{
+				$code = $matches[2];
+			}
+
+			if (str_starts_with($code, 'UF_'))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Returns how many users an exact ID filter pins the result set to, or null when the
+	 * filter does not narrow it down to an explicit ID list fitting into the first page.
+	 *
+	 * Such a result cannot be truncated by the query limit, so its total is already known
+	 * from the fetched rows and needs no separate COUNT query.
+	 */
+	private static function getExactUserIdCount(array $filter, array $navParams): ?int
+	{
+		if (($navParams['offset'] ?? 0) > 0)
+		{
+			return null;
+		}
+
+		foreach (['ID', '=ID'] as $field)
+		{
+			if (!array_key_exists($field, $filter))
+			{
+				continue;
+			}
+
+			$value = $filter[$field];
+			$ids = is_array($value) ? $value : [$value];
+
+			if (empty($ids) || count($ids) > ($navParams['limit'] ?? 0))
+			{
+				return null;
+			}
+
+			foreach ($ids as $id)
+			{
+				if ((int)$id <= 0)
+				{
+					return null;
+				}
+			}
+
+			return count($ids);
+		}
+
+		return null;
+	}
+
+	private static function prepareUserGetResult(array $result, array $navParams, int $count): array
+	{
+		if (!$result)
+		{
+			return $result;
+		}
+
+		return self::setNavData(
+			$result,
+			[
+				'count' => $count,
+				'offset' => $navParams['offset'] ?? 0,
+			],
+		);
+	}
+
 	private static function prepareUserFilter($query, $allowedUserFields = null, $clearFilterType = []): array
 	{
 		$filter = [];
@@ -1297,23 +1476,23 @@ class User extends \IRestService
 		return $user;
 	}
 
-	protected static function getUserData($userFields, $allowedFields = null)
+	protected static function getUserData($userFields, $allowedFields = null, ?array $userFieldMetadata = null)
 	{
 		static $extranetModuleInstalled = null;
 		if ($extranetModuleInstalled === null)
 		{
 			$extranetModuleInstalled = ModuleManager::isModuleInstalled('extranet');
 		}
-		global $USER_FIELD_MANAGER;
-		$fieldsList = $USER_FIELD_MANAGER->getUserFields(static::$entityUser, 0, LANGUAGE_ID);
-
-		$urlManager = \Bitrix\Main\Engine\UrlManager::getInstance();
 
 		$res = array();
 		if (is_null($allowedFields))
 		{
 			$allowedFields = static::getDefaultAllowedUserFields();
 		}
+
+		$fieldsList = $userFieldMetadata ?? static::getUserFieldMetadata($allowedFields);
+		$urlManager = null;
+
 		foreach ($allowedFields as $key)
 		{
 			switch ($key)
@@ -1366,6 +1545,11 @@ class User extends \IRestService
 						}
 						elseif ($fieldsList[$key]['USER_TYPE_ID'] === 'file')
 						{
+							if ($urlManager === null)
+							{
+								$urlManager = \Bitrix\Main\Engine\UrlManager::getInstance();
+							}
+
 							if ($fieldsList[$key]['MULTIPLE'] === 'Y' && is_array($userFields[$key]))
 							{
 								foreach ($userFields[$key] as $k => $value)

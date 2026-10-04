@@ -12,6 +12,7 @@ use Bitrix\Bizproc\Starter\Enum\Scenario;
 use Bitrix\Bizproc\Starter\Result\StartResult;
 use Bitrix\Bizproc\Starter\Starter;
 use Bitrix\Im\Bot;
+use Bitrix\Im\Command;
 use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Message;
@@ -19,6 +20,7 @@ use Bitrix\Im\V2\MessageCollection;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 use Bitrix\Main\LoaderException;
 use Bitrix\Main\Localization\Loc;
@@ -39,6 +41,7 @@ class BizprocBot extends Base
 	public const REGISTER_PARAM_POSITION = 'position';
 	public const REGISTER_PARAM_AVATAR = 'avatar';
 	public const REGISTER_PARAM_CODE = 'code';
+	public const REGISTER_PARAM_TEMPLATE_ID = 'templateId';
 
 	public const FIELD_BOT_ID = 'BOT_ID';
 	public const FIELD_CLASS = 'CLASS';
@@ -50,6 +53,7 @@ class BizprocBot extends Base
 	public const FIELD_ID = 'ID';
 	public const FIELD_CODE = 'CODE';
 	private const IM_BOT_NEW_MESSAGE_TRIGGER = 'ImBotNewMessageTrigger';
+	public const COMMAND_DISCUSS_REPORT = 'discussReport';
 	private const FIELD_DOCUMENT_ID = 'DOCUMENT_ID';
 	private const MESSAGE_FIELD_TO_CHAT_ID = 'TO_CHAT_ID';
 	private const MESSAGE_FIELD_SYSTEM = 'SYSTEM';
@@ -60,6 +64,12 @@ class BizprocBot extends Base
 	 * @var array<string, ?int> ['code' => 123, ...]
 	 */
 	private static array $botIdsByCodes = [];
+
+	/**
+	 * In-process guard so the module-wide discuss command is ensured at most once per request,
+	 * keeping the hot IM paths (onMessageAdd) from re-touching the shared command list.
+	 */
+	private static bool $discussReportCommandEnsured = false;
 
 	private const UNAVAILABLE_TARIFF_ERROR_CODE = 'BP_DESIGNER_UNAVAILABLE_BY_TARIFF';
 
@@ -96,6 +106,10 @@ class BizprocBot extends Base
 				$botId = self::getBotIdByCode($code, false);
 				if ($botId)
 				{
+					// Bot already created (e.g. by a concurrent call): ensure the module-wide
+					// keyboard command exists before bailing out. Registration is idempotent.
+					self::ensureDiscussReportCommand();
+
 					return 0;
 				}
 			}
@@ -109,6 +123,7 @@ class BizprocBot extends Base
 		{
 			$code =  $code ?: Random::getStringByAlphabet(10, Random::ALPHABET_ALPHALOWER);
 			$avatarId = (int)($params[self::REGISTER_PARAM_AVATAR] ?? 0);
+			$templateId = (int)($params[self::REGISTER_PARAM_TEMPLATE_ID] ?? 0);
 			$botId = Bot::register([
 				'CODE' => $code,
 				'TYPE' => Bot::TYPE_BOT,
@@ -122,13 +137,14 @@ class BizprocBot extends Base
 				'PROPERTIES' => [
 					'NAME' => (string)($params[self::REGISTER_PARAM_NAME] ?? ''),
 					'WORK_POSITION' => (string)($params[self::REGISTER_PARAM_POSITION] ?? ''),
-					'PERSONAL_PHOTO' => self::isCorrectAvatarFileId($avatarId) ? \CFile::makeFileArray($avatarId) : null,
+					'PERSONAL_PHOTO' => self::resolveAvatarForCreate($avatarId, $templateId),
 				],
 			]);
 
 			if ($botId)
 			{
 				self::$botIdsByCodes[$code] = (int)$botId;
+				self::ensureDiscussReportCommand();
 			}
 
 			return (int)$botId;
@@ -199,6 +215,13 @@ class BizprocBot extends Base
 			return false;
 		}
 
+		// Runtime self-heal for agents released before this feature: their bot was created without
+		// the discuss command and no register()/registerOrUpdateByCode() runs for them again. Because
+		// the command is module-wide (COMMON, BOT_ID=0), ensuring it once here — on a path every
+		// existing agent traverses — makes the keyboard button dispatch for all of them. Guarded, so
+		// the shared command list is not re-touched on every incoming message.
+		self::ensureDiscussReportCommand();
+
 		$messageFields = (array)$messageFields;
 		if (!self::canBotAnswer($messageFields))
 		{
@@ -246,6 +269,195 @@ class BizprocBot extends Base
 		}
 
 		return true;
+	}
+
+	/**
+	 * Ensures the single module-wide "discuss report" slash command that backs the keyboard button
+	 * for every bizproc bot.
+	 *
+	 * It is registered once as COMMON with BOT_ID=0, so \Bitrix\Im\Command::findCommands() dispatches
+	 * it by name regardless of which bot's chat the button lives in — one global row therefore covers
+	 * all agents, including copies released before this feature, without an updater. A per-bot row
+	 * would instead grow the globally cached command list linearly with the number of agents and clear
+	 * that hot cache on every single registration.
+	 *
+	 * HIDDEN keeps it out of the slash-command palette (it is only ever reached via the button).
+	 *
+	 * Idempotent and cache-safe on repeat: the in-process guard short-circuits after the first call,
+	 * and Command::register() itself returns the existing id without clearing the command cache when a
+	 * bizproc command with this name already exists.
+	 */
+	private static function ensureDiscussReportCommand(): void
+	{
+		if (self::$discussReportCommandEnsured)
+		{
+			return;
+		}
+
+		if (!Loader::includeModule('im'))
+		{
+			return;
+		}
+
+		$commandId = Command::register([
+			'MODULE_ID' => self::MODULE_ID,
+			'BOT_ID' => 0,
+			'COMMAND' => self::COMMAND_DISCUSS_REPORT,
+			'COMMON' => 'Y',
+			'HIDDEN' => 'Y',
+			'SONET_SUPPORT' => 'N',
+			'EXTRANET_SUPPORT' => 'N',
+			'CLASS' => self::class,
+			'METHOD_COMMAND_ADD' => 'onCommandAdd',/** @see BizprocBot::onCommandAdd */
+			'METHOD_LANG_GET' => 'onCommandLang',/** @see BizprocBot::onCommandLang */
+		]);
+
+		if ($commandId)
+		{
+			self::$discussReportCommandEnsured = true;
+		}
+	}
+
+	/**
+	 * Handles the "discuss report" keyboard command: the clicking manager opens the report
+	 * discussion. The report id comes from COMMAND_PARAMS and the actor from FROM_USER_ID;
+	 * membership is re-checked server-side by the timeman domain service (COMMAND_PARAMS is
+	 * not trusted).
+	 *
+	 * On success the clicking manager's active client is asked to auto-open the freshly resolved
+	 * discussion chat through the im pull facade; the second participant is not notified here.
+	 *
+	 * @param int|string $messageId
+	 * @param array<string, mixed>|mixed $messageFields
+	 */
+	public static function onCommandAdd($messageId, $messageFields): bool
+	{
+		$messageFields = (array)$messageFields;
+		if ((string)($messageFields['COMMAND'] ?? '') !== self::COMMAND_DISCUSS_REPORT)
+		{
+			return false;
+		}
+
+		$reportId = (int)($messageFields['COMMAND_PARAMS'] ?? 0);
+		$senderId = (int)($messageFields[self::FIELD_FROM_USER_ID] ?? 0);
+		if ($reportId <= 0 || $senderId <= 0)
+		{
+			return false;
+		}
+
+		// The service is not registered in services, so ServiceLocator::get() resolves it by class name
+		// and throws when it is absent. Module updates are not atomic: an older timeman may be installed
+		// without this class, and the delivery of the bot message must not become fatal because of that.
+		if (
+			!Loader::includeModule('timeman')
+			|| !class_exists(\Bitrix\Timeman\V2\Internal\Service\ReportDiscussionService::class)
+		)
+		{
+			return false;
+		}
+
+		$discussResult = ServiceLocator::getInstance()
+			->get(\Bitrix\Timeman\V2\Internal\Service\ReportDiscussionService::class)
+			->discuss($reportId, $senderId)
+		;
+
+		if (!$discussResult->isSuccess())
+		{
+			(new \Bitrix\Main\Diag\LoggerFactory())->createById('bizproc.imbot')?->warning(
+				'Report discussion failed for reportId={reportId}, senderId={senderId}: {errors}',
+				[
+					'reportId' => $reportId,
+					'senderId' => $senderId,
+					'errors' => implode('; ', $discussResult->getErrorMessages()),
+				],
+			);
+
+			return true;
+		}
+
+		$dialogId = (string)($discussResult->getData()['dialogId'] ?? '');
+		if (self::isDiscussChatDialogId($dialogId))
+		{
+			static::openDiscussionChatForSender($senderId, $dialogId);
+		}
+
+		return true;
+	}
+
+	private static function isDiscussChatDialogId(string $dialogId): bool
+	{
+		return (bool)preg_match('/^chat\d+$/D', $dialogId);
+	}
+
+	/**
+	 * Transport boundary for the auto-open: asks the clicking manager's active client to open the
+	 * discussion chat via the im pull event. The event class is guarded because module updates are not
+	 * atomic (im may still be an older version) - when it is missing the chat is created but not
+	 * auto-opened (logged no-op), never a fatal. Isolated as an overridable seam so the gating in
+	 * onCommandAdd can be tested without raising a real pull.
+	 */
+	protected static function openDiscussionChatForSender(int $senderId, string $dialogId): void
+	{
+		if (
+			!Loader::includeModule('im')
+			|| !class_exists(\Bitrix\Im\V2\Pull\Event\ApplicationOpenChat::class)
+		)
+		{
+			(new \Bitrix\Main\Diag\LoggerFactory())->createById('bizproc.imbot')?->warning(
+				'Auto-open chat pull event is unavailable for senderId={senderId}, dialogId={dialogId}',
+				['senderId' => $senderId, 'dialogId' => $dialogId],
+			);
+
+			return;
+		}
+
+		try
+		{
+			$sendResult = (new \Bitrix\Im\V2\Pull\Event\ApplicationOpenChat($senderId, $dialogId))->send();
+			if (!$sendResult->isSuccess())
+			{
+				(new \Bitrix\Main\Diag\LoggerFactory())->createById('bizproc.imbot')?->warning(
+					'Auto-open chat pull was not sent for senderId={senderId}, dialogId={dialogId}: {errors}',
+					[
+						'senderId' => $senderId,
+						'dialogId' => $dialogId,
+						'errors' => implode('; ', $sendResult->getErrorMessages()),
+					],
+				);
+			}
+		}
+		catch (\Throwable $exception)
+		{
+			// The event resolves a named pull service, which no class_exists guard can cover
+			(new \Bitrix\Main\Diag\LoggerFactory())->createById('bizproc.imbot')?->warning(
+				'Auto-open chat pull failed for senderId={senderId}, dialogId={dialogId}: {error}',
+				[
+					'senderId' => $senderId,
+					'dialogId' => $dialogId,
+					'error' => $exception->getMessage(),
+				],
+			);
+		}
+	}
+
+	/**
+	 * @param string $command
+	 * @param string|null $lang
+	 *
+	 * @return array{TITLE: string, PARAMS: string}|false
+	 */
+	public static function onCommandLang($command, $lang = null): array|false
+	{
+		$title = Loc::getMessage('BIZPROC_IMBOT_BIZPROCBOT_COMMAND_DISCUSS_REPORT_TITLE', null, $lang);
+		if ($title === null || $title === '')
+		{
+			return false;
+		}
+
+		return [
+			'TITLE' => $title,
+			'PARAMS' => (string)Loc::getMessage('BIZPROC_IMBOT_BIZPROCBOT_COMMAND_DISCUSS_REPORT_PARAMS', null, $lang),
+		];
 	}
 
 	public static function onChatStart($dialogId, $joinFields): bool
@@ -442,9 +654,13 @@ class BizprocBot extends Base
 			return self::register($params);
 		}
 
+		// Existing bot (e.g. agent released before this feature): the create branch never runs,
+		// so ensure the module-wide keyboard command exists here too. Registration is idempotent.
+		self::ensureDiscussReportCommand();
+
 		$updated = Bot::update(
 			[self::FIELD_BOT_ID => $botId],
-			['PROPERTIES' => self::prepareBotUpdateProperties($params)],
+			['PROPERTIES' => self::prepareBotUpdateProperties($params, $botId)],
 		);
 
 		return $updated ? (int)$botId : 0;
@@ -475,12 +691,104 @@ class BizprocBot extends Base
 		return self::$botIdsByCodes[$code];
 	}
 
+	/**
+	 * Bulk variant of getBotIdByCode: resolves many bot codes with a single query and warms the cache.
+	 *
+	 * @param string[] $codes
+	 * @return array<string, int> Map of [code => botId] only for codes bound to an existing bot.
+	 */
+	public static function getBotIdsByCodes(array $codes): array
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return [];
+		}
+
+		$result = [];
+		$codesToQuery = [];
+
+		foreach ($codes as $code)
+		{
+			$code = (string)$code;
+			if ($code === '')
+			{
+				continue;
+			}
+
+			if (array_key_exists($code, self::$botIdsByCodes))
+			{
+				if (self::$botIdsByCodes[$code] !== null)
+				{
+					$result[$code] = self::$botIdsByCodes[$code];
+				}
+
+				continue;
+			}
+
+			$codesToQuery[$code] = $code;
+		}
+
+		if (empty($codesToQuery))
+		{
+			return $result;
+		}
+
+		$rows = BotTable::query()
+			->where(self::FIELD_CLASS, self::class)
+			->whereIn(self::FIELD_CODE, array_values($codesToQuery))
+			->setSelect([self::FIELD_BOT_ID, self::FIELD_CODE])
+			->fetchAll()
+		;
+
+		foreach ($rows as $row)
+		{
+			$code = (string)($row[self::FIELD_CODE] ?? '');
+			if ($code === '')
+			{
+				continue;
+			}
+
+			$botId = empty($row[self::FIELD_BOT_ID]) ? null : (int)$row[self::FIELD_BOT_ID];
+			self::$botIdsByCodes[$code] = $botId;
+			unset($codesToQuery[$code]);
+
+			if ($botId !== null)
+			{
+				$result[$code] = $botId;
+			}
+		}
+
+		// codes without a bot row: cache null to avoid re-querying them later
+		foreach ($codesToQuery as $code)
+		{
+			self::$botIdsByCodes[$code] = null;
+		}
+
+		return $result;
+	}
+
 	private static function isNameFilledInParams(array $params): bool
 	{
 		return !empty((string)($params[self::REGISTER_PARAM_NAME] ?? null));
 	}
 
-	private static function prepareBotUpdateProperties(array $params): array
+	/**
+	 * Avatar for bot creation: the wizard-supplied avatar wins; otherwise the agent default
+	 * (or null for non-agent bots, which keeps the previous behavior).
+	 *
+	 * @return array|null File array for CUser::Add, or null.
+	 */
+	private static function resolveAvatarForCreate(int $avatarId, int $templateId): ?array
+	{
+		if (self::isCorrectAvatarFileId($avatarId))
+		{
+			return \CFile::makeFileArray($avatarId);
+		}
+
+		return AiAgentBotAvatar::getFileArrayByTemplateId($templateId);
+	}
+
+	private static function prepareBotUpdateProperties(array $params, int $botId): array
 	{
 		$botPropertiesToUpdate = [
 			'NAME' => (string)($params[self::REGISTER_PARAM_NAME] ?? ''),
@@ -491,10 +799,22 @@ class BizprocBot extends Base
 		if ($avatarId > 0 && self::isCorrectAvatarFileId($avatarId))
 		{
 			$botPropertiesToUpdate['PERSONAL_PHOTO'] = \CFile::CloneFile($avatarId);
+
+			return $botPropertiesToUpdate;
 		}
-		else
+
+		$templateId = (int)($params[self::REGISTER_PARAM_TEMPLATE_ID] ?? 0);
+		if (AiAgentBotAvatar::resolvePathByTemplateId($templateId) === null)
 		{
 			$botPropertiesToUpdate['DELETE_PERSONAL_PHOTO'] = 'Y';
+		}
+		elseif (method_exists(self::class, 'botHasPhoto') && !self::botHasPhoto($botId))
+		{
+			$defaultAvatarId = AiAgentBotAvatar::getFileIdByTemplateId($templateId);
+			if ($defaultAvatarId !== null)
+			{
+				$botPropertiesToUpdate['PERSONAL_PHOTO'] = $defaultAvatarId;
+			}
 		}
 
 		return $botPropertiesToUpdate;
@@ -505,9 +825,10 @@ class BizprocBot extends Base
 		$messageFields = $event->getParameters();
 		$messageId = (int)($messageFields[BizprocBot::FIELD_ID] ?? 0);
 		$botId = (int)($messageFields[BizprocBot::FIELD_BOT_ID] ?? 0);
+		$messageAuthorId = (int)($messageFields[BizprocBot::FIELD_FROM_USER_ID] ?? 0);
 
 		$result = new Result();
-		if ($messageId <= 0 || $botId <= 0)
+		if ($messageId <= 0 || $botId <= 0 || $messageAuthorId <= 0)
 		{
 			$result->addError(new Error('bot not configured correctly.'));
 
@@ -519,7 +840,13 @@ class BizprocBot extends Base
 		$messageFields[self::FIELD_DOCUMENT_ID] = $document;
 
 		return Starter::getByScenario(Scenario::onEvent)
-			->addEvent( self::IM_BOT_NEW_MESSAGE_TRIGGER, [new DocumentDto($document, $documentType)], $messageFields)
+			->addEvent(
+				code: self::IM_BOT_NEW_MESSAGE_TRIGGER,
+				documents: [new DocumentDto($document, $documentType)],
+				parameters: $messageFields,
+				eventType: \CBPDocumentEventType::Trigger,
+				userId: $messageAuthorId,
+			)
 			->setParameters($messageFields)
 			->start()
 		;

@@ -519,6 +519,30 @@ class Call
 	}
 
 	/**
+	 * Reloads CRM entities from the database without persisting any state.
+	 *
+	 * @return array
+	 * @internal
+	 */
+	public function reloadCrmEntities(): array
+	{
+		$result = CallCrmEntityTable::getList([
+			'filter' => [
+				'=CALL_ID' => $this->callId,
+			],
+		])->fetchAll();
+		foreach ($result as &$entity)
+		{
+			$entity['ENTITY_ID'] = (int)$entity['ENTITY_ID'];
+		}
+		unset($entity);
+
+		$this->crmEntities = $result ?: [];
+
+		return $this->crmEntities;
+	}
+
+	/**
 	 * @return array
 	 */
 	public function getCreatedCrmEntities()
@@ -614,6 +638,26 @@ class Call
 	 */
 	public function getCrmBindings()
 	{
+		return $this->crmBindings;
+	}
+
+	/**
+	 * Reloads CRM bindings from the database without persisting any state.
+	 *
+	 * @return array
+	 * @internal
+	 */
+	public function reloadCrmBindings(): array
+	{
+		$row = CallTable::getRow([
+			'select' => ['CRM_BINDINGS'],
+			'filter' => [
+				'=CALL_ID' => $this->callId,
+			],
+		]);
+
+		$this->crmBindings = is_array($row['CRM_BINDINGS'] ?? null) ? $row['CRM_BINDINGS'] : [];
+
 		return $this->crmBindings;
 	}
 

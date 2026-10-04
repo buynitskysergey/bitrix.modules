@@ -60,7 +60,7 @@ final class SearchResult implements EntityInterface, \JsonSerializable
 	}
 
 	/**
-	 * @return array{id: int, name: string, photoUrl: ?string}|null
+	 * @return array{id: int, name: string, photoUrl: ?string, color?: string}|null
 	 */
 	public function getAuthor(): ?array
 	{
@@ -68,7 +68,7 @@ final class SearchResult implements EntityInterface, \JsonSerializable
 	}
 
 	/**
-	 * @param array{id: int, name: string, photoUrl: ?string}|null $author
+	 * @param array{id: int, name: string, photoUrl: ?string, color?: string}|null $author
 	 */
 	public function withMeta(string $collectionTitle, ?array $author): self
 	{

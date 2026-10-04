@@ -370,20 +370,30 @@ abstract class AbstractCheck
 	 */
 	protected function getVatIdByVatRate($vatRate)
 	{
-		static $vatList = array();
+		if (!is_numeric($vatRate))
+		{
+			return 0;
+		}
 
-		if (!$vatList)
+		static $vatList = null;
+
+		if ($vatList === null)
 		{
 			if (Main\Loader::includeModule('catalog'))
 			{
 				$dbRes = Catalog\VatTable::getList(array('filter' => array('ACTIVE' => 'Y')));
+				$vatList = [];
 				while ($data = $dbRes->fetch())
 				{
-					$vatList[(int)$data['RATE']] = (int)$data['ID'];
+					if ($data['RATE'] !== null)
+					{
+						$vatList[number_format((float)$data['RATE'], 2, '.', '')] = (int)$data['ID'];
+					}
 				}
 			}
 		}
 
+		$vatRate = number_format((float)$vatRate, 2, '.', '');
 		if (!isset($vatList[$vatRate]))
 		{
 			return 0;

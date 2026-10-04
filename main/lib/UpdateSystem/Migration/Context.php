@@ -6,6 +6,7 @@ namespace Bitrix\Main\UpdateSystem\Migration;
 
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\DB\Connection;
 use Bitrix\Main\DB\Ddl\DbType;
 use Bitrix\Main\UpdateSystem\Migration\Tools\Database;
 use Bitrix\Main\Web\Json;
@@ -14,6 +15,7 @@ class Context
 {
 	private ?bool $moduleTablesExist = null;
 	private ?array $migrationConfig = null;
+	private ?Connection $connection = null;
 
 	public function __construct(
 		private readonly Config $config,
@@ -76,14 +78,42 @@ class Context
 		return $this->moduleTablesExist();
 	}
 
+	public function setConnection(Connection $connection): self
+	{
+		$this->connection = $connection;
+		$this->moduleTablesExist = null;
+
+		return $this;
+	}
+
+	public function getConnection(): Connection
+	{
+		return $this->connection ?? Application::getConnection();
+	}
+
 	public function getDbType(): DbType
 	{
-		return DbType::getByConnectionType(Application::getConnection()->getType());
+		return DbType::getByConnectionType($this->getConnection()->getType());
 	}
 
 	public function isDevMode(): bool
 	{
 		return $this->config->isDevMode();
+	}
+
+	public function isCurrentDevUpdater(): bool
+	{
+		if (!$this->isDevMode())
+		{
+			return false;
+		}
+
+		$updaterFilename = str_replace('\\', '/', $this->getUpdaterFilename());
+
+		return (bool)preg_match(
+			'#(?:^|/)dev/updates/current/updater(?:\.php|/index\.php)$#',
+			$updaterFilename,
+		);
 	}
 
 	public function isEtalon(): bool
@@ -117,7 +147,7 @@ class Context
 			return false;
 		}
 
-		return Database::tableExists($tableName);
+		return Database::tableExists($tableName, $this->getConnection());
 	}
 
 	public function columnExists(string $tableName, string $columnName): bool
@@ -127,7 +157,7 @@ class Context
 			return false;
 		}
 
-		return Database::columnExists($tableName, $columnName);
+		return Database::columnExists($tableName, $columnName, $this->getConnection());
 	}
 
 	public function indexExists(string $tableName, array $indexFields): bool
@@ -137,7 +167,7 @@ class Context
 			return false;
 		}
 
-		return Database::indexExists($tableName, $indexFields);
+		return Database::indexExists($tableName, $indexFields, $this->getConnection());
 	}
 
 	public function getIndexName(string $tableName, array $indexFields): ?string
@@ -147,7 +177,7 @@ class Context
 			return null;
 		}
 
-		return Database::getIndexName($tableName, $indexFields);
+		return Database::getIndexName($tableName, $indexFields, $this->getConnection());
 	}
 
 	/**
@@ -161,7 +191,7 @@ class Context
 			return [];
 		}
 
-		return Database::getPrimaryKeyColumns($tableName);
+		return Database::getPrimaryKeyColumns($tableName, $this->getConnection());
 	}
 
 	public function isMySql(): bool

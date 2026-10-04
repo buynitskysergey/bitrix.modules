@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Bitrix\Bizproc\Internal\Service\Storage;
 
 use Bitrix\Bizproc\Internal\Model\StorageFieldTable;
-use Bitrix\Bizproc\Internal\Model\StorageTypeTable;
 use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\DB\MysqlCommonConnection;
@@ -13,11 +12,15 @@ use Bitrix\Main\DB\SqlHelper;
 
 final class StorageLimitsService
 {
+	public const BANNER_STATE_WARNING = 'warning';
+	public const BANNER_STATE_BLOCKED = 'blocked';
+	public const MAX_DISK_BUFFER_MB = 1024 * 1024;
+
 	private const MAX_FIELDS_PER_STORAGE = 50;
-	private const MAX_STORAGES = 300;
-	private const DEFAULT_CLEANUP_DAYS = 90;
-	private const OPTION_CLEANUP_DAYS = 'storage_items_cleanup_days';
-	private const OPTION_CLEANUP_SIZE_MB = 'storage_items_cleanup_size';
+	private const OPTION_DISK_BLOCK_BUFFER_MB = 'storage_disk_block_buffer';
+	private const OPTION_DISK_WARNING_BUFFER_MB = 'storage_disk_warning_buffer';
+	private const DEFAULT_DISK_BLOCK_BUFFER_MB = 1024;
+	private const DEFAULT_DISK_WARNING_BUFFER_MB = 2048;
 
 	private const STORAGE_TABLE_NAMES = [
 		'b_bp_storage_record_field',
@@ -26,40 +29,82 @@ final class StorageLimitsService
 		'b_bp_storage_type',
 	];
 
-	private ?bool $isDiskQuotaReadable = null;
+	private readonly RemainingDiskSpaceProviderInterface $remainingDiskSpaceProvider;
+	private ?int $remainingDiskBytes = null;
+	private bool $isRemainingDiskBytesResolved = false;
+
+	public function __construct(RemainingDiskSpaceProviderInterface $remainingDiskSpaceProvider)
+	{
+		$this->remainingDiskSpaceProvider = $remainingDiskSpaceProvider;
+	}
 
 	public function getMaxFieldsPerStorage(): int
 	{
 		return self::MAX_FIELDS_PER_STORAGE;
 	}
 
-	public function getMaxStorages(): int
+	public function getRemainingDiskBytes(): ?int
 	{
-		return self::MAX_STORAGES;
-	}
-
-	public function getCleanupDays(): int
-	{
-		$days = (int)Option::get('bizproc', self::OPTION_CLEANUP_DAYS, self::DEFAULT_CLEANUP_DAYS);
-
-		return $days > 0 ? $days : self::DEFAULT_CLEANUP_DAYS;
-	}
-
-	public function getStorageItemsCleanupSizeBytes(): int
-	{
-		$sizeMb = (int)Option::get('bizproc', self::OPTION_CLEANUP_SIZE_MB, 0);
-
-		return $sizeMb > 0 ? $sizeMb * 1024 * 1024 : 0;
-	}
-
-	public function isDiskQuotaReadable(): bool
-	{
-		if ($this->isDiskQuotaReadable === null)
+		if (!$this->isRemainingDiskBytesResolved)
 		{
-			$this->isDiskQuotaReadable = (new \CDiskQuota())->checkDiskQuota(['size' => 0]);
+			$this->remainingDiskBytes = $this->remainingDiskSpaceProvider->getRemainingBytes();
+			$this->isRemainingDiskBytesResolved = true;
 		}
 
-		return $this->isDiskQuotaReadable;
+		return $this->remainingDiskBytes;
+	}
+
+	public function shouldBlockWrite(): bool
+	{
+		$remaining = $this->getRemainingDiskBytes();
+
+		return $remaining !== null && $remaining <= $this->getBlockBufferBytes();
+	}
+
+	public function getBannerState(): ?string
+	{
+		$remaining = $this->getRemainingDiskBytes();
+		if ($remaining === null)
+		{
+			return null;
+		}
+
+		if ($remaining <= $this->getBlockBufferBytes())
+		{
+			return self::BANNER_STATE_BLOCKED;
+		}
+
+		if ($remaining <= $this->getWarningBufferBytes())
+		{
+			return self::BANNER_STATE_WARNING;
+		}
+
+		return null;
+	}
+
+	public static function isValidDiskBufferMb(string $sizeMb): bool
+	{
+		$sizeMb = trim($sizeMb);
+
+		return preg_match('/^[0-9]+$/D', $sizeMb) === 1 && (int)$sizeMb <= self::MAX_DISK_BUFFER_MB;
+	}
+
+	private function getBlockBufferBytes(): int
+	{
+		return $this->getDiskBufferBytes(self::OPTION_DISK_BLOCK_BUFFER_MB, self::DEFAULT_DISK_BLOCK_BUFFER_MB);
+	}
+
+	private function getWarningBufferBytes(): int
+	{
+		return $this->getDiskBufferBytes(self::OPTION_DISK_WARNING_BUFFER_MB, self::DEFAULT_DISK_WARNING_BUFFER_MB);
+	}
+
+	private function getDiskBufferBytes(string $optionName, int $defaultMb): int
+	{
+		$optionValue = (string)Option::get('bizproc', $optionName, (string)$defaultMb);
+		$sizeMb = self::isValidDiskBufferMb($optionValue) ? (int)$optionValue : $defaultMb;
+
+		return $sizeMb * 1024 * 1024;
 	}
 
 	public function canAddField(int $storageId): bool
@@ -72,16 +117,7 @@ final class StorageLimitsService
 		return StorageFieldTable::getFieldsCountByStorage($storageId) < $this->getMaxFieldsPerStorage();
 	}
 
-	public function canAddStorage(): bool
-	{
-		return StorageTypeTable::getCount() < $this->getMaxStorages();
-	}
-
-	/**
-	 * TODO: задействовать при включении лимита на размер таблиц хранилища
-	 * и в будущем агенте очистки (StorageQuotaCleanupAgent). Сейчас метод выставлен на будущее.
-	 * @return int
-	 */
+	/** Kept intentionally: disk limits use the portal quota, but storage table size is still needed for diagnostics. */
 	public function getStorageTablesSizeBytes(): int
 	{
 		if (!\Bitrix\Main\ModuleManager::isModuleInstalled('bitrix24'))

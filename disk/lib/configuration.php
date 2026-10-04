@@ -4,6 +4,7 @@
 namespace Bitrix\Disk;
 
 
+use Bitrix\Disk\Config\Feature\FileViewerFormatsFlag;
 use Bitrix\Disk\Document\BitrixHandler;
 use Bitrix\Disk\Document\LocalDocumentController;
 use Bitrix\Disk\Document\OnlyOffice\OnlyOfficeHandler;
@@ -11,6 +12,7 @@ use Bitrix\Disk\Integration\Bitrix24Manager;
 use Bitrix\Disk\Internal\Enum\CustomServerTypes;
 use Bitrix\Disk\Internal\Enum\ServersTypesEnum;
 use Bitrix\Disk\Internal\Service\MarkdownRenderService;
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UI\Viewer\Transformation\Document;
@@ -63,6 +65,16 @@ final class Configuration
 		// working renderer it cannot work, so it is treated as unavailable even when the option is enabled.
 		return 'Y' === Option::get(Driver::INTERNAL_MODULE_ID, 'disk_enable_markdown_viewer', 'N')
 			&& MarkdownRenderService::isAvailable();
+	}
+
+	public static function isUniversalFilePickerEnabled(): bool
+	{
+		return Option::get(Driver::INTERNAL_MODULE_ID, 'disk_enable_universal_file_picker', 'N') === 'Y';
+	}
+
+	public static function isEnabledFileViewerFormats(): bool
+	{
+		return Feature::isEnabled(FileViewerFormatsFlag::class);
 	}
 
 	/**

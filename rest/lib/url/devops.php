@@ -25,9 +25,24 @@ class DevOps extends Base
 		return $this->getUrl('statistic');
 	}
 
-	public function getListUrl()
+	public function getListUrl(?string $sortBy = null, ?string $order = null)
 	{
-		return $this->getUrl('list');
+		$query = null;
+		if (!empty($sortBy))
+		{
+			if ($order !== null)
+			{
+				$order = mb_strtoupper($order);
+				$order = in_array($order, ['ASC', 'DESC'], true) ? $order : 'ASC';
+			}
+
+			$query = [
+				'by' => $sortBy,
+				'order' => $order,
+			];
+		}
+
+		return $this->getUrl(page: 'list', query: $query);
 	}
 
 	public function getIframeUrl($query = null)

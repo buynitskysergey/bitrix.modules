@@ -24,7 +24,7 @@ class SyncMailboxAction extends JsGridAction
 
 	public function isEnabled(array $rawFields): bool
 	{
-		return true;
+		return !($rawFields['MIGRATION_ACTIVE'] ?? false);
 	}
 
 	public function getActionId(): string

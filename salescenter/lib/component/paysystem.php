@@ -34,7 +34,6 @@ class PaySystem
 			return $result->addError(new Main\Error("Module sale don't included"));
 		}
 
-		/** @var \Bitrix\Sale\PaySystem\Manager $paySystemManager */
 		$paySystemManager = Main\DI\ServiceLocator::getInstance()->get('sale.paysystem.manager');
 
 		$systemHandlerList = $this->getSystemPaySystemHandlersList();
@@ -201,8 +200,9 @@ class PaySystem
 			$image = $this->getImagePath() . 'marketplace_default.svg';
 			$itemSelectedImage = $this->getImagePath() . 'marketplace_default_s.svg';
 
-			$imagePath = $this->getImagePath() . $handler . '.svg';
-			$itemSelectedImagePath = $this->getImagePath() . $handler . '_s.svg';
+			$imageExtension = ($handler === 'platon') ? 'webp' : 'svg';
+			$imagePath = $this->getImagePath() . $handler . '.' . $imageExtension;
+			$itemSelectedImagePath = $this->getImagePath() . $handler . '_s.' . $imageExtension;
 			if (Main\IO\File::isFileExists(Main\Application::getDocumentRoot() . $imagePath))
 			{
 				$image = $imagePath;
@@ -253,8 +253,8 @@ class PaySystem
 						$paySystemPath = $this->getPaySystemComponentPath();
 						$paySystemPath->addParams($queryParams);
 
-						$imagePath = $this->getImagePath() . $handler . '_' . $psMode . '.svg';
-						$itemSelectedImagePath = $this->getImagePath() . $handler . '_' . $psMode . '_s.svg';
+						$imagePath = $this->getImagePath() . $handler . '_' . $psMode . '.' . $imageExtension;
+						$itemSelectedImagePath = $this->getImagePath() . $handler . '_' . $psMode . '_s.' . $imageExtension;
 						if (Main\IO\File::isFileExists(Main\Application::getDocumentRoot() . $imagePath))
 						{
 							$psModeImage = $imagePath;

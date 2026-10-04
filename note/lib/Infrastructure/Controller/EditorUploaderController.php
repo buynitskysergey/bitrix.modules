@@ -15,6 +15,7 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\DocumentFileService;
+use Bitrix\Note\Internal\Service\License\LicenseService;
 use Bitrix\Note\Internal\Service\NoteFileUrlService;
 use Bitrix\UI\FileUploader\CommitOptions;
 use Bitrix\UI\FileUploader\Configuration;
@@ -41,9 +42,20 @@ class EditorUploaderController extends UploaderController
 
 	public function isAvailable(): bool
 	{
+		// Tariff/tool gate before ACL: same denial as an ACL failure.
+		if ($this->createLicenseService()->isAccessBlocked())
+		{
+			return false;
+		}
+
 		$userId = (int)CurrentUser::get()->getId();
 
 		return $userId > 0 && AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_ACCESS);
+	}
+
+	protected function createLicenseService(): LicenseService
+	{
+		return new LicenseService();
 	}
 
 	public function getConfiguration(): Configuration

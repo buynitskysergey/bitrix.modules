@@ -4,6 +4,7 @@ namespace Bitrix\HumanResources\Compatibility\Event;
 
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\EntityIdFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\Column\Node\NodeTypeFilter;
+use Bitrix\HumanResources\Builder\Structure\Filter\Column\RoleFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\NodeFilter;
 use Bitrix\HumanResources\Builder\Structure\Filter\NodeMemberFilter;
 use Bitrix\HumanResources\Builder\Structure\NodeMemberDataBuilder;
@@ -20,6 +21,7 @@ use Bitrix\HumanResources\Service\UserService;
 use Bitrix\HumanResources\Type\MemberEntityType;
 use Bitrix\HumanResources\Enum\LoggerEntityType;
 use Bitrix\HumanResources\Type\NodeEntityType;
+use Bitrix\HumanResources\Type\NodeMemberRole;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Engine\CurrentUser;
@@ -279,6 +281,7 @@ class NewToOldEventHandler
 						nodeFilter: $nodeFilter,
 						findRelatedMembers: false,
 						active: null,
+						withVirtualUsers: true,
 					)
 				;
 
@@ -453,7 +456,87 @@ class NewToOldEventHandler
 			}
 		}
 
+		$member = $event->getParameter('member');
+		$previousMember = $event->getParameter('previousMember');
+		if (
+			isset($member, $previousMember)
+			&& $member->entityType === MemberEntityType::USER
+			&& in_array('nodeId', $changedFields, true)
+			&& $previousMember->nodeId !== $member->nodeId
+		)
+		{
+			self::clearSourceDepartmentHead($member, $previousMember);
+		}
+
 		self::onMemberAdded($event);
+	}
+
+	/**
+	 * Clears the legacy head flag (UF_HEAD) of the source department a member has left,
+	 * mirroring the semantics of onMemberDeleted for the cross-node move case.
+	 */
+	private static function clearSourceDepartmentHead(NodeMember $member, NodeMember $previousMember): void
+	{
+		$sourceNode = Container::getNodeRepository()->getById($previousMember->nodeId);
+		if (!$sourceNode || $sourceNode->type !== NodeEntityType::DEPARTMENT)
+		{
+			return;
+		}
+
+		$sourceDepartmentId = DepartmentBackwardAccessCode::extractIdFromCode($sourceNode->accessCode);
+		$sourceDepartment = OldStructureUtils::getOldDepartmentById($sourceDepartmentId ?? 0);
+
+		if (!$sourceDepartment || (int)$sourceDepartment['UF_HEAD'] !== $member->entityId)
+		{
+			return;
+		}
+
+		if (self::isStillHeadOfNode($member->entityId, $previousMember->nodeId))
+		{
+			return;
+		}
+
+		$onAfterUserUpdateEvent = 'main-OnAfterUserUpdate';
+		Container::getSemaphoreService()->lock($onAfterUserUpdateEvent);
+		Container::getEventSenderService()->removeEventHandlers('iblock', 'OnBeforeIBlockSectionUpdate');
+		Container::getEventSenderService()->removeEventHandlers('main', 'OnAfterUserUpdate');
+
+		try
+		{
+			OldStructureUtils::updateDepartment([
+				'ID' => $sourceDepartmentId,
+				'UF_HEAD' => null,
+			]);
+		}
+		catch (\Exception)
+		{
+		}
+		finally
+		{
+			Container::getSemaphoreService()->unlock($onAfterUserUpdateEvent);
+		}
+
+		self::clearCacheInBackground($sourceNode, $member);
+	}
+
+	/**
+	 * Authoritative check against the new model: is the user still a head of the given node
+	 * through another membership record (guard against multiple heads / races).
+	 */
+	private static function isStillHeadOfNode(int $entityId, int $nodeId): bool
+	{
+		$headMembers = (new NodeMemberDataBuilder())
+			->setFilter(new NodeMemberFilter(
+				entityIdFilter: EntityIdFilter::fromEntityId($entityId),
+				nodeFilter: NodeFilter::createWithNodeId($nodeId),
+				active: null,
+				roleFilter: RoleFilter::fromRole(NodeMemberRole::Head),
+			))
+			->setLimit(1)
+			->getAll()
+		;
+
+		return !$headMembers->empty();
 	}
 
 	/**

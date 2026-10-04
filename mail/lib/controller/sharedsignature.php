@@ -9,6 +9,7 @@ use Bitrix\Mail\Dto\SharedSignatureDto;
 use Bitrix\Mail\Internals\SharedSignatureTable;
 use Bitrix\Mail\Service\SharedSignature\AssignmentResolver;
 use Bitrix\Mail\Service\SharedSignature\SharedSignatureService;
+use Bitrix\Main\Context;
 use Bitrix\Main\Engine\ActionFilter\HttpMethod;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
@@ -123,7 +124,7 @@ class SharedSignature extends Base
 
 		if (!$result->isSuccess())
 		{
-			$this->errorCollection = $result->getErrors();
+			$this->applyServiceErrors($result->getErrors());
 
 			return false;
 		}
@@ -174,7 +175,7 @@ class SharedSignature extends Base
 
 		if (!$result->isSuccess())
 		{
-			$this->errorCollection = $result->getErrors();
+			$this->applyServiceErrors($result->getErrors());
 
 			return false;
 		}
@@ -197,7 +198,7 @@ class SharedSignature extends Base
 
 		if (!$result->isSuccess())
 		{
-			$this->errorCollection = $result->getErrors();
+			$this->applyServiceErrors($result->getErrors());
 
 			return false;
 		}
@@ -223,7 +224,7 @@ class SharedSignature extends Base
 
 		if (!$result->isSuccess())
 		{
-			$this->errorCollection = $result->getErrors();
+			$this->applyServiceErrors($result->getErrors());
 
 			return false;
 		}
@@ -276,5 +277,23 @@ class SharedSignature extends Base
 	private static function sharedScopeFilter(): array
 	{
 		return ['=SCOPE' => SharedSignatureTable::SCOPE_SHARED];
+	}
+
+	/**
+	 * @param Error[] $errors
+	 */
+	private function applyServiceErrors(array $errors): void
+	{
+		foreach ($errors as $error)
+		{
+			if (SharedSignatureService::isValidationError($error))
+			{
+				Context::getCurrent()->getResponse()->setStatus(422);
+
+				break;
+			}
+		}
+
+		$this->addErrors($errors);
 	}
 }

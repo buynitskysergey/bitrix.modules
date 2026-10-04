@@ -1,6 +1,8 @@
 <?php
 
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Type\DateTime;
+use Bitrix\Timeman\Helper\TimeHelper;
 use Bitrix\Timeman\V2\Internal\Integration\HumanResources\Service\NodeSettingsService;
 use Bitrix\Timeman\V2\Internal\Entity\Report\RecordReportType;
 use Bitrix\Timeman\V2\Internal\Service\ReportTextHtmlRenderer;
@@ -819,7 +821,9 @@ class CUserReportFull
 					}
 					else
 					{
-						$fields["DATE_FROM"] = strtotime("mon next week", $lastReportDate - date('Z'));
+						// Normalize $lastReportDate to UTC before strtotime, date-aware on the report date
+						// (server offset AT $lastReportDate, honoring DST) instead of the fixed date('Z').
+						$fields["DATE_FROM"] = strtotime("mon next week", $lastReportDate - $this->getServerOffsetAt((int)$lastReportDate));
 					}
 
 					$fields["DATE_TO"] = strtotime(
@@ -1193,7 +1197,7 @@ class CUserReportFull
 		return $arReport;
 	}
 
-	private function isReportDay(string $dateSubmit): bool
+	private function isReportDay(string $dateSubmit, ?int $fixedNowTimestamp = null): bool
 	{
 		if (!$dateSubmit)
 		{
@@ -1202,12 +1206,13 @@ class CUserReportFull
 
 		$fullFormat = CSite::getDateFormat("FULL", SITE_ID);
 		$dateSubmitTimeStamp = MakeTimeStamp($dateSubmit, $fullFormat);
-		$currentTimeWithOffset = time() + CTimeZone::getOffset();
+		$currentTimeWithOffset = $this->getCurrentReportTimeWithOffset($fixedNowTimestamp);
 
+		// Compared by DATE; both operands use the same report coordinate from getCurrentReportTimeWithOffset().
 		return (CTimeMan::removeHoursTS($dateSubmitTimeStamp) <= CTimeMan::removeHoursTS($currentTimeWithOffset));
 	}
 
-	private function isShowReportForm(string $dateSubmit): bool
+	private function isShowReportForm(string $dateSubmit, ?int $fixedNowTimestamp = null): bool
 	{
 		if (!$dateSubmit)
 		{
@@ -1216,9 +1221,27 @@ class CUserReportFull
 
 		$fullFormat = CSite::getDateFormat("FULL", SITE_ID);
 		$dateSubmitTimeStamp = MakeTimeStamp($dateSubmit, $fullFormat);
-		$currentTimeWithOffset = time() + CTimeZone::getOffset();
+		$currentTimeWithOffset = $this->getCurrentReportTimeWithOffset($fixedNowTimestamp);
 
+		// Compared by TIME (no removeHoursTS); same coordinate as isReportDay so the two stay consistent.
 		return ($dateSubmitTimeStamp <= $currentTimeWithOffset);
+	}
+
+	private function getCurrentReportTimeWithOffset(?int $fixedNowTimestamp = null): int
+	{
+		$now = $fixedNowTimestamp ?? time();
+		$offsetDate = DateTime::createFromTimestamp($now);
+		$relativeOffset = CTimeZone::GetOffset(null, false, $offsetDate);
+
+		return $now + $relativeOffset;
+	}
+
+	/**
+	 * @see TimeHelper::getServerOffsetAt()
+	 */
+	private function getServerOffsetAt(int $timestamp): int
+	{
+		return TimeHelper::getInstance()->getServerOffsetAt($timestamp);
 	}
 
 	/**

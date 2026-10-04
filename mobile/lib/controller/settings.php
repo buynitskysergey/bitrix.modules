@@ -10,6 +10,7 @@ use Bitrix\Intranet\Service\MobileAppSettings;
 use Bitrix\Main\Engine\JsonController;
 use Bitrix\Intranet\Dto\EntitySelector\EntitySelectorCodeDto;
 use Bitrix\Intranet\Public\Service\OtpSettingsService;
+use Bitrix\IntranetMobile\Controller\LoginHistory;
 use Bitrix\Main\Loader;
 use Bitrix\Mobile\Settings\Dto\SecuritySettingsDto;
 use Bitrix\Mobile\Settings\Dto\RightsDto;
@@ -69,6 +70,10 @@ final class Settings extends JsonController
 			!Loader::includeModule('bitrix24')
 			|| Feature::isFeatureEnabled('user_login_history');
 		$isLoginHistoryToolAvailable = ToolsManager::getInstance()->checkAvailabilityByToolId('login_history');
+		$isLogoutOtherDeviceAvailable =
+			Loader::includeModule('intranetmobile')
+			&& class_exists(LoginHistory::class)
+			&& method_exists(LoginHistory::class, 'logoutOtherDevicesAction');
 
 		return SecuritySettingsDto::make([
 			'isTakeScreenshotDisabled' => $mobileAppSettings->isTakeScreenshotDisabled(),
@@ -80,6 +85,7 @@ final class Settings extends JsonController
 			'takeScreenshotRights' => $this->getTakeScreenshotRights(),
 			'copyTextRights' => $this->getCopyTextRights($mobileAppSettings),
 			'isLoginHistoryAvailable' => $isLoginHistoryToolAvailable && $isUserLoginHistoryFeatureEnabled,
+			'isLogoutOtherDeviceAvailable' => $isLogoutOtherDeviceAvailable,
 		]);
 	}
 
@@ -113,6 +119,7 @@ final class Settings extends JsonController
 	public function setTakeScreenshotDisabledAction(bool $value): bool
 	{
 		self::getMobileAppSettings()->setAllowScreenshot(!$value);
+
 		return $value;
 	}
 
@@ -137,6 +144,7 @@ final class Settings extends JsonController
 	public function setCopyTextDisabledAction(bool $value): bool
 	{
 		self::getMobileAppSettings()->setAllowCopyText(!$value);
+
 		return $value;
 	}
 

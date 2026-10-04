@@ -14,6 +14,22 @@ class CallBackTrigger extends WebFormTrigger
 		return 'CALLBACK';
 	}
 
+	/**
+	 * Same form fields as the CRM form trigger, but the date/time is the moment the feedback form was
+	 * filled in. The client fills it in, so the node names no portal initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_CALLBACK_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getWebFormReturnProperties()
+		);
+	}
+
 	public static function getName()
 	{
 		return Loc::getMessage('CRM_AUTOMATION_TRIGGER_CALLBACK_NAME_1');

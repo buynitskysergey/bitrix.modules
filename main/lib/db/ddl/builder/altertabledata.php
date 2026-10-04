@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace Bitrix\Main\DB\Ddl\Builder;
 
 use Bitrix\Main\DB\Ddl\Column\ColumnInterface;
+use Bitrix\Main\DB\Ddl\Column\ColumnState;
 use Bitrix\Main\DB\Ddl\IndexColumn;
 
 class AlterTableData
 {
+	/** @var array<string, ColumnState> */
+	private readonly array $columnStates;
+
 	/**
 	 * @param ColumnInterface[] $addedColumns
 	 * @param ColumnInterface[] $modifiedColumns
@@ -18,6 +22,7 @@ class AlterTableData
 	 * @param array<string, array{type: string, columns: IndexColumn[]}> $addedIndexes
 	 * @param string[] $droppedColumns
 	 * @param array<string, string> $renamedColumns oldName → newName
+	 * @param array<string, ColumnState> $columnStates
 	 */
 	public function __construct(
 		private readonly string $tableName,
@@ -29,8 +34,15 @@ class AlterTableData
 		private readonly array $addedIndexes,
 		private readonly array $droppedColumns,
 		private readonly array $renamedColumns,
+		array $columnStates = [],
 	)
 	{
+		$normalizedColumnStates = [];
+		foreach ($columnStates as $name => $state)
+		{
+			$normalizedColumnStates[strtolower($name)] = $state;
+		}
+		$this->columnStates = $normalizedColumnStates;
 	}
 
 	public function getTableName(): string
@@ -83,5 +95,10 @@ class AlterTableData
 	public function getRenamedColumns(): array
 	{
 		return $this->renamedColumns;
+	}
+
+	public function getColumnState(string $columnName): ?ColumnState
+	{
+		return $this->columnStates[strtolower($columnName)] ?? null;
 	}
 }

@@ -9,12 +9,17 @@ use Bitrix\Bizproc\Starter\Enum\Scenario;
 use Bitrix\Bizproc\Starter\Starter;
 use Bitrix\Main\Loader;
 use Bitrix\Timeman\V2\Internal\Entity\FullReport\FullReport;
+use Bitrix\Timeman\V2\Internal\Entity\Report\RecordReportType;
 use Bitrix\Timeman\V2\Internal\Integration\Bizproc\FullReportSentTrigger;
 
 final class FullReportSendNotifier
 {
+	private const SOURCE_TYPE_AI = 'AI';
+	private const SOURCE_TYPE_ROBO = 'ROBO';
+
 	public function __construct(
 		private readonly ReportTextNormalizerService $reportTextNormalizer,
+		private readonly ReportPeriodPhraseFormatter $reportPeriodPhraseFormatter,
 	)
 	{
 	}
@@ -30,11 +35,15 @@ final class FullReportSendNotifier
 	{
 		if ($this->isStarterEnabled())
 		{
-			$fields = [
-				FullReportSentTrigger::FIELD_USER_ID => $senderId,
-				FullReportSentTrigger::FIELD_REPORT => $this->normalizeForChat((string)$report->report),
-				FullReportSentTrigger::FIELD_REPORT_EXTENDED => $this->normalizeForChat((string)$report->reportExtended),
-			];
+			$fields = $this->buildEventFields($report, $senderId);
+
+			// The most direct manager (first of the already priority-sorted recipients) is the report
+			// recipient the workflow must address — the single source of truth, instead of recomputing it.
+			$directManagerId = (int)(array_values($managerIds)[0] ?? 0);
+			if ($directManagerId > 0)
+			{
+				$fields[FullReportSentTrigger::FIELD_MANAGER_ID] = $directManagerId;
+			}
 
 			Starter::getByScenario(Scenario::onEvent)
 				->setContext(new ContextDto('timeman'))
@@ -42,6 +51,29 @@ final class FullReportSendNotifier
 				->start()
 			;
 		}
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function buildEventFields(FullReport $report, int $senderId): array
+	{
+		return [
+			FullReportSentTrigger::FIELD_USER_ID => $senderId,
+			FullReportSentTrigger::FIELD_REPORT => $this->normalizeForChat((string)$report->report),
+			FullReportSentTrigger::FIELD_REPORT_EXTENDED => $this->normalizeForChat((string)$report->reportExtended),
+			FullReportSentTrigger::FIELD_REPORT_ID => $report->id,
+			FullReportSentTrigger::FIELD_PERIOD_PHRASE => $this->reportPeriodPhraseFormatter->formatForReport($report),
+			FullReportSentTrigger::FIELD_SOURCE_TYPE => $this->resolveSourceType($report),
+		];
+	}
+
+	private function resolveSourceType(FullReport $report): string
+	{
+		return $report->type === RecordReportType::AI_REPORT
+			? self::SOURCE_TYPE_AI
+			: self::SOURCE_TYPE_ROBO
+		;
 	}
 
 	private function normalizeForChat(string $text): string

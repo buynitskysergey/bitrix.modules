@@ -1,7 +1,7 @@
 <?php
 namespace Bitrix\Crm\Activity\Rest;
 
-use \Bitrix\Crm\Activity\Entity\AppTypeTable;
+use Bitrix\Crm\Activity\Entity\AppTypeTable;
 
 use Bitrix\Crm\Activity\Provider\ConfigurableRestApp;
 use Bitrix\Main\Loader;

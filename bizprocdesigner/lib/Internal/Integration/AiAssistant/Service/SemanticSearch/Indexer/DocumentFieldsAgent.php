@@ -65,7 +65,7 @@ final class DocumentFieldsAgent
 		catch (\Throwable $e)
 		{
 			Container::getDefaultLogger()->error(
-				'Error while background indexation: ' . $e->getMessage(),
+				'Error while background indexation: ' . $e->getMessage() . PHP_EOL . '{trace}',
 				context: [
 					'trace' => $e->getTraceAsString(),
 				],

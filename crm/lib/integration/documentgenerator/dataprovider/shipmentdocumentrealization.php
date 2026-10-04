@@ -6,7 +6,7 @@ use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Order\ShipmentItem;
 use Bitrix\Crm\Security\EntityAuthorization;
 use Bitrix\DocumentGenerator\Nameable;
-use \Bitrix\Crm\Integration\DocumentGenerator;
+use Bitrix\Crm\Integration\DocumentGenerator;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Sale\Internals\ShipmentTable;
 use Bitrix\Sale\Repository\ShipmentRepository;

@@ -4,11 +4,15 @@ namespace Bitrix\Mail;
 
 use Bitrix\Mail\Helper\Enum\MailboxStatus;
 use Bitrix\Mail\Internals\MailboxAccessTable;
+use Bitrix\Mail\Internals\Repository\MailboxAddressAliasRepository;
+use Bitrix\Mail\Internals\Service\Mailbox\AddressBindingResolver;
+use Bitrix\Mail\Internals\Service\Mailbox\EmailNormalizer;
 use Bitrix\Main\Data\Cache;
 use Bitrix\Main\DB\ArrayResult;
 use Bitrix\Main\Entity;
 use Bitrix\Main\Localization;
 use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
+use Bitrix\Main\ORM\Query;
 
 Localization\Loc::loadMessages(__FILE__);
 
@@ -33,6 +37,7 @@ class MailboxTable extends Entity\DataManager
 	use DeleteByFilterTrait;
 
 	private const CACHE_TTL = 86400;
+	private const MEMBERSHIP_FIELDS = ['USER_ID', 'ACTIVE', 'SERVER_TYPE'];
 	public const SHARED_MAILBOX_KEY = 'mailbox_shared_mailboxes';
 	public const OWNER_MAILBOX_KEY = 'mailbox_owners_mailboxes';
 	public const SHARED_CACHE_DIR = '/mail/shared/';
@@ -52,6 +57,323 @@ class MailboxTable extends Entity\DataManager
 		return 'b_mail_mailbox';
 	}
 
+	public static function update($primary, array $data)
+	{
+		$mailboxId = self::extractMailboxId($primary);
+		$updateFields = isset($data['fields']) && is_array($data['fields']) ? $data['fields'] : $data;
+		$addressFields = array_intersect(['EMAIL', 'NAME', 'LOGIN'], array_keys($updateFields));
+		$membershipFields = array_intersect(self::MEMBERSHIP_FIELDS, array_keys($updateFields));
+		$connection = \Bitrix\Main\Application::getConnection();
+		$addressTransactionStarted = false;
+		$previousMembership = [];
+
+		try
+		{
+			if ($mailboxId > 0 && $addressFields !== [])
+			{
+				$connection->startTransaction();
+				$addressTransactionStarted = true;
+				$sqlHelper = $connection->getSqlHelper();
+				$connection->query(sprintf(
+					'SELECT %1$s FROM %2$s WHERE %1$s = %3$u FOR UPDATE',
+					$sqlHelper->quote('ID'),
+					$sqlHelper->quote(self::getTableName()),
+					$mailboxId,
+				));
+			}
+
+			if ($mailboxId > 0 && $membershipFields !== [])
+			{
+				$previousMembership = self::getMembershipFields($mailboxId);
+			}
+
+			$result = parent::update($primary, $data);
+			if ($addressTransactionStarted)
+			{
+				if ($result->isSuccess())
+				{
+					$connection->commitTransaction();
+				}
+				else
+				{
+					$addressTransactionStarted = false;
+					self::rollbackOwnTransaction($connection);
+				}
+				$addressTransactionStarted = false;
+			}
+
+			if ($result->isSuccess() && $previousMembership !== [])
+			{
+				$currentMembership = self::getMembershipFields($mailboxId);
+				self::invalidateMembershipCaches($previousMembership, $currentMembership);
+			}
+
+			return $result;
+		}
+		catch (\Throwable $exception)
+		{
+			if ($addressTransactionStarted)
+			{
+				self::rollbackOwnTransaction($connection);
+			}
+
+			self::cleanRuntimeFullRowCachesByMailboxId($mailboxId);
+			if ($previousMembership !== [])
+			{
+				try
+				{
+					self::invalidateMembershipCaches(
+						$previousMembership,
+						self::getMembershipFields($mailboxId),
+					);
+				}
+				catch (\Throwable)
+				{
+				}
+			}
+
+			throw $exception;
+		}
+	}
+
+	public static function delete($primary)
+	{
+		$mailboxId = self::extractMailboxId($primary);
+		$connection = \Bitrix\Main\Application::getConnection();
+		$connection->startTransaction();
+
+		try
+		{
+			(new MailboxAddressAliasRepository())->deleteByMailboxId($mailboxId);
+			$result = parent::delete($primary);
+			if ($result->isSuccess())
+			{
+				$connection->commitTransaction();
+			}
+			else
+			{
+				self::rollbackOwnTransaction($connection);
+			}
+
+			return $result;
+		}
+		catch (\Throwable $exception)
+		{
+			self::rollbackOwnTransaction($connection);
+
+			throw $exception;
+		}
+	}
+
+	public static function deleteByFilter(array|Query\Filter\ConditionTree $filter)
+	{
+		$where = Query\Query::buildFilterSql(static::getEntity(), $filter);
+		if ($where === '')
+		{
+			throw new \Bitrix\Main\ArgumentException(
+				'Deleting by empty filter is not allowed, use truncate (' . static::getTableName() . ').',
+				'filter',
+			);
+		}
+
+		$connection = static::getEntity()->getConnection();
+		static::onBeforeDeleteByFilter(' where ' . $where);
+		$connection->startTransaction();
+		try
+		{
+			$sqlHelper = $connection->getSqlHelper();
+			$mailboxRows = $connection->query(sprintf(
+				'SELECT %1$s FROM %2$s WHERE %3$s ORDER BY %1$s ASC FOR UPDATE',
+				$sqlHelper->quote('ID'),
+				$sqlHelper->quote(static::getTableName()),
+				$where,
+			));
+			$mailboxIds = [];
+			while ($row = $mailboxRows->fetch())
+			{
+				$mailboxIds[] = (int)$row['ID'];
+			}
+
+			$aliasRepository = new MailboxAddressAliasRepository();
+			foreach ($mailboxIds as $mailboxId)
+			{
+				$aliasRepository->deleteByMailboxId($mailboxId);
+			}
+			$connection->queryExecute(sprintf(
+				'DELETE FROM %s WHERE %s',
+				$sqlHelper->quote(static::getTableName()),
+				$where,
+			));
+			$connection->commitTransaction();
+			static::cleanCache();
+		}
+		catch (\Throwable $exception)
+		{
+			self::rollbackOwnTransaction($connection);
+
+			throw $exception;
+		}
+	}
+
+	public static function updateMulti($primaries, $data, $ignoreEvents = false)
+	{
+		$primaries = (array)$primaries;
+		$data = (array)$data;
+		$addressFields = array_intersect(['EMAIL', 'NAME', 'LOGIN'], array_keys($data));
+		$membershipFields = array_intersect(self::MEMBERSHIP_FIELDS, array_keys($data));
+		$mailboxIds = array_values(array_unique(array_filter(
+			array_map(static fn($primary): int => self::extractMailboxId($primary), $primaries),
+			static fn(int $mailboxId): bool => $mailboxId > 0,
+		)));
+		sort($mailboxIds, SORT_NUMERIC);
+		if ($mailboxIds === [])
+		{
+			return parent::updateMulti($primaries, $data, $ignoreEvents);
+		}
+		if ($addressFields === [])
+		{
+			if ($membershipFields === [])
+			{
+				try
+				{
+					$result = parent::updateMulti($primaries, $data, $ignoreEvents);
+				}
+				catch (\Throwable $exception)
+				{
+					self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
+
+					throw $exception;
+				}
+				if ($result->isSuccess())
+				{
+					self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
+				}
+
+				return $result;
+			}
+
+			$previousMembership = self::getMembershipFieldsForIds($mailboxIds);
+			try
+			{
+				$result = parent::updateMulti($primaries, $data, $ignoreEvents);
+			}
+			catch (\Throwable $exception)
+			{
+				self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
+				self::invalidateMembershipCachesForBatch(
+					$previousMembership,
+					self::getMembershipFieldsForIds($mailboxIds),
+				);
+
+				throw $exception;
+			}
+			if ($result->isSuccess())
+			{
+				self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
+				self::invalidateMembershipCachesForBatch(
+					$previousMembership,
+					self::getMembershipFieldsForIds($mailboxIds),
+				);
+			}
+
+			return $result;
+		}
+
+		$connection = static::getEntity()->getConnection();
+		$connection->startTransaction();
+
+		try
+		{
+			if ($mailboxIds !== [])
+			{
+				$sqlHelper = $connection->getSqlHelper();
+				$connection->query(sprintf(
+					'SELECT %1$s FROM %2$s WHERE %1$s IN (%3$s) ORDER BY %1$s ASC FOR UPDATE',
+					$sqlHelper->quote('ID'),
+					$sqlHelper->quote(static::getTableName()),
+					implode(', ', $mailboxIds),
+				));
+			}
+			$previousMembership = $membershipFields === [] ? [] : self::getMembershipFieldsForIds($mailboxIds);
+
+			if ($ignoreEvents)
+			{
+				$result = parent::updateMulti($primaries, $data, true);
+				if ($result->isSuccess())
+				{
+					$mailboxesById = self::getAddressFieldsForIds($mailboxIds);
+					$groups = [];
+					foreach ($mailboxesById as $mailboxId => $mailbox)
+					{
+						$normalizedEmail = (new EmailNormalizer())->normalizeMailbox($mailbox);
+						$groupKey = $normalizedEmail ?? "\0";
+						$groups[$groupKey]['ids'][] = $mailboxId;
+						$groups[$groupKey]['normalizedEmail'] = $normalizedEmail;
+					}
+
+					foreach ($groups as $group)
+					{
+						$derivedResult = parent::updateMulti(
+							$group['ids'],
+							['EMAIL_NORMALIZED' => $group['normalizedEmail']],
+							true,
+						);
+						if (!$derivedResult->isSuccess())
+						{
+							$result->addErrors($derivedResult->getErrors());
+							break;
+						}
+					}
+				}
+			}
+			else
+			{
+				$result = parent::updateMulti($primaries, $data, false);
+			}
+			if ($result->isSuccess())
+			{
+				$connection->commitTransaction();
+				self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
+				if ($previousMembership !== [])
+				{
+					self::invalidateMembershipCachesForBatch(
+						$previousMembership,
+						self::getMembershipFieldsForIds($mailboxIds),
+					);
+				}
+			}
+			else
+			{
+				self::rollbackOwnTransaction($connection);
+			}
+
+			return $result;
+		}
+		catch (\Throwable $exception)
+		{
+			self::rollbackOwnTransaction($connection);
+			self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
+
+			throw $exception;
+		}
+	}
+
+	private static function rollbackOwnTransaction(\Bitrix\Main\DB\Connection $connection): void
+	{
+		try
+		{
+			$connection->rollbackTransaction();
+		}
+		catch (\Bitrix\Main\DB\TransactionException $exception)
+		{
+			// The drivers throw this only after ROLLBACK TO SAVEPOINT has succeeded.
+			if ($exception->getMessage() !== 'Nested rollbacks are unsupported.')
+			{
+				throw $exception;
+			}
+		}
+	}
+
 	/**
 	 * ( A user can connect the same mailbox only once )
 	 *
@@ -60,15 +382,21 @@ class MailboxTable extends Entity\DataManager
 	 */
 	public static function getUserMailboxWithEmail($email): mixed
 	{
-		foreach (static::getUserMailboxes() as $mailbox)
+		global $USER;
+
+		if (!is_object($USER) || !$USER->isAuthorized())
 		{
-			if ($mailbox['EMAIL'] == $email)
-			{
-				return $mailbox;
-			}
+			return null;
 		}
 
-		return null;
+		$resolved = (new AddressBindingResolver())->findBindings((string)$email, (int)$USER->getId())[0] ?? null;
+
+		if ($resolved === null)
+		{
+			return null;
+		}
+
+		return static::getUserMailbox($resolved->mailboxId, (int)$USER->getId()) ?: null;
 	}
 
 	/**
@@ -81,23 +409,30 @@ class MailboxTable extends Entity\DataManager
 	public static function getMailboxesWithEmail($email)
 	{
 		$result = [];
-		$list = self::getList(([
-			'select' => [
-				'ID',
-				'USER_ID',
-			],
-			'filter' => [
-				'=EMAIL' => $email,
-			],
-		]));
+		$bindings = (new AddressBindingResolver())->findBindings((string)$email);
+		$mailboxIds = array_map(
+			static fn($binding): int => $binding->mailboxId,
+			$bindings,
+		);
 
-		while ($item = $list->fetch())
+		if ($mailboxIds !== [])
 		{
-			$result[] = $item;
+			$rowsById = (new AddressBindingResolver())->findMailboxesByIds($mailboxIds);
+
+			foreach ($mailboxIds as $mailboxId)
+			{
+				if (isset($rowsById[$mailboxId]))
+				{
+					$result[] = [
+						'ID' => $rowsById[$mailboxId]['ID'],
+						'USER_ID' => $rowsById[$mailboxId]['USER_ID'],
+					];
+				}
+			}
 		}
 
 		$dbResult = new ArrayResult($result);
-		$dbResult->setCount($list->getSelectedRowsCount());
+		$dbResult->setCount(count($result));
 
 		return $dbResult;
 	}
@@ -368,12 +703,45 @@ class MailboxTable extends Entity\DataManager
 		}
 	}
 
+	public static function onBeforeAdd(Entity\Event $event): Entity\EventResult
+	{
+		return self::setNormalizedEmail($event, true);
+	}
+
+	public static function onBeforeUpdate(Entity\Event $event): Entity\EventResult
+	{
+		return self::setNormalizedEmail($event);
+	}
+
+	private static function setNormalizedEmail(Entity\Event $event, bool $always = false): Entity\EventResult
+	{
+		$result = new Entity\EventResult();
+		$fields = $event->getParameter('fields');
+		$addressFields = ['EMAIL', 'NAME', 'LOGIN'];
+		if ($always || array_intersect($addressFields, array_keys($fields)) !== [])
+		{
+			$mailbox = [];
+			if (!$always)
+			{
+				$primary = $event->getParameter('primary');
+				$mailbox = static::getById((int)($primary['ID'] ?? 0))->fetch() ?: [];
+			}
+
+			$result->modifyFields([
+				'EMAIL_NORMALIZED' => (new EmailNormalizer())->normalizeMailbox(array_merge($mailbox, $fields)),
+			]);
+		}
+
+		return $result;
+	}
+
 	public static function onAfterUpdate(Entity\Event $event): void
 	{
-		$mailbox = $event->getParameter('fields');
-		if (isset($mailbox['USER_ID']))
+		$primary = $event->getParameter('primary');
+		$mailboxId = (int)($primary['ID'] ?? 0);
+		if ($mailboxId > 0)
 		{
-			unset(self::$ownerCache[$mailbox['USER_ID']]);
+			self::cleanRuntimeFullRowCachesByMailboxId($mailboxId);
 		}
 	}
 
@@ -420,6 +788,9 @@ class MailboxTable extends Entity\DataManager
 				'data_type' => 'integer',
 			),
 			'EMAIL' => array(
+				'data_type' => 'string',
+			),
+			'EMAIL_NORMALIZED' => array(
 				'data_type' => 'string',
 			),
 			'USERNAME' => array(
@@ -512,6 +883,11 @@ class MailboxTable extends Entity\DataManager
 			'SYNC_LOCK' => array(
 				'data_type' => 'integer',
 			),
+			// Hot pointer to the active physical source generation, see MailboxSourceGenerationTable
+			'ACTIVE_GENERATION_ID' => array(
+				'data_type' => 'integer',
+				'default_value' => 0,
+			),
 			'OPTIONS' => array(
 				'data_type'  => 'text',
 				'save_data_modification' => function()
@@ -547,6 +923,142 @@ class MailboxTable extends Entity\DataManager
 		Cache::createInstance()
 			 ->clean(self::getOwnerMailboxCacheKey($userId),MailboxTable::OWNER_CACHE_DIR)
 		;
+	}
+
+	public static function cleanCachesByMailboxId(int $mailboxId): void
+	{
+		$ownerId = self::getOwnerId($mailboxId);
+		if ($ownerId > 0)
+		{
+			self::cleanOwnerCacheByUserId($ownerId);
+		}
+
+		self::cleanAllSharedCache();
+	}
+
+	private static function extractMailboxId(mixed $primary): int
+	{
+		return (int)(is_array($primary) ? ($primary['ID'] ?? 0) : $primary);
+	}
+
+	private static function getMembershipFields(int $mailboxId): array
+	{
+		return static::getByPrimary($mailboxId, [
+			'select' => self::MEMBERSHIP_FIELDS,
+		])->fetch() ?: [];
+	}
+
+	private static function getMembershipFieldsForIds(array $mailboxIds): array
+	{
+		$result = [];
+		foreach (array_chunk($mailboxIds, 100) as $mailboxIdChunk)
+		{
+			$rows = static::getList([
+				'select' => array_merge(['ID'], self::MEMBERSHIP_FIELDS),
+				'filter' => ['@ID' => $mailboxIdChunk],
+			])->fetchAll();
+			foreach ($rows as $row)
+			{
+				$result[(int)$row['ID']] = $row;
+			}
+		}
+
+		return $result;
+	}
+
+	private static function getAddressFieldsForIds(array $mailboxIds): array
+	{
+		$result = [];
+		foreach (array_chunk($mailboxIds, 100) as $mailboxIdChunk)
+		{
+			$rows = static::getList([
+				'select' => ['ID', 'EMAIL', 'NAME', 'LOGIN'],
+				'filter' => ['@ID' => $mailboxIdChunk],
+			])->fetchAll();
+			foreach ($rows as $row)
+			{
+				$result[(int)$row['ID']] = $row;
+			}
+		}
+
+		return $result;
+	}
+
+	private static function invalidateMembershipCaches(array $previous, array $current): void
+	{
+		self::invalidateMembershipCachesForBatch([0 => $previous], [0 => $current]);
+	}
+
+	private static function invalidateMembershipCachesForBatch(array $previousById, array $currentById): void
+	{
+		$ownerIds = [];
+		$sharedCacheMustBeCleaned = false;
+		foreach ($previousById as $mailboxId => $previous)
+		{
+			$current = $currentById[$mailboxId] ?? [];
+			$previousOwnerId = (int)($previous['USER_ID'] ?? 0);
+			$currentOwnerId = (int)($current['USER_ID'] ?? 0);
+			$userChanged = $previousOwnerId !== $currentOwnerId;
+			$membershipChanged = $userChanged
+				|| (string)($previous['ACTIVE'] ?? '') !== (string)($current['ACTIVE'] ?? '')
+				|| (string)($previous['SERVER_TYPE'] ?? '') !== (string)($current['SERVER_TYPE'] ?? '')
+			;
+			if (!$membershipChanged)
+			{
+				continue;
+			}
+
+			$ownerIds[$previousOwnerId] = true;
+			$ownerIds[$currentOwnerId] = true;
+			$sharedCacheMustBeCleaned = true;
+		}
+
+		foreach (array_keys($ownerIds) as $ownerId)
+		{
+			if ($ownerId > 0)
+			{
+				self::cleanOwnerCacheByUserId($ownerId);
+			}
+		}
+
+		if ($sharedCacheMustBeCleaned)
+		{
+			// Shared access can include users, departments and other access codes.
+			// Their exact users cannot be determined safely from the mailbox row alone.
+			self::cleanAllSharedCache();
+		}
+	}
+
+	private static function cleanRuntimeFullRowCachesByMailboxId(int $mailboxId): void
+	{
+		foreach (self::$ownerCache as $userId => $mailboxes)
+		{
+			if (array_key_exists($mailboxId, $mailboxes))
+			{
+				unset(self::$ownerCache[$userId]);
+			}
+		}
+
+		foreach (self::$sharedCache as $userId => $mailboxes)
+		{
+			if (array_key_exists($mailboxId, $mailboxes))
+			{
+				unset(self::$sharedCache[$userId]);
+			}
+		}
+	}
+
+	private static function cleanRuntimeCachesAfterIgnoredBatch(array $mailboxIds, bool $ignoreEvents): void
+	{
+		if (!$ignoreEvents)
+		{
+			return;
+		}
+
+		foreach ($mailboxIds as $mailboxId)
+		{
+			self::cleanRuntimeFullRowCachesByMailboxId($mailboxId);
+		}
 	}
 
 	private static function getOwnerMailboxCacheKey(int $userId): string

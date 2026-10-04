@@ -2,7 +2,10 @@
 return [
 	'rest' => [
 		'value' => [
-			'defaultNamespace' => '\\Bitrix\\Main\\Rest\\V3\\Controller',
+			'defaultNamespace' => '\\Bitrix\\Main\\Infrastructure\\Rest\\Controller',
+			'namespaces' => [
+				'\\Bitrix\\Main\\Rest\\V3\\Controller',
+			],
 		]
 	],
 	'controllers' => [

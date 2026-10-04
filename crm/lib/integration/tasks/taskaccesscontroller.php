@@ -7,6 +7,16 @@ use Bitrix\Tasks\Access\ActionDictionary;
 
 class TaskAccessController
 {
+	public static function canRead(int $taskId, int $userId): bool
+	{
+		if (!Loader::includeModule('tasks'))
+		{
+			return false;
+		}
+
+		return \Bitrix\Tasks\Access\TaskAccessController::can($userId, ActionDictionary::ACTION_TASK_READ, $taskId);
+	}
+
 	public static function canEdit(int $taskId, int $userId): bool
 	{
 		if (!Loader::includeModule('tasks'))

@@ -10,6 +10,7 @@ class SaveSettingsRequestDto implements JsonSerializable
 		public readonly string $title,
 		public readonly string $description,
 		public readonly array $portRuleCollectionDictionary,
+		public readonly array $relationPortRuleCollectionDictionary = [],
 	){}
 
 	public function jsonSerialize(): array
@@ -18,15 +19,17 @@ class SaveSettingsRequestDto implements JsonSerializable
 			'title' => $this->title,
 			'description' => $this->description,
 			'rules' => $this->portRuleCollectionDictionary,
+			'relations' => $this->relationPortRuleCollectionDictionary,
 		];
 	}
-	
+
 	public static function fromArray(array $array): self
 	{
 		return new self(
 			$array['title'] ?? '',
 			$array['description'] ?? '',
 			$array['rules'] ?? [],
+			$array['relations'] ?? [],
 		);
 	}
 }

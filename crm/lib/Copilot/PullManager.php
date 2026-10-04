@@ -9,6 +9,7 @@ final class PullManager
 {
 	public const ADD_CALL_SCORING_PULL_COMMAND = 'call_scoring_add';
 	public const UPDATE_CALL_ASSESSMENT_PULL_COMMAND = 'call_assessment_update';
+	public const CALL_ASSESSMENT_CREATE_COMPLETE_PULL_COMMAND = 'call_assessment_create_complete';
 
 	/** @var CPullWatch|string|null */
 	protected $pullWatch = null;
@@ -38,6 +39,7 @@ final class PullManager
 			'jobId' => $params['jobId'] ?? null,
 			'ratedUserId' => $params['ratedUserId'] ?? null,
 			'assessmentSettingsId' => $params['assessmentSettingsId'] ?? null,
+			'status' => $params['status'] ?? null,
 		];
 
 		$this->pullWatch::AddToStack(
@@ -81,5 +83,23 @@ final class PullManager
 
 		$this->pullWatch::Add($userId, self::ADD_CALL_SCORING_PULL_COMMAND);
 		$this->pullWatch::Add($userId, self::UPDATE_CALL_ASSESSMENT_PULL_COMMAND);
+	}
+
+	public function sendCreateCompletePullEvent(int $userId, int $assessmentId): void
+	{
+		if (!$this->includePullModule() || $userId <= 0)
+		{
+			return;
+		}
+
+		$message = [
+			'module_id' => 'crm',
+			'command' => self::CALL_ASSESSMENT_CREATE_COMPLETE_PULL_COMMAND,
+			'params' => [
+				'assessmentId' => $assessmentId,
+			],
+		];
+
+		\CPullStack::AddByUser($userId, $message);
 	}
 }

@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Recurring\Entity\Item;
 
 use Bitrix\Crm\Recurring\Calculator;
 use Bitrix\Crm\Recurring\Entity\Dynamic;
+use Bitrix\Crm\Recurring\Entity\DynamicExecutionContext;
 use Bitrix\Crm\Recurring\Entity\ParameterMapper\EntityForm;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Factory;
@@ -20,6 +21,24 @@ abstract class DynamicEntity extends BaseEntity
 	 */
 
 	protected ?int $entityTypeId = null;
+	private ?DynamicExecutionContext $executionContext;
+
+	protected function __construct($id = null, ?DynamicExecutionContext $executionContext = null)
+	{
+		parent::__construct($id);
+
+		$this->executionContext = $executionContext;
+	}
+
+	protected function getCurrentDate(): Date
+	{
+		return $this->executionContext?->getExecutionDate() ?? parent::getCurrentDate();
+	}
+
+	protected function getExecutionContext(): ?DynamicExecutionContext
+	{
+		return $this->executionContext;
+	}
 
 	private function getOnRecurringEventName(string $eventName): string
 	{
@@ -71,7 +90,7 @@ abstract class DynamicEntity extends BaseEntity
 			return null;
 		}
 
-		return Dynamic::getNextDate($params, $startDate);
+		return Dynamic::getNextDate($params, $startDate, $this->getCurrentDate());
 	}
 
 	public static function getFormMapper(array $params = []): EntityForm
@@ -87,7 +106,7 @@ abstract class DynamicEntity extends BaseEntity
 			return $nextExecution;
 		}
 
-		$today = new Date();
+		$today = $this->getCurrentDate();
 		if (
 			$startDate->getTimestamp() > $today->getTimestamp()
 			&& $nextExecution->getTimestamp() > $startDate->getTimestamp()

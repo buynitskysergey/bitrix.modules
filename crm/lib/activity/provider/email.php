@@ -4,9 +4,10 @@ namespace Bitrix\Crm\Activity\Provider;
 
 use Bitrix\Crm;
 use Bitrix\Crm\Activity;
-use Bitrix\Crm\ActivityTable;
 use Bitrix\Crm\Activity\CommunicationStatistics;
+use Bitrix\Crm\ActivityTable;
 use Bitrix\Crm\Automation\Trigger\EmailSentTrigger;
+use Bitrix\Crm\Integration\AI\EventHandler;
 use Bitrix\Crm\Timeline\LogMessageType;
 use Bitrix\Crm\Update\Activity\CompressMailStepper;
 use Bitrix\Mail\Internals\MailEntityOptionsTable;
@@ -18,6 +19,8 @@ use Bitrix\Main\Result;
 
 class Email extends Activity\Provider\Base
 {
+	public const ACTIVITY_PROVIDER_ID = 'CRM_EMAIL';
+
 	/**
 	 * Size of html description can cause long sanitizing
 	 */
@@ -30,9 +33,11 @@ class Email extends Activity\Provider\Base
 	public const TYPE_EMAIL_COMPRESSED = 'EMAIL_COMPRESSED';
 	private const DESCRIPTION_PREVIEW_LIMIT = 200;
 
+	public const COPILOT_LAST_MESSAGES_FINGERPRINT = 'COPILOT_LAST_MESSAGES_FINGERPRINT';
+
 	public static function getId()
 	{
-		return 'CRM_EMAIL';
+		return self::ACTIVITY_PROVIDER_ID;
 	}
 
 	public static function getTypeId(array $activity)
@@ -195,6 +200,8 @@ class Email extends Activity\Provider\Base
 				$badge->deleteByEntity($itemIdentifier, $badge->getType(), $badge->getValue());
 			}
 		}
+
+		EventHandler::onAfterEmailActivityAdd($activityFields);
 	}
 
 	public static function renderView(array $activity)
@@ -833,4 +840,112 @@ class Email extends Activity\Provider\Base
 		return LogMessageType::EMAIL_INCOMING_MOVED;
 	}
 
+	public static function getMessagesForCopilot(
+		int $activityId,
+		int $ownerTypeId,
+		int $ownerId,
+		int $limit = Activity\Mail\CopilotThreadCollector::DEFAULT_THREAD_LIMIT,
+	): string
+	{
+		static $messagesForCopilot = [];
+		$cacheKey = $activityId . ':' . $ownerTypeId . ':' . $ownerId . ':' . $limit;
+
+		if (isset($messagesForCopilot[$cacheKey]))
+		{
+			return $messagesForCopilot[$cacheKey];
+		}
+
+		$messagesForCopilot[$cacheKey] = '';
+
+		if ($activityId <= 0 || $ownerTypeId <= 0 || $ownerId <= 0)
+		{
+			return $messagesForCopilot[$cacheKey];
+		}
+
+		$row = ActivityTable::query()
+			->setSelect(['THREAD_ID'])
+			->where('ID', $activityId)
+			->fetch()
+		;
+
+		if (!$row)
+		{
+			return $messagesForCopilot[$cacheKey];
+		}
+
+		$threadId = (int)($row['THREAD_ID'] ?? 0);
+
+		if ($threadId <= 0)
+		{
+			return $messagesForCopilot[$cacheKey];
+		}
+
+		$messagesForCopilot[$cacheKey] = Activity\Mail\CopilotThreadCollector::collect($threadId, $ownerTypeId, $ownerId, $limit);
+
+		return $messagesForCopilot[$cacheKey];
+	}
+
+	public static function isCopilotRepeatProcessingAvailable(int $activityId, int $ownerTypeId, int $ownerId): bool
+	{
+		if ($activityId <= 0 || $ownerTypeId <= 0 || $ownerId <= 0)
+		{
+			return false;
+		}
+
+		$currentFingerprint = self::calculateCopilotContentFingerprint($activityId, $ownerTypeId, $ownerId);
+		if ($currentFingerprint === '')
+		{
+			return false;
+		}
+
+		return $currentFingerprint !== self::getLastCopilotContentFingerprint($activityId, $ownerTypeId, $ownerId);
+	}
+
+	public static function getLastCopilotContentFingerprint(int $activityId, int $ownerTypeId, int $ownerId): string
+	{
+		$activity = Crm\Service\Container::getInstance()->getActivityBroker()->getById($activityId);
+		$settings = is_array($activity['SETTINGS'] ?? null) ? $activity['SETTINGS'] : [];
+		$fingerprints = is_array($settings[self::COPILOT_LAST_MESSAGES_FINGERPRINT] ?? null)
+			? $settings[self::COPILOT_LAST_MESSAGES_FINGERPRINT]
+			: []
+		;
+
+		return (string)($fingerprints[self::getCopilotOwnerKey($ownerTypeId, $ownerId)] ?? '');
+	}
+
+	public static function saveCopilotContentFingerprint(int $activityId, int $ownerTypeId, int $ownerId): void
+	{
+		if ($activityId <= 0 || $ownerTypeId <= 0 || $ownerId <= 0)
+		{
+			return;
+		}
+
+		$activity = Crm\Service\Container::getInstance()->getActivityBroker()->getById($activityId);
+		if (($activity['PROVIDER_ID'] ?? null) !== static::getId())
+		{
+			return;
+		}
+
+		$settings = is_array($activity['SETTINGS'] ?? null) ? $activity['SETTINGS'] : [];
+		$fingerprints = is_array($settings[self::COPILOT_LAST_MESSAGES_FINGERPRINT] ?? null)
+			? $settings[self::COPILOT_LAST_MESSAGES_FINGERPRINT]
+			: []
+		;
+		$fingerprints[self::getCopilotOwnerKey($ownerTypeId, $ownerId)] = self::calculateCopilotContentFingerprint($activityId, $ownerTypeId, $ownerId);
+		$settings[self::COPILOT_LAST_MESSAGES_FINGERPRINT] = $fingerprints;
+
+		\CCrmActivity::Update($activityId, ['SETTINGS' => $settings]);
+	}
+
+	private static function calculateCopilotContentFingerprint(int $activityId, int $ownerTypeId, int $ownerId): string
+	{
+		$messages = self::getMessagesForCopilot($activityId, $ownerTypeId, $ownerId);
+
+		return $messages === '' ? '' : md5($messages);
+	}
+
+	private static function getCopilotOwnerKey(int $ownerTypeId, int $ownerId): string
+	{
+		return $ownerTypeId . '_' . $ownerId;
+	}
 }

@@ -272,6 +272,16 @@ class Container
 		return self::getService('humanresources.service.hcmlink.placement.salaryAndVacation');
 	}
 
+	public static function getHcmLinkSalaryVacationApiService(): Service\HcmLink\SalaryVacationApiService
+	{
+		return self::getService('humanresources.service.hcmlink.salaryVacationApi');
+	}
+
+	public static function getHcmLinkPinService(): Service\HcmLink\PinService
+	{
+		return self::getService('humanresources.service.hcmlink.pin');
+	}
+
 	public static function getDepartmentUserSearchService(): Service\Member\DepartmentUserSearchService
 	{
 		return self::getService('humanresources.service.member.departmentUserSearchService');

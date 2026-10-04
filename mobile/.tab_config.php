@@ -7,6 +7,7 @@ use Bitrix\Mobile\AppTabs\CatalogStore;
 use Bitrix\Mobile\AppTabs\Chat;
 use Bitrix\Mobile\AppTabs\Crm;
 use Bitrix\Mobile\AppTabs\Mail;
+use Bitrix\Mobile\AppTabs\Marketplace;
 use Bitrix\Mobile\AppTabs\CrmCustomSectionFactory;
 use Bitrix\Mobile\AppTabs\Disk;
 use Bitrix\Mobile\AppTabs\Menu;
@@ -35,6 +36,7 @@ $config = [
 		['code' => 'sync', 'class' => Sync::class],
 		['code' => 'menu', 'class' => Feature::isEnabled(MenuFeature::class) ? MenuNew::class : Menu::class],
 		['code' => 'crm', 'class' => Crm::class],
+		['code' => 'marketplace', 'class' => Marketplace::class],
 		['code' => 'terminal', 'class' => Terminal::class],
 		['code' => 'catalog_store', 'class' => CatalogStore::class],
 		['code' => 'projects', 'class' => Projects::class],

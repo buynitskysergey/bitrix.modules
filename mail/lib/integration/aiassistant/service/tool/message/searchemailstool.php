@@ -9,6 +9,8 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\AiAssistant\Facade\TracedLogger;
 use Bitrix\Mail\Helper\Dto\Message\SearchMessagesDto;
 use Bitrix\Mail\Helper\Message\MessageSearch;
+use Bitrix\Mail\Internal\Service\Message\ClassificationLabel;
+use Bitrix\Mail\Internal\Service\Message\ClassificationSettings;
 use Bitrix\Main\SystemException;
 
 class SearchEmailsTool extends ToolContract
@@ -16,6 +18,8 @@ class SearchEmailsTool extends ToolContract
 	public const ACTION_NAME = 'search_emails';
 
 	private const MAX_LIMIT = 100;
+
+	private ?ClassificationSettings $settings = null;
 
 	public function __construct(
 		private readonly MessageSearch $messageSearch,
@@ -32,7 +36,7 @@ class SearchEmailsTool extends ToolContract
 
 	public function getDescription(): string
 	{
-		return
+		$description =
 			"Searches for email messages in a mailbox. "
 			. "Returns an array of messages with id, subject, from, to, date, "
 			. "isSeen, hasAttachments, url, and a 'bindings' array listing the "
@@ -51,91 +55,111 @@ class SearchEmailsTool extends ToolContract
 			. "Use 'excludeBindings' to drop messages that have a binding of any listed type "
 			. "(e.g. ['TASKS_TASK'] returns messages that have no task linked — other links are allowed)."
 		;
+
+		if (!$this->getSettings()->isAutoClassifyEnabled())
+		{
+			return $description;
+		}
+
+		return
+			$description
+			. " Can filter by classification label (" . implode(', ', $this->allowedLabels()) . ")."
+		;
 	}
 
 	/*
-	 * 'unanswered' and 'classification' are deliberately left out of the schema: the first scans the whole
-	 * mailbox (see MessageFilter::addUnanswered), the second has nothing to match until labelling ships.
-	 * Hiding a filter only keeps it away from the model: arguments are not validated against the schema, so
-	 * an explicitly passed key still reaches SearchMessagesDto.
+	 * 'unanswered' is left out on purpose: the runtime validates the arguments against this schema and
+	 * additionalProperties: false rejects an unlisted key. 'classification' is listed only while the switch
+	 * is on.
 	 */
 	public function getInputSchema(): array
 	{
+		$properties = [
+			'mailboxId' => [
+				'type' => 'integer',
+				'description' => 'Identifier of the mailbox to search in. Omit to search in all user mailboxes.',
+				'minimum' => 1,
+			],
+			'searchQuery' => [
+				'type' => 'string',
+				'description' => 'Search query to find messages by subject, sender, or content.',
+				'minLength' => 1,
+			],
+			'dateFrom' => [
+				'type' => 'string',
+				'description' =>
+					'Start of the date range. Use ISO 8601 date (YYYY-MM-DD) or date-time. '
+					. 'A bare date starts at 00:00:00.',
+			],
+			'dateTo' => [
+				'type' => 'string',
+				'description' =>
+					'End of the date range, inclusive. Use ISO 8601 date (YYYY-MM-DD) or date-time. '
+					. 'A bare date ends at 23:59:59.',
+			],
+			'isSeen' => [
+				'type' => 'boolean',
+				'description' => 'Filter by read status. True for read, false for unread. Omit for all.',
+			],
+			'hasAttachments' => [
+				'type' => 'boolean',
+				'description' => 'Filter by attachments. True for with attachments, false without. Omit for all.',
+			],
+			'folder' => [
+				'type' => 'string',
+				'description' => 'Folder name (e.g., INBOX, Sent). Omit for all folders.',
+			],
+			'bindings' => [
+				'type' => 'array',
+				'description' =>
+					"Keep only messages that have a binding of any listed entity type. "
+					. "Use ['NO_BIND'] to find messages without any binding. "
+					. "Omit for no binding filter.",
+				'items' => [
+					'type' => 'string',
+					'enum' => SearchMessagesDto::ALLOWED_BINDINGS,
+				],
+				'uniqueItems' => true,
+				'minItems' => 1,
+			],
+			'excludeBindings' => [
+				'type' => 'array',
+				'description' =>
+					"Drop messages that have a binding of any listed entity type. "
+					. "Example: ['TASKS_TASK'] returns messages without a linked task (other links are allowed). "
+					. "Omit for no exclusion.",
+				'items' => [
+					'type' => 'string',
+					'enum' => SearchMessagesDto::ALLOWED_EXCLUDE_BINDINGS,
+				],
+				'uniqueItems' => true,
+				'minItems' => 1,
+			],
+			'limit' => [
+				'type' => 'integer',
+				'description' => 'Maximum number of messages to return. Defaults to ' . SearchMessagesDto::DEFAULT_LIMIT . ', max ' . self::MAX_LIMIT . '.',
+				'minimum' => 1,
+				'maximum' => self::MAX_LIMIT,
+			],
+			'offset' => [
+				'type' => 'integer',
+				'description' => 'Offset by matching messages. Use nextOffset from the previous response when hasMore is true.',
+				'minimum' => 0,
+			],
+		];
+
+		if ($this->getSettings()->isAutoClassifyEnabled())
+		{
+			$properties['classification'] = [
+				'type' => 'string',
+				'enum' => $this->allowedLabels(),
+				'description' => 'Filter by classification label. Omit for all.',
+			];
+		}
+
 		return [
 			'type' => 'object',
-			'properties' => [
-				'mailboxId' => [
-					'type' => 'integer',
-					'description' => 'Identifier of the mailbox to search in. Omit to search in all user mailboxes.',
-					'minimum' => 1,
-				],
-				'searchQuery' => [
-					'type' => 'string',
-					'description' => 'Search query to find messages by subject, sender, or content.',
-					'minLength' => 1,
-				],
-				'dateFrom' => [
-					'type' => 'string',
-					'description' =>
-						'Start of the date range. Use ISO 8601 date (YYYY-MM-DD) or date-time. '
-						. 'A bare date starts at 00:00:00.',
-				],
-				'dateTo' => [
-					'type' => 'string',
-					'description' =>
-						'End of the date range, inclusive. Use ISO 8601 date (YYYY-MM-DD) or date-time. '
-						. 'A bare date ends at 23:59:59.',
-				],
-				'isSeen' => [
-					'type' => 'boolean',
-					'description' => 'Filter by read status. True for read, false for unread. Omit for all.',
-				],
-				'hasAttachments' => [
-					'type' => 'boolean',
-					'description' => 'Filter by attachments. True for with attachments, false without. Omit for all.',
-				],
-				'folder' => [
-					'type' => 'string',
-					'description' => 'Folder name (e.g., INBOX, Sent). Omit for all folders.',
-				],
-				'bindings' => [
-					'type' => 'array',
-					'description' =>
-						"Keep only messages that have a binding of any listed entity type. "
-						. "Use ['NO_BIND'] to find messages without any binding. "
-						. "Omit for no binding filter.",
-					'items' => [
-						'type' => 'string',
-						'enum' => SearchMessagesDto::ALLOWED_BINDINGS,
-					],
-					'uniqueItems' => true,
-					'minItems' => 1,
-				],
-				'excludeBindings' => [
-					'type' => 'array',
-					'description' =>
-						"Drop messages that have a binding of any listed entity type. "
-						. "Example: ['TASKS_TASK'] returns messages without a linked task (other links are allowed). "
-						. "Omit for no exclusion.",
-					'items' => [
-						'type' => 'string',
-						'enum' => SearchMessagesDto::ALLOWED_EXCLUDE_BINDINGS,
-					],
-					'uniqueItems' => true,
-					'minItems' => 1,
-				],
-				'limit' => [
-					'type' => 'integer',
-					'description' => 'Maximum number of messages to return. Defaults to ' . SearchMessagesDto::DEFAULT_LIMIT . ', max ' . self::MAX_LIMIT . '.',
-					'minimum' => 1,
-					'maximum' => self::MAX_LIMIT,
-				],
-				'offset' => [
-					'type' => 'integer',
-					'description' => 'Offset by matching messages. Use nextOffset from the previous response when hasMore is true.',
-					'minimum' => 0,
-				],
-			],
+			'properties' => $properties,
 			'required' => [],
 			'additionalProperties' => false,
 		];
@@ -149,6 +173,11 @@ class SearchEmailsTool extends ToolContract
 	public function canRun(int $userId): bool
 	{
 		return true;
+	}
+
+	protected function getSettings(): ClassificationSettings
+	{
+		return $this->settings ??= new ClassificationSettings();
 	}
 
 	protected function executeStructured(int $userId, ...$args): array
@@ -195,5 +224,13 @@ class SearchEmailsTool extends ToolContract
 		$value = is_numeric($raw) ? (int)$raw : 0;
 
 		return max(0, $value);
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function allowedLabels(): array
+	{
+		return array_map(static fn (ClassificationLabel $case): string => $case->value, ClassificationLabel::cases());
 	}
 }

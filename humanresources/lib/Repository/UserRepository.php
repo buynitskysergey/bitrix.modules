@@ -3,6 +3,7 @@
 namespace Bitrix\HumanResources\Repository;
 
 use Bitrix\HumanResources\Exception\WrongStructureItemException;
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Item\Collection\UserCollection;
 use Bitrix\HumanResources\Item\Node;
 use Bitrix\HumanResources\Model\NodeMemberTable;
@@ -196,6 +197,8 @@ final class UserRepository
 			),
 		)->where('ACTIVE', 'Y')
 		;
+
+		RealUserFilter::applyToUserQuery($ormQuery);
 
 		$ormQuery->whereMatch(
 			'USER_INDEX.SEARCH_USER_CONTENT',

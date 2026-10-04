@@ -94,6 +94,7 @@ final class RepeatSaleSegmentController
 			'TITLE' => $segmentItem->getTitle(),
 			'PROMPT' => $segmentItem->getPrompt(),
 			'IS_ENABLED' => $segmentItem->isEnabled(),
+			'IS_AUTO_DISABLED' => $segmentItem->isAutoDisabled(),
 			'IS_SYSTEM' => $segmentItem->isSystem(),
 			'CODE' => $segmentItem->getCode(),
 			'BASE_SEGMENT_CODE' => $segmentItem->getBaseSegmentCode(),

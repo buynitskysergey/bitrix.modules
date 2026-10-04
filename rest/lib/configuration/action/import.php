@@ -16,6 +16,7 @@ use Bitrix\Rest\AppLogTable;
 use Bitrix\Main\IO\File;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\EventTable;
+use Bitrix\Rest\Internal\Service\Application\ApplicationInstallationFinalizer;
 
 /**
  * Class Import
@@ -535,45 +536,52 @@ class Import extends Base
 		{
 			if ($app['INSTALLED'] === AppTable::NOT_INSTALLED)
 			{
-				AppTable::setSkipRemoteUpdate(true);
-				$updateResult = AppTable::update(
-					$app['ID'],
-					[
-						'INSTALLED' => AppTable::INSTALLED
-					]
-				);
-				AppTable::setSkipRemoteUpdate(false);
+				$updateResult = (new ApplicationInstallationFinalizer())->finalize((int)$app['ID'], true);
 
-				if (!empty($app['URL_INSTALL']))
+				if ($updateResult->isSuccess())
 				{
-					$eventBindResult = EventTable::add(
-						[
-							'APP_ID' => $app['ID'],
-							'EVENT_NAME' => 'ONAPPINSTALL',
-							'EVENT_HANDLER' => $app['URL_INSTALL'],
-						]
-					);
-					if ($eventBindResult->isSuccess())
+					if (!empty($app['URL_INSTALL']))
 					{
-						Sender::bind('rest', 'OnRestAppInstall');
+						$eventBindResult = EventTable::add(
+							[
+								'APP_ID' => $app['ID'],
+								'EVENT_NAME' => 'ONAPPINSTALL',
+								'EVENT_HANDLER' => $app['URL_INSTALL'],
+							],
+						);
+						if ($eventBindResult->isSuccess())
+						{
+							Sender::bind('rest', 'OnRestAppInstall');
+						}
+						// checkCallback is already called inside checkFields
+						$bindUserReady = EventTable::add(
+							[
+								'APP_ID' => $app['ID'],
+								'EVENT_NAME' => 'ONAPPUSERREADY',
+								'EVENT_HANDLER' => $app['URL_INSTALL'],
+							],
+						);
+						if ($bindUserReady->isSuccess())
+						{
+							Sender::bind('rest', 'OnRestAppUserReady');
+						}
 					}
-					// checkCallback is already called inside checkFields
-					$bindUserReady = EventTable::add(
-						[
-							'APP_ID' => $app['ID'],
-							'EVENT_NAME' => 'ONAPPUSERREADY',
-							'EVENT_HANDLER' => $app['URL_INSTALL'],
-						]
-					);
-					if ($bindUserReady->isSuccess())
-					{
-						Sender::bind('rest', 'OnRestAppUserReady');
-					}
+
+					AppTable::install($app['ID']);
+					AppLogTable::log($app['ID'], AppLogTable::ACTION_TYPE_INSTALL);
 				}
 
-				AppTable::install($app['ID']);
-				AppLogTable::log($app['ID'], AppLogTable::ACTION_TYPE_INSTALL);
 				$result['result'] = $updateResult->isSuccess();
+				if (!$updateResult->isSuccess())
+				{
+					$errorCode = $updateResult->getError()?->getCode()
+						?? ApplicationInstallationFinalizer::ERROR_UPDATE_FAILED;
+					$this->getNotificationInstance()->add(
+						Loc::getMessage('REST_CONFIGURATION_IMPORT_ERROR_INSTALL_APP'),
+						$errorCode,
+						Notification::TYPE_EXCEPTION,
+					);
+				}
 			}
 			else
 			{

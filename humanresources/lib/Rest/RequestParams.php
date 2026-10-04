@@ -30,6 +30,22 @@ class RequestParams
 		return (string)$value;
 	}
 
+	public function requireNonEmptyString(string $name): string
+	{
+		$value = $this->json->get($name);
+		if (!is_string($value) || trim($value) === '')
+		{
+			throw new RequestValidationException([
+				new Error(
+					"Parameter \"{$name}\" must be a non-empty string.",
+					'INVALID_' . strtoupper($name),
+				),
+			]);
+		}
+
+		return $value;
+	}
+
 	public function requireInt(string $name): int
 	{
 		$value = $this->json->get($name);
@@ -41,6 +57,22 @@ class RequestParams
 		}
 
 		return (int)$value;
+	}
+
+	public function requirePositiveInt(string $name): int
+	{
+		$value = $this->json->get($name);
+		if (!is_int($value) || $value <= 0)
+		{
+			throw new RequestValidationException([
+				new Error(
+					"Parameter \"{$name}\" must be a positive integer.",
+					'INVALID_' . strtoupper($name),
+				),
+			]);
+		}
+
+		return $value;
 	}
 
 	public function requireArray(string $name): array
@@ -57,6 +89,48 @@ class RequestParams
 		}
 
 		return $value;
+	}
+
+	public function requireList(string $name, bool $allowEmpty = false): array
+	{
+		$value = $this->json->get($name);
+		if (!is_array($value) || !array_is_list($value) || (!$allowEmpty && $value === []))
+		{
+			throw new RequestValidationException([
+				new Error(
+					"Parameter \"{$name}\" must be a"
+						. ($allowEmpty ? '' : ' non-empty')
+						. ' list.',
+					'INVALID_' . strtoupper($name),
+				),
+			]);
+		}
+
+		return $value;
+	}
+
+	public function has(string $name): bool
+	{
+		return array_key_exists($name, $this->json->getValues());
+	}
+
+	/**
+	 * @param list<string> $allowedFields
+	 */
+	public function assertAllowedFields(array $allowedFields): void
+	{
+		$unknownFields = array_diff(array_keys($this->json->getValues()), $allowedFields);
+		if ($unknownFields === [])
+		{
+			return;
+		}
+
+		throw new RequestValidationException([
+			new Error(
+				'Unknown request fields: ' . implode(', ', $unknownFields) . '.',
+				'UNKNOWN_FIELDS',
+			),
+		]);
 	}
 
 	public function getString(string $name, ?string $default = null): ?string

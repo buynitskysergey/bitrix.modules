@@ -13,11 +13,16 @@ class DynamicItem implements PermissionEntity, FilterableByTypes, FilterableByCa
 	use Trait\FilterableByCategory;
 	use Trait\FilterableByTypes;
 
-	private function permissions(bool $isAutomationEnabled, bool $isStagesEnabled, array $stages = []): array
+	private function permissions(
+		bool $isAutomationEnabled,
+		bool $isStagesEnabled,
+		array $stages,
+		?string $inheritDescription,
+	): array
 	{
 		$permissions = $isAutomationEnabled
-			? PermissionAttrPresets::crmEntityPresetAutomation()
-			: PermissionAttrPresets::crmEntityPreset()
+			? PermissionAttrPresets::crmEntityPresetAutomation(true, $inheritDescription)
+			: PermissionAttrPresets::crmEntityPreset($inheritDescription)
 		;
 
 		$permissions = array_merge(
@@ -29,7 +34,7 @@ class DynamicItem implements PermissionEntity, FilterableByTypes, FilterableByCa
 		{
 			$permissions = array_merge(
 				$permissions,
-				PermissionAttrPresets::crmStageTransition($stages),
+				PermissionAttrPresets::crmStageTransition($stages, $inheritDescription),
 			);
 		}
 
@@ -47,43 +52,55 @@ class DynamicItem implements PermissionEntity, FilterableByTypes, FilterableByCa
 		$result = [];
 		foreach ($types as $type)
 		{
-			$isAutomationEnabled = $typesMap->isAutomationEnabled($type->getEntityTypeId());
-			$isStagesEnabled = $typesMap->isStagesEnabled($type->getEntityTypeId());
-			$isCategoriesEnabled = $typesMap->isCategoriesEnabled($type->getEntityTypeId());
+			$entityTypeId = $type->getEntityTypeId();
+			$isAutomationEnabled = $typesMap->isAutomationEnabled($entityTypeId);
+			$isStagesEnabled = $typesMap->isStagesEnabled($entityTypeId);
+			$isCategoriesEnabled = $typesMap->isCategoriesEnabled($entityTypeId);
+			$isStagesType = $type->getIsStagesEnabled();
+			$stagesFieldName = $typesMap->getStagesFieldName($entityTypeId);
 
-			$perms = $this->permissions($isAutomationEnabled, $isStagesEnabled);
-
-			$stagesFieldName = $typesMap->getStagesFieldName($type->getEntityTypeId());
-
-			$categories = $typesMap->getCategories($type->getEntityTypeId());
-			$categories = $this->filterItemCategories($categories);
+			$categories = $this->filterItemCategories($typesMap->getCategories($entityTypeId));
 
 			foreach ($categories as $category)
 			{
-				$entityName = (new PermissionEntityTypeHelper($type->getEntityTypeId()))
+				$entityName = (new PermissionEntityTypeHelper($entityTypeId))
 					->getPermissionEntityTypeForCategory($category->getId())
 				;
 
+				$funnelName = $isCategoriesEnabled ? $category->getName() : null;
+
 				$fields = [];
-				if ($type->getIsStagesEnabled())
+				$stages = [];
+				if ($isStagesType)
 				{
-					$stages = [];
-					foreach ($typesMap->getStages($type->getEntityTypeId(), $category->getId()) as $stage)
+					foreach ($typesMap->getStages($entityTypeId, $category->getId()) as $stage)
 					{
 						$stages[$stage->getStatusId()] = $stage->getName();
 					}
 
 					$fields = [$stagesFieldName => $stages];
-
-					$perms = $this->permissions($isAutomationEnabled, $isStagesEnabled, $fields[$stagesFieldName]);
 				}
+
+				$inheritDescription = PermissionAttrPresets::stageInheritDescription(
+					$entityTypeId,
+					$type->getTitle(),
+					// funnel is reflected in the stage-inheritance phrase only for stage-enabled types
+					$isStagesType ? $funnelName : null,
+				);
+
+				$perms = $this->permissions(
+					$isAutomationEnabled,
+					$isStagesEnabled,
+					$stages,
+					$inheritDescription,
+				);
 
 				$result[] = new EntityDTO(
 					$entityName,
 					$type->getTitle(),
 					$fields,
 					$perms,
-					$isCategoriesEnabled ? $category->getName() : null,
+					$funnelName,
 					'smart-process',
 					'--ui-color-accent-light-blue',
 				);

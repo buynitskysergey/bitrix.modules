@@ -2,6 +2,7 @@
 
 namespace Bitrix\Crm\Integration\Analytics\Builder;
 
+use Bitrix\Crm\Integration\Analytics\ActorResolver;
 use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Main\Engine\Response\Converter;
 use Bitrix\Main\Error;
@@ -19,6 +20,7 @@ abstract class AbstractBuilder implements BuilderContract
 	private array $p3 = [];
 	private array $p4 = [];
 	private array $p5 = [];
+	private ?int $actorId = null;
 
 	final public function validate(): Result
 	{
@@ -129,11 +131,26 @@ abstract class AbstractBuilder implements BuilderContract
 	 */
 	abstract protected function buildCustomData(): array;
 
+	/**
+	 * Initiator of the action this event describes.
+	 *
+	 * Pass it only when a real employee triggered the action (automation, business process,
+	 * REST). Public entry points must leave it unset: their visitor is not an actor.
+	 */
+	final public function setActorId(?int $actorId): static
+	{
+		$this->actorId = $actorId;
+
+		return $this;
+	}
+
 	public function buildEvent(): \Bitrix\Main\Analytics\AnalyticsEvent
 	{
 		$data = $this->buildData();
 
 		$event = new \Bitrix\Main\Analytics\AnalyticsEvent($data['event'], $data['tool'], $data['category']);
+		$event->setUserId(ActorResolver::resolve($this->actorId));
+
 		if (!empty($data['type']))
 		{
 			$event->setType($data['type']);

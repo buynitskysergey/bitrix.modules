@@ -380,16 +380,17 @@ class Order extends Sale\Order
 	private function runAutomation(): void
 	{
 		$starter = new Crm\Integration\BizProc\Starter\CrmStarter(
-			new Crm\Integration\BizProc\Starter\Dto\DocumentDto( \CCrmOwnerType::Order, $this->getId())
+			new Crm\Integration\BizProc\Starter\Dto\DocumentDto(\CCrmOwnerType::Order, $this->getId())
 		);
 
-		$events = [];
 		if ($this->fields->isChanged('CANCELED') && $this->isCanceled())
 		{
-			$events[] = new Crm\Integration\BizProc\Starter\Dto\EventDto(
-				Crm\Automation\Trigger\OrderCanceledTrigger::getCode(),
-				[new Crm\Integration\BizProc\Starter\Dto\DocumentDto(\CCrmOwnerType::Order, $this->getId())],
-				['ORDER' => $this]
+			Crm\Automation\Trigger\OrderCanceledTrigger::execute(
+				[['OWNER_TYPE_ID' => \CCrmOwnerType::Order, 'OWNER_ID' => $this->getId()]],
+				[
+					Crm\Automation\Trigger\OrderCanceledTrigger::ORDER_INPUT_ORDER_ID => $this->getId(),
+					Crm\Automation\Trigger\OrderCanceledTrigger::EVENT_INITIATOR_KEY => (int)$this->getField('EMP_CANCELED_ID'),
+				]
 			);
 		}
 
@@ -398,10 +399,14 @@ class Order extends Sale\Order
 			$binding = $this->getEntityBinding();
 			if ($binding)
 			{
-				$events[] = new Crm\Integration\BizProc\Starter\Dto\EventDto(
-					Crm\Automation\Trigger\OrderPaidTrigger::getCode(),
-					[new Crm\Integration\BizProc\Starter\Dto\DocumentDto($binding->getOwnerTypeId(), $binding->getOwnerId())],
-					['ORDER' => $this]
+				Crm\Automation\Trigger\OrderPaidTrigger::execute(
+					[['OWNER_TYPE_ID' => $binding->getOwnerTypeId(), 'OWNER_ID' => $binding->getOwnerId()]],
+					[
+						Crm\Automation\Trigger\OrderPaidTrigger::ORDER_INPUT_ORDER_ID => $this->getId(),
+						Crm\Automation\Trigger\OrderPaidTrigger::ORDER_INPUT_SUM => $this->getPrice(),
+						Crm\Automation\Trigger\OrderPaidTrigger::ORDER_INPUT_CURRENCY => $this->getCurrency(),
+						Crm\Automation\Trigger\OrderPaidTrigger::EVENT_INITIATOR_KEY => (int)$this->getField('EMP_PAYED_ID'),
+					]
 				);
 			}
 		}
@@ -411,10 +416,12 @@ class Order extends Sale\Order
 			$binding = $this->getEntityBinding();
 			if ($binding && $binding->getOwnerTypeId() === \CCrmOwnerType::Deal)
 			{
-				$events[] = new Crm\Integration\BizProc\Starter\Dto\EventDto(
-					Crm\Automation\Trigger\DeliveryFinishedTrigger::getCode(),
-					[new Crm\Integration\BizProc\Starter\Dto\DocumentDto(\CCrmOwnerType::Deal, $binding->getOwnerId())],
-					['ORDER' => $this]
+				Crm\Automation\Trigger\DeliveryFinishedTrigger::execute(
+					[['OWNER_TYPE_ID' => \CCrmOwnerType::Deal, 'OWNER_ID' => $binding->getOwnerId()]],
+					[
+						Crm\Automation\Trigger\DeliveryFinishedTrigger::ORDER_INPUT_ORDER_ID => $this->getId(),
+						Crm\Automation\Trigger\DeliveryFinishedTrigger::EVENT_INITIATOR_KEY => (int)$this->getField('EMP_DEDUCTED_ID'),
+					]
 				);
 			}
 		}
@@ -422,7 +429,6 @@ class Order extends Sale\Order
 		$runDto = new Crm\Integration\BizProc\Starter\Dto\RunDataDto(
 			$this->fields->getChangedValues(),
 			$this->fields->getOriginalValues(),
-			$events,
 		);
 
 		if ($this->isNew)

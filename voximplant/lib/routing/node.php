@@ -17,6 +17,28 @@ abstract class Node
 	}
 
 	/**
+	 * Classes allowed to be restored when the execution graph is read from the database.
+	 * A new node type must be added here, otherwise the call can not continue routing on the next hit.
+	 *
+	 * @return string[]
+	 */
+	public static function getSerializableClasses(): array
+	{
+		return [
+			Root::class,
+			SecurityCheck::class,
+			Ivr::class,
+			IvrAction::class,
+			Queue::class,
+			User::class,
+			Pstn::class,
+			Voicemail::class,
+			Hangup::class,
+			\Bitrix\Voximplant\Queue::class,
+		];
+	}
+
+	/**
 	 * @return int
 	 */
 	public function getId()

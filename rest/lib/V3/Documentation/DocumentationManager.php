@@ -14,6 +14,7 @@ use Bitrix\Rest\V3\Documentation\Attributes\Hidden;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoCollection;
 use Bitrix\Rest\V3\Dto\DtoField;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumRegistry;
 use Bitrix\Rest\V3\Interaction\Request\Request;
 use Bitrix\Rest\V3\Interaction\Response\AddResponse;
 use Bitrix\Rest\V3\Interaction\Response\AggregateResponse;
@@ -22,6 +23,7 @@ use Bitrix\Rest\V3\Interaction\Response\BooleanResponse;
 use Bitrix\Rest\V3\Interaction\Response\DeleteResponse;
 use Bitrix\Rest\V3\Interaction\Response\GetResponse;
 use Bitrix\Rest\V3\Interaction\Response\ListResponse;
+use Bitrix\Rest\V3\Interaction\Response\Response;
 use Bitrix\Rest\V3\Interaction\Response\TailResponse;
 use Bitrix\Rest\V3\Interaction\Response\UpdateResponse;
 use Bitrix\Rest\V3\Schema\MethodDescription;
@@ -135,6 +137,15 @@ class DocumentationManager
 					if (!$controllerMethodDescription->isEnabled)
 					{
 						continue;
+					}
+					$methodDto = $this->getDtoByClass($controllerMethodDescription->dtoFqcn);
+					if ($methodDto !== null)
+					{
+						$this->collectDtoSchemas(
+							$methodDto,
+							$customModuleSchemas[$moduleId] ?? [],
+							$dtoSchemas,
+						);
 					}
 					if (isset($customModuleMethods[$controllerData->module][$controllerMethodDescription->actionUri]))
 					{
@@ -404,30 +415,57 @@ class DocumentationManager
 					return $base;
 				}
 
-				foreach ($extraProperties as $extraPropertyName => $extraPropertyType)
+				foreach ($this->buildOpenApiPropertiesFromExtras($extraProperties) as $name => $schema)
 				{
-					if (is_subclass_of($extraPropertyType, Dto::class))
-					{
-						$extraProperty = $this->getDtoByClass($extraPropertyType);
-						if ($extraProperty === null)
-						{
-							continue;
-						}
-						$base['properties'][$extraPropertyName] = [
-							'$ref' => '#/components/schemas/' . TypeAliasRegistry::toPublicType($extraProperty),
-						];
-					}
-					elseif (isset($this->formatTypes[$extraPropertyType]))
-					{
-						$base['properties'][$extraPropertyName] = $this->formatTypes[$extraPropertyType];
-					}
+					$base['properties'][$name] = $schema;
 				}
 
 				return $baseResponse($base);
 			}
 		}
 
+		// Custom Response subclasses (e.g. DownloadResultResponse): describe public properties.
+		if (is_subclass_of($returnTypeClass, Response::class))
+		{
+			return $baseResponse([
+				'type' => 'object',
+				'properties' => $this->buildOpenApiPropertiesFromExtras(
+					$this->getExtraResponseProperties($returnTypeClass),
+				),
+			]);
+		}
+
 		return $baseResponse();
+	}
+
+	/**
+	 * @param array<string, string> $extras property name => PHP type
+	 * @return array<string, array>
+	 */
+	private function buildOpenApiPropertiesFromExtras(array $extras): array
+	{
+		$properties = [];
+
+		foreach ($extras as $extraPropertyName => $extraPropertyType)
+		{
+			if (is_subclass_of($extraPropertyType, Dto::class))
+			{
+				$extraProperty = $this->getDtoByClass($extraPropertyType);
+				if ($extraProperty === null)
+				{
+					continue;
+				}
+				$properties[$extraPropertyName] = [
+					'$ref' => '#/components/schemas/' . TypeAliasRegistry::toPublicType($extraProperty),
+				];
+			}
+			elseif (isset($this->formatTypes[$extraPropertyType]))
+			{
+				$properties[$extraPropertyName] = $this->formatTypes[$extraPropertyType];
+			}
+		}
+
+		return $properties;
 	}
 
 	private function getExtraResponseProperties(string $returnTypeClass): array
@@ -497,6 +535,16 @@ class DocumentationManager
 
 	private function getFormatByType(DtoField $field): array
 	{
+		if ($field->getDynamicEnumProvider() !== null)
+		{
+			$definition = DynamicEnumRegistry::resolve($field->getDynamicEnumProvider());
+
+			return [
+				'type' => $definition->type->toOpenApiType(),
+				'enum' => $definition->values,
+			];
+		}
+
 		if (isset($this->formatTypes[$field->getPropertyType()]))
 		{
 			return $this->formatTypes[$field->getPropertyType()];

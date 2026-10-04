@@ -28,7 +28,23 @@ class CEvent
 		return Mail\EventManager::cleanUpAgent();
 	}
 
-	public static function SendImmediate($event, $lid, $arFields, $Duplicate = "Y", $message_id = "", $files = [], $languageId = '', array $filesContent = [])
+	/**
+	 * @param Mail\Sender\Identity|null $senderIdentity Sender the message is sent on behalf of.
+	 * @param Mail\Context|null $context Mail context applied within this call.
+	 * Applied within this call only: the deferred queue of Send() keeps neither identity nor context.
+	 */
+	public static function SendImmediate(
+		$event,
+		$lid,
+		$arFields,
+		$Duplicate = "Y",
+		$message_id = "",
+		$files = [],
+		$languageId = '',
+		array $filesContent = [],
+		?Mail\Sender\Identity $senderIdentity = null,
+		?Mail\Context $context = null,
+	)
 	{
 		$arLocalFields = [
 			"EVENT_NAME" => $event,
@@ -43,7 +59,7 @@ class CEvent
 			"FILES_CONTENT" => $filesContent,
 		];
 
-		$result = Mail\Event::sendImmediate($arLocalFields);
+		$result = Mail\Event::sendImmediate($arLocalFields, $senderIdentity, $context);
 
 		return $result === Mail\Event::SEND_RESULT_NONE ? false : $result;
 	}

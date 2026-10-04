@@ -1,6 +1,11 @@
 <?php
 
+use Bitrix\Catalog\ProductTable;
+use Bitrix\Catalog\VatTable;
 use Bitrix\Crm;
+use Bitrix\Main\Loader;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Join;
 
 class CAllCrmProductRow
 {
@@ -452,6 +457,7 @@ class CAllCrmProductRow
 				'DISCOUNT_RATE' => array('TYPE' => 'double'),
 				'DISCOUNT_SUM' => array('TYPE' => 'double'),
 				'TAX_RATE' => array('TYPE' => 'double'),
+				'TAX_NAME' => array('TYPE' => 'string'),
 				'TAX_INCLUDED' => array('TYPE' => 'char'),
 				'CUSTOMIZED' => array('TYPE' => 'char'),
 				'MEASURE_CODE' => array('TYPE' => 'integer'),
@@ -493,6 +499,7 @@ class CAllCrmProductRow
 			'DISCOUNT_RATE' => ['FIELD' => 'PR.DISCOUNT_RATE', 'TYPE' => 'double'],
 			'DISCOUNT_SUM' => ['FIELD' => 'PR.DISCOUNT_SUM', 'TYPE' => 'double'],
 			'TAX_RATE' => ['FIELD' => 'PR.TAX_RATE', 'TYPE' => 'double'],
+			'TAX_NAME' => ['FIELD' => 'PR.TAX_NAME', 'TYPE' => 'string'],
 			'TAX_INCLUDED' => ['FIELD' => 'PR.TAX_INCLUDED', 'TYPE' => 'char'],
 			'CUSTOMIZED' => ['FIELD' => 'PR.CUSTOMIZED', 'TYPE' => 'char'],
 			'MEASURE_CODE' => ['FIELD' => 'PR.MEASURE_CODE', 'TYPE' => 'int'],
@@ -738,6 +745,7 @@ class CAllCrmProductRow
 			$ary['DISCOUNT_SUM'] = (float)($ary['DISCOUNT_SUM'] ?? 0.0);
 
 			$ary['TAX_RATE'] = isset($ary['TAX_RATE']) ? (float)$ary['TAX_RATE'] : null;
+			$ary['TAX_NAME'] = $ary['TAX_NAME'] ?? '';
 			$ary['TAX_INCLUDED'] = $ary['TAX_INCLUDED'] ?? 'N';
 			$ary['CUSTOMIZED'] = $ary['CUSTOMIZED'] ?? 'N';
 
@@ -978,6 +986,7 @@ class CAllCrmProductRow
 				'DISCOUNT_SUM' => $prices['DISCOUNT_SUM'],
 				'DISCOUNT_RATE' => $prices['DISCOUNT_RATE'],
 				'TAX_RATE' => $prices['TAX_RATE'],
+				'TAX_NAME' => $arRow['TAX_NAME'] ?? '',
 				'TAX_INCLUDED' => $prices['TAX_INCLUDED'],
 
 				'MEASURE_CODE' => $measureCode,
@@ -997,6 +1006,8 @@ class CAllCrmProductRow
 			{
 				$safeRow['PRICE_ACCOUNT'] = $prices['PRICE_ACCOUNT'];
 			}
+
+			$safeRow = self::normalizeTaxName($safeRow);
 
 			$safeRow['ORIGINAL_ROW'] = $arRow;
 			$arSafeRows[] = &$safeRow;
@@ -1092,6 +1103,87 @@ class CAllCrmProductRow
 		return $result;
 	}
 
+	private static function normalizeTaxName(array $row): array
+	{
+		$row['TAX_NAME'] = (string)($row['TAX_NAME'] ?? '');
+		if ($row['TAX_NAME'] !== '')
+		{
+			return $row;
+		}
+
+		if (!Loader::includeModule('catalog'))
+		{
+			return $row;
+		}
+
+		$taxRate = $row['TAX_RATE'];
+		$productId = (int)($row['PRODUCT_ID'] ?? 0);
+
+		if ($productId > 0)
+		{
+			$catalogProductVat = ProductTable::getRow([
+				'select' => [
+					'RATE' => 'VAT.RATE',
+					'NAME' => 'VAT.NAME',
+				],
+				'filter' => ['=ID' => $productId],
+				'cache' => [
+					'ttl' => 86400,
+					'cache_joins' => true,
+				],
+				'runtime' => [
+					new Reference(
+						'VAT',
+						VatTable::class,
+						Join::on('this.VAT_ID', 'ref.ID')
+					),
+				],
+			]);
+
+			if ($catalogProductVat)
+			{
+				$catalogVatRate = $catalogProductVat['RATE'] !== null
+					? (float)$catalogProductVat['RATE']
+					: null;
+
+				if ($catalogVatRate === $taxRate)
+				{
+					$row['TAX_NAME'] = (string)($catalogProductVat['NAME'] ?? '');
+
+					return $row;
+				}
+			}
+		}
+
+		$filter = ['=ACTIVE' => 'Y'];
+		if ($taxRate === null)
+		{
+			$filter['=EXCLUDE_VAT'] = 'Y';
+		}
+		else
+		{
+			$filter['=EXCLUDE_VAT'] = 'N';
+			$filter['=RATE'] = (float)$taxRate;
+		}
+
+		$vat = VatTable::getRow([
+			'select' => ['ID', 'NAME'],
+			'filter' => $filter,
+			'order' => [
+				'SORT' => 'ASC',
+				'ID' => 'ASC',
+			],
+			'cache' => ['ttl' => 86400],
+		]);
+
+		if ($vat)
+		{
+			$row['TAX_NAME'] = (string)($vat['NAME'] ?? '');
+		}
+
+		return $row;
+	}
+
 	/**
 	 * @deprecated
 	 * @see Crm\Service\Accounting::calculateProductPrices
@@ -1167,6 +1259,7 @@ class CAllCrmProductRow
 			isset($modified['DISCOUNT_RATE']) && $modified['DISCOUNT_RATE'] != $original['DISCOUNT_RATE'] ||
 			isset($modified['DISCOUNT_SUM']) && $modified['DISCOUNT_SUM'] != $original['DISCOUNT_SUM'] ||
 			isset($modified['TAX_INCLUDED']) && $modified['TAX_INCLUDED'] != $original['TAX_INCLUDED'] ||
+			isset($modified['TAX_NAME']) && $modified['TAX_NAME'] != $original['TAX_NAME'] ||
 			isset($modified['CUSTOMIZED']) && $modified['CUSTOMIZED'] != $original['CUSTOMIZED'] ||
 			isset($modified['MEASURE_CODE']) && $modified['MEASURE_CODE'] != $original['MEASURE_CODE'] ||
 			isset($modified['MEASURE_NAME']) && $modified['MEASURE_NAME'] != $original['MEASURE_NAME'] ||
@@ -1486,9 +1579,6 @@ class CAllCrmProductRow
 
 	private static function RegisterEvents($ownerType, $ownerID, $arEvents, $checkPerms)
 	{
-		global $USER;
-		$userID = isset($USER) && ($USER instanceof CUser) && ('CUser' === get_class($USER)) ? $USER->GetId() : 0;
-
 		$CCrmEvent = new CCrmEvent();
 		foreach($arEvents as $arEvent)
 		{
@@ -1497,11 +1587,8 @@ class CAllCrmProductRow
 			$arEvent['ENTITY_ID'] = $ownerID;
 			$arEvent['ENTITY_FIELD'] = 'PRODUCT_ROWS';
 
-			if($userID > 0)
-			{
-				$arEvent['USER_ID']  = $userID;
-			}
-
+			// Do not stamp the ambient hit user as the author; let
+			// CCrmEvent::Add resolve a meaningful one (explicit context user / system).
 			$CCrmEvent->Add($arEvent, $checkPerms);
 		}
 

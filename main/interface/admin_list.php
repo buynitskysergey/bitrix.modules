@@ -722,7 +722,7 @@ class CAdminList
 	{
 		global $set_default;
 		$sTableID = $this->table_id;
-		return $set_default=="Y"
+		return ($set_default === 'Y' || $_REQUEST['set_default'] === 'Y')
 			&& (
 				!isset($this->session["SESS_ADMIN"][$sTableID])
 				|| empty($this->session["SESS_ADMIN"][$sTableID])

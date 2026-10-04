@@ -1,0 +1,8 @@
+{
+    "defaultTableName": "b_timeman_entries",
+    "installDirectoriesMapping": {
+        "install/activities": "activities",
+        "install/components": "components",
+        "install/js": "js"
+    }
+}

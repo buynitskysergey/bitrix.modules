@@ -13,6 +13,9 @@ use Bitrix\Crm\Integration\AiAssistant\Tools\DynamicType\CreateDynamicTypeTool;
 use Bitrix\Crm\Integration\AiAssistant\Tools\DynamicType\SearchDynamicTypeTool;
 use Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\Tool\AutomatedSolution;
 use Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\Tool\SmartProcess;
+use Bitrix\Main\Loader;
+
+Loader::requireModule('aiassistant');
 
 final class SmartProcessToolSet extends BaseToolSet
 {

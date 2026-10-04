@@ -5,7 +5,7 @@ namespace Bitrix\Crm\Integration\AI\Model;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Entity\AiQualityAssessmentTable;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\JobRepository;
-use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Main\Application;
 use Bitrix\Main\DB\SqlExpression;
@@ -272,13 +272,37 @@ final class QueueTable extends DataManager
 
 	public static function deleteByItem(
 		ItemIdentifier $target,
-		int $typeId = ScoreCall::TYPE_ID,
+		int $typeId = ScoreCallV2::TYPE_ID,
 	): Result
 	{
 		$jobIds = self::getJobIds([
 			'=ENTITY_TYPE_ID' => $target->getEntityTypeId(),
 			'=ENTITY_ID' => $target->getEntityId(),
 			'=TYPE_ID' => $typeId,
+		]);
+
+		$sqlQuery = new SqlExpression(
+			/** @lang text */
+			'DELETE FROM ?# WHERE ENTITY_TYPE_ID=?i AND ENTITY_ID=?i AND TYPE_ID=?i',
+			self::getTableName(),
+			$target->getEntityTypeId(),
+			$target->getEntityId(),
+			$typeId,
+		);
+
+		Application::getConnection()->query((string)$sqlQuery);
+
+		self::cleanCache();
+		self::deleteRelated($target, $jobIds);
+
+		return new Result();
+	}
+
+	public static function deleteAllByItem(ItemIdentifier $target): Result
+	{
+		$jobIds = self::getJobIds([
+			'=ENTITY_TYPE_ID' => $target->getEntityTypeId(),
+			'=ENTITY_ID' => $target->getEntityId(),
 		]);
 
 		$sqlQuery = new SqlExpression(

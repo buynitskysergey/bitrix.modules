@@ -113,6 +113,8 @@ final class DataCollectorManager
 				$result['base_deal'] = $baseDeal;
 			}
 
+			$this->applyTranscriptBudget($result);
+
 			return $result;
 		}
 		catch (Throwable $exception)
@@ -127,6 +129,36 @@ final class DataCollectorManager
 
 			return [];
 		}
+	}
+
+	/**
+	 * Applies the aggregate transcript budget (layer A) across the client's communication_data,
+	 * base deal first, then deals_list by freshness. No-op when the feature or budget is off.
+	 *
+	 * @param array<string, mixed> $result
+	 */
+	private function applyTranscriptBudget(array &$result): void
+	{
+		$commBlocks = [];
+
+		if (isset($result['base_deal']['communication_data']) && is_array($result['base_deal']['communication_data']))
+		{
+			$commBlocks[] = &$result['base_deal']['communication_data'];
+		}
+
+		if (isset($result['deals_list']) && is_array($result['deals_list']))
+		{
+			foreach ($result['deals_list'] as &$deal)
+			{
+				if (isset($deal['communication_data']) && is_array($deal['communication_data']))
+				{
+					$commBlocks[] = &$deal['communication_data'];
+				}
+			}
+			unset($deal);
+		}
+
+		(new TranscriptBudgetTrimmer())->trimResult($commBlocks);
 	}
 
 	private function getClientCollector(): ClientDataCollector

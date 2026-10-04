@@ -12,6 +12,7 @@ use Bitrix\Main;
 use Bitrix\Main\Grid\Context;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Sale\Location;
+use Bitrix\Main\Web\Uri;
 
 Loc::loadMessages(__FILE__);
 
@@ -583,11 +584,11 @@ final class LocationHelper extends NameHelper
 				{
 					$node = array(
 						"text" => ($queryParams['SHOW_CHECKBOX'] ? '<input type="checkbox" value="'.intval($id).'" />&nbsp;' : '').$item['NAME'],
-						"fav_id" => intval($id), // allows javascript to know what item it is
-						"url" => \CHTTP::urlAddParams(static::getListUrl(intval($id)), ["apply_filter" => "y"]),
+						"fav_id" => intval($id), // allows JavaScript to know what item it is
+						"url" => (string)(new Uri(static::getListUrl(intval($id))))->addParams( ["apply_filter" => "y"]),
 						"module_id" => "sale",
 						"items_id" => self::packItemsQueryString(array('ID' => $id, 'LIMIT' => $limit, 'SHOW_CHECKBOX' => $queryParams['SHOW_CHECKBOX'])),
-						//"skip_chain" => true, // uncomment, if you dont want this menu item figure in breadcrumbs
+						//"skip_chain" => true, // uncomment, if you don't want this menu item figure in breadcrumbs
 						"parent_menu" => self::packItemsQueryString(array('ID' => $item['PARENT_ID'], 'LIMIT' => $limit, 'SHOW_CHECKBOX' => $queryParams['SHOW_CHECKBOX'])),
 						"more_url" => array( // additional route, which will be treated as an alias when calculating selected menu path
 							self::getEditUrl(intval($id)), // when editing existed node

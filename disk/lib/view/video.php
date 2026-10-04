@@ -17,6 +17,8 @@ class Video extends Base
 
 	const PLAYER_MIN_WIDTH = 400;
 	const PLAYER_MIN_HEIGHT = 300;
+	const TRANSFORMATION_RETRY_INTERVAL = 5;
+	const TRANSFORMATION_WAIT_TIMEOUT = 90;
 
 	public function __construct($name, $fileId, $viewId = null, $previewId = null, $isTransformationEnabledInStorage = true)
 	{
@@ -53,6 +55,16 @@ class Video extends Base
 		return true;
 	}
 
+	public function isTransformationAllowed($size = 0)
+	{
+		if (!$this->isViewerFormatEnabled())
+		{
+			return false;
+		}
+
+		return parent::isTransformationAllowed($size);
+	}
+
 	/**
 	 * Returns maximum allowed transformation file size.
 	 *
@@ -81,6 +93,11 @@ class Video extends Base
 	 */
 	public function render($params = array())
 	{
+		if (!$this->isViewerFormatEnabled())
+		{
+			return '';
+		}
+
 		if(empty($params) || !isset($params['PATH']) || empty($params['PATH']))
 		{
 			return '';
@@ -129,6 +146,13 @@ class Video extends Base
 			$this->renderForDesktop($params, $autostart, $sizeType);
 		}
 		return ob_get_clean();
+	}
+
+	private function isViewerFormatEnabled(): bool
+	{
+		return mb_strtolower($this->fileExtension) !== 'mkv'
+			|| Configuration::isEnabledFileViewerFormats()
+		;
 	}
 
 	public function getSizes($maxWidth = null, $maxHeight = null): array
@@ -253,6 +277,11 @@ class Video extends Base
 	 */
 	public function isHtmlAvailable()
 	{
+		if (!$this->isViewerFormatEnabled())
+		{
+			return false;
+		}
+
 		if($this->getData() || $this->isTransformationAllowed())
 		{
 			return true;
@@ -270,8 +299,10 @@ class Video extends Base
 			'',
 			[
 				'BFILE_ID' => $this->fileId,
-				'ATTACHED_OBJECT' => $params['ATTACHED_OBJECT'],
-				'FILE' => $params['FILE'],
+				'ATTACHED_OBJECT' => $params['ATTACHED_OBJECT'] ?? null,
+				'FILE' => $params['FILE'] ?? null,
+				'RETRY_INTERVAL' => self::TRANSFORMATION_RETRY_INTERVAL,
+				'WAIT_TIMEOUT' => self::TRANSFORMATION_WAIT_TIMEOUT,
 			]
 		);
 
@@ -421,7 +452,12 @@ class Video extends Base
 		}
 		else
 		{
-			$params['TYPE'] = $mimeTypes[$this->getExtension()];
+			$type = $mimeTypes[$this->getExtension()];
+			$params['TYPE'] = $type;
+			$params['TRACKS'][] = [
+				'src' => $params['PATH'],
+				'type' => $type,
+			];
 		}
 		return $params;
 	}

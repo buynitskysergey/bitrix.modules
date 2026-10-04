@@ -6,6 +6,7 @@ use Bitrix\Disk;
 use Bitrix\Disk\Infrastructure\Controller\HtmlViewerRefusalResponse;
 use Bitrix\Disk\Internal\Service\HtmlViewerService;
 use Bitrix\Disk\Internal\Service\MarkdownRenderService;
+use Bitrix\Disk\Internal\Service\TiffPreviewService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Main\DI\ServiceLocator;
@@ -35,6 +36,10 @@ final class Version extends Engine\Controller
 				new ActionFilter\CloseSession(),
 			]
 		];
+		$configureActions['showTiffPreview'] = $configureActions['showMarkdown'];
+		$configureActions['showTiffPreview']['+prefilters'][] = new ActionFilter\HttpMethod([
+			ActionFilter\HttpMethod::METHOD_GET,
+		]);
 
 		return $configureActions;
 	}
@@ -89,6 +94,24 @@ final class Version extends Engine\Controller
 	public function showHtmlAction(Disk\Version $version): HttpResponse
 	{
 		return ServiceLocator::getInstance()->get(HtmlViewerService::class)->showByVersion($version);
+	}
+
+	public function showTiffPreviewAction(
+		Disk\Version $version,
+		?string $previewToken = null,
+	): array|Response\BFile|null
+	{
+		$result = (new TiffPreviewService())->getByVersion($version, $previewToken);
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		$data = $result->getData();
+
+		return $data['response'] ?? $data;
 	}
 
 	public function deleteAction(Disk\Version $version)

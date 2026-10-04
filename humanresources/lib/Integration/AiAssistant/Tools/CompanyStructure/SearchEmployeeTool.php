@@ -6,6 +6,7 @@ namespace Bitrix\HumanResources\Integration\AiAssistant\Tools\CompanyStructure;
 
 use Bitrix\HumanResources\Access\Model\UserModel;
 use Bitrix\HumanResources\Access\Permission\PermissionDictionary;
+use Bitrix\HumanResources\Access\Permission\PermissionHelper;
 use Bitrix\HumanResources\Access\Permission\PermissionVariablesDictionary;
 use Bitrix\HumanResources\Integration\AiAssistant\Tools\NodeBaseTool;
 use Bitrix\HumanResources\Integration\AiAssistant\Tools\Schema\InputProperty;
@@ -151,8 +152,12 @@ class SearchEmployeeTool extends NodeBaseTool
 			return true;
 		}
 
-		return $user->getPermission(PermissionDictionary::HUMAN_RESOURCES_STRUCTURE_VIEW)
-			!== PermissionVariablesDictionary::VARIABLE_NONE;
+		$value = PermissionHelper::getPermissionValue(
+			PermissionDictionary::HUMAN_RESOURCES_STRUCTURE_VIEW,
+			$userId,
+		)->getFirst()?->value ?? PermissionVariablesDictionary::VARIABLE_NONE;
+
+		return $value !== PermissionVariablesDictionary::VARIABLE_NONE;
 	}
 
 	/**

@@ -6,6 +6,7 @@ use Bitrix\Calendar\Integration\AI;
 use Bitrix\Calendar\Integration\Bitrix24Manager;
 use Bitrix\Calendar\UserSettings;
 use Bitrix\Calendar\Util;
+use Bitrix\Calendar\View\EventViewData;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\Response\Component;
@@ -92,6 +93,23 @@ class CalendarEventViewForm extends Controller
 			return [];
 		}
 
+		$permissions = \CCalendarEvent::getEventPermissions($entry, $userId);
+		$viewData = EventViewData::prepare(
+			$entry,
+			$responseParams['section'],
+			$permissions,
+			$responseParams['userIndex'],
+			$userId,
+		);
+		$responseParams['entry'] = $viewData['entry'];
+		$responseParams['section'] = $viewData['section'];
+		$responseParams['userIndex'] = $viewData['userIndex'];
+
+		if ($viewData['restricted'])
+		{
+			return $this->getRestrictedViewParams($responseParams, $isCollabUser);
+		}
+
 		$params = array_merge([
 			'event' => $entry,
 			'type' => \CCalendar::GetType(),
@@ -127,7 +145,6 @@ class CalendarEventViewForm extends Controller
 
 		$event['REMIND'] = \CCalendarReminder::GetTextReminders($event['REMIND'] ?? []);
 
-		$permissions = \CCalendarEvent::getEventPermissions($event, $userId);
 		$event['permissions'] = $permissions;
 		$params['entry']['permissions'] = $permissions;
 
@@ -140,7 +157,7 @@ class CalendarEventViewForm extends Controller
 		$meetingHost = false;
 		if ($event['IS_MEETING'])
 		{
-			$userIndex = \CCalendarEvent::getUserIndex();
+			$userIndex = $params['userIndex'];
 			$attendees = ['y' => [], 'n' => [], 'q' => [], 'i' => []];
 
 			if (isset($event['ATTENDEE_LIST']) && is_array($event['ATTENDEE_LIST']))
@@ -186,6 +203,7 @@ class CalendarEventViewForm extends Controller
 		$params['event'] = $event;
 		$params['eventId'] = $event['ID'];
 		$params['parentId'] = $event['PARENT_ID'];
+		$params['isRestrictedEventView'] = false;
 		$params['name'] = $event['NAME'];
 		$params['fromToHtml'] = $this->getFromToHtml($event);
 		$params['timezoneHint'] = $timezoneHint;
@@ -263,6 +281,76 @@ class CalendarEventViewForm extends Controller
 		$params['downloadIcsEnabled'] = ($event['permissions']['view_full'] ?? null) && $isCollabUser;
 
 		return $params;
+	}
+
+	private function getRestrictedViewParams(array $context, bool $isCollabUser): array
+	{
+		$entry = $context['entry'];
+		$userId = $context['userId'];
+
+		return [
+			'id' => 'calendar_view_slider_' . mt_rand(),
+			'entry' => $entry,
+			'event' => $entry,
+			'section' => $context['section'],
+			'userIndex' => [],
+			'userId' => $userId,
+			'userTimezone' => $context['userTimezone'],
+			'userSettings' => $context['userSettings'],
+			'plannerFeatureEnabled' => $context['plannerFeatureEnabled'],
+			'dayOfWeekMonthFormat' => $context['dayOfWeekMonthFormat'],
+			'type' => \CCalendar::GetType(),
+			'bIntranet' => \CCalendar::IsIntranetEnabled(),
+			'bSocNet' => \CCalendar::IsSocNet(),
+			'AVATAR_SIZE' => 21,
+			'eventId' => $entry['ID'],
+			'parentId' => $entry['ID'],
+			'isRestrictedEventView' => true,
+			'name' => $entry['NAME'],
+			'fromToHtml' => $this->getFromToHtml($entry),
+			'timezoneHint' => Util::getTimezoneHint($userId, $entry),
+			'isMeeting' => false,
+			'isRemind' => '',
+			'isRrule' => false,
+			'rruleDescription' => '',
+			'avatarSize' => 34,
+			'attendees' => ['y' => [], 'n' => [], 'q' => [], 'i' => []],
+			'curUserStatus' => '',
+			'meetingHost' => [
+				'ID' => 0,
+				'URL' => '',
+				'DISPLAY_NAME' => '',
+				'AVATAR' => null,
+				'COLLAB_USER' => false,
+				'SHARING_USER' => false,
+				'EMAIL_USER' => false,
+			],
+			'meetingHostDisplayName' => '',
+			'meetingHostWorkPosition' => '',
+			'meetingCreatorUrl' => null,
+			'meetingCreatorDisplayName' => null,
+			'meetingCreatorCollabUser' => false,
+			'isHighImportance' => false,
+			'description' => null,
+			'isWebdavEvent' => null,
+			'isCrmEvent' => false,
+			'accessibility' => $entry['ACCESSIBILITY'],
+			'isIntranetEnabled' => \CCalendar::IsIntranetEnabled(),
+			'isPrivate' => false,
+			'location' => '',
+			'canEditCalendar' => false,
+			'canAttendeeEditCalendar' => false,
+			'canDeleteEvent' => false,
+			'showComments' => false,
+			'filesView' => null,
+			'crmView' => null,
+			'signedEvent' => null,
+			'isCollabUser' => $isCollabUser,
+			'downloadIcsEnabled' => false,
+			'guestLinkAvailable' => false,
+			'guestLinkUrl' => null,
+			'entryUrl' => '',
+		];
 	}
 
 	//get components actions

@@ -7,16 +7,20 @@ namespace Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action;
 use Bitrix\Crm\Service\Timeline\Context;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\AnalyzeCommunicationInCall;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\AnalyzeCommunicationInChat;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\AnalyzeCommunicationInEmail;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\ConfirmFields;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FillFieldsInCall;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FillFieldsInChat;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FillFieldsInEmail;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FillRepeatSaleTips;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FullInCall;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FullInChat;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FullInEmail;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\ScoreCall;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\SummarizeInCall;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\SummarizeInChat;
+use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\SummarizeInEmail;
 use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\TranscribeInCall;
-use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FullInCall;
-use Bitrix\Crm\Service\Timeline\Item\Activity\AI\Action\Type\FullInChat;
 use Bitrix\Crm\Service\Timeline\Item\AssociatedEntityModel;
 
 final class AIActionRegistry
@@ -25,16 +29,20 @@ final class AIActionRegistry
 	private const ACTION_CLASSES = [
 		FillFieldsInCall::class,
 		FillFieldsInChat::class,
+		FillFieldsInEmail::class,
 		ScoreCall::class,
 		ConfirmFields::class,
 		FillRepeatSaleTips::class,
 		AnalyzeCommunicationInCall::class,
 		AnalyzeCommunicationInChat::class,
+		AnalyzeCommunicationInEmail::class,
 		SummarizeInCall::class,
 		SummarizeInChat::class,
+		SummarizeInEmail::class,
 		TranscribeInCall::class,
 		FullInCall::class,
 		FullInChat::class,
+		FullInEmail::class,
 	];
 
 	private function __construct() {}
@@ -47,7 +55,8 @@ final class AIActionRegistry
 		string $scenario,
 		int $activityId,
 		Context $context,
-		?AssociatedEntityModel $model = null
+		?AssociatedEntityModel $model = null,
+		int $rootActivityId = 0,
 	): ?AIAction
 	{
 		if (!$model)
@@ -64,7 +73,7 @@ final class AIActionRegistry
 				&& in_array($providerId, $class::getSupportedProviders(), true)
 			)
 			{
-				return new $class($activityId, $context, $model);
+				return new $class($activityId, $context, $model, $rootActivityId);
 			}
 		}
 

@@ -6,11 +6,14 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Bizproc\Internal\Entity\StorageItem\StorageItem;
 use Bitrix\Bizproc\Internal\Exception\Exception;
 use Bitrix\Bizproc\Internal\Exception\ErrorBuilder;
+use Bitrix\Bizproc\Public\Command\StorageItem\Mixins\ChecksDiskWriteLimitTrait;
 use Bitrix\Main\Result;
 
 
 class UpdateStorageItemCommand extends AbstractCommand
 {
+	use ChecksDiskWriteLimitTrait;
+
 	public function __construct(
 		public readonly int $updatedBy,
 		public readonly int $storageTypeId,
@@ -35,6 +38,11 @@ class UpdateStorageItemCommand extends AbstractCommand
 			storageTypeId: $props['storageTypeId'],
 			storageItem: StorageItem::mapFromArray($props['storageItem'], $props['storageTypeId']),
 		);
+	}
+
+	protected function beforeRun(): ?Result
+	{
+		return $this->checkDiskWriteLimit();
 	}
 
 	protected function execute(): Result

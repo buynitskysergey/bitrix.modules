@@ -64,7 +64,7 @@ final class ExpandableListFactory
 				$bottomBlock->addContentBlock(
 					'variationInfo',
 					(new Text())
-						->setColor(Text::COLOR_BASE_50)
+						->setColor(Text::COLOR_BASE_90)
 						->setValue($product->getVariationInfo())
 						->setFontSize(Text::FONT_SIZE_SM)
 				);

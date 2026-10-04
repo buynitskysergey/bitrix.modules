@@ -4,6 +4,7 @@
  * IBlock implementation only supported.
  * */
 use Bitrix\Crm\Integration\StorageType;
+use Bitrix\Main\Web\Uri;
 
 class CCrmWebDavHelper
 {
@@ -229,10 +230,10 @@ class CCrmWebDavHelper
 			'ID' => $elementID,
 			'FILE_ID' => $arElement['PROPERTY_FILE_VALUE'],
 			'NAME' => $arElement['NAME'],
-			'EDIT_URL' => CHTTP::urlAddParams($editUrl, array('ncc' => '1')),
-			'VIEW_URL' => CHTTP::urlAddParams($viewUrl, array('ncc' => '1')),
-			'DELETE_URL' => CHTTP::urlAddParams($deleteUrl, array('ncc' => '1')),
-			'SHOW_URL' => CHTTP::urlAddParams($showUrl, array('ncc' => '1')),
+			'EDIT_URL' => (string)(new Uri($editUrl))->addParams(array('ncc' => '1')),
+			'VIEW_URL' => (string)(new Uri($viewUrl))->addParams(array('ncc' => '1')),
+			'DELETE_URL' => (string)(new Uri($deleteUrl))->addParams(array('ncc' => '1')),
+			'SHOW_URL' => (string)(new Uri($showUrl))->addParams(array('ncc' => '1')),
 			'SIZE' => $size
 		);
 	}

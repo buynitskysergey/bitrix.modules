@@ -7,6 +7,7 @@ use Bitrix\Rest\AppLogTable;
 use Bitrix\Rest\AppTable;
 use Bitrix\Rest\EventTable;
 use Bitrix\Rest\Event\Sender;
+use Bitrix\Rest\Internal\Service\Application\ApplicationInstallationFinalizer;
 use Bitrix\Main\Event;
 use Bitrix\Rest\Marketplace\Application;
 
@@ -169,6 +170,19 @@ class AppConfiguration
 					);
 					if (!$event = $res->fetch())
 					{
+						$finalizationResult = (new ApplicationInstallationFinalizer())->finalize(
+							(int)$app['ID'],
+							true,
+						);
+						if (!$finalizationResult->isSuccess())
+						{
+							return [
+								'ERROR_EXCEPTION' => [
+									'message' => Loc::getMessage('REST_CONFIGURATION_ERROR_INSTALL_APP_CONTENT'),
+								],
+							];
+						}
+
 						$res = EventTable::add(
 							[
 								"APP_ID" => $app['ID'],
@@ -205,15 +219,6 @@ class AppConfiguration
 								Sender::bind('rest', 'OnRestAppUserReady');
 							}
 						}
-
-						AppTable::setSkipRemoteUpdate(true);
-						AppTable::update(
-							$app['ID'],
-							[
-								'INSTALLED' => AppTable::INSTALLED
-							]
-						);
-						AppTable::setSkipRemoteUpdate(false);
 
 						AppLogTable::log($app['ID'], AppLogTable::ACTION_TYPE_INSTALL);
 

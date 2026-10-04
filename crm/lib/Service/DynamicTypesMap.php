@@ -92,7 +92,8 @@ class DynamicTypesMap
 		if (!$this->isTypesLoaded)
 		{
 			$this->isTypesLoaded = true;
-			foreach ($this->getTypesCollection() as $type)
+			// iterate over a snapshot: the collection iterator is shared, and factories called below traverse it too
+			foreach ($this->getTypesCollection()->getAll() as $type)
 			{
 				$entityTypeId = $type->getEntityTypeId();
 

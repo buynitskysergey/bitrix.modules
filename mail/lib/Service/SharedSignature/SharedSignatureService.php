@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Service\SharedSignature;
 
-use Bitrix\Mail\Helper\LicenseManager;
 use Bitrix\Mail\Helper\MailAccess;
+use Bitrix\Mail\Integration\Main\SenderProvider;
+use Bitrix\Mail\Internal\Service\Signature\Template\SignatureTemplateProcessor;
+use Bitrix\Mail\Internal\Service\Signature\Template\SignatureTemplateProcessorFactory;
 use Bitrix\Mail\Internals\Entity\SharedSignature;
 use Bitrix\Mail\Internals\SharedSignatureAssignmentTable;
 use Bitrix\Mail\Internals\SharedSignatureTable;
@@ -24,9 +26,21 @@ class SharedSignatureService
 	public const ERROR_ACCESS_DENIED = 'SHARED_SIGNATURE_ACCESS_DENIED';
 	public const ERROR_INVALID_SCOPE = 'SIGNATURE_INVALID_SCOPE';
 	public const ERROR_ASSIGNMENTS_REQUIRED_FOR_SCOPE_CHANGE = 'SIGNATURE_ASSIGNMENTS_REQUIRED_FOR_SCOPE_CHANGE';
+	public const ERROR_SHARED_SENDER_ASSIGNMENT_NOT_ALLOWED = 'SIGNATURE_SHARED_SENDER_ASSIGNMENT_NOT_ALLOWED';
 	public const ERROR_EMPTY_BODY = 'SIGNATURE_EMPTY_BODY';
 
 	private const INTERFACE_OPTION_NAME = 'shared_signature_enabled';
+	private readonly SenderIdentityResolver $senderIdentityResolver;
+	private SignatureTemplateProcessor $templateProcessor;
+
+	public function __construct(
+		?SenderIdentityResolver $senderIdentityResolver = null,
+		?SignatureTemplateProcessor $templateProcessor = null,
+	)
+	{
+		$this->senderIdentityResolver = $senderIdentityResolver ?? new SenderIdentityResolver();
+		$this->templateProcessor = $templateProcessor ?? SignatureTemplateProcessorFactory::create();
+	}
 
 	/**
 	 * Returns signatures with their assignments, newest first.
@@ -147,8 +161,7 @@ class SharedSignatureService
 
 		return self::canManageSharedScope()
 			? ['LOGIC' => 'OR', $ownScope, $sharedScope]
-			: $ownScope
-		;
+			: $ownScope;
 	}
 
 	/**
@@ -281,6 +294,32 @@ class SharedSignatureService
 
 		$currentUserId = (int)CurrentUser::get()->getId();
 		$ownerId = (int)($fields['ownerId'] ?? $currentUserId);
+		if (!$this->canCreate($scope, $ownerId, $currentUserId))
+		{
+			$result->addError(self::accessDeniedError());
+
+			return $result;
+		}
+
+		$canonicalizeResult = $this->canonicalizeSignature((string)($fields['signature'] ?? ''));
+		if (!$canonicalizeResult->isSuccess())
+		{
+			$result->addErrors($canonicalizeResult->getErrors());
+
+			return $result;
+		}
+		$fields['signature'] = (string)($canonicalizeResult->getData()['template'] ?? '');
+
+		$assignments = $this->normalizeAssignmentsForWrite(
+			$scope,
+			$ownerId,
+			self::normalizeAssignments($assignments),
+		);
+		$assignmentValidationResult = self::validateAssignmentsForScope($scope, $assignments);
+		if (!$assignmentValidationResult->isSuccess())
+		{
+			return $assignmentValidationResult;
+		}
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
@@ -306,7 +345,7 @@ class SharedSignatureService
 
 			$signatureId = (int)$addResult->getId();
 
-			$assignResult = $this->saveAssignments($signatureId, self::normalizeAssignments($assignments));
+			$assignResult = $this->saveAssignments($signatureId, $assignments);
 			if (!$assignResult->isSuccess())
 			{
 				$connection->rollbackTransaction();
@@ -339,8 +378,12 @@ class SharedSignatureService
 	 *
 	 * @param array{signature?: string, scope?: string, ownerId?: int} $fields Partial update — only present keys are applied.
 	 * @param array<array{targetType: string, targetId: int, targetValue?: string, isFlat: bool}>|null $assignments When null, assignments are not changed.
+	 * @param bool $allowMailboxRoundTrip Set only by the compatible string API: an unchanged echo of
+	 *        the current mailbox sender keeps the mailbox binding even when an identically formatted
+	 *        independent sender exists. Explicit typed assignments must leave it false, otherwise a
+	 *        deliberate switch to the independent sender would be folded back into the mailbox.
 	 */
-	public function update(int $id, array $fields, ?array $assignments = null): Result
+	public function update(int $id, array $fields, ?array $assignments = null, bool $allowMailboxRoundTrip = false): Result
 	{
 		$result = new Result();
 
@@ -355,7 +398,10 @@ class SharedSignatureService
 			return $result;
 		}
 
-		if (array_key_exists('scope', $fields) && !in_array((string)$fields['scope'], SharedSignatureTable::getScopes(), true))
+		if (
+			array_key_exists('scope', $fields)
+			&& !in_array((string)$fields['scope'], SharedSignatureTable::getScopes(), true)
+		)
 		{
 			$result->addError(new Error(
 				Loc::getMessage('MAIL_SIGNATURE_ERROR_INVALID_SCOPE'),
@@ -365,11 +411,22 @@ class SharedSignatureService
 			return $result;
 		}
 
+		$currentUserId = (int)CurrentUser::get()->getId();
+		$scope = (string)($fields['scope'] ?? $signature->get('SCOPE'));
+		$scopeChanged = array_key_exists('scope', $fields)
+			&& (string)$fields['scope'] !== (string)$signature->get('SCOPE');
+		$targetOwnerId = (int)($fields['ownerId'] ?? $signature->get('OWNER_ID'));
 		if (
-			array_key_exists('scope', $fields)
-			&& (string)$fields['scope'] !== (string)$signature->get('SCOPE')
-			&& $assignments === null
+			!$this->canModify($signature, $currentUserId)
+			|| !$this->canCreate($scope, $targetOwnerId, $currentUserId)
 		)
+		{
+			$result->addError(self::accessDeniedError());
+
+			return $result;
+		}
+
+		if ($scopeChanged && $assignments === null)
 		{
 			$result->addError(new Error(
 				Loc::getMessage('MAIL_SIGNATURE_ERROR_ASSIGNMENTS_REQUIRED_FOR_SCOPE_CHANGE'),
@@ -377,6 +434,50 @@ class SharedSignatureService
 			));
 
 			return $result;
+		}
+
+		if ($assignments !== null)
+		{
+			$ownerId = (int)($fields['ownerId'] ?? $signature->get('OWNER_ID'));
+			$existingMailboxNames = [];
+			if ($allowMailboxRoundTrip)
+			{
+				foreach ($this->getAssignmentsForSignature($id) as $existingAssignment)
+				{
+					if ((string)$existingAssignment['TARGET_TYPE'] === SharedSignatureAssignmentTable::TARGET_MAILBOX)
+					{
+						$existingMailboxNames[(int)$existingAssignment['TARGET_ID']] =
+							(string)$existingAssignment['TARGET_VALUE'];
+					}
+				}
+			}
+			$assignments = $this->normalizeAssignmentsForWrite(
+				$scope,
+				$ownerId,
+				self::normalizeAssignments($assignments),
+				$existingMailboxNames,
+			);
+		}
+
+		if ($assignments !== null)
+		{
+			$assignmentValidationResult = self::validateAssignmentsForScope($scope, $assignments);
+			if (!$assignmentValidationResult->isSuccess())
+			{
+				return $assignmentValidationResult;
+			}
+		}
+
+		if (array_key_exists('signature', $fields))
+		{
+			$canonicalizeResult = $this->canonicalizeSignature((string)$fields['signature']);
+			if (!$canonicalizeResult->isSuccess())
+			{
+				$result->addErrors($canonicalizeResult->getErrors());
+
+				return $result;
+			}
+			$fields['signature'] = (string)($canonicalizeResult->getData()['template'] ?? '');
 		}
 
 		$connection = Application::getConnection();
@@ -409,7 +510,7 @@ class SharedSignatureService
 
 			if ($assignments !== null)
 			{
-				$syncResult = $this->syncAssignments($id, self::normalizeAssignments($assignments));
+				$syncResult = $this->syncAssignments($id, $assignments);
 				if (!$syncResult->isSuccess())
 				{
 					$connection->rollbackTransaction();
@@ -431,6 +532,11 @@ class SharedSignatureService
 		return $result;
 	}
 
+	protected function canonicalizeSignature(string $signature): Result
+	{
+		return $this->templateProcessor->canonicalize($signature);
+	}
+
 	/**
 	 * Deletes a shared signature and its assignments (cascade at service level).
 	 *
@@ -441,6 +547,23 @@ class SharedSignatureService
 	public function delete(int $id): Result
 	{
 		$result = new Result();
+		$signature = SharedSignatureTable::getById($id)->fetchObject();
+		if ($signature === null)
+		{
+			$result->addError(new Error(
+				Loc::getMessage('MAIL_SIGNATURE_ERROR_NOT_FOUND'),
+				self::ERROR_NOT_FOUND,
+			));
+
+			return $result;
+		}
+
+		if (!$this->canModify($signature))
+		{
+			$result->addError(self::accessDeniedError());
+
+			return $result;
+		}
 
 		$migrator = new SignatureMigrator();
 		$legacyId = $migrator->findLegacySourceId($id);
@@ -502,6 +625,30 @@ class SharedSignatureService
 			return $result;
 		}
 
+		if (
+			(string)$signature->get('SCOPE') !== SharedSignatureTable::SCOPE_SHARED
+			|| !self::canManageSharedScope()
+		)
+		{
+			$result->addError(self::accessDeniedError());
+
+			return $result;
+		}
+
+		$assignments = $this->normalizeAssignmentsForWrite(
+			(string)$signature->get('SCOPE'),
+			(int)$signature->get('OWNER_ID'),
+			self::normalizeAssignments($assignments),
+		);
+		$assignmentValidationResult = self::validateAssignmentsForScope(
+			(string)$signature->get('SCOPE'),
+			$assignments,
+		);
+		if (!$assignmentValidationResult->isSuccess())
+		{
+			return $assignmentValidationResult;
+		}
+
 		$connection = Application::getConnection();
 		$connection->startTransaction();
 
@@ -516,7 +663,7 @@ class SharedSignatureService
 				return $result;
 			}
 
-			$assignResult = $this->saveAssignments($id, self::normalizeAssignments($assignments));
+			$assignResult = $this->saveAssignments($id, $assignments);
 			if (!$assignResult->isSuccess())
 			{
 				$connection->rollbackTransaction();
@@ -532,6 +679,43 @@ class SharedSignatureService
 			$connection->rollbackTransaction();
 
 			throw $e;
+		}
+
+		return $result;
+	}
+
+	public static function isValidationError(Error $error): bool
+	{
+		return in_array($error->getCode(), [
+			self::ERROR_ASSIGNMENTS_REQUIRED_FOR_SCOPE_CHANGE,
+			self::ERROR_SHARED_SENDER_ASSIGNMENT_NOT_ALLOWED,
+		], true);
+	}
+
+	/**
+	 * @param array<array{targetType: string, targetId: int, targetValue: string, isFlat: bool}> $assignments
+	 */
+	private static function validateAssignmentsForScope(string $scope, array $assignments): Result
+	{
+		$result = new Result();
+		if ($scope !== SharedSignatureTable::SCOPE_SHARED)
+		{
+			return $result;
+		}
+
+		foreach ($assignments as $assignment)
+		{
+			if ($assignment['targetType'] !== SharedSignatureAssignmentTable::TARGET_SENDER)
+			{
+				continue;
+			}
+
+			$result->addError(new Error(
+				Loc::getMessage('MAIL_SIGNATURE_ERROR_SHARED_SENDER_ASSIGNMENT_NOT_ALLOWED'),
+				self::ERROR_SHARED_SENDER_ASSIGNMENT_NOT_ALLOWED,
+			));
+
+			break;
 		}
 
 		return $result;
@@ -562,7 +746,8 @@ class SharedSignatureService
 
 	/**
 	 * Brings raw assignment input to the internal shape and drops unknown target types.
-	 * A sender target carries its string in targetValue and keeps targetId at 0.
+	 * A sender target carries its string in targetValue and keeps targetId at 0. A mailbox target
+	 * may carry the display name used by the personal compatibility sender contract.
 	 *
 	 * @param array<array{targetType?: string, targetId?: int, targetValue?: string, isFlat?: bool}> $assignments
 	 * @return array<array{targetType: string, targetId: int, targetValue: string, isFlat: bool}>
@@ -591,12 +776,17 @@ class SharedSignatureService
 				continue;
 			}
 
-			$isSender = $type === SharedSignatureAssignmentTable::TARGET_SENDER;
+			$isStringValue = in_array($type, [
+				SharedSignatureAssignmentTable::TARGET_MAILBOX,
+				SharedSignatureAssignmentTable::TARGET_SENDER,
+			], true);
 
 			$normalized[] = [
 				'targetType' => $type,
-				'targetId' => $isSender ? 0 : (int)($assignment['targetId'] ?? $assignment['TARGET_ID'] ?? 0),
-				'targetValue' => $isSender
+				'targetId' => $type === SharedSignatureAssignmentTable::TARGET_SENDER
+					? 0
+					: (int)($assignment['targetId'] ?? $assignment['TARGET_ID'] ?? 0),
+				'targetValue' => $isStringValue
 					? (string)($assignment['targetValue'] ?? $assignment['TARGET_VALUE'] ?? '')
 					: '',
 				'isFlat' => self::isAffirmative($assignment['isFlat'] ?? $assignment['IS_FLAT'] ?? false),
@@ -604,6 +794,134 @@ class SharedSignatureService
 		}
 
 		return $normalized;
+	}
+
+	/**
+	 * Replaces an exact current sender of an owner signature with its stable mailbox target.
+	 *
+	 * @param array<array{targetType: string, targetId: int, targetValue: string, isFlat: bool}> $assignments
+	 * @return array<array{targetType: string, targetId: int, targetValue: string, isFlat: bool}>
+	 */
+	private function normalizeAssignmentsForWrite(
+		string $scope,
+		int $ownerId,
+		array $assignments,
+		array $existingMailboxNames = [],
+	): array
+	{
+		if ($scope !== SharedSignatureTable::SCOPE_OWNER)
+		{
+			foreach ($assignments as &$assignment)
+			{
+				if ($assignment['targetType'] === SharedSignatureAssignmentTable::TARGET_MAILBOX)
+				{
+					$assignment['targetValue'] = '';
+				}
+			}
+			unset($assignment);
+
+			return $assignments;
+		}
+
+		if ($ownerId <= 0)
+		{
+			return $assignments;
+		}
+
+		$senders = [];
+		foreach ($assignments as $assignment)
+		{
+			if ($assignment['targetType'] === SharedSignatureAssignmentTable::TARGET_SENDER)
+			{
+				$senders[] = $assignment['targetValue'];
+			}
+		}
+
+		if ($senders === [])
+		{
+			return $assignments;
+		}
+
+		try
+		{
+			$identities = $this->senderIdentityResolver->resolveForOwner($ownerId, $senders);
+			$availableSenderCandidates = $this->loadAvailableSenderCandidates(
+				$ownerId,
+				array_column($identities, 'email'),
+			);
+		}
+		catch (\Throwable)
+		{
+			return $assignments;
+		}
+
+		foreach ($assignments as &$assignment)
+		{
+			if ($assignment['targetType'] !== SharedSignatureAssignmentTable::TARGET_SENDER)
+			{
+				continue;
+			}
+
+			$key = AssignmentResolver::normalizeSenderKey($assignment['targetValue']);
+			$identity = $identities[$key] ?? null;
+			$isExistingMailboxRoundTrip = $identity !== null
+				&& $identity['mailboxId'] !== null
+				&& array_key_exists($identity['mailboxId'], $existingMailboxNames)
+				&& $existingMailboxNames[$identity['mailboxId']] === $identity['name'];
+			if (
+				$identity === null
+				|| $identity['mailboxId'] === null
+				|| $identity['isAlias']
+				|| (!$isExistingMailboxRoundTrip && !isset(
+					$availableSenderCandidates[$key]['mailboxIds'][$identity['mailboxId']],
+				))
+				|| (!$isExistingMailboxRoundTrip && $availableSenderCandidates[$key]['hasIndependentSender'])
+			)
+			{
+				continue;
+			}
+
+			$assignment['targetType'] = SharedSignatureAssignmentTable::TARGET_MAILBOX;
+			$assignment['targetId'] = $identity['mailboxId'];
+			$assignment['targetValue'] = $identity['name'];
+		}
+		unset($assignment);
+
+		return $assignments;
+	}
+
+	/**
+	 * @return array<string, array{mailboxIds: array<int, true>, hasIndependentSender: bool}>
+	 */
+	private function loadAvailableSenderCandidates(int $ownerId, array $emails): array
+	{
+		$candidates = [];
+		foreach (SenderProvider::getAvailableTypedSenders($ownerId, $emails) as $sender)
+		{
+			$mailboxId = (int)($sender['mailboxId'] ?? 0);
+			$keys = array_unique([
+				AssignmentResolver::normalizeSenderKey((string)$sender['sender']),
+				AssignmentResolver::normalizeSenderKey((string)$sender['email']),
+			]);
+			foreach ($keys as $key)
+			{
+				$candidates[$key] ??= [
+					'mailboxIds' => [],
+					'hasIndependentSender' => false,
+				];
+
+				if ($mailboxId > 0)
+				{
+					$candidates[$key]['mailboxIds'][$mailboxId] = true;
+				}
+				else
+				{
+					$candidates[$key]['hasIndependentSender'] = true;
+				}
+			}
+		}
+
+		return $candidates;
 	}
 
 	/**
@@ -829,18 +1147,15 @@ class SharedSignatureService
 
 	/**
 	 * Tells whether the current user may create, change and delete signatures of the
-	 * shared scope. Same pair of checks as SharedSignatureAccess: tariff plus the RBAC
-	 * right to manage employee mailboxes.
+	 * shared scope.
 	 *
 	 * A shared signature reaches mailboxes the user does not own — up to the whole portal — so it
-	 * takes the right to manage mailboxes, not the one to see their grid. Seeing a shared signature
-	 * assigned to oneself is a different matter and asks for nothing.
+	 * takes the dedicated right to manage shared signatures. Seeing a shared signature assigned to
+	 * oneself is a different matter and asks for nothing.
 	 */
 	public static function canManageSharedScope(): bool
 	{
-		return LicenseManager::isMailboxManagementEnabled()
-			&& MailAccess::hasCurrentUserAccessToMailboxManagement()
-		;
+		return MailAccess::hasCurrentUserAccessToSharedSignatureManagement();
 	}
 
 	/**
@@ -853,8 +1168,7 @@ class SharedSignatureService
 	{
 		return $this->isOwnerScope($signature)
 			? $this->isOwnedBy($signature, $userId)
-			: self::canManageSharedScope()
-		;
+			: self::canManageSharedScope();
 	}
 
 	/**
@@ -878,8 +1192,7 @@ class SharedSignatureService
 
 		return $scope === SharedSignatureTable::SCOPE_OWNER
 			? ($userId > 0 && $ownerId === $userId)
-			: self::canManageSharedScope()
-		;
+			: self::canManageSharedScope();
 	}
 
 	/**

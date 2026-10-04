@@ -5,6 +5,7 @@ namespace Bitrix\HumanResources\Compatibility\Event;
 use Bitrix\HumanResources\Compatibility\Utils\DepartmentBackwardAccessCode;
 use Bitrix\HumanResources\Config\Storage;
 use Bitrix\HumanResources\Enum\EventName;
+use Bitrix\HumanResources\Internals\Service\Container as InternalContainer;
 use Bitrix\HumanResources\Item\Collection\NodeMemberCollection;
 use Bitrix\HumanResources\Item\Node;
 use Bitrix\HumanResources\Item\NodeMember;
@@ -339,9 +340,9 @@ class NodeEventHandler
 		$headRole = self::getRole('HEAD');
 		$employeeRole = self::getRole('EMPLOYEE');
 
-		$heads =
-			Container::getNodeMemberRepository()
-				->findAllByRoleIdAndNodeId($headRole, $node->id)
+		$heads = $headRole !== null
+			? InternalContainer::getNodeMemberRepository()->findAllByRoleIdAndNodeId($headRole, $node->id, withVirtualUsers: true)
+			: new NodeMemberCollection()
 		;
 
 		$currentHead = $fields['UF_HEAD'] ?? null;

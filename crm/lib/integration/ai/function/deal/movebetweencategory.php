@@ -8,6 +8,7 @@ use Bitrix\Crm\Integration\AI\Function\Deal\Dto\MoveBetweenCategoryParameters;
 use Bitrix\Crm\Item\Deal;
 use Bitrix\Crm\Result;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Service\Factory;
 use Bitrix\Crm\Service\Operation\Update;
 use Bitrix\Crm\Service\UserPermissions;
@@ -87,7 +88,8 @@ final class MoveBetweenCategory implements AIFunction
 		$operation = $this->factory->getUpdateOperation($deal);
 		$operation
 			->getContext()
-			->setUserId($this->currentUserId);
+			->setUserId($this->currentUserId)
+			->setScope(Context::SCOPE_AI);
 
 		$operation
 			->disableCheckFields()

@@ -7,6 +7,7 @@ namespace Bitrix\Bizproc\Internal\Service\StorageActivity;
 use Bitrix\Bizproc\Activity\Dto\ContentBlock;
 use Bitrix\Bizproc\Activity\Dto\ContentBlockContext;
 use Bitrix\Bizproc\FieldType;
+use Bitrix\Bizproc\Internal\Entity\StorageField\StorageFieldCollection;
 use Bitrix\Bizproc\Internal\Repository\Mapper\StorageItemMapper;
 use Bitrix\Bizproc\Internal\Service\StorageField\FieldService;
 use Bitrix\Bizproc\Public\Provider\StorageFieldProvider;
@@ -69,7 +70,10 @@ final class StorageActivityService
 		return $options;
 	}
 
-	public static function getFilteringFieldsMap(int $storageId, ?array $prefetchedFields = null): array
+	public static function getFilteringFieldsMap(
+		int $storageId,
+		?StorageFieldCollection $prefetchedFields = null,
+	): array
 	{
 		$map = [];
 
@@ -100,6 +104,51 @@ final class StorageActivityService
 		}
 
 		return $map;
+	}
+
+	/**
+	 * Both activity dialog maps of a single storage, built from one field load.
+	 *
+	 * @return array{filterFields: array, returnFields: array}
+	 */
+	public static function getActivityFieldsMaps(int $storageId): array
+	{
+		$fields = self::loadStorageFields($storageId);
+
+		return [
+			'filterFields' => array_values(self::getFilteringFieldsMap($storageId, $fields)),
+			'returnFields' => self::buildReturnFieldsMap($fields),
+		];
+	}
+
+	public static function loadStorageFields(int $storageId): StorageFieldCollection
+	{
+		if ($storageId <= 0)
+		{
+			return new StorageFieldCollection();
+		}
+
+		try
+		{
+			return (new StorageFieldProvider())->getByStorageId($storageId);
+		}
+		catch (\Bitrix\Main\ArgumentException)
+		{
+			return new StorageFieldCollection();
+		}
+	}
+
+	public static function buildReturnFieldsMap(StorageFieldCollection $fields): array
+	{
+		$fieldsMap = [];
+
+		foreach ($fields as $field)
+		{
+			$property = $field->toProperty();
+			$fieldsMap[$property['FieldName']] = $property;
+		}
+
+		return self::getReturnableSystemFields() + $fieldsMap;
 	}
 
 	public static function getSystemFields(?array $supportedFields = null): array
@@ -169,7 +218,13 @@ final class StorageActivityService
 		$provider = new StorageTypeProvider();
 		$type = $provider->getType(['CODE' => $storageCode], ['ID']);
 
-		return self::$storageIdByCodeCache[$storageCode] = (int)$type?->getId();
+		$id = (int)$type?->getId();
+		if ($id > 0)
+		{
+			self::$storageIdByCodeCache[$storageCode] = $id;
+		}
+
+		return $id;
 	}
 
 	/**
@@ -248,7 +303,10 @@ final class StorageActivityService
 
 		foreach ($storageIds as $id)
 		{
-			$result[$id] = self::getFilteringFieldsMap($id, $fieldsByStorage[$id] ?? []);
+			$result[$id] = self::getFilteringFieldsMap(
+				$id,
+				new StorageFieldCollection(...($fieldsByStorage[$id] ?? [])),
+			);
 		}
 
 		return $result;

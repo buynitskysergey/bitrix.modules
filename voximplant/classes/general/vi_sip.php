@@ -557,11 +557,11 @@ class CVoxImplantSip
 		switch ($account->GetAccountLang())
 		{
 			case 'ru':
-				return 'https://www.1c-bitrix.ru/buy/products/b24.php#tab-section-3';
+				return 'https://www.1c-bitrix.ru/buy/products/b24.php#tab-section-4';
 			case 'ua':
 				return 'https://www.bitrix24.eu/prices/self-hosted-telephony.php';
 			case 'kz':
-				return 'https://www.1c-bitrix.kz/buy/products/b24.php#tab-section-3';
+				return 'https://www.1c-bitrix.kz/buy/products/b24.php#tab-section-5';
 			case 'by':
 				return 'https://www.1c-bitrix.by/buy/products/b24.php#tab-section-3';
 			case 'de':

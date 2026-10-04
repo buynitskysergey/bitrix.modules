@@ -70,6 +70,19 @@ class DocumentFileCleanupService
 		return $result;
 	}
 
+	/**
+	 * [P4.T3 / P4.T4, invariant N2] Physically removes files the CALLER has already confirmed
+	 * unreachable via {@see \Bitrix\Note\Internal\Service\File\FileReachabilityService} — deletes
+	 * the link row and the underlying CFile together. This is the only pairing that may ever
+	 * delete a b_note_document_file link that once pointed at a reachable file: callers MUST NOT
+	 * invoke this for a fileId that might still be referenced by a surviving version, or the file
+	 * becomes an unrecoverable orphan (the link row is reachability's starting set).
+	 */
+	public function cleanupUnreachableFiles(int $documentId, array $unreachableFileIds): Result
+	{
+		return $this->cleanupByDocumentAndFileIds($documentId, $unreachableFileIds);
+	}
+
 	public function cleanupByDocumentAndFileIds(int $documentId, array $fileIds): Result
 	{
 		$result = new Result();
@@ -99,21 +112,37 @@ class DocumentFileCleanupService
 			return $result;
 		}
 
-		$deleteResult = $this->linkRepository->deleteByDocumentAndFileIds($documentId, $linkedFileIds);
-		if (!$deleteResult->isSuccess())
+		// [Invariant N2] Physically delete the CFile FIRST, then drop its link row — never the
+		// other way round. If CFile::Delete throws (disk I/O, external storage failure), the
+		// link row must stay in place so the file remains a linked-but-unreachable candidate
+		// that a later sweep/unlink retries; deleting the link first would strand the file as
+		// an unrecoverable orphan the reachability set can never see again.
+		[$deletedFileIds, $deleteFailedFileIds] = $this->deleteFiles($linkedFileIds, $result);
+
+		if (empty($deletedFileIds))
 		{
-			$result->addErrors($deleteResult->getErrors());
 			$result->setData([
 				'successFileIds' => [],
-				'failedFileIds' => array_values(array_unique(array_merge($failedFileIds, $linkedFileIds))),
+				'failedFileIds' => array_values(array_unique(array_merge($failedFileIds, $deleteFailedFileIds))),
 			]);
 
 			return $result;
 		}
 
-		[$successFileIds, $deleteFailedFileIds] = $this->deleteFiles($linkedFileIds, $result);
+		$deleteResult = $this->linkRepository->deleteByDocumentAndFileIds($documentId, $deletedFileIds);
+		if (!$deleteResult->isSuccess())
+		{
+			$result->addErrors($deleteResult->getErrors());
+			$result->setData([
+				'successFileIds' => [],
+				'failedFileIds' => array_values(array_unique(array_merge($failedFileIds, $deleteFailedFileIds, $deletedFileIds))),
+			]);
+
+			return $result;
+		}
+
 		$result->setData([
-			'successFileIds' => $successFileIds,
+			'successFileIds' => $deletedFileIds,
 			'failedFileIds' => array_values(array_unique(array_merge($failedFileIds, $deleteFailedFileIds))),
 		]);
 

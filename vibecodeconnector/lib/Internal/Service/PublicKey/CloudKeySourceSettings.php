@@ -4,19 +4,23 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Internal\Service\PublicKey;
 
-use Bitrix\Main\Config\Option;
+use Bitrix\Vibecodeconnector\Internal\Config\ModuleOptions;
 
 final class CloudKeySourceSettings
 {
+	private const OPTION_NAME = 'cloud_shared_key_source';
+
+	public function __construct(private readonly ModuleOptions $options = new ModuleOptions())
+	{
+	}
+
 	public function getSource(): PublicKeySource
 	{
-		$raw = (string)Option::get('vibecodeconnector', 'cloud_shared_key_source', '');
-
-		return PublicKeySource::tryFromOrDefault($raw);
+		return PublicKeySource::tryFromOrDefault($this->options->get(self::OPTION_NAME));
 	}
 
 	public function setSource(PublicKeySource $source): void
 	{
-		Option::set('vibecodeconnector', 'cloud_shared_key_source', $source->value);
+		$this->options->set(self::OPTION_NAME, $source->value);
 	}
 }

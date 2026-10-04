@@ -14,8 +14,10 @@ use CFile;
  */
 final class IconStorageService
 {
+	public const MAX_BYTES = 5 * 1024 * 1024;
+	public const MAX_SIDE = 256;
+
 	private const MODULE_BUCKET = 'vibecodeconnector';
-	private const MAX_BYTES = 5 * 1024 * 1024;
 	private const ALLOWED_MIME_PREFIX = 'image/';
 
 	public function __construct(
@@ -60,35 +62,140 @@ final class IconStorageService
 				return null;
 			}
 
-			$info = $this->getImageInfo($tmp);
-			if ($info === null)
-			{
-				return null;
-			}
-
-			$extension = $this->resolveExtension($info);
-			if ($extension === null)
-			{
-				return null;
-			}
-
 			$fileArray = CFile::MakeFileArray($tmp);
 			if (!is_array($fileArray))
 			{
 				return null;
 			}
 
-			$fileArray['name'] = 'icon.' . $extension;
-			$fileArray['MODULE_ID'] = self::MODULE_BUCKET;
-
-			$fileId = CFile::SaveFile($fileArray, self::MODULE_BUCKET);
-
-			return $fileId > 0 ? (int)$fileId : null;
+			return $this->saveImageFile($fileArray, shrink: false);
 		}
 		finally
 		{
 			File::deleteFile($tmp);
 		}
+	}
+
+	public function getSupportedImageInfo(string $path): ?Image\Info
+	{
+		$info = $this->getImageInfo($path);
+		if ($info === null || $this->resolveExtension($info) === null)
+		{
+			return null;
+		}
+
+		if (!$info->isSupported())
+		{
+			return null;
+		}
+
+		return $info;
+	}
+
+	/**
+	 * @param array<string, mixed> $fileArray
+	 */
+	public function saveImageFile(array $fileArray, bool $shrink = true): ?int
+	{
+		$prepared = $this->prepareImage($fileArray, $shrink);
+
+		return $prepared === null ? null : $this->store($prepared);
+	}
+
+	/**
+	 * @param array<string, mixed> $fileArray
+	 * @return array{fileId: int, content: string, format: string}|null
+	 */
+	public function saveImageFileWithContent(array $fileArray): ?array
+	{
+		$prepared = $this->prepareImage($fileArray, shrink: true);
+		if ($prepared === null)
+		{
+			return null;
+		}
+
+		$fileId = $this->store($prepared);
+		if ($fileId === null)
+		{
+			return null;
+		}
+
+		$content = File::getFileContents((string)$prepared['fileArray']['tmp_name']);
+		if (!is_string($content))
+		{
+			$this->delete($fileId);
+
+			return null;
+		}
+
+		return ['fileId' => $fileId, 'content' => $content, 'format' => $prepared['format']];
+	}
+
+	/**
+	 * @param array<string, mixed> $fileArray
+	 * @return array{fileArray: array<string, mixed>, format: string}|null
+	 */
+	private function prepareImage(array $fileArray, bool $shrink): ?array
+	{
+		$info = $this->getImageInfo((string)($fileArray['tmp_name'] ?? ''));
+		if ($info === null)
+		{
+			return null;
+		}
+
+		if ($this->resolveExtension($info) === null)
+		{
+			return null;
+		}
+
+		if ($shrink && !$info->isSupported())
+		{
+			return null;
+		}
+
+		if ($shrink && !$this->shrinkToBoundingBox($fileArray, $info))
+		{
+			return null;
+		}
+
+		$storedInfo = $this->getImageInfo((string)($fileArray['tmp_name'] ?? ''));
+		$extension = $storedInfo === null ? null : $this->resolveExtension($storedInfo);
+		if ($extension === null)
+		{
+			return null;
+		}
+
+		$fileArray['name'] = 'icon.' . $extension;
+		$fileArray['MODULE_ID'] = self::MODULE_BUCKET;
+
+		return ['fileArray' => $fileArray, 'format' => $extension];
+	}
+
+	/**
+	 * @param array{fileArray: array<string, mixed>, format: string} $prepared
+	 */
+	private function store(array $prepared): ?int
+	{
+		$fileId = CFile::SaveFile($prepared['fileArray'], self::MODULE_BUCKET);
+
+		return $fileId > 0 ? (int)$fileId : null;
+	}
+
+	/**
+	 * @param array<string, mixed> $fileArray
+	 */
+	private function shrinkToBoundingBox(array &$fileArray, Image\Info $info): bool
+	{
+		if ($info->getWidth() <= self::MAX_SIDE && $info->getHeight() <= self::MAX_SIDE)
+		{
+			return true;
+		}
+
+		return (bool)CFile::ResizeImage(
+			$fileArray,
+			['width' => self::MAX_SIDE, 'height' => self::MAX_SIDE],
+			BX_RESIZE_IMAGE_PROPORTIONAL,
+		);
 	}
 
 	public function delete(int $fileId): void

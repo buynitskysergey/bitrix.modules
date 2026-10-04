@@ -2,35 +2,49 @@
 
 namespace Bitrix\Crm\Integration\AI\Function\Category\Stage;
 
-use Bitrix\Crm\Controller\ErrorCode;
-use Bitrix\Crm\EO_Status;
-use Bitrix\Crm\EO_Status_Collection;
 use Bitrix\Crm\Integration\AI\Contract\AIFunction;
 use Bitrix\Crm\Integration\AI\Function\Category\Dto\Stage\UpdateListParameters;
 use Bitrix\Crm\Integration\AI\Function\Category\Dto\Stage\UpdateListStage;
-use Bitrix\Crm\Integration\PullManager;
-use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Result;
-use Bitrix\Crm\Service\Container;
-use Bitrix\Crm\Service\UserPermissions;
-use Bitrix\Crm\Stage\DefaultProcessColorGenerator;
-use Bitrix\Main\Application;
-use Bitrix\Main\ORM\Objectify\State;
-use CCrmStatus;
-use RuntimeException;
-use Throwable;
+use Bitrix\Crm\V2\Internal\Service\Category\Matching\MatchByPosition;
+use Bitrix\Crm\V2\Internal\Service\Category\Matching\PositionalStageInput;
+use Bitrix\Crm\V2\Internal\Service\Category\StageSetReplacer;
+use Bitrix\Crm\V2\Public\EntityType;
 
+/**
+ * The tool of the AI assistant that replaces the process stages of a category with the list a model
+ * sent, matched to the ones the category has by position.
+ *
+ * Everything below the parameters is the group replacement of the domain
+ * ({@see StageSetReplacer}), and the only thing this scenario adds to it is the strategy the stages
+ * are matched by ({@see MatchByPosition}) and the shape the answer comes back in. The permission,
+ * the transaction, the order of the writes and the notification of the kanban all live in the core,
+ * shared with REST - the scenario used to run its own copy of them, and a rule kept in two places
+ * drifts apart.
+ *
+ * WHAT THE PORT CHANGED. The right to write is asked with the category as well as the entity type
+ * ({@see \Bitrix\Crm\V2\Internal\Service\Category\CategoryAccess::canWriteStages()}), so a
+ * contractor category is decided by the warehouse configuration right where the tool used to want
+ * CRM administrator - the permission model of the domain rather than one of this tool, and the same
+ * one REST is held to. Beside it the entity type now has to support stages at all, where the
+ * scenario only required a factory. A refusal answers with the errors of the domain instead of the
+ * text of whatever the storage boundary threw. And a stage update that fails is a refusal now: the
+ * scenario wrote through {@see \CCrmStatus::Update()}, which hands back the identifier it was given
+ * even when the write did not go through, so a rename the boundary turned down used to be reported
+ * as a success.
+ *
+ * WHAT IT KEPT. The contract of {@see AIFunction} and the shape of a successful answer, the
+ * positional matching with its workaround, the new stages going in front of the first final stage,
+ * the step the resulting set is spaced by, and the notification of the kanban. The change counts are
+ * read off the plan rather than off the difference in set sizes, which for this strategy comes to
+ * the same numbers.
+ */
 final class UpdateList implements AIFunction
 {
-	private const SORT_STEP = 10;
-
-	private readonly UserPermissions $permissions;
-
 	public function __construct(
 		private readonly int $currentUserId,
 	)
 	{
-		$this->permissions = Container::getInstance()->getUserPermissions($this->currentUserId);
 	}
 
 	public function isAvailable(): bool
@@ -46,216 +60,39 @@ final class UpdateList implements AIFunction
 			return Result::fail($parameters->getValidationErrors());
 		}
 
-		if (!$this->permissions->isAdminForEntity($parameters->entityTypeId))
-		{
-			return Result::failAccessDenied();
-		}
+		// Safe without a check of its own: the parameters only validate for an entity type that has a
+		// factory, and every such type is one EntityType wraps.
+		$entityType = EntityType::fromId($parameters->entityTypeId);
 
-		$factory = Container::getInstance()->getFactory($parameters->entityTypeId);
-		if ($factory === null)
-		{
-			return Result::fail("Entity type with ID {$parameters->entityTypeId} not found");
-		}
-
-		$connection = Application::getConnection();
-		$colorGenerator = new DefaultProcessColorGenerator();
-
-		$stagesAsArrays = array_map(
-			static fn(UpdateListStage $stage) => ['name' => $stage->name, 'color' => $stage->color],
-			$parameters->stages,
+		$replacement = (new StageSetReplacer())->replace(
+			$entityType,
+			$this->currentUserId,
+			$parameters->categoryId,
+			self::stagesOf($parameters),
+			new MatchByPosition(),
 		);
 
-		$changeCounts = null;
-
-		try
+		if (!$replacement->isSuccess())
 		{
-			$connection->startTransaction();
-
-			$existingStages = $factory->getStages($parameters->categoryId);
-			$changeCounts = $this->countStageChanges($existingStages, $stagesAsArrays);
-			$newCollection = $this->applyStageChanges($existingStages, $stagesAsArrays, $colorGenerator);
-			$this->saveStages($newCollection, $factory->getStagesEntityId($parameters->categoryId));
-
-			$connection->commitTransaction();
-		}
-		catch (Throwable $e)
-		{
-			$connection->rollbackTransaction();
-
-			return Result::fail($e->getMessage(), $e->getCode());
+			// Every error of the domain, message and code alike: the tool hands the text to the model
+			// ({@see \Bitrix\Crm\Integration\AiAssistant\Tools\CategoryUpdateStagesList}), and the
+			// boundary answers a refused write with more than one error often enough.
+			return (new Result())->addErrors($replacement->getErrors());
 		}
 
-		PullManager::getInstance()->sendStageUpdatedEvent(
-			[],
-			[
-				'TYPE' => $factory->getEntityName(),
-				'CATEGORY_ID' => $parameters->categoryId,
-			],
+		return Result::success(
+			changeCounts: $replacement->getData()[StageSetReplacer::DATA_KEY_CHANGE_COUNTS],
 		);
-
-		return Result::success(changeCounts: $changeCounts);
-	}
-
-	private function applyStageChanges(
-		EO_Status_Collection $existingStages,
-		array $stagesToUpdate,
-		DefaultProcessColorGenerator $colorGenerator,
-	): EO_Status_Collection
-	{
-		$result = new EO_Status_Collection();
-		$lastUpdatedStage = null;
-
-		foreach ($existingStages->getAll() as $existingStage)
-		{
-			$isFinal = PhaseSemantics::isFinal($existingStage->getSemantics());
-			$isEmpty = empty($stagesToUpdate);
-
-			if (!$isEmpty && !$isFinal)
-			{
-				$current = array_shift($stagesToUpdate);
-				$existingColor = $existingStage->getColor() ?: null;
-
-				$existingStage
-					->setName($current['name'])
-					->setColor($current['color'] ?? $existingColor ?? $colorGenerator->generate())
-				;
-
-				$result->add($existingStage);
-				$lastUpdatedStage = $existingStage;
-
-				continue;
-			}
-
-			if (!$isEmpty && $isFinal)
-			{
-				foreach ($stagesToUpdate as $stage)
-				{
-					$result->add(
-						(new EO_Status())
-							->setName($stage['name'])
-							->setColor($stage['color'] ?? $colorGenerator->generate()),
-					);
-				}
-
-				$stagesToUpdate = [];
-				$result->add($existingStage);
-
-				continue;
-			}
-
-			if ($isEmpty && !$isFinal)
-			{
-				if ($existingStage->getSystem() && $lastUpdatedStage !== null)
-				{
-					$result->add(
-						$existingStage
-							->setName($lastUpdatedStage->getName())
-							->setColor($lastUpdatedStage->getColor()),
-					);
-
-					$result->remove($lastUpdatedStage);
-
-					$deleteResult = $lastUpdatedStage->delete();
-					if (!$deleteResult->isSuccess())
-					{
-						$error = $deleteResult->getError() ?? ErrorCode::getGeneralError();
-
-						throw new RuntimeException($error->getMessage());
-					}
-
-					continue;
-				}
-
-				$deleteResult = $existingStage->delete();
-				if (!$deleteResult->isSuccess())
-				{
-					$error = $deleteResult->getError() ?? ErrorCode::getGeneralError();
-
-					throw new RuntimeException($error->getMessage());
-				}
-
-				continue;
-			}
-
-			$result->add($existingStage);
-		}
-
-		$sort = self::SORT_STEP;
-		foreach ($result->getAll() as $stage)
-		{
-			$stage->setSort($sort);
-			$sort += self::SORT_STEP;
-		}
-
-		return $result;
-	}
-
-	private function saveStages(EO_Status_Collection $stages, string $stagesEntityId): void
-	{
-		$stageService = new CCrmStatus($stagesEntityId);
-
-		foreach (array_reverse($stages->getAll()) as $stage)
-		{
-			if ($stage->state === State::DELETED)
-			{
-				continue;
-			}
-
-			$fields = [
-				'NAME' => $stage->getName(),
-				'COLOR' => $stage->getColor(),
-				'SORT' => $stage->getSort(),
-			];
-
-			if ($stage->state === State::RAW)
-			{
-				$addResult = $stageService->Add($fields);
-				if ($addResult === false)
-				{
-					$errorMessage = $stageService->GetLastError() ?? ErrorCode::getGeneralError()->getMessage();
-
-					throw new RuntimeException($errorMessage);
-				}
-
-				continue;
-			}
-
-			$updateResult = $stageService->Update($stage->getId(), $fields);
-			if ($updateResult === false)
-			{
-				$errorMessage = $stageService->GetLastError() ?? ErrorCode::getGeneralError()->getMessage();
-
-				throw new RuntimeException($errorMessage);
-			}
-		}
 	}
 
 	/**
-	 * @return array{added: int, renamed: int, deleted: int}
+	 * @return PositionalStageInput[]
 	 */
-	private function countStageChanges(EO_Status_Collection $existingStages, array $stagesToUpdate): array
+	private static function stagesOf(UpdateListParameters $parameters): array
 	{
-		$inProcessStages = array_filter(
-			$existingStages->getAll(),
-			static fn(EO_Status $stage) => !PhaseSemantics::isFinal($stage->getSemantics()),
+		return array_map(
+			static fn(UpdateListStage $stage) => new PositionalStageInput($stage->name, $stage->color),
+			$parameters->stages,
 		);
-
-		$existingCount = count($inProcessStages);
-		$updateCount = count($stagesToUpdate);
-
-		if ($updateCount > $existingCount)
-		{
-			return [
-				'added' => $updateCount - $existingCount,
-				'renamed' => $existingCount,
-				'deleted' => 0,
-			];
-		}
-
-		return [
-			'added' => 0,
-			'renamed' => $updateCount,
-			'deleted' => $existingCount - $updateCount,
-		];
 	}
 }

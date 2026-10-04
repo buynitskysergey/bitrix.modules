@@ -4,7 +4,7 @@ namespace Bitrix\Crm\Integration\Report\Dashboard\Managers;
 
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Crm\Integration\Report\View;
-use \Bitrix\Crm\Integration\Report\Handler;
+use Bitrix\Crm\Integration\Report\Handler;
 use Bitrix\Report\VisualConstructor\Entity\Dashboard;
 use Bitrix\Report\VisualConstructor\Entity\DashboardRow;
 use Bitrix\Report\VisualConstructor\Entity\Report;

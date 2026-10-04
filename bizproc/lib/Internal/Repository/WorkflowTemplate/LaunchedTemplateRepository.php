@@ -97,6 +97,31 @@ class LaunchedTemplateRepository
 		return $query->exec()->fetch() !== false;
 	}
 
+	/**
+	 * Returns ORIGIN_SYSTEM_CODE of a launched copy by its templateId, or null when
+	 * the template is not a launched copy of a system node.
+	 */
+	public function getSystemCodeByTemplateId(int $templateId): ?string
+	{
+		if ($templateId <= 0)
+		{
+			return null;
+		}
+
+		$row = WorkflowTemplateSettingsTable::query()
+			->setSelect(['VALUE'])
+			->where('TEMPLATE_ID', $templateId)
+			->where('NAME', WorkflowTemplateSettingsTable::ORIGIN_SYSTEM_CODE)
+			->setLimit(1)
+			->exec()
+			->fetch()
+		;
+
+		$code = $row['VALUE'] ?? null;
+
+		return is_string($code) && $code !== '' ? $code : null;
+	}
+
 	private function resolveSystemCode(int $templateId): ?string
 	{
 		if ($templateId <= 0)

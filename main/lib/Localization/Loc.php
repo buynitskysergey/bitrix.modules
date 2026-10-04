@@ -6,7 +6,6 @@ use Bitrix\Main;
 use Bitrix\Main\IO\Path;
 use Bitrix\Main\Context;
 use Bitrix\Main\Config\Configuration;
-use Bitrix\Main\Text\Encoding;
 
 final class Loc
 {
@@ -17,6 +16,19 @@ final class Loc
 	private static $includedFiles = [];
 	private static $lazyLoadFiles = [];
 	private static $triedFiles = [];
+	private static $messageDecorator = null;
+	private static $messagesFile = [];
+
+	public static function setMessageDecorator(?callable $decorator): void
+	{
+		self::$messageDecorator = $decorator;
+	}
+
+	public static function getMessageSourceFile(string $code, ?string $language = null): ?string
+	{
+		$language ??= self::getCurrentLang();
+		return self::$messagesFile[$language][$code] ?? null;
+	}
 
 	/**
 	 * Returns translation by message code.
@@ -29,11 +41,6 @@ final class Loc
 	 */
 	public static function getMessage($code, $replace = null, $language = null)
 	{
-		if (defined("BX_MESS_CODE"))
-		{
-			return $code;
-		}
-
 		if ($language === null)
 		{
 			//function call optimization
@@ -52,7 +59,13 @@ final class Loc
 			self::loadLazy($code, $language);
 		}
 
-		$s = self::$messages[$language][$code] ?? null;
+		$raw = self::$messages[$language][$code] ?? null;
+		$s = $raw;
+
+		if (self::$messageDecorator !== null)
+		{
+			$s = (self::$messageDecorator)($code, $raw, $s, self::$messagesFile[$language][$code] ?? null, $language);
+		}
 
 		if (is_array($replace) && $s !== null)
 		{
@@ -255,26 +268,27 @@ final class Loc
 
 		if (!empty($mess))
 		{
-			[$convertEncoding, $targetEncoding, $sourceEncoding] = Translation::getEncodings($language, $langFile);
-
 			foreach ($mess as $key => $val)
 			{
-				if (isset(self::$customMessages[$language][$key]))
+				if (defined('BX_MESS_CODE'))
 				{
-					self::$messages[$language][$key] = $mess[$key] = self::$customMessages[$language][$key];
+					self::$messages[$language][$key] = $key;
+					$mess[$key] = $key;
+				}
+				elseif (isset(self::$customMessages[$language][$key]))
+				{
+					$value = self::$customMessages[$language][$key];
+					self::$messages[$language][$key] = $value;
+					$mess[$key] = $value;
 				}
 				else
 				{
-					if ($convertEncoding)
-					{
-						if ($targetEncoding !== 'utf-8' || !preg_match('//u', $val))
-						{
-							$val = Encoding::convertEncoding($val, $sourceEncoding, $targetEncoding);
-						}
-						$mess[$key] = $val;
-					}
-
 					self::$messages[$language][$key] = $val;
+				}
+
+				if (self::$messageDecorator !== null)
+				{
+					self::$messagesFile[$language][$key] = $langFile;
 				}
 			}
 		}
@@ -305,19 +319,8 @@ final class Loc
 
 		if (!empty($mess))
 		{
-			[$convertEncoding, $targetEncoding, $sourceEncoding] = Translation::getEncodings($language, $langFile);
-
 			foreach ($mess as $key => $val)
 			{
-				if ($convertEncoding)
-				{
-					if ($targetEncoding !== 'utf-8' || !preg_match('//u', $val))
-					{
-						$val = Encoding::convertEncoding($val, $sourceEncoding, $targetEncoding);
-					}
-					$mess[$key] = $val;
-				}
-
 				self::$customMessages[$language][$key] = $val;
 			}
 		}

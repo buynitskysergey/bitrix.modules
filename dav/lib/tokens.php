@@ -123,16 +123,30 @@ class TokensTable extends Entity\DataManager
 
 		try
 		{
-			$result = self::add($params);
+			return self::add($params)->getData();
 		}
 		catch (\Exception)
 		{
+			// USER_ID has a unique key: on a race two parallel requests may both
+			// try to create a token for the same user. If a row already exists,
+			// reuse the winner's token instead of blindly regenerating TOKEN
+			// (which would collide on USER_ID again and throw a fatal error).
+			$existing = self::getList([
+				'filter' => ['USER_ID' => $userId],
+				'limit' => 1,
+			])->fetch();
+
+			if ($existing)
+			{
+				return $existing;
+			}
+
+			// No row for this user: the collision was on the TOKEN primary key
+			// (extremely rare). Retry once with a fresh TOKEN; let it throw otherwise.
 			$params['TOKEN'] = Random::getString(static::DEFAULT_TOKEN_LENGTH);
 
-			$result = self::add($params);
+			return self::add($params)->getData();
 		}
-
-		return $result->getData();
 	}
 
 	/**

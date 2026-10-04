@@ -9,6 +9,7 @@ use Bitrix\Main\ArgumentException;
 use Bitrix\Main\DI\Exception\CircularDependencyException;
 use Bitrix\Main\DI\Exception\ServiceNotFoundException;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ObjectNotFoundException;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
@@ -37,11 +38,14 @@ class DeactivateSystemUserCommandHandler
 	public function __invoke(DeactivateSystemUserCommand $command): Main\Result
 	{
 		$result = new Main\Result();
-		$appInfo = AppTable::getByClientId($command->appId);
+		$appInfo = AppTable::getById($command->appId)->fetch();
 
 		if (!$appInfo)
 		{
-			$result->addError(new Main\Error('Application was not found'));
+			$result->addError(new Main\Error(
+				'Application was not found',
+				'REST_APPLICATION_NOT_FOUND',
+			));
 
 			return $result;
 		}

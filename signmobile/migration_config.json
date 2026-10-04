@@ -1,0 +1,6 @@
+{
+    "defaultTableName": "b_signmobile_notifications",
+    "installDirectoriesMapping": {
+        "install/mobileapp": "mobileapp"
+    }
+}

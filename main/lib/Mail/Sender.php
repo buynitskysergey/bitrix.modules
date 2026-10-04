@@ -14,9 +14,27 @@ use Bitrix\Main\Mail\Sender\UserSenderDataProvider;
 class Sender
 {
 	public const MAIN_SENDER_SMTP_LIMIT_DECREASE = 'MainSenderSmtpLimitDecrease';
+	public const ADDRESS_MISMATCH_ERROR = 'MAIL_SENDER_ADDRESS_MISMATCH';
+	public const SENDER_UNAVAILABLE_ERROR = 'MAIL_SENDER_UNAVAILABLE';
 	private const MAIN_SENDER_SMTP_SERVER_PATTERN = '/^([a-z0-9-]+\.)+[a-z0-9-]{2,20}$/i';
+	private const AMBIGUOUS_SENDER_CACHE_DIR = '/main/mail/sender_ambiguous';
+	private const AMBIGUOUS_SENDER_AUDIT_TYPE = 'MAIL_SENDER_AMBIGUOUS';
+	private const SMTP_CACHE_DIR = '/main/mail/smtp';
+	private const SMTP_CACHE_TTL = 30 * 24 * 3600;
+	private const LIMIT_CACHE_DIR = '/main/mail/limit';
+	private const LIMIT_CACHE_TTL = 3600;
+	private const FALLBACK_SENDER_CACHE_DIR = '/main/mail/sender_fallback';
+	private const IDENTITY_SENDER_CACHE_DIR = '/main/mail/sender_identity';
+	private const IDENTITY_SENDER_CACHE_TTL = 60;
+
+	/** Short on purpose: a fallback choice must not outlive the duplicate records it was made on. */
+	private const FALLBACK_SENDER_CACHE_TTL = 300;
 
 	private static array $senderCache = [];
+	private static array $smtpConfigCache = [];
+	private static array $emailLimitCache = [];
+	private static array $addressLimitCache = [];
+	private static array $resolvedSenderIdCache = [];
 
 	public static function add(array $fields)
 	{
@@ -80,19 +98,14 @@ class Sender
 				'CONFIRM_CODE' => mb_strtoupper($fields['OPTIONS']['confirm_code']),
 			);
 
-			if (!empty($smtpConfig))
-			{
-				\Bitrix\Main\EventManager::getInstance()->addEventHandlerCompatible(
-					'main',
-					'OnBeforeEventSend',
-					function (&$eventFields, &$message, $context) use (&$smtpConfig)
-					{
-						$context->setSmtp($smtpConfig);
-					}
-				);
-			}
-
-			\CEvent::sendImmediate('MAIN_MAIL_CONFIRM_CODE', SITE_ID, $mailEventFields);
+			$context = (new Context())->setAutomaticCustomSmtpEnabled(false);
+			\CEvent::sendImmediate(
+				'MAIN_MAIL_CONFIRM_CODE',
+				SITE_ID,
+				$mailEventFields,
+				senderIdentity: null,
+				context: $context,
+			);
 		}
 		else
 		{
@@ -206,17 +219,8 @@ class Sender
 
 		if (!empty($updateFields))
 		{
+			// the limit travels inside OPTIONS and stays within this record
 			$result = Internal\SenderTable::update($senderId, $updateFields);
-
-			if ($result->isSuccess())
-			{
-				unset(self::$senderCache[$senderId]);
-			}
-
-			if (!empty($updateFields['OPTIONS']['smtp']['limit']))
-			{
-				self::setEmailLimit($sender['EMAIL'], $updateFields['OPTIONS']['smtp']['limit']);
-			}
 		}
 
 		return $result;
@@ -320,7 +324,6 @@ class Sender
 			{
 				continue;
 			}
-			unset(self::$senderCache[$id]);
 
 			$aliasesForPossibleDeletion = [];
 			if (!empty($currentSender['OPTIONS']['smtp']['server']) && empty(self::getPublicSmtpSenderByEmail($currentSender['EMAIL'], $id)) && $currentSender['USER_ID'])
@@ -353,16 +356,104 @@ class Sender
 				foreach ($aliases as $alias)
 				{
 					SenderTable::delete($alias['ID']);
-					unset(self::$senderCache[(int)$alias['ID']]);
 				}
 			}
 		}
 	}
 
+	/**
+	 * Drops every cache built around the address: the address fallback plus the caches of all sender
+	 * records the address currently has.
+	 */
 	public static function clearCustomSmtpCache($email)
 	{
+		$email = self::normalizeEmail(is_string($email) ? $email : null);
+		if ($email === null)
+		{
+			return;
+		}
+
+		self::clearAddressCache($email);
+
+		foreach (self::getByEmail($email) as $sender)
+		{
+			self::clearSenderCache((int)$sender['ID']);
+		}
+	}
+
+	/**
+	 * Drops the caches of a single sender record. Called by the data layer on every change of the
+	 * record, so that neither the configuration nor the limit outlives it.
+	 */
+	public static function clearSenderCache(int $senderId, ?string $email = null): void
+	{
 		$cache = new \CPHPCache();
-		$cache->clean($email, '/main/mail/smtp');
+		$cacheKey = self::getSenderCacheKey($senderId);
+
+		$cache->clean($cacheKey, self::SMTP_CACHE_DIR);
+		$cache->clean($cacheKey, self::LIMIT_CACHE_DIR);
+
+		unset(
+			self::$senderCache[$senderId],
+			self::$smtpConfigCache[$senderId],
+			self::$emailLimitCache[$senderId]
+		);
+
+		self::$resolvedSenderIdCache = [];
+
+		$email = self::normalizeEmail($email);
+		if ($email !== null)
+		{
+			self::clearAddressCache($email);
+		}
+	}
+
+	public static function clearIdentitySenderCache(
+		int $senderId,
+		?string $parentModuleId = null,
+		?int $parentId = null,
+	): void
+	{
+		$cache = new \CPHPCache();
+		if ($senderId > 0)
+		{
+			self::cleanIdentitySenderCacheKey($cache, self::getIdentitySenderCacheKey($senderId));
+		}
+
+		if ($parentModuleId !== null && $parentModuleId !== '' && $parentId !== null && $parentId > 0)
+		{
+			self::cleanIdentitySenderCacheKey(
+				$cache,
+				self::getIdentityMailboxCacheKey($parentModuleId, $parentId),
+			);
+		}
+
+		self::$resolvedSenderIdCache = [];
+	}
+
+	/**
+	 * Drops the caches built around the address itself: the fallback choice and the limit of the
+	 * address, which is derived from all its records at once.
+	 */
+	private static function clearAddressCache(string $email): void
+	{
+		$cache = new \CPHPCache();
+
+		$cache->clean($email, self::FALLBACK_SENDER_CACHE_DIR);
+		$cache->clean(self::getAddressCacheKey($email), self::LIMIT_CACHE_DIR);
+
+		self::$resolvedSenderIdCache = [];
+		unset(self::$addressLimitCache[$email]);
+	}
+
+	private static function getSenderCacheKey(int $senderId): string
+	{
+		return 'sender_' . $senderId;
+	}
+
+	private static function getAddressCacheKey(string $email): string
+	{
+		return 'address_' . $email;
 	}
 
 	public static function getById(int $senderId): ?array
@@ -397,7 +488,7 @@ class Sender
 	{
 		$query = SenderTable::query()
 			->setSelect(['*'])
-			->where('EMAIL', $email)
+			->where('EMAIL', Address::normalizeEmail($email))
 		;
 
 		if ($userId)
@@ -408,128 +499,404 @@ class Sender
 		return $query->fetchAll();
 	}
 
-	public static function getCustomSmtp($email)
+	/**
+	 * Returns the stable identity of the first usable sender owned by the user for the exact address.
+	 */
+	public static function resolveIdentityForOwner(int $ownerId, string $email): ?Sender\Identity
 	{
-		static $smtp = array();
-
-		if (!isset($smtp[$email]))
+		$sender = (new Sender\IdentityResolver())->resolveForOwner($ownerId, $email);
+		if ($sender === null)
 		{
-			$config = false;
-
-			$cache = new \CPHPCache();
-
-			if ($cache->initCache(30*24*3600, $email, '/main/mail/smtp'))
-			{
-				$config = $cache->getVars();
-			}
-			else
-			{
-				$res = Internal\SenderTable::getList(array(
-					'filter' => array(
-						'IS_CONFIRMED' => true,
-						'=EMAIL' => $email,
-					),
-					'order' => array(
-						'ID' => 'DESC',
-					),
-				));
-				while ($item = $res->fetch())
-				{
-					if (!empty($item['OPTIONS']['smtp']['server']) && empty($item['OPTIONS']['smtp']['encrypted']))
-					{
-						$config = $item['OPTIONS']['smtp'];
-						break;
-					}
-				}
-
-				$cache->startDataCache();
-				$cache->endDataCache($config);
-			}
-
-			if ($config)
-			{
-				$config = new Smtp\Config(array(
-					'from' => $email,
-					'host' => $config['server'],
-					'port' => $config['port'],
-					'protocol' => $config['protocol'],
-					'login' => $config['login'],
-					'password' => $config['password'],
-					'isOauth' => $config['isOauth'],
-				));
-				// config will be replaced with null value due errors
-				$config = (new Main\Mail\Smtp\OAuthConfigPreparer())->prepareBeforeSendIfNeed($config);
-			}
-
-			$smtp[$email] = $config;
+			return null;
 		}
 
-		return $smtp[$email];
+		if ($sender['PARENT_MODULE_ID'] === 'mail' && (int)$sender['PARENT_ID'] > 0)
+		{
+			return Sender\Identity::fromMailbox((int)$sender['PARENT_ID']);
+		}
+
+		return Sender\Identity::fromSender((int)$sender['ID']);
+	}
+
+	public static function getCustomSmtp($email, ?Sender\Identity $identity = null)
+	{
+		$senderId = self::resolveSenderId($identity, is_string($email) ? $email : null);
+		if ($senderId <= 0)
+		{
+			return false;
+		}
+
+		if (!array_key_exists($senderId, self::$smtpConfigCache))
+		{
+			$options = self::getSenderSmtpOptions($senderId);
+
+			self::$smtpConfigCache[$senderId] = $options
+				? self::createSmtpConfig($options['EMAIL'], $options['smtp'])
+				: false
+			;
+		}
+
+		return self::$smtpConfigCache[$senderId];
 	}
 
 	/**
-	 * get sending limit by email, returns null if no limit.
+	 * Resolves the identity into the identifier of the sender record the message is sent through.
+	 * Without an identity the address fallback is used, and its result is cached separately.
+	 *
+	 * @return int Sender record identifier, zero when nothing matched.
+	 */
+	public static function resolveSenderId(?Sender\Identity $identity, ?string $email): int
+	{
+		$email = self::normalizeEmail($email);
+		$memoKey = self::getResolveMemoKey($identity, $email);
+
+		if (!array_key_exists($memoKey, self::$resolvedSenderIdCache))
+		{
+			self::$resolvedSenderIdCache[$memoKey] = $identity === null
+				? self::resolveFallbackSenderId($email)
+				: self::resolveIdentitySenderId($identity)
+			;
+		}
+
+		return self::$resolvedSenderIdCache[$memoKey];
+	}
+
+	private static function resolveIdentitySenderId(Sender\Identity $identity): int
+	{
+		if ($identity->hasMailboxRef())
+		{
+			$senderId = self::resolveIdentityCoordinate(
+				self::getIdentityMailboxCacheKey($identity->mailboxModuleId, $identity->mailboxParentId),
+				Sender\Identity::fromMailbox($identity->mailboxParentId, $identity->mailboxModuleId),
+			);
+			if ($senderId > 0)
+			{
+				return $senderId;
+			}
+		}
+
+		if ($identity->hasSenderRef())
+		{
+			return self::resolveIdentityCoordinate(
+				self::getIdentitySenderCacheKey($identity->senderId),
+				Sender\Identity::fromSender($identity->senderId),
+			);
+		}
+
+		return 0;
+	}
+
+	private static function resolveIdentityCoordinate(string $cacheKey, Sender\Identity $identity): int
+	{
+		$cache = new \CPHPCache();
+		if ($cache->initCache(self::IDENTITY_SENDER_CACHE_TTL, $cacheKey, self::IDENTITY_SENDER_CACHE_DIR))
+		{
+			return (int)$cache->getVars();
+		}
+
+		$senderId = (int)(self::resolveSender($identity, null)['ID'] ?? 0);
+		if ($senderId > 0 && $cache->startDataCache())
+		{
+			$cache->endDataCache($senderId);
+		}
+
+		return $senderId;
+	}
+
+	private static function cleanIdentitySenderCacheKey(\CPHPCache $cache, string $cacheKey): void
+	{
+		$cache->clean($cacheKey, self::IDENTITY_SENDER_CACHE_DIR);
+	}
+
+	private static function getIdentitySenderCacheKey(int $senderId): string
+	{
+		return 'sender_' . $senderId;
+	}
+
+	private static function getIdentityMailboxCacheKey(string $parentModuleId, int $parentId): string
+	{
+		return 'mailbox_' . md5($parentModuleId) . '_' . $parentId;
+	}
+
+	private static function resolveFallbackSenderId(?string $email): int
+	{
+		if ($email === null)
+		{
+			return 0;
+		}
+
+		$cache = new \CPHPCache();
+		if ($cache->initCache(self::FALLBACK_SENDER_CACHE_TTL, $email, self::FALLBACK_SENDER_CACHE_DIR))
+		{
+			return (int)$cache->getVars();
+		}
+
+		$senderId = (int)(self::resolveSender(null, $email)['ID'] ?? 0);
+
+		$cache->startDataCache();
+		$cache->endDataCache($senderId);
+
+		return $senderId;
+	}
+
+	private static function getResolveMemoKey(?Sender\Identity $identity, ?string $email): string
+	{
+		return implode('|', [
+			$identity?->mailboxModuleId ?? '',
+			$identity?->mailboxParentId ?? 0,
+			$identity?->senderId ?? 0,
+			$email ?? '',
+		]);
+	}
+
+	/**
+	 * @return array|null Address and smtp options of the record, or null when it has no configuration.
+	 */
+	private static function getSenderSmtpOptions(int $senderId): ?array
+	{
+		$cache = new \CPHPCache();
+		if ($cache->initCache(self::SMTP_CACHE_TTL, self::getSenderCacheKey($senderId), self::SMTP_CACHE_DIR))
+		{
+			return $cache->getVars() ?: null;
+		}
+
+		$sender = self::getById($senderId);
+		$options = empty($sender['OPTIONS']['smtp']['server'])
+			? null
+			: [
+				'EMAIL' => $sender['EMAIL'],
+				'smtp' => $sender['OPTIONS']['smtp'],
+			]
+		;
+
+		$cache->startDataCache();
+		$cache->endDataCache($options ?? false);
+
+		return $options;
+	}
+
+	private static function normalizeEmail(?string $email): ?string
+	{
+		if ($email === null || $email === '')
+		{
+			return null;
+		}
+
+		$address = new Address($email);
+
+		return $address->validate() ? $address->getEmail() : null;
+	}
+
+	/**
+	 * Resolves the sender record the message is sent through and reports ambiguity to the event log.
+	 */
+	private static function resolveSender(?Sender\Identity $identity, ?string $email): ?array
+	{
+		$isAmbiguous = false;
+		$sender = (new Sender\IdentityResolver())->resolve($identity, $email, $isAmbiguous);
+
+		if ($sender && $isAmbiguous)
+		{
+			self::logAmbiguousSender($sender['EMAIL'], (int)$sender['ID']);
+		}
+
+		return $sender;
+	}
+
+	/**
+	 * One record a day per address is enough: without deduplication every message would produce an entry.
+	 */
+	private static function logAmbiguousSender(string $email, int $senderId): void
+	{
+		$cache = new \CPHPCache();
+		if ($cache->initCache(86400, $email, self::AMBIGUOUS_SENDER_CACHE_DIR))
+		{
+			return;
+		}
+
+		$cache->startDataCache();
+		$cache->endDataCache(true);
+
+		(new Main\Diag\EventLogger('main', self::AMBIGUOUS_SENDER_AUDIT_TYPE))->warning(
+			'Address {email} belongs to several senders, sender #{senderId} is used for outgoing mail.',
+			[
+				'email' => $email,
+				'senderId' => $senderId,
+			]
+		);
+	}
+
+	private static function createSmtpConfig(string $email, array $smtp)
+	{
+		$config = new Smtp\Config(array(
+			'from' => $email,
+			'host' => $smtp['server'],
+			'port' => $smtp['port'],
+			'protocol' => $smtp['protocol'],
+			'login' => $smtp['login'],
+			'password' => $smtp['password'],
+			'isOauth' => $smtp['isOauth'],
+		));
+
+		// config will be replaced with null value due errors
+		return (new Main\Mail\Smtp\OAuthConfigPreparer())->prepareBeforeSendIfNeed($config);
+	}
+
+	/**
+	 * get sending limit of the sender the message is sent through, returns null if no limit.
+	 * A named sender is limited by its own record only. Without an identity the record is picked by
+	 * the address, so the address as a whole is limited by the strictest of its records: a limit set
+	 * by the administrator must not disappear because the fallback landed on a neighbour record.
 	 * @param $email
+	 * @param Sender\Identity|null $identity Sender identity, when the caller knows it.
 	 * @return int|null
 	 * @throws Main\ArgumentException
 	 * @throws Main\ObjectPropertyException
 	 * @throws Main\SystemException
 	 */
-	public static function getEmailLimit($email): ?int
+	public static function getEmailLimit($email, ?Sender\Identity $identity = null): ?int
 	{
-		$address = new \Bitrix\Main\Mail\Address($email);
+		$email = self::normalizeEmail(is_string($email) ? $email : null);
 
-		if (!$address->validate())
+		$limit = $identity === null
+			? self::getAddressLimit($email)
+			: self::getSenderLimit(self::resolveSenderId($identity, $email))
+		;
+
+		return $limit !== null && $limit < 0 ? 0 : $limit;
+	}
+
+	private static function getSenderLimit(int $senderId): ?int
+	{
+		if ($senderId <= 0)
 		{
 			return null;
 		}
 
-		$email = $address->getEmail();
-		static $mailLimit = array();
-
-		if (!isset($mailLimit[$email]))
+		if (!array_key_exists($senderId, self::$emailLimitCache))
 		{
-			$cache = new \CPHPCache();
-
-			if ($cache->initCache(3600, $email, '/main/mail/limit'))
-			{
-				$mailLimit[$email]  = $cache->getVars();
-			}
-			else
-			{
-				$res = Internal\SenderTable::getList(array(
-					'filter' => array(
-						'IS_CONFIRMED' => true,
-						'=EMAIL' => $email,
-					),
-					'order' => array(
-						'ID' => 'DESC',
-					),
-				));
-				$limit = null;
-				while ($item = $res->fetch())
-				{
-					if ($item['OPTIONS']['smtp']['limit'] !== null)
-					{
-						$limit = (int)$item['OPTIONS']['smtp']['limit'];
-						break;
-					}
-				}
-
-				$mailLimit[$email] = $limit;
-
-				$cache->startDataCache();
-				$cache->endDataCache($mailLimit[$email]);
-			}
+			self::$emailLimitCache[$senderId] = self::readSenderLimit($senderId);
 		}
 
-		return $mailLimit[$email] < 0 ? 0 : $mailLimit[$email];
+		return self::$emailLimitCache[$senderId];
+	}
+
+	private static function getAddressLimit(?string $email): ?int
+	{
+		if ($email === null)
+		{
+			return null;
+		}
+
+		if (!array_key_exists($email, self::$addressLimitCache))
+		{
+			self::$addressLimitCache[$email] = self::readAddressLimit($email);
+		}
+
+		return self::$addressLimitCache[$email];
+	}
+
+	/**
+	 * The smallest positive limit among the confirmed records of the address. A record participates whatever
+	 * the state of its smtp configuration: the limit is a restriction of the address, not a property
+	 * of a working transport.
+	 */
+	private static function readAddressLimit(string $email): ?int
+	{
+		$cache = new \CPHPCache();
+		if ($cache->initCache(self::LIMIT_CACHE_TTL, self::getAddressCacheKey($email), self::LIMIT_CACHE_DIR))
+		{
+			$cached = $cache->getVars();
+
+			return $cached === null || $cached === false ? null : (int)$cached;
+		}
+
+		$limit = null;
+		$res = Internal\SenderTable::getList([
+			'select' => ['OPTIONS'],
+			'filter' => [
+				'=IS_CONFIRMED' => true,
+				'=EMAIL' => $email,
+			],
+		]);
+
+		while ($item = $res->fetch())
+		{
+			if (!isset($item['OPTIONS']['smtp']['limit']))
+			{
+				continue;
+			}
+
+			$senderLimit = (int)$item['OPTIONS']['smtp']['limit'];
+			if ($senderLimit <= 0)
+			{
+				continue;
+			}
+
+			$limit = $limit === null ? $senderLimit : min($limit, $senderLimit);
+		}
+
+		$cache->startDataCache();
+		$cache->endDataCache($limit ?? false);
+
+		return $limit;
+	}
+
+	private static function readSenderLimit(int $senderId): ?int
+	{
+		$cache = new \CPHPCache();
+		if ($cache->initCache(self::LIMIT_CACHE_TTL, self::getSenderCacheKey($senderId), self::LIMIT_CACHE_DIR))
+		{
+			$cached = $cache->getVars();
+
+			return $cached === null || $cached === false ? null : (int)$cached;
+		}
+
+		$sender = self::getById($senderId);
+		$limit = isset($sender['OPTIONS']['smtp']['limit'])
+			? (int)$sender['OPTIONS']['smtp']['limit']
+			: null
+		;
+
+		$cache->startDataCache();
+		$cache->endDataCache($limit ?? false);
+
+		return $limit;
+	}
+
+	/**
+	 * Set the limit of a single sender record, leaving the records of other owners with the same
+	 * address untouched.
+	 * Returns true if the limit was changed.
+	 * @param int $senderId
+	 * @param int $limit
+	 * @return bool
+	 */
+	public static function setSenderLimit(int $senderId, int $limit): bool
+	{
+		$sender = self::getById($senderId);
+		if (!$sender || empty($sender['OPTIONS']['smtp']))
+		{
+			return false;
+		}
+
+		$limit = max($limit, 0);
+		if ((int)($sender['OPTIONS']['smtp']['limit'] ?? 0) === $limit)
+		{
+			return false;
+		}
+
+		$options = $sender['OPTIONS'];
+		$options['smtp']['limit'] = $limit;
+
+		return Internal\SenderTable::update($senderId, ['OPTIONS' => $options])->isSuccess();
 	}
 
 	/**
 	 * Set sender limit by email. Finding all senders with same email and set up limit from option
 	 * Returns true if change some email limit.
 	 * Returns false if has no changes.
+	 * The caches of the affected records are dropped by the data layer.
 	 * @param string $email
 	 * @param int $limit
 	 * @return bool
@@ -547,9 +914,6 @@ class Sender
 		}
 
 		$email = $address->getEmail();
-
-		$cache = new \CPHPCache();
-		$cache->clean($email, '/main/mail/limit');
 
 		$res = Internal\SenderTable::getList(array(
 			'filter' => array(
@@ -588,6 +952,7 @@ class Sender
 
 	/**
 	 * Remove limit from all connected senders.
+	 * The caches of the affected records are dropped by the data layer.
 	 * @param string $email
 	 * @return bool
 	 * @throws Main\ArgumentException
@@ -604,8 +969,6 @@ class Sender
 		}
 
 		$email = $address->getEmail();
-		$cache = new \CPHPCache();
-		$cache->clean($email, '/main/mail/limit');
 
 		$res = Internal\SenderTable::getList(array(
 			'filter' => array(
@@ -631,38 +994,125 @@ class Sender
 
 	public static function applyCustomSmtp($event)
 	{
-		$headers = $event->getParameter('arguments')->additional_headers;
-		$context = $event->getParameter('arguments')->context;
+		$arguments = $event->getParameter('arguments');
+		$headers = $arguments->additional_headers;
+		$context = $arguments->context;
 
 		if (empty($context) || !($context instanceof Context))
 		{
 			return;
 		}
 
-		if ($context->getSmtp() && $context->getSmtp()->getHost())
+		if ($context->getAutomaticCustomSmtpEnabled() === false)
 		{
 			return;
 		}
 
-		if (preg_match('/X-Bitrix-Mail-SMTP-Host:/i', $headers))
-		{
-			return;
-		}
+		$identity = $context->getSenderIdentity();
+		$address = self::extractFromAddress($headers);
 
-		$eol = Mail::getMailEol();
-		$eolh = preg_replace('/([a-f0-9]{2})/i', '\x\1', bin2hex($eol));
-
-		if (preg_match(sprintf('/(^|%1$s)From:(.+?)(%1$s([^\s]|$)|$)/is', $eolh), $headers, $matches))
+		// An identity without a usable sender record keeps the address selection it had before identities.
+		$customSmtp = $identity !== null
+			? static::getCustomSmtp($address?->getEmail(), $identity)
+			: false
+		;
+		if ($customSmtp)
 		{
-			$address = new Address(preg_replace(sprintf('/%s\s+/', $eolh), '', $matches[2]));
-			if ($address->validate())
+			$resolvedEmail = $customSmtp->getFrom();
+			if (
+				$address === null
+				|| !$resolvedEmail
+				|| strcasecmp($address->getEmail(), $resolvedEmail) !== 0
+			)
 			{
-				if ($customSmtp = static::getCustomSmtp($address->getEmail()))
-				{
-					$context->setSmtp($customSmtp);
-				}
+				return self::rejectSending(
+					$context,
+					self::ADDRESS_MISMATCH_ERROR,
+					Loc::getMessage('MAIN_MAIL_SENDER_ADDRESS_MISMATCH_ERROR'),
+					[
+						'messageAddress' => $address?->getEmail(),
+						'senderAddress' => $resolvedEmail,
+					],
+				);
 			}
+
+			if (
+				($context->getSmtp() && $context->getSmtp()->getHost())
+				|| preg_match('/X-Bitrix-Mail-SMTP-Host:/i', $headers)
+			)
+			{
+				return;
+			}
+
+			$context->setSmtp($customSmtp);
+
+			return;
 		}
+
+		if (
+			$address === null
+			|| ($context->getSmtp() && $context->getSmtp()->getHost())
+			|| preg_match('/X-Bitrix-Mail-SMTP-Host:/i', $headers)
+		)
+		{
+			return;
+		}
+
+		$customSmtp = static::getCustomSmtp($address->getEmail());
+		if ($customSmtp)
+		{
+			$context->setSmtp($customSmtp);
+		}
+	}
+
+	private static function rejectSending(
+		Context $context,
+		string $code,
+		string $message,
+		array $customData = [],
+	): Main\EventResult
+	{
+		$error = new Error($message, $code, $customData);
+		$context->setSendingError($error);
+
+		return new Main\EventResult(Main\EventResult::ERROR, ['error' => $error]);
+	}
+
+	private static function extractFromAddress($headers): ?Address
+	{
+		$value = self::extractHeaderValue($headers, 'From');
+		if ($value === null)
+		{
+			return null;
+		}
+
+		$address = new Address($value);
+
+		return $address->validate() ? $address : null;
+	}
+
+	private static function extractHeaderValue(string $headers, string $name): ?string
+	{
+		if (!preg_match(self::getHeaderPattern($name), $headers, $matches))
+		{
+			return null;
+		}
+
+		return preg_replace(sprintf('/%s\s+/', self::getEolPattern()), '', $matches[2]);
+	}
+
+	private static function getHeaderPattern(string $name): string
+	{
+		return sprintf(
+			'/(^|%1$s)%2$s:(.+?)(%1$s([^\s]|$)|$)/is',
+			self::getEolPattern(),
+			preg_quote($name, '/')
+		);
+	}
+
+	private static function getEolPattern(): string
+	{
+		return preg_replace('/([a-f0-9]{2})/i', '\x\1', bin2hex(Mail::getMailEol()));
 	}
 
 	public static function prepareUserMailboxes($userId = null)
@@ -792,7 +1242,7 @@ class Sender
 
 		$filter = [
 			'=IS_CONFIRMED' => true,
-			'=EMAIL' => $email,
+			'=EMAIL' => Address::normalizeEmail($email),
 			'=USER_ID' => $userId,
 			'=PARENT_MODULE_ID' => 'main',
 		];
@@ -853,7 +1303,7 @@ class Sender
 	{
 		$filter = [
 			'=IS_CONFIRMED' => true,
-			'=EMAIL' => $email,
+			'=EMAIL' => Address::normalizeEmail($email),
 			'=IS_PUBLIC' => true,
 			'!=ID' => $senderId,
 		];
@@ -877,6 +1327,9 @@ class Sender
 
 	public static function hasUserAvailableSmtpSenderByEmail(string $email, int $userId, bool $onlyWithSmtp = false): bool
 	{
+		// the stored address is normalized, so a lookup by the address of the caller has to be too
+		$email = Address::normalizeEmail($email);
+
 		if (self::getPublicSmtpSenderByEmail($email, onlyWithSmtp: $onlyWithSmtp))
 		{
 			return true;

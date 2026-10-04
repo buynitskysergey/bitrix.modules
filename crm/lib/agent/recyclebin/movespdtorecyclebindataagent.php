@@ -58,6 +58,7 @@ final class MoveSpdToRecycleBinDataAgent extends AgentBase
 
 		if (empty($recycleBinIds))
 		{
+			$this->unlockRecycleBinStorage();
 			$nextEntityTypeId = $this->getNextEntity();
 			if (!$nextEntityTypeId)
 			{
@@ -66,7 +67,6 @@ final class MoveSpdToRecycleBinDataAgent extends AgentBase
 				return false;
 			}
 
-			$this->unlockRecycleBinStorage();
 			$this->entityTypeId = $nextEntityTypeId;
 
 			$this->logger->info('AgentRecycleBinChangeEngine: Next entity type', [

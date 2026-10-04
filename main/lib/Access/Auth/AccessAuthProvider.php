@@ -99,17 +99,7 @@ class AccessAuthProvider extends \CAuthProvider
 		$getMemberCollectionByNodeType =
 			static fn(NodeEntityType $nodeType) =>
 				(new NodeMemberDataBuilder())
-					->addFilter(
-						new NodeMemberFilter(
-							entityIdFilter: EntityIdFilter::fromEntityId($userId),
-							entityType: MemberEntityType::USER,
-							nodeFilter: new NodeFilter(
-								entityTypeFilter: NodeTypeFilter::fromNodeTypes([$nodeType]),
-							),
-							findRelatedMembers: false,
-							active: null,
-						)
-					)
+					->addFilter(self::createMemberFilter($userId, $nodeType))
 					->getAll()
 		;
 
@@ -191,5 +181,25 @@ class AccessAuthProvider extends \CAuthProvider
 
 			$connection->query($sql);
 		}
+	}
+
+	private static function createMemberFilter(int $userId, NodeEntityType $nodeType): NodeMemberFilter
+	{
+		$filter = new NodeMemberFilter(
+			entityIdFilter: EntityIdFilter::fromEntityId($userId),
+			entityType: MemberEntityType::USER,
+			nodeFilter: new NodeFilter(
+				entityTypeFilter: NodeTypeFilter::fromNodeTypes([$nodeType]),
+			),
+			findRelatedMembers: false,
+			active: null,
+		);
+
+		if (property_exists($filter, 'withVirtualUsers'))
+		{
+			$filter->withVirtualUsers = true;
+		}
+
+		return $filter;
 	}
 }

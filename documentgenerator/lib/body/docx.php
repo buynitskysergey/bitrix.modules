@@ -254,7 +254,7 @@ class Docx extends ZipDocument
 		];
 
 		$footerRelationships =
-			$this->innerDocuments[static::PATH_DOCUMENT]['relationships']['data'][static::REL_TYPE_FOOTER];
+			$this->innerDocuments[static::PATH_DOCUMENT]['relationships']['data'][static::REL_TYPE_FOOTER] ?? null;
 		if (isset($footerRelationships))
 		{
 			foreach ($footerRelationships as $relationship)
@@ -271,7 +271,7 @@ class Docx extends ZipDocument
 		}
 
 		$headerRelationships =
-			$this->innerDocuments[static::PATH_DOCUMENT]['relationships']['data'][static::REL_TYPE_HEADER];
+			$this->innerDocuments[static::PATH_DOCUMENT]['relationships']['data'][static::REL_TYPE_HEADER] ?? null;
 		if (isset($headerRelationships))
 		{
 			foreach ($headerRelationships as $relationship)
@@ -289,7 +289,7 @@ class Docx extends ZipDocument
 
 		// take only the first numbering.xml - we will add only
 		$numberingRelationships =
-			$this->innerDocuments[static::PATH_DOCUMENT]['relationships']['data'][static::REL_TYPE_NUMBERING];
+			$this->innerDocuments[static::PATH_DOCUMENT]['relationships']['data'][static::REL_TYPE_NUMBERING] ?? null;
 		if (isset($numberingRelationships))
 		{
 			foreach ($numberingRelationships as $relationship)
@@ -667,7 +667,7 @@ class Docx extends ZipDocument
 		{
 			return;
 		}
-		if (!$this->numbering['documentPath'])
+		if (empty($this->numbering['documentPath']))
 		{
 			/** @var \DOMDocument $relationshipsDocument */
 			$relationshipsDocument = $this->innerDocuments[static::PATH_DOCUMENT]['relationships']['document'];
@@ -697,7 +697,7 @@ class Docx extends ZipDocument
 			]);
 		}
 
-		if (!$this->numbering['document'])
+		if (empty($this->numbering['document']))
 		{
 			$numberingContent = $this->zip->getFromName($this->numbering['documentPath']);
 			if (empty($numberingContent))

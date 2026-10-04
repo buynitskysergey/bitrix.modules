@@ -587,6 +587,19 @@ class Manager
 			$tpl->setDocumentStatus('SCRIPT');
 			$tpl->setAutoExecute(\CBPDocumentEventType::Script);
 
+			$activities = $tpl->getActivities();
+
+			$checkResult = \CBPWorkflowTemplateLoader::checkImportedTemplateActivities(
+				is_array($activities) ? $activities : [],
+				new \CBPWorkflowTemplateUser($userId)
+			);
+			if (!$checkResult->isSuccess())
+			{
+				$result->addErrors($checkResult->getErrors());
+
+				return $result;
+			}
+
 			$saveResult = $tpl->save();
 
 			if ($saveResult->isSuccess())

@@ -6,9 +6,10 @@ namespace Bitrix\Bizproc\Public\Activity;
 
 use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\Entity\Workflow\ExecutionPayload;
-use Bitrix\Bizproc\Public\Activity\Interface\FilterResultPropertyResolver;
+use Bitrix\Bizproc\Public\Activity\Mixins\NodeFilterResultProperties;
 use Bitrix\Bizproc\Public\Activity\Structure\FlowDirectedActivity;
 use Bitrix\Bizproc\Internal\Entity\Activity\Interface\FlowCompositeActivity;
+use Bitrix\Bizproc\Internal\Service\Activity\ChildValidationContext;
 use Bitrix\Bizproc\Internal\Service\Container;
 use Bitrix\Main\Localization\Loc;
 use CBPActivity;
@@ -24,12 +25,12 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 	IBPConfigurableActivity,
 	FlowCompositeActivity
 {
+	use NodeFilterResultProperties;
+
 	protected const RULES_PARAM = 'Rules';
+	protected const RELATIONS_PARAM = 'Relations';
 	protected const INPUT_ACTIVITY_NAMES = 'InputNames';
 	protected const OUTPUT_ACTIVITY_NAMES = 'OutputNames';
-	protected const FILTER_SETTINGS = 'FilterSettings';
-	protected const FILTER_RETURN_PROPERTIES_MAP = 'FilterReturnPropertiesMap';
-	protected const FILTER_RESULT_ALL_SUFFIX = '_all';
 	protected const NOT_FILLED_MARK = 'NotFilled';
 
 	protected array $queuePortIds = [];
@@ -42,23 +43,18 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 			$this->arProperties,
 			[
 				static::RULES_PARAM => [],
+				static::RELATIONS_PARAM => [],
 				static::INPUT_ACTIVITY_NAMES => [],
 				static::OUTPUT_ACTIVITY_NAMES => [],
-				static::FILTER_SETTINGS => [],
-				static::FILTER_RETURN_PROPERTIES_MAP => [],
 			],
+			static::getFilterPropertyDefaults(),
 		);
 
 		$this->setPropertiesTypes([
 			static::RULES_PARAM => [
 				'Type' => FieldType::RULES,
 			],
-			static::FILTER_SETTINGS => [
-				'Type' => FieldType::RULES,
-			],
-			static::FILTER_RETURN_PROPERTIES_MAP => [
-				'Type' => FieldType::JSON,
-			],
+			...static::getFilterPropertyTypes(),
 		]);
 	}
 
@@ -78,38 +74,65 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 
 	public static function validateChild($childActivity, $bFirstChild = false)
 	{
-		$errors = [];
-
-		$whiteList = [
-			'IfElseActivity',
-			'EmptyBlockActivity',
+		return [
+			...static::validateUnifiedPanelChild(static::getActivityName(), $childActivity),
+			...parent::validateChild($childActivity, $bFirstChild),
 		];
+	}
 
-		$nodeActionCollection = Container::instance()
-			->getComplexActivityService()
-			->getCorrespondingNodeActionActivityByName(static::getActivityName())
-		;
-		foreach ($nodeActionCollection as $nodeAction)
+	/**
+	 * The verdict on one child of a node served by the unified settings panel. Both surfaces of the panel reach
+	 * it from here - a complex node above and an ordinary node the panel serves
+	 * ({@see \CBPActivity::validateChild()}) - so a second verdict cannot appear.
+	 *
+	 * Lives here and not next to the ordinary node because the phrase of the verdict does: `Loc::getMessage()`
+	 * loads the language file of the file it is called from.
+	 *
+	 * The white list itself belongs to the service that owns both the action catalog and the relation action,
+	 * and is memoized there per node
+	 * ({@see \Bitrix\Bizproc\Internal\Service\Activity\ComplexActivityService::getUnifiedPanelChildCodes()}):
+	 * answered by the descriptor of the node alone - the class of a child is never loaded - so a child costs one
+	 * array read and never a traversal, on every entry into a template alike: the designer, an import, REST and
+	 * the AI converter.
+	 *
+	 * @param string $activityCode Code of the node the child is being given to.
+	 * @param mixed $childActivity Type of the child, in the shape a template carries it.
+	 * @param array|null $documentType Document context the node works in: the catalog the white list is built
+	 *     of excludes an action locked in that context, so the verdict here is the one the settings panel of
+	 *     the very same node gave. Omitted, the context published by the running validation pass answers
+	 *     ({@see ChildValidationContext}); no pass running and no context given keeps the context-free
+	 *     catalog - the widest of the answers, and the one every caller got before the context existed.
+	 * @return list<array{code: string, message: string}>
+	 */
+	public static function validateUnifiedPanelChild(
+		string $activityCode,
+		$childActivity,
+		?array $documentType = null,
+	): array
+	{
+		$container = Container::instance();
+		$allowedCodes = $container->getComplexActivityService()->getUnifiedPanelChildCodes(
+			$activityCode,
+			$documentType ?? ChildValidationContext::getDocumentType(),
+		);
+		$childCode = $container->getActivitySearcherService()->normalizeActivityCode((string)$childActivity);
+
+		if (isset($allowedCodes[$childCode]))
 		{
-			$whiteList[] = $nodeAction->getClass();
+			return [];
 		}
 
-		if (!in_array($childActivity, $whiteList, true))
-		{
-			$errors[] = [
+		return [
+			[
 				'code' => 'WrongChildType',
 				'message' => Loc::getMessage('BIZPROC_PUBLIC_ACTIVITY_BCA_INVALID_CHILD'),
-			];
-		}
-
-		return [...$errors, ...parent::validateChild($childActivity, $bFirstChild)];
+			],
+		];
 	}
 
 	protected static function getActivityName(): string
 	{
-		$class = static::class;
-
-		return mb_strtolower(str_starts_with($class, 'CBP') ? mb_substr($class, 3) : $class);
+		return static::getActivityCode();
 	}
 
 	/**
@@ -117,15 +140,27 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 	 */
 	protected function getStartActivityNames(): array
 	{
-		return array_values(
-			array_intersect_key(
-				$this->getRawProperty(static::INPUT_ACTIVITY_NAMES),
-				array_flip($this->queuePortIds)
-			)
+		$matchedInputNames = array_intersect_key(
+			$this->getRawProperty(static::INPUT_ACTIVITY_NAMES),
+			array_flip($this->queuePortIds)
 		);
+
+		// A single input port may carry several rules: its InputNames entry is then a list of input
+		// activity names (all rules start when the port fires). A single-rule port keeps a scalar entry,
+		// so (array) normalises both shapes without changing single-rule behaviour.
+		$startNames = [];
+		foreach ($matchedInputNames as $entry)
+		{
+			foreach ((array)$entry as $name)
+			{
+				$startNames[] = $name;
+			}
+		}
+
+		return $startNames;
 	}
 
-	protected function onDeadEndReached(CBPActivity $lastActivity): void
+	protected function onDeadEndReached(CBPActivity $lastActivity): array
 	{
 		$outputNames = $this->getRawProperty(static::OUTPUT_ACTIVITY_NAMES);
 
@@ -137,6 +172,8 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 		}
 
 		$this->outputPortId = $portId;
+
+		return [];
 	}
 
 	protected function close(): void
@@ -176,64 +213,6 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 		return [
 			...$complexActivityService->configureRuleProperty(),
 		];
-	}
-
-	protected function initializeFilterResultProperties(): void
-	{
-		$returnPropertiesMap = $this->getRawProperty(static::FILTER_RETURN_PROPERTIES_MAP);
-		if (!is_array($returnPropertiesMap))
-		{
-			return;
-		}
-
-		foreach (array_keys($returnPropertiesMap) as $propertyId)
-		{
-			$this->arProperties[$propertyId] = null;
-		}
-
-		if (empty($returnPropertiesMap))
-		{
-			return;
-		}
-
-		$propertyTypes = [];
-		foreach ($returnPropertiesMap as $propertyId => $property)
-		{
-			if (is_array($property))
-			{
-				$propertyTypes[$propertyId] = $property;
-			}
-		}
-
-		if (!empty($propertyTypes))
-		{
-			$this->setPropertiesTypes($propertyTypes);
-		}
-
-		$resolver = $this->getFilterResultPropertyResolver();
-		if ($resolver === null)
-		{
-			return;
-		}
-
-		foreach ($resolver->resolveProperties($this) as $filterId => $result)
-		{
-			if (array_key_exists($filterId, $returnPropertiesMap))
-			{
-				$this->arProperties[$filterId] = $result['documentId'] ?? null;
-			}
-
-			$allPropertyId = $filterId . static::FILTER_RESULT_ALL_SUFFIX;
-			if (array_key_exists($allPropertyId, $returnPropertiesMap))
-			{
-				$this->arProperties[$allPropertyId] = $result['documentIds'] ?? [];
-			}
-		}
-	}
-
-	private function getFilterResultPropertyResolver(): ?FilterResultPropertyResolver
-	{
-		return Container::instance()->getFilterResultPropertyResolverRegistry()->resolve($this);
 	}
 
 	public static function getPropertiesDialogValues(

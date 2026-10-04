@@ -2,7 +2,6 @@
 
 namespace Bitrix\Crm\Service\Broker;
 
-use Bitrix\Crm\Category\Entity\Category;
 use Bitrix\Crm\EO_Status;
 use Bitrix\Crm\EO_Status_Collection;
 use Bitrix\Crm\Service\Factory;
@@ -55,18 +54,20 @@ final class Stage
 		return null;
 	}
 
-	public function getByCategoryId(?int $categoryId = null): EO_Status_Collection
+	public function getByCategoryId(?int $categoryId = null): ?EO_Status_Collection
 	{
 		return $this
 			->loadByCategoryId($categoryId)
-			->getByCategoryIdFromCache($categoryId);
+			->getByCategoryIdFromCache($categoryId)
+		;
 	}
 
-	public function getByCategoryIds(array $categoryIds): EO_Status_Collection
+	public function getByCategoryIds(array $categoryIds): ?EO_Status_Collection
 	{
 		return $this
 			->loadByCategoryIds($categoryIds)
-			->getByCategoryIdsFromCache($categoryIds);
+			->getByCategoryIdsFromCache($categoryIds)
+		;
 	}
 
 	private function loadByCategoryId(?int $categoryId = null): self

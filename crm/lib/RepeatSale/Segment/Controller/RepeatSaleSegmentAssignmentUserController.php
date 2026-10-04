@@ -59,4 +59,26 @@ final class RepeatSaleSegmentAssignmentUserController
 
 		return $connection->query($sql);
 	}
+
+	public static function onUserDelete($userId): void
+	{
+		$userId = (int)$userId;
+		if ($userId > 0)
+		{
+			self::getInstance()->deleteByUserId($userId);
+		}
+	}
+
+	public static function onAfterUserUpdate($fields): void
+	{
+		if (
+			is_array($fields)
+			&& isset($fields['ACTIVE'])
+			&& $fields['ACTIVE'] === 'N'
+			&& (int)($fields['ID'] ?? 0) > 0
+		)
+		{
+			self::getInstance()->deleteByUserId((int)$fields['ID']);
+		}
+	}
 }

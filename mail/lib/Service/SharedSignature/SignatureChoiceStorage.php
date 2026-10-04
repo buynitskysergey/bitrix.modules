@@ -20,6 +20,13 @@ class SignatureChoiceStorage
 	public const OPTION_CATEGORY = 'mail';
 	public const OPTION_NAME = 'signature_choice';
 
+	private readonly SenderIdentityResolver $senderIdentityResolver;
+
+	public function __construct(?SenderIdentityResolver $senderIdentityResolver = null)
+	{
+		$this->senderIdentityResolver = $senderIdentityResolver ?? new SenderIdentityResolver();
+	}
+
 	/**
 	 * @return array{id: int, time: int}|null
 	 */
@@ -30,7 +37,7 @@ class SignatureChoiceStorage
 			return null;
 		}
 
-		$stored = $this->readAll($userId);
+		$stored = $this->getAllChoices($userId);
 		$raw = $stored[$senderKey] ?? null;
 
 		return is_scalar($raw) ? self::decode((string)$raw) : null;
@@ -57,6 +64,49 @@ class SignatureChoiceStorage
 			if (is_scalar($raw))
 			{
 				$choices[(string)$senderKey] = (string)$raw;
+			}
+		}
+
+		try
+		{
+			$identities = $this->senderIdentityResolver->resolveForOwner($userId, array_keys($choices));
+		}
+		catch (\Throwable)
+		{
+			return $choices;
+		}
+
+		foreach ($choices as $senderKey => $raw)
+		{
+			$choice = self::decode($raw);
+			$identity = $identities[AssignmentResolver::normalizeSenderKey($senderKey)] ?? null;
+			if (
+				$choice === null
+				|| !is_array($identity)
+				|| empty($identity['isAlias'])
+				|| (int)($identity['mailboxId'] ?? 0) <= 0
+				|| empty($identity['currentEmail'])
+			)
+			{
+				continue;
+			}
+
+			$currentSenderKey = self::buildSenderKey(
+				(string)$identity['currentEmail'],
+				(string)($identity['name'] ?? ''),
+			);
+			if ($currentSenderKey === $senderKey)
+			{
+				continue;
+			}
+
+			$currentChoice = isset($choices[$currentSenderKey])
+				? self::decode($choices[$currentSenderKey])
+				: null
+			;
+			if (!array_key_exists($currentSenderKey, $choices) || self::isNewer($choice, $currentChoice))
+			{
+				$choices[$currentSenderKey] = $raw;
 			}
 		}
 
@@ -173,6 +223,15 @@ class SignatureChoiceStorage
 	private static function encode(int $signatureId, int $time): string
 	{
 		return $signatureId . ':' . $time;
+	}
+
+	/**
+	 * @param array{id: int, time: int} $candidate
+	 * @param array{id: int, time: int}|null $current
+	 */
+	private static function isNewer(array $candidate, ?array $current): bool
+	{
+		return $current === null || $candidate['time'] > $current['time'];
 	}
 
 	/**

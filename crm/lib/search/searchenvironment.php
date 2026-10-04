@@ -67,6 +67,8 @@ class SearchEnvironment
 			$filter[] = $searchFilter;
 			unset($searchFilter);
 		}
+
+		unset($filter['__ENABLE_SEARCH_CONTENT_PHONE_DETECTION']);
 	}
 
 	public static function convertEntityFilterValues(int $entityTypeId, array &$fields): void

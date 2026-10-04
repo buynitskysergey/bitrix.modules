@@ -17,6 +17,7 @@ use Bitrix\Rest\Internal\Contract\Repository\IncomingWebhookRepositoryInterface;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhook;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhookAttributeCollection;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhookExternalAttribute;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Repository\IncomingWebhookRepository;
 use Bitrix\Rest\Internal\Repository\IntegrationRepository;
 use Bitrix\Rest\Internal\Service\Security\SecurityAuditLogger;
@@ -50,7 +51,7 @@ abstract class AbstractCreateIncomingWebhookCommandHandler
 		if ($user->getData() === null)
 		{
 			throw new ObjectNotFoundException(
-				'User with ID ' . $userId . ' not found'
+				'User with ID ' . $userId . ' not found',
 			);
 		}
 
@@ -82,6 +83,7 @@ abstract class AbstractCreateIncomingWebhookCommandHandler
 		array $scopes,
 		array $attributes,
 		?string $comment = null,
+		bool $skipTariffCheck = false,
 	): IncomingWebhook {
 		$connection = Application::getConnection();
 		$connection->startTransaction();
@@ -95,13 +97,14 @@ abstract class AbstractCreateIncomingWebhookCommandHandler
 				],
 				ElementCodeType::IN_WEBHOOK->value,
 				null,
-				$initiatorUserId
+				$initiatorUserId,
+				$skipTariffCheck,
 			);
 
 			if (($integrationResult['status'] ?? false) !== true || empty($integrationResult['ID']))
 			{
 				throw new SystemException(
-					implode('; ', $integrationResult['errors'] ?? ['Failed to create incoming webhook integration'])
+					implode('; ', $integrationResult['errors'] ?? ['Failed to create incoming webhook integration']),
 				);
 			}
 
@@ -175,6 +178,7 @@ abstract class AbstractCreateIncomingWebhookCommandHandler
 			}
 
 			$connection->commitTransaction();
+			LicenseScannerStateInvalidator::reset();
 
 			$this->securityAuditLogger->logWebhookCreated(
 				actingUserId: $initiatorUserId,

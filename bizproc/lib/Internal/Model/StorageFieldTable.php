@@ -56,7 +56,7 @@ class StorageFieldTable extends DataManager
 	use DeleteByFilterTrait;
 
 	public const DEFAULT_SORT = 500;
-	private const CODE_PATTERN = '/^[A-Za-z_][A-Za-z0-9_]*$/';
+	public const CODE_PATTERN = '/^[A-Za-z_][A-Za-z0-9_]*$/';
 
 	public static function getTableName(): string
 	{

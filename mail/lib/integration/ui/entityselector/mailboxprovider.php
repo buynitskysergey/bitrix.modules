@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Integration\UI\EntitySelector;
 
-use Bitrix\Mail\Helper\LicenseManager;
 use Bitrix\Mail\Helper\MailAccess;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Main\Engine\CurrentUser;
@@ -19,10 +18,8 @@ use Bitrix\UI\EntitySelector\Tab;
  * SEL-01: entity selector provider for active portal mailboxes.
  * Used by the shared signature assignment dialog ("specific mailboxes" mode).
  *
- * isAvailable() mirrors the SharedSignatureAccess gate filter — the tariff plus the right to
- * manage employee mailboxes: the load endpoint is reachable by any authorized user, so without
- * this gate the provider would expose every mailbox email on the portal to whoever may merely
- * see their grid.
+ * The load endpoint is reachable by any authorized user, so availability follows the dedicated
+ * shared-signature permission and does not expose portal mailbox addresses to other users.
  */
 class MailboxProvider extends BaseProvider
 {
@@ -42,8 +39,7 @@ class MailboxProvider extends BaseProvider
 			return false;
 		}
 
-		return LicenseManager::isMailboxManagementEnabled()
-			&& MailAccess::hasCurrentUserAccessToMailboxManagement();
+		return MailAccess::hasCurrentUserAccessToSharedSignatureManagement();
 	}
 
 	/**

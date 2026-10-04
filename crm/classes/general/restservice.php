@@ -37,7 +37,6 @@ use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\Text\StringHelper;
 use Bitrix\Rest\AccessException;
 use Bitrix\Rest\RestException;
 use Bitrix\Rest\UserFieldProxy;
@@ -439,6 +438,9 @@ final class CCrmRestService extends IRestService
 	);
 	private static $DESCRIPTION = null;
 	private static $PROXIES = array();
+	private const SYSTEM_FILE_FIELDS = array(
+		CCrmOwnerType::Contact => array('PHOTO'),
+	);
 
 	public static function onRestServiceBuildDescription()
 	{
@@ -451,6 +453,10 @@ final class CCrmRestService extends IRestService
 			{
 				$bindings[$name] = $callback;
 			}
+			$bindings[\CRestUtil::METHOD_DOWNLOAD] = array(
+				'CCrmRestService',
+				'onRestServiceDownload',
+			);
 
 			$allActivityPlacementsCodes = AppPlacement::getAllDetailActivityCodes();
 			$bindings[\CRestUtil::PLACEMENTS] = [];
@@ -513,6 +519,81 @@ final class CCrmRestService extends IRestService
 
 		return self::$DESCRIPTION;
 	}
+
+	public static function onRestServiceDownload(array $params, $nav, CRestServer $server): never
+	{
+		$entityTypeId = self::parseDownloadPositiveInteger($params['entityTypeId'] ?? null);
+		$entityId = self::parseDownloadPositiveInteger($params['entityId'] ?? null);
+		$fileId = self::parseDownloadPositiveInteger($params['fileId'] ?? null);
+		$fieldName = $params['fieldName'] ?? null;
+		$isSystemFile = self::isSystemFileField($entityTypeId, $fieldName);
+
+		if (
+			$entityTypeId === null
+			|| $entityId === null
+			|| $fileId === null
+			|| !is_string($fieldName)
+			|| (!$isSystemFile && preg_match('/\AUF_[A-Z0-9_]+\z/', $fieldName) !== 1)
+		)
+		{
+			throw new RestException(
+				'File not found',
+				RestException::ERROR_NOT_FOUND,
+				CRestServer::STATUS_NOT_FOUND,
+			);
+		}
+
+		$errors = array();
+		$errorCodes = array();
+		if (
+			CCrmFileProxy::WriteFileToResponse(
+				$entityTypeId,
+				$entityId,
+				$fieldName,
+				$fileId,
+				$errors,
+				array(
+					'strict_view_result' => true,
+					'is_dynamic' => !$isSystemFile,
+					'error_codes' => &$errorCodes,
+				),
+			)
+		)
+		{
+			exit;
+		}
+
+		$isAccessDenied = in_array(CCrmFileProxy::ERROR_ACCESS_DENIED, $errorCodes, true);
+		throw new RestException(
+			$isAccessDenied ? 'Access denied.' : 'File not found',
+			$isAccessDenied ? 'ACCESS_DENIED' : RestException::ERROR_NOT_FOUND,
+			$isAccessDenied ? CRestServer::STATUS_FORBIDDEN : CRestServer::STATUS_NOT_FOUND,
+		);
+	}
+
+	private static function isSystemFileField(?int $entityTypeId, mixed $fieldName): bool
+	{
+		return is_string($fieldName)
+			&& in_array($fieldName, self::SYSTEM_FILE_FIELDS[$entityTypeId] ?? array(), true)
+		;
+	}
+
+	private static function parseDownloadPositiveInteger(mixed $value): ?int
+	{
+		if (!is_string($value) || preg_match('/\A[1-9][0-9]*\z/', $value) !== 1)
+		{
+			return null;
+		}
+
+		$result = filter_var(
+			$value,
+			FILTER_VALIDATE_INT,
+			array('options' => array('min_range' => 1)),
+		);
+
+		return $result === false ? null : $result;
+	}
+
 	public static function onRestServiceMethod($arParams, $nav, CRestServer $server)
 	{
 		if(!Service\Container::getInstance()->getUserPermissions()->entityType()->canReadSomeItemsInCrmOrAutomatedSolutions())
@@ -729,13 +810,26 @@ final class CCrmRestService extends IRestService
 			}
 			$proxy->setServer($server);
 		}
-		return $proxy->processMethodRequest(
-			$parts[2],
-			$partCount > 3 ? array_slice($parts, 3) : array(),
-			$arParams,
-			$nav,
-			$server
-		);
+		try
+		{
+			return $proxy->processMethodRequest(
+				$parts[2],
+				$partCount > 3 ? array_slice($parts, 3) : array(),
+				$arParams,
+				$nav,
+				$server
+			);
+		}
+		catch (\TypeError | \ValueError $e)
+		{
+			// CRestServer catches only \Exception, so engine errors caused by malformed
+			// request params would end up as a fatal error instead of a REST error response
+			throw new RestException(
+				'Wrong params.',
+				RestException::ERROR_ARGUMENT,
+				CRestServer::STATUS_WRONG_REQUEST
+			);
+		}
 	}
 	public static function getNavData($start, $isOrm = false)
 	{
@@ -5673,8 +5767,10 @@ class CCrmProductRowRestProxy extends CCrmRestProxyBase
 			return false;
 		}
 
-		if(!CCrmAuthorizationHelper::CheckCreatePermission(
-			CCrmProductRow::ResolveOwnerTypeName($ownerType)))
+		$ownerTypeName = CCrmProductRow::ResolveOwnerTypeName($ownerType);
+		$ownerTypeID = CCrmOwnerType::ResolveID($ownerTypeName);
+
+		if(!EntityAuthorization::checkUpdatePermission($ownerTypeID, $ownerID))
 		{
 			$errors[] = 'Access denied.';
 			return false;
@@ -10221,6 +10317,13 @@ class CCrmActivityRestProxy extends CCrmRestProxyBase
 			}
 		}
 
+		if (\Bitrix\Crm\Activity\CallDeletionRestriction::isDeletionRestricted(
+			$ID, $currentFields, (int)$this->getCurrentUserID()))
+		{
+			$errors[] = 'Access denied.';
+			return false;
+		}
+
 		$result = CCrmActivity::Delete($ID, false, true, array());
 		if($result === false)
 		{
@@ -13445,8 +13548,12 @@ class CCrmRequisiteRestProxy extends CCrmRestProxyBase
 
 				return $filter;
 			},
-			static fn (array $params) => $entity->getList($params),
-			static fn (array $filter) => $entity->getCountByFilter($filter),
+			static function (array $params) use ($entity) {
+				$params['checkOwnerPermissions'] = true;
+
+				return $entity->getList($params);
+			},
+			static fn (array $filter) => $entity->getCountByFilter($filter, ['checkOwnerPermissions' => true]),
 		);
 	}
 
@@ -13745,8 +13852,12 @@ class CCrmRequisiteBankDetailRestProxy extends CCrmRestProxyBase
 
 				return $filter;
 			},
-			static fn (array $params) => $entity->getList($params),
-			static fn (array $filter) => $entity->getCountByFilter($filter),
+			static function (array $params) use ($entity) {
+				$params['checkOwnerPermissions'] = true;
+
+				return $entity->getList($params);
+			},
+			static fn (array $filter) => $entity->getCountByFilter($filter, ['checkOwnerPermissions' => true]),
 		);
 	}
 	protected function innerUpdate($ID, &$fields, &$errors, array $params = null)
@@ -14191,281 +14302,6 @@ class CCrmAddressRestProxy extends CCrmRestProxyBase
 
 	}
 
-	private function parseEntityTypeIdElement(array $filter, string $entityTypeIdKey, string $resultName): Main\Result
-	{
-		$result = new Main\Result();
-
-		if (isset($filter[$entityTypeIdKey]))
-		{
-			$id = CCrmOwnerType::Undefined;
-			$value = $filter[$entityTypeIdKey];
-			if (is_int($value))
-			{
-				$id = $value;
-			}
-			elseif (is_string($value))
-			{
-				$id = (int)$value;
-			}
-			else // array
-			{
-				$result->addError(new Main\Error('Multiple value', 'MULTIPLE_VALUE'));
-			}
-
-			if ($result->isSuccess())
-			{
-				$validEntityTypeIds = [
-					CCrmOwnerType::Lead,
-					CCrmOwnerType::Contact,
-					CCrmOwnerType::Company,
-					CCrmOwnerType::Requisite,
-				];
-
-				if (in_array($id, $validEntityTypeIds, true))
-				{
-					$result->setData([$resultName => $id]);
-				}
-				else
-				{
-					$result->addError(new Main\Error('Invalid value', 'INVALID_VALUE'));
-				}
-			}
-		}
-		else
-		{
-			$result->addError(new Main\Error('Value is not set', 'VALUE_IS_NOT_SET'));
-		}
-
-		return $result;
-	}
-
-	private function parseEntityIdElement(array $filter, string $entityIdKey, string $resultName): Main\Result
-	{
-		$result = new Main\Result();
-
-		if (isset($filter[$entityIdKey]))
-		{
-			$id = 0;
-			$value = $filter[$entityIdKey];
-			if (is_int($value))
-			{
-				$id = $value;
-			}
-			elseif (is_string($value))
-			{
-				$id = (int)$value;
-			}
-			else // array
-			{
-				$result->addError(new Main\Error('Multiple value', 'MULTIPLE_VALUE'));
-			}
-
-			if ($result->isSuccess())
-			{
-				if ($id > 0)
-				{
-					$result->setData([$resultName => $id]);
-				}
-				else
-				{
-					$result->addError(new Main\Error('Invalid value', 'INVALID_VALUE'));
-				}
-			}
-		}
-		else
-		{
-			$result->addError(new Main\Error('Value is not set', 'VALUE_IS_NOT_SET'));
-		}
-
-		return $result;
-	}
-
-	private function parseIdent(array $filter, callable $identMethod, string $identName): Main\Result
-	{
-		$result = new Main\Result();
-
-		$resultName = lcfirst(StringHelper::snake2camel($identName));
-		$idResult1 = $identMethod($filter, '=' . $identName, $resultName);
-		$isSetId1 = $idResult1->isSuccess();
-		$idResult2 = $identMethod($filter, $identName, $resultName);
-		$isSetId2 = $idResult2->isSuccess();
-		$id = 0;
-
-		if ($isSetId1 && !$isSetId2)
-		{
-			$id = $idResult1->getData()[$resultName];
-		}
-		elseif (!$isSetId1 && $isSetId2)
-		{
-			$id = $idResult2->getData()[$resultName];
-		}
-		elseif ($isSetId1 && $isSetId2)
-		{
-			$id1 = $idResult1->getData()[$resultName];
-			$id2 = $idResult2->getData()[$resultName];
-
-			if ($id1 === $id2)
-			{
-				$id = $id1;
-			}
-			else
-			{
-				$result->addError(new Main\Error('Invalid value', 'INVALID_VALUE'));
-			}
-		}
-		else
-		{
-			$result->addError(new Main\Error('Value is not set', 'VALUE_IS_NOT_SET'));
-		}
-
-		if ($result->isSuccess())
-		{
-			if ($id > 0)
-			{
-				$result->setData([$resultName => $id]);
-			}
-			else
-			{
-				$result->addError(new Main\Error('Invalid value', 'INVALID_VALUE'));
-			}
-		}
-
-		return $result;
-	}
-
-	private function parseEntityTypeId(array $filter): Main\Result
-	{
-		return $this->parseIdent($filter, [$this, 'parseEntityTypeIdElement'], 'ENTITY_TYPE_ID');
-	}
-
-	private function parseEntityId(array $filter): Main\Result
-	{
-		return $this->parseIdent($filter, [$this, 'parseEntityIdElement'], 'ENTITY_ID');
-	}
-
-	private function parseAnchorTypeId(array $filter): Main\Result
-	{
-		return $this->parseIdent($filter, [$this, 'parseEntityTypeIdElement'], 'ANCHOR_TYPE_ID');
-	}
-
-	private function parseAnchorId(array $filter): Main\Result
-	{
-		return $this->parseIdent($filter, [$this, 'parseEntityIdElement'], 'ANCHOR_ID');
-	}
-
-	private function parseIdents(
-		array $filter,
-		callable $parseTypeId,
-		callable $parseId,
-		string $typeIdKey,
-		string $idKey,
-		string $errorMessage,
-		string $errorCode
-	): Main\Result
-	{
-		$result = new Main\Result();
-
-		$typeId = 0;
-		$typeIdResult = $parseTypeId($filter);
-		$isTypeIdParsed = $typeIdResult->isSuccess();
-		if ($isTypeIdParsed)
-		{
-			$typeId = $typeIdResult->getData()[$typeIdKey];
-		}
-
-		$id = 0;
-		$idResult = $parseId($filter);
-		$isIdParsed = $idResult->isSuccess();
-		if ($isIdParsed)
-		{
-			$id = $idResult->getData()[$idKey];
-		}
-
-		if ($isTypeIdParsed && $isIdParsed)
-		{
-			$result->setData(
-				[
-					$typeIdKey => $typeId,
-					$idKey => $id,
-				]
-			);
-		}
-		else
-		{
-			$result->addError(new Main\Error($errorMessage, $errorCode));
-		}
-
-		return $result;
-	}
-
-	private function parseEntityIdents(array $filter): Main\Result
-	{
-		return $this->parseIdents(
-			$filter,
-			[$this, 'parseEntityTypeId'],
-			[$this, 'parseEntityId'],
-			'entityTypeId',
-			'entityId',
-			'Entity idents is not parsed',
-			'ENTITY_IDENTS_IS_NOT_PARSED',
-		);
-	}
-
-	private function parseAnchorIdents(array $filter): Main\Result
-	{
-		return $this->parseIdents(
-			$filter,
-			[$this, 'parseAnchorTypeId'],
-			[$this, 'parseAnchorId'],
-			'anchorTypeId',
-			'anchorId',
-			'Anchor idents is not parsed',
-			'ANCHOR_IDENTS_IS_NOT_PARSED',
-		);
-	}
-
-	private function getIdents(array $filter): Main\Result
-	{
-		$result = new Main\Result();
-
-		$entityIdentsResult = $this->parseEntityIdents($filter);
-		$isEntityIdentsParsed = $entityIdentsResult->isSuccess();
-		$isEntityIdentsAbsent = !(
-			array_key_exists('=ENTITY_TYPE_ID', $filter)
-			|| array_key_exists('ENTITY_TYPE_ID', $filter)
-		);
-		$anchorIdentsResult = $this->parseAnchorIdents($filter);
-		$isAnchorIdentsParsed = $anchorIdentsResult->isSuccess();
-		$isAnchorIdentsAbsent = !(
-			array_key_exists('=ANCHOR_TYPE_ID', $filter)
-			|| array_key_exists('ANCHOR_TYPE_ID', $filter)
-		);
-		if ($isEntityIdentsParsed && $isAnchorIdentsAbsent && !$isAnchorIdentsParsed)
-		{
-			$result->setData(
-				[
-					'entityTypeId' => $entityIdentsResult->getData()['entityTypeId'],
-					'entityId' => $entityIdentsResult->getData()['entityId'],
-				]
-			);
-		}
-		elseif ($isAnchorIdentsParsed && $isEntityIdentsAbsent && !$isEntityIdentsParsed)
-		{
-			$result->setData(
-				[
-					'entityTypeId' => $anchorIdentsResult->getData()['anchorTypeId'],
-					'entityId' => $anchorIdentsResult->getData()['anchorId'],
-				]
-			);
-		}
-		else
-		{
-			$result->addError(new Main\Error('Identifiers is not parsed', 'IDENTS_IN_NOT_PARSED'));
-		}
-
-		return $result;
-	}
-
 	public function getList($order, $filter, $select, $start)
 	{
 		$entity = self::getEntity();
@@ -14498,8 +14334,12 @@ class CCrmAddressRestProxy extends CCrmRestProxyBase
 
 				return $filter;
 			},
-			static fn (array $params) => $entity->getList($params),
-			static fn (array $filter) => $entity->getCount($filter),
+			static function (array $params) use ($entity) {
+				$params['checkOwnerPermissions'] = true;
+
+				return $entity->getList($params);
+			},
+			static fn (array $filter) => $entity->getCount($filter, ['checkOwnerPermissions' => true]),
 		);
 	}
 

@@ -9,7 +9,6 @@ use Bitrix\Main\Messenger\Entity\AbstractMessage;
 class ScheduledTriggerMessage extends AbstractMessage
 {
 	public function __construct(
-		public readonly int $scheduleId,
 		public readonly int $templateId,
 		public readonly string $triggerName,
 		public readonly ?string $scheduledAt,
@@ -20,7 +19,6 @@ class ScheduledTriggerMessage extends AbstractMessage
 	public function jsonSerialize(): array
 	{
 		return [
-			'scheduleId' => $this->scheduleId,
 			'templateId' => $this->templateId,
 			'triggerName' => $this->triggerName,
 			'scheduledAt' => $this->scheduledAt,

@@ -1,6 +1,7 @@
 <?php
 
 namespace Bitrix\Mail\Helper;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\Entity\MailboxDirectory;
 use Bitrix\Main;
 use Bitrix\Main\Localization\Loc;
@@ -81,6 +82,10 @@ class MessageFolder
 		}
 	}
 
+	/**
+	 * Both generations of a switched mailbox keep the same folder paths, so the path hash alone
+	 * points at two rows: the counter has to reach the folder of the active generation.
+	 */
 	public static function getDirIdForMessages($mailboxId, $messagesIds)
 	{
 		$dirWithMessagesId = MailboxDirectoryTable::getList([
@@ -100,10 +105,10 @@ class MessageFolder
 			'select' => [
 				'ID',
 			],
-			'filter' => [
+			'filter' => GenerationScope::forMailbox((int)$mailboxId)->apply([
 				'@UID.ID' => $messagesIds,
 				'=MAILBOX_ID' => $mailboxId,
-			],
+			]),
 			'limit' => 1,
 		])->fetchAll();
 

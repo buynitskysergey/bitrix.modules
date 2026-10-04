@@ -4,6 +4,7 @@ namespace Bitrix\Crm\FileUploader;
 
 use Bitrix\Crm\Field;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Main\ArgumentException;
 use Bitrix\UI\FileUploader\Configuration;
 
@@ -18,9 +19,10 @@ final class EntityFieldController extends EntityController
 	 *     categoryId: ?int,
 	 *     fieldName: string
 	 * } $options
+	 * @param UserPermissions|null $userPermissions
 	 * @throws ArgumentException
 	 */
-	public function __construct(array $options)
+	public function __construct(array $options, ?UserPermissions $userPermissions = null)
 	{
 		$options['fieldName'] ??= '';
 		$options['fieldName'] = (string)$options['fieldName'];
@@ -30,7 +32,7 @@ final class EntityFieldController extends EntityController
 			throw new ArgumentException('Parameter "fieldName" must be defined in options.');
 		}
 
-		parent::__construct($options);
+		parent::__construct($options, $userPermissions);
 
 		$factory = Container::getInstance()->getFactory($options['entityTypeId']);
 

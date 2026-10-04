@@ -9,9 +9,70 @@ use Bitrix\Ui\Public\Enum\IconSet\Outline;
 
 class OutgoingCallTrigger extends BaseTrigger
 {
+	protected const EVENT_INITIATOR_ID = 'Initiator';
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use CallReturnTrait;
+
 	public static function getCode()
 	{
 		return 'OUTGOING_CALL';
+	}
+
+	/**
+	 * No status field: the trigger is raised from the provider-agnostic
+	 * {@see \Bitrix\Crm\Activity\Provider\Call::onAfterAdd()}, which is not given the call object,
+	 * so an outgoing call has no lifecycle status to report.
+	 */
+	protected static function getCallReturnFieldIds(): array
+	{
+		return [self::RETURN_CALL_PHONE, self::RETURN_CALL_DIRECTION];
+	}
+
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventInitiatorProperty(),
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_OUTGOING_CALL_EVENT_DATE_TIME') ?? '',
+				),
+			],
+			static::getCallReturnProperties(),
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_INITIATOR_ID => $this->buildEventInitiatorValue(),
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
+	}
+
+	public function setInputData($data)
+	{
+		parent::setInputData($data);
+
+		if (is_callable([$this, 'setReturnValues']))
+		{
+			$communications = $this->getInputData('COMMUNICATIONS');
+			$phone = is_array($communications) ? ($communications[0]['VALUE'] ?? '') : '';
+
+			$this->setReturnValues($this->buildCallReturnValues($phone, 'outgoing'));
+		}
+
+		return $this;
+	}
+
+	/**
+	 * Outgoing call is initiated by the activity author.
+	 */
+	protected function resolveEventInitiatorUserId(): ?int
+	{
+		$authorId = (int)($this->getInputData('AUTHOR_ID') ?? 0);
+
+		return $authorId > 0 ? $authorId : null;
 	}
 
 	public static function getName()

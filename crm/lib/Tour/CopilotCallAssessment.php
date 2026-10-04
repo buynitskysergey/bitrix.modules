@@ -20,6 +20,11 @@ class CopilotCallAssessment extends Base
 			return false;
 		}
 
+		if (AIManager::isCallScoringV2Enabled())
+		{
+			return false;
+		}
+
 		if ($this->isUserSeenTour())
 		{
 			return false;

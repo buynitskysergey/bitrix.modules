@@ -131,9 +131,18 @@ class EventHandler
 				unset($activityIds[$key]); // exclude last call activity ID
 			}
 
+			$portalUserId = (int)($data['PORTAL_USER_ID'] ?? 0);
 			foreach ($activityIds as $activityId)
 			{
-				CCrmActivity::Complete($activityId, true, ['CUSTOM_CREATION_TIME' => $activityFields['CREATED']]);
+				$completeOptions = ['CUSTOM_CREATION_TIME' => $activityFields['CREATED']];
+				if ($portalUserId > 0)
+				{
+					// CURRENT_USER goes through Update() to EDITOR_ID to timeline-event
+					// USER_ID (see PrepareUpdateEvent), pinning the portal user as
+					// the author of the "activity completed" history record.
+					$completeOptions['CURRENT_USER'] = $portalUserId;
+				}
+				CCrmActivity::Complete($activityId, true, $completeOptions);
 			}
 		}
 

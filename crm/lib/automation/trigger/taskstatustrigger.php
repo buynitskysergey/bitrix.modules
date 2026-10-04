@@ -15,6 +15,8 @@ Loc::loadMessages(__FILE__);
 
 class TaskStatusTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
 	/**
 	 * @param int $entityTypeId Target entity id
 	 * @return bool
@@ -63,11 +65,20 @@ class TaskStatusTrigger extends BaseTrigger
 	public function setInputData($data)
 	{
 		$taskId = (int)($data['TASK']['ID'] ?? 0);
+		$taskStatus = (int)($data['TASK']['REAL_STATUS'] ?? 0);
 		if ($taskId > 0 && is_callable([$this, 'setReturnValues']))
 		{
-			$this->setReturnValues([
+			$returnValues = [
 				'TaskDocument' => Tasks\Integration\Bizproc\Document\Task::resolveDocumentId($taskId),
-			]);
+				'TaskId' => $taskId,
+			];
+
+			if ($taskStatus > 0)
+			{
+				$returnValues['TaskStatus'] = $taskStatus;
+			}
+
+			$this->setReturnValues($returnValues);
 		}
 
 		return parent::setInputData($data);
@@ -75,14 +86,40 @@ class TaskStatusTrigger extends BaseTrigger
 
 	public static function getReturnProperties(): array
 	{
-		return [
+		return array_merge(
 			[
-				'Id' => 'TaskDocument',
-				'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_TASK_STATUS_RETURN_TASK'),
-				'Type' => FieldType::DOCUMENT,
-				'Default' => ['tasks', Tasks\Integration\Bizproc\Document\Task::class, 'TASK'],
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_TASK_STATUS_EVENT_DATE_TIME') ?? ''
+				),
 			],
-		];
+			[
+				[
+					'Id' => 'TaskDocument',
+					'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_TASK_STATUS_RETURN_TASK'),
+					'Type' => FieldType::DOCUMENT,
+					'Default' => ['tasks', Tasks\Integration\Bizproc\Document\Task::class, 'TASK'],
+				],
+				[
+					'Id' => 'TaskId',
+					'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_TASK_STATUS_RETURN_TASK_ID'),
+					'Type' => FieldType::INT,
+					'Default' => null,
+				],
+				[
+					'Id' => 'TaskStatus',
+					'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_TASK_STATUS_RETURN_TASK_STATUS'),
+					'Type' => FieldType::INT,
+					'Default' => null,
+				],
+			]
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public function checkApplyRules(array $trigger)
@@ -143,6 +180,7 @@ class TaskStatusTrigger extends BaseTrigger
 			[
 				'Id' => 'taskCondition',
 				'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_TASK_STATUS_CONDITION'),
+				'ShowFieldLabel' => false,
 				'Type' => '@condition-group-selector',
 				'Settings' => [
 					'Fields' => array_values($taskFields),

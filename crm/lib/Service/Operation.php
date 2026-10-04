@@ -154,6 +154,8 @@ abstract class Operation
 
 		if ($result->isSuccess())
 		{
+			$this->invalidateV2ItemCache();
+
 			$this->updatePermissions();
 			$this->updateSearchIndexes();
 			$this->updateDuplicates();
@@ -276,6 +278,32 @@ abstract class Operation
 		return $result;
 	}
 
+	/**
+	 * Drops this item's entry from the V2 provider cache after a successful save. Every legacy
+	 * write (add/update/delete/copy/restore/import/conversion) passes through launch(), so this
+	 * single point keeps V2 cached reads consistent with data changed outside V2 Commands.
+	 * Must stay cheap and must never break the legacy operation flow.
+	 */
+	protected function invalidateV2ItemCache(): void
+	{
+		try
+		{
+			$id = (int)$this->item->getId();
+			$entityTypeId = (int)$this->item->getEntityTypeId();
+			if ($id > 0 && \Bitrix\Crm\V2\Public\EntityType::isValid($entityTypeId))
+			{
+				\Bitrix\Crm\V2\Internal\Service\ItemCache::getInstance()->invalidate(
+					\Bitrix\Crm\V2\Public\EntityType::fromId($entityTypeId),
+					$id,
+				);
+			}
+		}
+		catch (\Throwable)
+		{
+			// V2 cache invalidation is best-effort; the legacy write result must not depend on it.
+		}
+	}
+
 	abstract public function checkAccess(): Result;
 
 	public function processFieldsWithPermissions(): Result
@@ -372,6 +400,38 @@ abstract class Operation
 	public function checkFields(): Result
 	{
 		$requiredFields = $this->getRequiredFields();
+		if (empty($requiredFields))
+		{
+			return new Result();
+		}
+
+		$factory = Container::getInstance()->getFactory($this->item->getEntityTypeId());
+		if (!$factory)
+		{
+			throw new InvalidOperationException('Factory not found');
+		}
+
+		return $this->checkRequiredFields($requiredFields, $factory);
+	}
+
+	/**
+	 * Checks that required fields are not empty, ignoring the given field names.
+	 *
+	 * Same required-fields logic as checkFields(), but lets a caller validate the item before a
+	 * side effect (e.g. inline client creation) by excluding client binding fields, whose
+	 * requiredness is verified by launch() after the client is bound.
+	 *
+	 * @param string[] $excludedFieldNames
+	 * @return Result
+	 */
+	public function checkRequiredFieldsExcept(array $excludedFieldNames): Result
+	{
+		if (!$this->isCheckFieldsEnabled())
+		{
+			return new Result();
+		}
+
+		$requiredFields = array_diff($this->getRequiredFields(), $excludedFieldNames);
 		if (empty($requiredFields))
 		{
 			return new Result();
@@ -621,11 +681,7 @@ abstract class Operation
 						$this->itemBeforeSave->getEntityTypeId(),
 						$this->itemBeforeSave->getCompatibleData(Values::ACTUAL)
 					),
-					userId: (
-						$this->getContext()->getScope() === Context::SCOPE_AUTOMATION
-							? 0
-							: $this->getContext()->getUserId()
-					),
+					userId: $this->resolveAutomationInitiatorUserId(),
 					parameters: is_array($workflowParameters) || is_string($workflowParameters) ? $workflowParameters : null,
 					scope: $scope,
 					categoryId: $this->item->isCategoriesSupported() ? $this->item->getCategoryId() : null,
@@ -673,11 +729,26 @@ abstract class Operation
 					$this->itemBeforeSave->getEntityTypeId(),
 					$this->itemBeforeSave->getCompatibleData(Values::ACTUAL)
 				),
+				userId: $this->resolveAutomationInitiatorUserId(),
 				scope: $scope,
 			);
 		}
 
 		return $result->setData(['runData' => $runData, 'newStarter' => $starter, 'starter' => null]);
+	}
+
+	/**
+	 * Returns the user who initiated the change for the automation or bizproc
+	 * workflow being launched. Robots and workflow activities inherit this user
+	 * as the author of their own changes, so in non-interactive scopes, where
+	 * the ambient user is not the actor, the launch goes without an initiator
+	 * and falls back to the system user.
+	 */
+	public function resolveAutomationInitiatorUserId(): int
+	{
+		$context = $this->getContext();
+
+		return $context->isNonInteractiveScope() ? 0 : $context->getUserId();
 	}
 
 	abstract protected function save(): Result;
@@ -830,6 +901,24 @@ abstract class Operation
 	public function isBizProcEnabled(): bool
 	{
 		return $this->settings->isBizProcEnabled();
+	}
+
+	/**
+	 * Marks the Operation as a system update so that internal modifications
+	 * (e.g. last activity recalculation) do not change "modified by" / "modified time".
+	 *
+	 * @return $this
+	 */
+	public function markAsSystemUpdate(): self
+	{
+		$this->settings->markAsSystemUpdate();
+
+		return $this;
+	}
+
+	protected function isSystemUpdate(): bool
+	{
+		return $this->settings->isSystemUpdate();
 	}
 
 	public function enableCheckAccess(): self
@@ -1199,9 +1288,17 @@ abstract class Operation
 		return $this->getItem()->getCompatibleData();
 	}
 
+	/**
+	 * In non-interactive scopes the change does not originate from the initiator's own tab, so that tab
+	 * has to receive the pull event as well - otherwise its kanban keeps showing the stale state.
+	 */
 	protected function keepCurrentUser(): bool
 	{
-		return in_array($this->getContext()->getScope(), [Context::SCOPE_AUTOMATION, Context::SCOPE_TASK], true);
+		return in_array(
+			$this->getContext()->getScope(),
+			[Context::SCOPE_AUTOMATION, Context::SCOPE_TASK, Context::SCOPE_AI],
+			true
+		);
 	}
 
 	protected function updatePermissions(): void
@@ -1538,15 +1635,76 @@ abstract class Operation
 		// no changes - no actions
 		if (!$this->isItemChanged())
 		{
-			$this->item->reset(Item::FIELD_NAME_UPDATED_TIME);
-			$this->item->reset(Item::FIELD_NAME_UPDATED_BY);
+			$this->resetModificationStampFields();
 			return new Result();
+		}
+
+		// A system update (e.g. last activity recalculation) must not pollute
+		// "modified by" / "modified time" when only service fields were changed.
+		if ($this->isSystemUpdate() && $this->areOnlyServiceFieldsChanged())
+		{
+			$this->resetModificationStampFields();
 		}
 
 		return null;
 	}
 
+	/**
+	 * Returns true if all changed fields are considered service-only
+	 * (i.e. internal, non-user-facing). The base implementation always returns
+	 * false; Update operation overrides it to whitelist last activity fields.
+	 */
+	protected function areOnlyServiceFieldsChanged(): bool
+	{
+		return false;
+	}
+
+	/**
+	 * Modification stamp fields auto-filled by the update pipeline on every
+	 * save; reset together when an update must not count as a user
+	 * modification. Shared with the service-fields whitelist of the Update
+	 * operation.
+	 */
+	protected function getModificationStampFieldNames(): array
+	{
+		return [
+			Item::FIELD_NAME_UPDATED_TIME,
+			Item::FIELD_NAME_UPDATED_BY,
+		];
+	}
+
+	private function resetModificationStampFields(): void
+	{
+		foreach ($this->getModificationStampFieldNames() as $fieldName)
+		{
+			$this->item->reset($fieldName);
+		}
+	}
+
 	protected function sendAnalytics(Result $result): void
 	{
+	}
+
+	/**
+	 * Initiator to write into the analytics event, or null when the operation cannot name one.
+	 *
+	 * Only scopes where an employee really triggered the action report an actor. Public entry
+	 * points (crm forms, open lines) run under a manual-scope context carrying the responsible
+	 * employee, and reporting them would turn a visitor request into that employee's activity.
+	 */
+	protected function getAnalyticsActorId(): ?int
+	{
+		$scopesWithKnownActor = [
+			Context::SCOPE_AUTOMATION,
+			Context::SCOPE_REST,
+			Context::SCOPE_AI,
+		];
+
+		$context = $this->getContext();
+
+		return in_array($context->getScope(), $scopesWithKnownActor, true)
+			? $context->getUserId()
+			: null
+		;
 	}
 }

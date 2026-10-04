@@ -14,6 +14,7 @@ class PermissionDictionary extends Main\Access\Permission\PermissionDictionary
 	public const MAIL_MAILBOX_LIST_ITEM_EDIT = '202';
 	public const MAIL_MAILBOX_CONNECT = '203';
 	public const MAIL_MAILBOX_CRM_INTEGRATION_EDIT = '204';
+	public const MAIL_SHARED_SIGNATURES_MANAGE = '205';
 
 	private static function getRephrasedPermissionCode(string $permissionId): ?string
 	{

@@ -6,6 +6,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Voximplant\ConfigTable;
 use Bitrix\Voximplant\Model;
+use Bitrix\Voximplant\Routing\Node;
 
 Loc::loadMessages(__FILE__);
 
@@ -190,7 +191,24 @@ class CallTable extends Model\Base
 			),
 			'EXECUTION_GRAPH' => array(
 				'data_type' => 'text',
-				'serialized' => true,
+				'save_data_modification' => function()
+				{
+					return [
+						function($value)
+						{
+							return serialize($value);
+						}
+					];
+				},
+				'fetch_data_modification' => function()
+				{
+					return [
+						function($value)
+						{
+							return static::unserializeExecutionGraph($value);
+						}
+					];
+				},
 			),
 			'QUEUE' => new Entity\ReferenceField(
 				'QUEUE',
@@ -258,5 +276,21 @@ class CallTable extends Model\Base
 		]);
 
 		static::update($row['ID'], $fields);
+	}
+
+	/**
+	 * The graph is stored as serialized routing nodes, so only these classes are allowed to be restored.
+	 *
+	 * @param string|null $value
+	 * @return Node|mixed|null
+	 */
+	public static function unserializeExecutionGraph($value)
+	{
+		if ($value === null || $value === '')
+		{
+			return null;
+		}
+
+		return unserialize((string)$value, ['allowed_classes' => Node::getSerializableClasses()]);
 	}
 }

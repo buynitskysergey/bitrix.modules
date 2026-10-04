@@ -1,19 +1,10 @@
 <?php
 
 use Bitrix\Main\Config\Option;
+use Bitrix\Main\Application;
 
 class CUserCounterPage
 {
-	protected static function setUserIdOption($value = false)
-	{
-		//		\Bitrix\Main\Config\Option::set('main', 'user_counter_pull_page_start', $value);
-	}
-
-	protected static function getUserIdOption()
-	{
-		//		return \Bitrix\Main\Config\Option::get('main', 'user_counter_pull_page_start', false);
-	}
-
 	public static function getPageSizeOption($defaultValue = 100)
 	{
 		$value = (int)Option::get('main', 'user_counter_pull_page_size', $defaultValue);
@@ -25,58 +16,16 @@ class CUserCounterPage
 		return $value;
 	}
 
-	public static function setNewEvent()
-	{
-		self::setUserIdOption(0);
-	}
-
-	protected static function getMinMax($prevMax = 0)
-	{
-		global $DB;
-
-		$pageSize = self::getPageSizeOption();
-
-		$strSQL = "
-				SELECT USER_ID
-				FROM b_user_counter uc
-				WHERE SENT = '0' AND USER_ID > " . (int)$prevMax . "
-				GROUP BY USER_ID
-				ORDER BY USER_ID ASC
-				LIMIT ".$pageSize."
-			";
-
-		$res = $DB->query($strSQL);
-
-		$i = 0;
-		while($row = $res->fetch())
-		{
-			if (!$i)
-			{
-				$minValue = $row["USER_ID"];
-			}
-			else
-			{
-				$maxValue = $row["USER_ID"];
-			}
-			$i++;
-		}
-
-		if ($i)
-		{
-			return [
-				'MIN' => (int)$minValue,
-				'MAX' => (int)$maxValue,
-			];
-		}
-
-		return false;
-	}
-
 	public static function checkSendCounter()
 	{
 		global $DB, $USER;
 
-		$connection = \Bitrix\Main\Application::getConnection();
+		if (!CUserCounter::CheckLiveMode())
+		{
+			return;
+		}
+
+		$connection = Application::getConnection();
 
 		if(!$connection->lock('counterpull'))
 		{
@@ -156,17 +105,14 @@ class CUserCounterPage
 
 		$connection->unlock('counterpull');
 
-		if (\CUserCounter::CheckLiveMode())
+		foreach ($pullMessage as $channelId => $arMessage)
 		{
-			foreach ($pullMessage as $channelId => $arMessage)
-			{
-				\Bitrix\Pull\Event::add($channelId, Array(
-					'module_id' => 'main',
-					'command' => 'user_counter',
-					'expiry' => 3600,
-					'params' => $arMessage,
-				));
-			}
+			\Bitrix\Pull\Event::add($channelId, Array(
+				'module_id' => 'main',
+				'command' => 'user_counter',
+				'expiry' => 3600,
+				'params' => $arMessage,
+			));
 		}
 	}
 }

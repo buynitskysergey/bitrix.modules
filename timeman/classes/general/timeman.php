@@ -2,6 +2,7 @@
 
 use Bitrix\Main\Loader;
 use Bitrix\Timeman\Helper\EntityCodesHelper;
+use Bitrix\Timeman\Helper\TimeHelper;
 use Bitrix\Timeman\Integration\Humanresources\ManagersLogic;
 use Bitrix\Timeman\Integration\Humanresources\ManagersResolver;
 use Bitrix\Timeman\Integration\Humanresources\SubordinateAccessUsersResolver;
@@ -91,11 +92,7 @@ class CTimeMan
 					$timeFinish = null;
 				}
 			}
-			$info['INFO'] = [
-				'DATE_START' => MakeTimeStamp($arInfo['DATE_START']) - CTimeZone::GetOffset(),
-				'DATE_FINISH' => $arInfo['DATE_FINISH']
-					? (MakeTimeStamp($arInfo['DATE_FINISH']) - CTimeZone::GetOffset())
-					: '',
+			$info['INFO'] = array_merge(self::buildInfoTimestamps($arInfo, $record), [
 				'TIME_START' => $arInfo['TIME_START'],
 				'TIME_FINISH' => $timeFinish,
 				'DURATION' => $arInfo['RECORDED_DURATION'],
@@ -103,7 +100,7 @@ class CTimeMan
 				'ACTIVE' => ($arInfo['ACTIVE'] == 'Y'),
 				'PAUSED' => ($arInfo['PAUSED'] == 'Y'),
 				'CURRENT_STATUS' => $arInfo['CURRENT_STATUS'],
-			];
+			]);
 			if (!empty($actionsBuilder->getStopActions()))
 			{
 				foreach ($actionsBuilder->getStopActions() as $stopAction)
@@ -164,6 +161,28 @@ class CTimeMan
 		}
 
 		return $info;
+	}
+
+	/**
+	 * Time anchors of the runtime INFO payload, all absolute Unix instants taken from the record's absolute
+	 * RECORDED_* columns.
+	 *
+	 * DATE_START/DATE_FINISH are absolute instants (the historical contract restored after 26.100.0):
+	 * consumers subtract them from real clocks (time(), Date.now()), so a wall-time coordinate there inflates
+	 * every elapsed value by the server offset. DISPLAY_*_TIMESTAMP are synonyms kept for the JS already
+	 * shipped on them in 26.100.0. DATE_FINISH stays an empty string while the day has no finish.
+	 */
+	private static function buildInfoTimestamps(array $arInfo, WorktimeRecord $record): array
+	{
+		$startAbsoluteTs = (int)$record->getRecordedStartTimestamp();
+		$stopAbsoluteTs = $arInfo['DATE_FINISH'] ? $record->buildDisplayedStopTimestamp() : null;
+
+		return [
+			'DATE_START' => $startAbsoluteTs,
+			'DATE_FINISH' => $stopAbsoluteTs ?? '',
+			'DISPLAY_START_TIMESTAMP' => $startAbsoluteTs,
+			'DISPLAY_STOP_TIMESTAMP' => $stopAbsoluteTs,
+		];
 	}
 
 	public static function initRuntimeInfo(): array
@@ -757,8 +776,21 @@ class CTimeMan
 		}
 		else
 		{
-			return ($ts + date('Z')) % 86400;
+			// Seconds-from-midnight in the SERVER zone, date-aware at $ts (honors DST on the day of $ts)
+			// instead of the fixed server offset date('Z') "as of now". This is a generic server-side
+			// day-bucket helper with no employee context, so the server zone is the correct anchor.
+			$serverOffset = self::getServerOffsetAt((int)$ts);
+
+			return ((int)$ts + $serverOffset) % 86400;
 		}
+	}
+
+	/**
+	 * @see TimeHelper::getServerOffsetAt()
+	 */
+	private static function getServerOffsetAt(int $timestamp): int
+	{
+		return TimeHelper::getInstance()->getServerOffsetAt($timestamp);
 	}
 
 	public static function FormatTime($ts, $bTS = false)

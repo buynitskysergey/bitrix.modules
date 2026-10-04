@@ -7,14 +7,20 @@ namespace Bitrix\Note\Public\Command;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
+use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
+use Bitrix\Note\Internal\Service\DomainEventPublisher;
+use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Model\EventTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Collection\CollectionRestoreService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionCalculator;
+use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 class RestoreDocumentCommand extends AbstractCommand
@@ -27,6 +33,9 @@ class RestoreDocumentCommand extends AbstractCommand
 	private readonly CollectionRepository $collectionRepository;
 	private readonly CollectionRestoreService $collectionRestoreService;
 	private readonly PushNotificationService $pushService;
+	private readonly DomainEventPublisher $eventPublisher;
+	private readonly EventLogService $eventLogService;
+	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
 
 	public function __construct(
 		int $id,
@@ -37,6 +46,9 @@ class RestoreDocumentCommand extends AbstractCommand
 		?CollectionRepository $collectionRepository = null,
 		?PushNotificationService $pushService = null,
 		?CollectionRestoreService $collectionRestoreService = null,
+		?DomainEventPublisher $eventPublisher = null,
+		?EventLogService $eventLogService = null,
+		?BacklinkLifecycleNotifier $backlinkNotifier = null,
 	)
 	{
 		$this->id = $id;
@@ -48,6 +60,9 @@ class RestoreDocumentCommand extends AbstractCommand
 		$this->pushService = $pushService ?? new PushNotificationService();
 		$this->collectionRestoreService = $collectionRestoreService
 			?? new CollectionRestoreService($this->collectionRepository, $this->pushService);
+		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
+		$this->eventLogService = $eventLogService ?? new EventLogService();
+		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
 	}
 
 	protected function execute(): Result
@@ -85,6 +100,9 @@ class RestoreDocumentCommand extends AbstractCommand
 			$this->repository->getMaxPosition($collectionId, $targetParent)
 		);
 
+		// DocumentTable::update() is a single atomic write; no wrapping transaction is
+		// needed — one would only introduce a nested-rollback hazard when this command
+		// runs inside an already-open transaction (e.g. tests).
 		DocumentTable::update($this->id, [
 			'IS_ARCHIVED' => 'N',
 			'ARCHIVED_AT' => null,
@@ -94,6 +112,18 @@ class RestoreDocumentCommand extends AbstractCommand
 			'UPDATED_AT' => new DateTime(),
 			'UPDATED_BY' => $this->userId,
 		]);
+
+		// Best-effort: a failure to log the event must not undo an already-restored document.
+		if (Configuration::isActivityEnabled())
+		{
+			try
+			{
+				$this->eventLogService->record(EventTable::SCOPE_DOCUMENT, $this->id, 'archive_restored', $this->userId);
+			}
+			catch (\Throwable)
+			{
+			}
+		}
 
 		try
 		{
@@ -107,6 +137,13 @@ class RestoreDocumentCommand extends AbstractCommand
 		$restored = $this->repository->getById($this->id);
 
 		$this->emitDocumentRestore($restored, $collectionId, $targetParent, $position);
+		$this->eventPublisher->emitLifecycle(
+			OnDocumentLifecycleEvent::RESTORED,
+			$collectionId,
+			[$this->id],
+		);
+		// [D1] restoring brings this source back into view; refresh the backlinks of what it points at.
+		$this->backlinkNotifier->sourcesChanged([$this->id]);
 
 		$result = new Result();
 		$result->setData([
@@ -143,6 +180,14 @@ class RestoreDocumentCommand extends AbstractCommand
 			'title' => $title,
 			'hasChildren' => $hasChildren,
 		];
+
+		$pushService->notifyDocumentGrantees(
+			$collectionId,
+			[$documentId],
+			$initiatorUserId,
+			'documentRestore',
+			$payload,
+		);
 
 		$pushService->dispatchAfterCommit(static function () use (
 			$pushService, $collectionId, $documentId, $payload, $initiatorUserId,

@@ -58,7 +58,7 @@ function InitFilterEx($arName, $varName, $action = "set", $useSession = true, $F
 
 		if ($action == "set")
 		{
-			$FILTER[$name] = $_REQUEST[$name] ?? null;
+			$FILTER[$name] = $$name ?? $_REQUEST[$name] ?? null;
 			$$name = $FILTER[$name];
 
 			if (isset($_REQUEST[$period]) || isset($FILTER[$period]))

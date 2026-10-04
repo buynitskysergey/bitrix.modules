@@ -1,10 +1,10 @@
 <?php
 namespace Bitrix\Crm\Recurring\Entity\ParameterMapper;
 
-use \Bitrix\Crm\Recurring\Manager;
-use \Bitrix\Crm\Recurring\Calculator;
-use \Bitrix\Crm\Recurring\Entity\Deal;
-use \Bitrix\Main\Localization\Loc;
+use Bitrix\Crm\Recurring\Manager;
+use Bitrix\Crm\Recurring\Calculator;
+use Bitrix\Crm\Recurring\Entity\Deal;
+use Bitrix\Main\Localization\Loc;
 
 Loc::loadMessages(__FILE__);
 

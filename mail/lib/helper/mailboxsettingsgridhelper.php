@@ -17,6 +17,8 @@ use Bitrix\Mail\Helper\Mailbox\CrmImapFilter;
 use Bitrix\Mail\Helper\Mailbox\MailboxSyncManager;
 use Bitrix\Mail\Internals\MailEntityOptionsTable;
 use Bitrix\Mail\Internals\Search\MailboxListSearchIndexTable;
+use Bitrix\Mail\Integration\MailService\MigrationStatus;
+use Bitrix\Mail\Integration\MailService\MigrationStatusProvider;
 use Bitrix\Mail\MailServicesTable;
 use Bitrix\Main\Access\AccessCode;
 use Bitrix\Main\Application;
@@ -245,6 +247,14 @@ class MailboxSettingsGridHelper
 	{
 		$mailboxIds = array_column($mailboxes, 'ID');
 		$emails = array_column($mailboxes, 'EMAIL');
+		try
+		{
+			$migrationStatuses = (new MigrationStatusProvider())->getLatestForMailboxes($mailboxIds);
+		}
+		catch (\Throwable)
+		{
+			$migrationStatuses = [];
+		}
 
 		$emailLimitsAndCounters = $this->getEmailLimitsAndCounters($emails);
 
@@ -333,6 +343,7 @@ class MailboxSettingsGridHelper
 				$ownerData,
 				$errorMailboxIdsMap,
 				$crmFilterMap[(int)$mailbox['ID']] ?? false,
+				$migrationStatuses[(int)$mailbox['ID']] ?? null,
 			);
 		}
 
@@ -482,6 +493,7 @@ class MailboxSettingsGridHelper
 		?User $ownerData = null,
 		array $errorMailboxIdsMap = [],
 		bool $isCrmFilterActive = false,
+		?MigrationStatus $migrationStatus = null,
 	): array
 	{
 		$dataFromOptions = $this->extractDataFromOptions($mailbox);
@@ -542,6 +554,8 @@ class MailboxSettingsGridHelper
 			),
 			'HAS_ERROR' => isset($errorMailboxIdsMap[$mailbox['ID']]),
 			'CAN_EDIT' => $mailbox['CAN_EDIT'] ?? false,
+			'MIGRATION_STATUS' => $migrationStatus?->publicStatus,
+			'MIGRATION_ACTIVE' => $migrationStatus?->visibility === 'active',
 		];
 	}
 
@@ -1036,7 +1050,7 @@ class MailboxSettingsGridHelper
 				case 'EMAIL':
 					if (is_string($value))
 					{
-						$query->whereLike('EMAIL', '%' . $value . '%');
+						$this->applyEmailFilterToQuery($query, $value);
 					}
 
 					break;
@@ -1251,6 +1265,31 @@ class MailboxSettingsGridHelper
 					break;
 			}
 		}
+	}
+
+	/**
+	 * The value holds either a single substring typed in the filter or a comma separated list of
+	 * addresses passed from another screen. A typed substring keeps the LIKE search, a machine made
+	 * list of complete addresses is matched exactly and independently of the stored letter case.
+	 */
+	private function applyEmailFilterToQuery(Query $query, string $value): void
+	{
+		$emails = array_filter(
+			array_map('trim', explode(',', $value)),
+			static fn(string $email): bool => $email !== '',
+		);
+
+		if (count($emails) < 2)
+		{
+			$query->whereLike('EMAIL', '%' . $value . '%');
+
+			return;
+		}
+
+		$query
+			->registerRuntimeField(new ExpressionField('EMAIL_LOWER', 'LOWER(%s)', 'EMAIL'))
+			->whereIn('EMAIL_LOWER', array_values(array_unique(array_map('mb_strtolower', $emails))))
+		;
 	}
 
 	private function extractUserIdsFromFilterValue(array $values, ?string $accessCode = ''): array

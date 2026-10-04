@@ -10,6 +10,9 @@ Loc::loadMessages(__FILE__);
 
 class VisitTrigger extends BaseTrigger
 {
+	protected const EVENT_INITIATOR_ID = 'Initiator';
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
 	public static function isSupported($entityTypeId)
 	{
 		if ($entityTypeId === \CCrmOwnerType::Quote || $entityTypeId === \CCrmOwnerType::SmartInvoice)
@@ -33,6 +36,24 @@ class VisitTrigger extends BaseTrigger
 	public static function getCode()
 	{
 		return 'VISIT';
+	}
+
+	public static function getReturnProperties(): array
+	{
+		return [
+			static::getEventInitiatorProperty(),
+			static::getEventDateTimeProperty(
+				Loc::getMessage('CRM_AUTOMATION_TRIGGER_VISIT_EVENT_DATE_TIME') ?? ''
+			),
+		];
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_INITIATOR_ID => $this->buildEventInitiatorValue(),
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public static function getName()

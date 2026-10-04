@@ -3,7 +3,7 @@ namespace Bitrix\Crm\Agent\Activity;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Crm\Agent\AgentBase;
 use Bitrix\Crm\Pseudoactivity\Entity\WaitTable;
-use \Bitrix\Crm\Pseudoactivity\WaitEntry;
+use Bitrix\Crm\Pseudoactivity\WaitEntry;
 
 class WaitAgent extends AgentBase
 {

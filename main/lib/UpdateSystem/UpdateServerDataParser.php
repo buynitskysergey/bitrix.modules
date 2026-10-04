@@ -16,7 +16,8 @@ class UpdateServerDataParser
 		$strServerOutput = $this->text;
 		$arRes = [];
 		$strError = '';
-		\CUpdateSystem::ParseServerData($strServerOutput, $arRes, $strError);
+
+		\CUpdateClient::ParseServerData($strServerOutput, $arRes, $strError);
 
 		if (!isset($arRes[self::WRAPER_TAG]) || !is_array($arRes[self::WRAPER_TAG]['#']))
 		{
@@ -30,7 +31,7 @@ class UpdateServerDataParser
 			foreach ($items as $item)
 			{
 				$result[$tag] = array_merge($result[$tag], $item['@']);
-				if (isset($item['#']) && !empty($item['#']))
+				if (!empty($item['#']))
 				{
 					$result[$tag]['_VALUE'] = $item['#'];
 				}

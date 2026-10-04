@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Public\Provider;
 
+use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\Note\Internal\Model\FavoriteTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
+use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
@@ -166,6 +169,13 @@ class TreeProvider
 			$documents,
 		);
 		$childrenCountMap = $this->repository->getChildrenCountMapByParentIds($collectionId, $documentIds);
+		// [TPL-01] Star flag of the branch: one batch read per page. The branch is always read for the
+		// current user, so the favorites owner comes from the ambient user, as elsewhere in the tree.
+		$favoriteIds = array_flip((new FavoriteRepository())->findFavoriteEntityIds(
+			(int)CurrentUser::get()->getId(),
+			FavoriteTable::ENTITY_TYPE_DOCUMENT,
+			$documentIds,
+		));
 
 		$authorIdByDocumentId = [];
 		foreach ($documents as $document)
@@ -194,6 +204,7 @@ class TreeProvider
 				'hasChildren' => (int)($childrenCountMap[$id] ?? 0) > 0,
 				'excerpt' => $meta['excerpt'],
 				'author' => $meta['author'],
+				'isFavorite' => isset($favoriteIds[$id]),
 			];
 		}
 

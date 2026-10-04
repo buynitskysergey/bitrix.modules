@@ -20,6 +20,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Uri;
+use Bitrix\Sign\Access\DocumentAnnulPermission;
 use Bitrix\Sign\FeatureResolver;
 use Bitrix\Sign\Item\Member;
 use Bitrix\Sign\Item\MemberCollection;
@@ -48,6 +49,7 @@ final class SignB2eDocument extends Activity
 	private ?bool $isSignDocumentFill = null;
 	private ?bool $isSignDocumentReview = null;
 	private ?array $signersByStatuses = null;
+	private ?array $annulSignerState = null;
 
 	private const WAIT_DOCUMENT_CHAT = 1;
 	private const READY_DOCUMENT_CHAT = 2;
@@ -193,6 +195,14 @@ final class SignB2eDocument extends Activity
 		}
 
 		return $action;
+	}
+
+	private function getShowAnnulConfirmAction(bool $annul): Layout\Action
+	{
+		return (new Layout\Action\JsEvent($this->getType() . ':ShowAnnulConfirm'))
+			->addActionParamString('documentUid', (string)$this->getSignDocument()?->uid)
+			->addActionParamString('annul', $annul ? 'Y' : 'N')
+		;
 	}
 
 	private function getDocumentBlock(): Layout\Body\ContentBlock\ContentBlockWithTitle
@@ -348,7 +358,7 @@ final class SignB2eDocument extends Activity
 
 		if ($this->isSignDocumentDone())
 		{
-			$buttons['signingProcess'] = $this->getDownloadButton();
+			$buttons['signingProcess'] = $this->getSigningResultButton();
 		}
 
 		return $buttons;
@@ -369,7 +379,113 @@ final class SignB2eDocument extends Activity
 			;
 		}
 
+		$annulItem = $this->getAnnulMenuItem();
+		if ($annulItem !== null)
+		{
+			$items['annul'] = $annulItem;
+		}
+
 		return $items;
+	}
+
+	private function getAnnulMenuItem(): ?Layout\Menu\MenuItem
+	{
+		if (!$this->isDocumentAnnulAvailable())
+		{
+			return null;
+		}
+
+		// Show at most one of the two mutually exclusive items: offer annulment
+		// while any completed signer is still un-annulled, otherwise offer to
+		// revoke it once every eligible record is annulled.
+		[$hasAnnullable, $hasAnnulled] = $this->getAnnulSignerState();
+
+		if ($hasAnnullable)
+		{
+			return (new Layout\Menu\MenuItem((string)Loc::getMessage('CRM_SIGN_B2E_ACTIVITY_ANNUL')))
+				->setAction($this->getShowAnnulConfirmAction(true))
+			;
+		}
+
+		if ($hasAnnulled)
+		{
+			return (new Layout\Menu\MenuItem((string)Loc::getMessage('CRM_SIGN_B2E_ACTIVITY_UNANNUL')))
+				->setAction($this->getShowAnnulConfirmAction(false))
+			;
+		}
+
+		return null;
+	}
+
+	private function isDocumentAnnulAvailable(): bool
+	{
+		$signDocument = $this->getSignDocument();
+		if (!$signDocument)
+		{
+			return false;
+		}
+
+		if (
+			!class_exists(FeatureResolver::class)
+			|| !FeatureResolver::instance()->released('kedoDocumentAnnul')
+		)
+		{
+			return false;
+		}
+
+		if (!class_exists(DocumentAnnulPermission::class))
+		{
+			return false;
+		}
+
+		// The item is built for the context user, not necessarily for the global
+		// current user: in pull builds there may be no $USER at all.
+		$userId = $this->getContext()->getUserId();
+
+		return DocumentAnnulPermission::forUser($userId)
+			->canAnnulDocumentOwnedBy($signDocument->createdById)
+		;
+	}
+
+	/**
+	 * Aggregates the annulment state over the document's completed signers, the
+	 * same set the document-scoped annul endpoint operates on (SIGNER role, DONE
+	 * status). Returns [hasAnnullable, hasAnnulled]: whether any such record is
+	 * still un-annulled and whether any is already annulled.
+	 *
+	 * @return array{0: bool, 1: bool}
+	 */
+	private function getAnnulSignerState(): array
+	{
+		if ($this->annulSignerState === null)
+		{
+			$hasAnnullable = false;
+			$hasAnnulled = false;
+
+			$signDocument = $this->getSignDocument();
+			if ($signDocument)
+			{
+				// Two bounded existence checks instead of hydrating every signer of the
+				// document: the card is rebuilt often and only needs the two flags.
+				$documentId = (int)$signDocument->id;
+				$hasAnnullable = $this->memberRepository->existsByDocumentIdWithRoleStatusAndAnnulled(
+					$documentId,
+					Role::SIGNER,
+					MemberStatus::DONE,
+					false,
+				);
+				$hasAnnulled = $this->memberRepository->existsByDocumentIdWithRoleStatusAndAnnulled(
+					$documentId,
+					Role::SIGNER,
+					MemberStatus::DONE,
+					true,
+				);
+			}
+
+			$this->annulSignerState = [$hasAnnullable, $hasAnnulled];
+		}
+
+		return $this->annulSignerState;
 	}
 
 	private function getDocumentId(): int
@@ -829,7 +945,7 @@ final class SignB2eDocument extends Activity
 		;
 	}
 
-	private function getDownloadButton(): Layout\Footer\Button
+	private function getSigningResultButton(): Layout\Footer\Button
 	{
 		$title = (string)Loc::getMessage('CRM_TIMELINE_ACTIVITY_DOWNLOAD');
 		$type = Layout\Footer\Button::TYPE_SECONDARY;

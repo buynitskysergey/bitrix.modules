@@ -8,20 +8,31 @@ namespace Bitrix\Bizproc\Internal\AI\Agent\Generator\TemplateReverser;
  * Index over the flat Links list produced by LinkBuilder.
  *
  * Links format: [["fromName:fromPort", "toName:toPort"], ...]
+ *
+ * Only links whose both endpoints are known nodes enter the index. A link pointing outside the
+ * known set is dangling: it is dropped and reported via danglingLinks(), never routed around the
+ * unknown endpoint - the reverse must not invent edges the original graph did not have.
  */
 final class LinkGraph
 {
+	public const UNKNOWN_END_FROM = 'from';
+	public const UNKNOWN_END_TO = 'to';
+	public const UNKNOWN_END_BOTH = 'both';
+
 	/** @var array<string, array<string, array<int, array{name: string, port: string}>>> */
 	private array $outgoing = [];
 
 	/** @var array<string, array<string, array<int, array{name: string, port: string}>>> */
 	private array $incoming = [];
 
+	/** @var list<array{from: string, to: string, unknownEnd: string}> */
+	private array $dangling = [];
+
 	/**
 	 * @param list<array> $links raw Links from template.json
-	 * @param array<string, true>|null $knownNodes if provided, unknown nodes are collapsed transitively
+	 * @param array<string, true> $knownNodes names of nodes present in template Children
 	 */
-	public function __construct(array $links, ?array $knownNodes = null)
+	public function __construct(array $links, array $knownNodes)
 	{
 		foreach ($links as $link)
 		{
@@ -30,90 +41,67 @@ final class LinkGraph
 				continue;
 			}
 
-			[$fromName, $fromPort] = self::split((string)$link[0]);
-			[$toName, $toPort] = self::split((string)$link[1]);
+			$from = (string)$link[0];
+			$to = (string)$link[1];
+			[$fromName, $fromPort] = self::split($from);
+			[$toName, $toPort] = self::split($to);
+
+			$unknownEnd = self::unknownEnd($fromName, $toName, $knownNodes);
+			if ($unknownEnd !== null)
+			{
+				$this->dangling[] = ['from' => $from, 'to' => $to, 'unknownEnd' => $unknownEnd];
+				continue;
+			}
 
 			$this->outgoing[$fromName][$fromPort][] = ['name' => $toName, 'port' => $toPort];
 			$this->incoming[$toName][$toPort][] = ['name' => $fromName, 'port' => $fromPort];
 		}
 
-		if ($knownNodes !== null)
-		{
-			$this->collapseUnknown($knownNodes);
-		}
-	}
-
-	/**
-	 * Removes nodes not present in $known by routing each (src → unknown → dst) chain
-	 * into a direct (src → dst) edge. Chains of consecutive unknowns work because we
-	 * route to whatever the unknown currently points to — including other unknowns —
-	 * and process every unknown in the same pass.
-	 */
-	private function collapseUnknown(array $known): void
-	{
-		$unknowns = [];
-		foreach (array_keys($this->outgoing + $this->incoming) as $name)
-		{
-			if (!isset($known[$name]))
-			{
-				$unknowns[] = $name;
-			}
-		}
-
-		foreach ($unknowns as $name)
-		{
-			$inAll = $this->incoming[$name] ?? [];
-			$outAll = $this->outgoing[$name] ?? [];
-
-			$flatIn = $inAll ? array_merge(...array_values($inAll)) : [];
-			$flatOut = $outAll ? array_merge(...array_values($outAll)) : [];
-
-			foreach ($flatIn as $from)
-			{
-				foreach ($flatOut as $to)
-				{
-					$this->outgoing[$from['name']][$from['port']][] = $to;
-					$this->incoming[$to['name']][$to['port']][] = $from;
-				}
-			}
-
-			foreach ($flatIn as $from)
-			{
-				$this->outgoing[$from['name']] = self::removeEdgesPointingTo($this->outgoing[$from['name']] ?? [], $name);
-			}
-			foreach ($flatOut as $to)
-			{
-				$this->incoming[$to['name']] = self::removeEdgesPointingTo($this->incoming[$to['name']] ?? [], $name);
-			}
-			unset($this->outgoing[$name], $this->incoming[$name]);
-		}
-
 		$this->deduplicate();
 	}
 
+	/**
+	 * Links dropped from the index because an endpoint is not a known node.
+	 *
+	 * Order follows the Links list, so the equivalence report and the CLI read the same
+	 * sequence on every run.
+	 *
+	 * @return list<array{from: string, to: string, unknownEnd: string}>
+	 *         from, to - raw "name:port" endpoints as they appear in Links;
+	 *         unknownEnd - which endpoint is missing from the known nodes: self::UNKNOWN_END_FROM,
+	 *         self::UNKNOWN_END_TO or self::UNKNOWN_END_BOTH
+	 */
+	public function danglingLinks(): array
+	{
+		return $this->dangling;
+	}
+
+	/**
+	 * @param array<string, true> $known
+	 * @return string|null null when both endpoints are known
+	 */
+	private static function unknownEnd(string $fromName, string $toName, array $known): ?string
+	{
+		$isFromKnown = isset($known[$fromName]);
+		$isToKnown = isset($known[$toName]);
+
+		if ($isFromKnown && $isToKnown)
+		{
+			return null;
+		}
+		if (!$isFromKnown && !$isToKnown)
+		{
+			return self::UNKNOWN_END_BOTH;
+		}
+
+		return $isFromKnown ? self::UNKNOWN_END_TO : self::UNKNOWN_END_FROM;
+	}
+
+	/** Collapses repeated occurrences of the same edge; does not create edges. */
 	private function deduplicate(): void
 	{
 		$this->outgoing = self::dedupePortMaps($this->outgoing);
 		$this->incoming = self::dedupePortMaps($this->incoming);
-	}
-
-	/**
-	 * Removes all edges in $portMap whose endpoint references the given node name.
-	 *
-	 * @param array<string, list<array{name: string, port: string}>> $portMap port-id → list of endpoints
-	 * @return array<string, list<array{name: string, port: string}>>
-	 */
-	private static function removeEdgesPointingTo(array $portMap, string $name): array
-	{
-		foreach ($portMap as $port => $edges)
-		{
-			$portMap[$port] = array_values(array_filter(
-				$edges,
-				static fn($e) => $e['name'] !== $name,
-			));
-		}
-
-		return $portMap;
 	}
 
 	/**

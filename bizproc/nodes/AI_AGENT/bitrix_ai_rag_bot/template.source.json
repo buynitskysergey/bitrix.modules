@@ -1,0 +1,558 @@
+{
+    "name": "bitrix_ai_rag_bot",
+    "title": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_1",
+    "description": "BIZPROC_AI_AGENT_RAGCHATBOT_DESCRIPTION_1",
+    "root_title": "BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_1",
+    "wizard_title": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_1",
+    "wizard_description": "BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_1",
+    "activity_descriptors": {
+        "RagKnowledgeBaseNode": {
+            "node_type": "tool",
+            "icon": "DATABASE",
+            "color_index": 0,
+            "dimensions": {
+                "width": null,
+                "height": null
+            },
+            "ports": [
+                {
+                    "id": "t0",
+                    "title": "",
+                    "type": "topAux",
+                    "isActive": true
+                }
+            ]
+        },
+        "AiAgentRestartTrigger": {
+            "node_type": "trigger",
+            "icon": "AI_ROBOT",
+            "color_index": 0,
+            "dimensions": {
+                "width": 200,
+                "height": 48
+            },
+            "ports": [
+                {
+                    "id": "o0",
+                    "type": "output"
+                }
+            ]
+        }
+    },
+    "constants": {
+        "SetupTemplateActivity_62HyznTvdU": {
+            "label": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_2",
+            "type": "string",
+            "required": true
+        },
+        "SetupTemplateActivity_rgrHChbMKt": {
+            "label": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_7",
+            "type": "file"
+        },
+        "SetupTemplateActivity_BTXo5PtF6w": {
+            "label": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_3",
+            "type": "user",
+            "multiple": true,
+            "required": true
+        },
+        "SetupTemplateActivity_Z15YXPjTOs": {
+            "label": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_4",
+            "description": "BIZPROC_AI_AGENT_RAGCHATBOT_DESCRIPTION_2",
+            "type": "rag_knowledge_base",
+            "required": true
+        },
+        "SetupTemplateActivity_T76SEQ8ol9": {
+            "label": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_5",
+            "type": "text",
+            "default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_1###",
+            "wizard_title": "BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_2",
+            "wizard_description": "BIZPROC_AI_AGENT_RAGCHATBOT_TEXT_3"
+        },
+        "SetupTemplateActivity_YxMBdDhXHd": {
+            "label": "BIZPROC_AI_AGENT_RAGCHATBOT_NAME_6",
+            "type": "text",
+            "default": "###BIZPROC_AI_AGENT_RAGCHATBOT_DEFAULT_2###"
+        }
+    },
+    "flows": {
+        "setup": {
+            "trigger": "AiAgentStartTrigger",
+            "trigger_props": {
+                "_id": "A4791_5036_6881_3286",
+                "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_6###"
+            },
+            "steps": [
+                {
+                    "SetupTemplateActivity": {
+                        "_id": "A7649_2965_8496_3775",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_3###"
+                    }
+                },
+                {
+                    "ImBotCreateBotActivity": {
+                        "_id": "A7426_4464_6102_9845",
+                        "botName": "{=Constant:SetupTemplateActivity_62HyznTvdU}",
+                        "workPosition": "",
+                        "avatar": "{=Constant:SetupTemplateActivity_rgrHChbMKt}",
+                        "botCode": "{=Workflow:TemplateId}",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_4###"
+                    }
+                },
+                {
+                    "CreateStorageNode": {
+                        "_id": "A4889_7438_8206_9038",
+                        "StorageTitle": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_STORAGETITLE_1###",
+                        "StorageDescription": "",
+                        "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
+                        "Mode": "Y",
+                        "StorageFields": {
+                            "ID": {
+                                "Name": "ID",
+                                "Type": "int"
+                            },
+                            "CODE": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_2###",
+                                "Type": "string"
+                            },
+                            "DOCUMENT_ID": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_3###",
+                                "Type": "string"
+                            },
+                            "WORKFLOW_ID": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_4###",
+                                "Type": "string"
+                            },
+                            "TEMPLATE_ID": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_5###",
+                                "Type": "int"
+                            },
+                            "CREATED_BY": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_6###",
+                                "Type": "user"
+                            },
+                            "CREATED_TIME": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_7###",
+                                "Type": "datetime"
+                            },
+                            "startUser": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_11###",
+                                "Type": "user"
+                            },
+                            "missingGroupChatId": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_12###",
+                                "Type": "int"
+                            },
+                            "bot": {
+                                "Name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_10###",
+                                "Type": "string"
+                            }
+                        },
+                        "SelectedFields": [
+                            {
+                                "id": 0,
+                                "storageId": 0,
+                                "code": "startUser",
+                                "sort": 500,
+                                "name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_11###",
+                                "description": "",
+                                "type": "user",
+                                "multiple": false,
+                                "mandatory": false,
+                                "settings": null
+                            },
+                            {
+                                "id": 0,
+                                "storageId": 0,
+                                "code": "missingGroupChatId",
+                                "sort": 500,
+                                "name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_12###",
+                                "description": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_DESCRIPTION_1###",
+                                "type": "int",
+                                "multiple": false,
+                                "mandatory": false,
+                                "settings": null
+                            },
+                            {
+                                "id": 0,
+                                "storageId": 0,
+                                "code": "bot",
+                                "sort": 500,
+                                "name": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_NAME_10###",
+                                "description": "",
+                                "type": "string",
+                                "multiple": false,
+                                "mandatory": false,
+                                "settings": null
+                            }
+                        ],
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_1###"
+                    }
+                },
+                {
+                    "ReadDataStorageActivity": {
+                        "_id": "A4632_2501_2036_1473",
+                        "StorageId": null,
+                        "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
+                        "ReturnMode": "single",
+                        "IsExpanded": "Y",
+                        "ReturnFields": [
+                            "id",
+                            "missingGroupChatId",
+                            "bot"
+                        ],
+                        "ReturnFieldsByStorageCode": [],
+                        "DynamicFilterFields": {
+                            "items": [
+                                [
+                                    {
+                                        "object": "Document",
+                                        "field": "ID",
+                                        "operator": "!empty",
+                                        "value": ""
+                                    },
+                                    "AND"
+                                ]
+                            ]
+                        },
+                        "OutputFields": {
+                            "id": {
+                                "Name": "ID",
+                                "FieldName": "id",
+                                "Type": "int",
+                                "Required": false,
+                                "AllowSelection": true
+                            },
+                            "missingGroupChatId": {
+                                "Name": "missingGroupChatId",
+                                "FieldName": "missingGroupChatId",
+                                "Type": "string"
+                            },
+                            "bot": {
+                                "Name": "bot",
+                                "FieldName": "bot",
+                                "Type": "string"
+                            }
+                        },
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###"
+                    }
+                },
+                {
+                    "WriteDataStorageActivity": {
+                        "_id": "A2532_3871_3620_3427",
+                        "FieldValue": {
+                            "startUser": "{=A4791_5036_6881_3286:startedBy}",
+                            "missingGroupChatId": "{=A4632_2501_2036_1473:missingGroupChatId}",
+                            "bot": "{=A7426_4464_6102_9845:botId > user}"
+                        },
+                        "Author": "{=A4791_5036_6881_3286:startedBy}",
+                        "StorageId": null,
+                        "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
+                        "RewriteMode": "newItem",
+                        "IsExpanded": "Y",
+                        "Fields": {
+                            "startUser": {
+                                "Value": "{=A4791_5036_6881_3286:startedBy}",
+                                "FieldName": "startUser"
+                            },
+                            "missingGroupChatId": {
+                                "Value": "{=A4632_2501_2036_1473:missingGroupChatId}",
+                                "FieldName": "missingGroupChatId"
+                            },
+                            "bot": {
+                                "Value": "{=A7426_4464_6102_9845:botId > user}",
+                                "FieldName": "bot"
+                            }
+                        },
+                        "DynamicFilterFields": {
+                            "items": []
+                        },
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###"
+                    }
+                },
+                {
+                    "Condition": {
+                        "_id": "A9737_6776_3554_8777",
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                        "conditions": [
+                            {
+                                "object": "A4632_2501_2036_1473",
+                                "field": "bot",
+                                "operator": "!empty",
+                                "value": "",
+                                "joiner": 0
+                            }
+                        ],
+                        "true": [],
+                        "false": [
+                            {
+                                "ImBotMessageActivity": {
+                                    "_id": "A9988_4968_1175_9417",
+                                    "botId": "{=A7426_4464_6102_9845:botId}",
+                                    "botCode": "",
+                                    "recipient": [
+                                        "{=Constant:SetupTemplateActivity_BTXo5PtF6w}"
+                                    ],
+                                    "chatId": null,
+                                    "message": "###BIZPROC_AI_AGENT_RAGCHATBOT_MESSAGE_1###",
+                                    "asError": "N",
+                                    "aiWarning": "N",
+                                    "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        "bot_reply": {
+            "trigger": "ImBotNewMessageTrigger",
+            "trigger_props": {
+                "_id": "A9700_4393_6634_9720",
+                "BotId": null,
+                "BotCode": "{=Workflow:TemplateId}",
+                "SenderIds": [
+                    "{=Constant:SetupTemplateActivity_BTXo5PtF6w}"
+                ],
+                "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_7###"
+            },
+            "steps": [
+                {
+                    "AiAssistantAgentComplexActivity": {
+                        "_id": "A6081_2196_2229_4903",
+                        "_inner_id": "A9427_8490_1947_9553",
+                        "_inner_type": "AiAssistantAgentActivity",
+                        "mcpUser": "{=A9700_4393_6634_9720:SenderId}",
+                        "query": "{=A9700_4393_6634_9720:Message}",
+                        "systemPrompt": "###BIZPROC_AI_AGENT_RAGCHATBOT_SYSTEMPROMPT_1###",
+                        "returnType": "json",
+                        "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"chatAnswer\": {\n      \"type\": \"string\",\n      \"description\": \"Human readeable answer\"\n    },\n    \"isKnowledgeBaseHasAnswer\": {\n      \"type\": \"boolean\",\n      \"description\": \"Is knowledge base has information for user request?\"\n    }\n  },\n  \"required\": [\n    \"chatAnswer\",\"isKnowledgeBaseHasAnswer\"\n  ]\n}",
+                        "jsonPath": {
+                            "chatAnswer": {
+                                "Id": "chatAnswer",
+                                "Type": "json",
+                                "BaseType": "string",
+                                "Name": "JSON:chatAnswer",
+                                "Description": null,
+                                "Multiple": false,
+                                "Required": false,
+                                "Options": null,
+                                "Settings": null,
+                                "Default": null
+                            },
+                            "isKnowledgeBaseHasAnswer": {
+                                "Id": "isKnowledgeBaseHasAnswer",
+                                "Type": "json",
+                                "BaseType": "bool",
+                                "Name": "JSON:isKnowledgeBaseHasAnswer",
+                                "Description": null,
+                                "Multiple": false,
+                                "Required": false,
+                                "Options": null,
+                                "Settings": null,
+                                "Default": null
+                            }
+                        },
+                        "usePseudonymizer": "Y",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_2###",
+                        "attachments": {
+                            "a0": [
+                                {
+                                    "RagKnowledgeBaseNode": {
+                                        "_id": "A9610_6597_9992_4868",
+                                        "Rag": "{=Constant:SetupTemplateActivity_Z15YXPjTOs}",
+                                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_8###"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "ImBotMessageActivity": {
+                        "_id": "A5172_6770_9062_4959",
+                        "botId": "{=A9700_4393_6634_9720:ActualBotId}",
+                        "botCode": "",
+                        "recipient": [
+                            "{=A9700_4393_6634_9720:SenderId}"
+                        ],
+                        "chatId": "{=A9700_4393_6634_9720:chatId}",
+                        "message": "{{=if(strlen({=A9427_8490_1947_9553:chatAnswer}) > 0, {=A9427_8490_1947_9553:chatAnswer}, {=A9427_8490_1947_9553:errorMessage})}}",
+                        "asError": "{{=if(strlen({=A9427_8490_1947_9553:aiResult}) > 0, 'N', 'Y')}}",
+                        "aiWarning": "Y",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###"
+                    }
+                },
+                {
+                    "Condition": {
+                        "_id": "A6833_3320_3842_9837",
+                        "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                        "conditions": [
+                            {
+                                "object": "A9427_8490_1947_9553",
+                                "field": "isKnowledgeBaseHasAnswer",
+                                "operator": "=",
+                                "value": "",
+                                "joiner": 0
+                            },
+                            {
+                                "object": "A9427_8490_1947_9553",
+                                "field": "toolsUsed",
+                                "operator": "=",
+                                "value": "Y",
+                                "joiner": 0
+                            }
+                        ],
+                        "true": [
+                            {
+                                "ReadDataStorageActivity": {
+                                    "_id": "A3922_7992_6256_9512",
+                                    "StorageId": null,
+                                    "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
+                                    "ReturnMode": "single",
+                                    "IsExpanded": "Y",
+                                    "ReturnFields": [
+                                        "startUser",
+                                        "missingGroupChatId",
+                                        "bot"
+                                    ],
+                                    "ReturnFieldsByStorageCode": [],
+                                    "DynamicFilterFields": {
+                                        "items": [
+                                            [
+                                                {
+                                                    "object": "Document",
+                                                    "field": "ID",
+                                                    "operator": "!empty",
+                                                    "value": ""
+                                                },
+                                                "AND"
+                                            ]
+                                        ]
+                                    },
+                                    "OutputFields": {
+                                        "startUser": {
+                                            "Name": "startUser",
+                                            "FieldName": "startUser",
+                                            "Type": "string"
+                                        },
+                                        "missingGroupChatId": {
+                                            "Name": "missingGroupChatId",
+                                            "FieldName": "missingGroupChatId",
+                                            "Type": "string"
+                                        },
+                                        "bot": {
+                                            "Name": "bot",
+                                            "FieldName": "bot",
+                                            "Type": "string"
+                                        }
+                                    },
+                                    "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_3###"
+                                }
+                            },
+                            {
+                                "Condition": {
+                                    "_id": "A4460_4773_5285_8053",
+                                    "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_5###",
+                                    "conditions": [
+                                        {
+                                            "object": "A3922_7992_6256_9512",
+                                            "field": "missingGroupChatId",
+                                            "operator": "!empty",
+                                            "value": "",
+                                            "joiner": 0
+                                        }
+                                    ],
+                                    "true": [],
+                                    "false": [
+                                        {
+                                            "ImCreateGroupChatActivity": {
+                                                "_id": "A7868_4961_2315_7261",
+                                                "ChatName": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_CHATNAME_1###",
+                                                "Members": [
+                                                    "{{=merge({=A3922_7992_6256_9512:startUser},{=A9700_4393_6634_9720:ActualBotId > user})}}"
+                                                ],
+                                                "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_6###"
+                                            }
+                                        },
+                                        {
+                                            "WriteDataStorageActivity": {
+                                                "_id": "A2637_1165_8843_2682",
+                                                "FieldValue": {
+                                                    "missingGroupChatId": "{=A7868_4961_2315_7261:ChatId}",
+                                                    "startUser": "{=A3922_7992_6256_9512:startUser}",
+                                                    "bot": "{=A9700_4393_6634_9720:ActualBotId > user}"
+                                                },
+                                                "Author": "{=A3922_7992_6256_9512:startUser}",
+                                                "StorageId": null,
+                                                "StorageCode": "RAG_SYSTEM_INFO_{=Workflow:TemplateId}",
+                                                "RewriteMode": "newItem",
+                                                "IsExpanded": "Y",
+                                                "Fields": {
+                                                    "missingGroupChatId": {
+                                                        "Value": "{=A7868_4961_2315_7261:ChatId}",
+                                                        "FieldName": "missingGroupChatId"
+                                                    },
+                                                    "startUser": {
+                                                        "Value": "{=A3922_7992_6256_9512:startUser}",
+                                                        "FieldName": "startUser"
+                                                    },
+                                                    "bot": {
+                                                        "Value": "{=A9700_4393_6634_9720:ActualBotId > user}",
+                                                        "FieldName": "bot"
+                                                    }
+                                                },
+                                                "DynamicFilterFields": {
+                                                    "items": []
+                                                },
+                                                "Title": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_TITLE_2###"
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "ImBotMessageActivity": {
+                                    "_id": "A7930_3492_4440_1410",
+                                    "botId": "{=A9700_4393_6634_9720:ActualBotId}",
+                                    "botCode": "",
+                                    "recipient": null,
+                                    "chatId": "{{=if({=A3922_7992_6256_9512:missingGroupChatId} > 0, {=A3922_7992_6256_9512:missingGroupChatId},{=A7868_4961_2315_7261:ChatId})}}",
+                                    "message": "###BIZPROC_NODES_BITRIX_AI_RAG_BOT_MESSAGE_1###",
+                                    "asError": "N",
+                                    "aiWarning": "Y",
+                                    "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_5###"
+                                }
+                            }
+                        ],
+                        "false": []
+                    }
+                }
+            ]
+        },
+        "restart": {
+            "trigger": "AiAgentRestartTrigger",
+            "trigger_props": {
+                "_id": "A3184_5027_6613_4790",
+                "Title": "###BITRIX_AI_RAG_BOT_AIAGENTRESTARTTRIGGER_TITLE###"
+            },
+            "steps": [
+                {
+                    "SetupTemplateActivity": {
+                        "_id": "A8215_3960_7448_2051",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_3###"
+                    }
+                },
+                {
+                    "ImBotCreateBotActivity": {
+                        "_id": "A2704_8153_9265_3814",
+                        "botName": "{=Constant:SetupTemplateActivity_62HyznTvdU}",
+                        "workPosition": "",
+                        "avatar": "{=Constant:SetupTemplateActivity_rgrHChbMKt}",
+                        "botCode": "{=Workflow:TemplateId}",
+                        "Title": "###BIZPROC_AI_AGENT_RAGCHATBOT_TITLE_4###"
+                    }
+                }
+            ]
+        }
+    }
+}

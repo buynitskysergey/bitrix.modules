@@ -2,6 +2,7 @@
 
 namespace Bitrix\Rest\Engine;
 
+use Bitrix\Bitrix24\Feature;
 use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Config\Option;
@@ -12,6 +13,7 @@ use Bitrix\Rest\AppTable;
 use Bitrix\Rest\Infrastructure\Market\MarketSubscription;
 use Bitrix\Rest\Internal\Exception\Payment\MarketSubscriptionRequiredException;
 use Bitrix\Rest\Internal\Exception\Payment\RestUnavailableException;
+use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanException;
 use Bitrix\Rest\Marketplace\Client;
 use Bitrix\Rest\Marketplace\Immune;
 use Bitrix\Rest\Service\ServiceContainer;
@@ -45,6 +47,13 @@ class Access
 	private const DEFAULT_AVAILABLE_COUNT_DEMO = 10;
 	private const SYSTEM_METHODS = ['crm.automation.trigger'];
 	private const ALWAYS_AVAILABLE_METHODS = ['rest.portal.license.get'];
+	private const MARKETPLACE_APP_STATUSES = [
+		AppTable::STATUS_FREE,
+		AppTable::STATUS_PAID,
+		AppTable::STATUS_DEMO,
+		AppTable::STATUS_TRIAL,
+		AppTable::STATUS_SUBSCRIPTION,
+	];
 
 	private static $appDeniedException = [];
 	private static $availableAppCount = [];
@@ -52,15 +61,32 @@ class Access
 	/**
 	 * @return bool
 	 */
-	public static function isFeatureEnabled()
+	public static function isFeatureEnabled(): bool
 	{
-		return
-			!ModuleManager::isModuleInstalled('bitrix24')
-			|| (
-				Loader::includeModule('bitrix24')
-				&& \Bitrix\Bitrix24\Feature::isFeatureEnabled('rest_access')
-			)
-		;
+		if (!ModuleManager::isModuleInstalled('bitrix24'))
+		{
+			return true;
+		}
+
+		if (!Loader::includeModule('bitrix24'))
+		{
+			return false;
+		}
+
+		$serviceContainer = ServiceContainer::getInstance();
+		if (!$serviceContainer->has('vibe_plus.tariff_access'))
+		{
+			return Feature::isFeatureEnabled('rest_access');
+		}
+
+		$tariffAccessService = $serviceContainer->getVibePlusTariffAccessService();
+		$tariffAvailability = $tariffAccessService->getRestAccessAvailability();
+		if ($tariffAvailability !== null)
+		{
+			return $tariffAvailability;
+		}
+
+		return $tariffAccessService->isRestAccessAvailableByTariffFeatures();
 	}
 
 	/**
@@ -95,6 +121,26 @@ class Access
 			return;
 		}
 
+		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
+		$tariffAvailability = $tariffAccessService->getRestAccessAvailability();
+		if ($tariffAvailability === false && $app !== '')
+		{
+			$appInfo = AppTable::getByClientId($app);
+			$isPublishedApplication = is_array($appInfo) && $appInfo['STATUS'] !== AppTable::STATUS_LOCAL;
+			$tariffAvailability = $tariffAccessService->getUserRestAvailability(
+				$isPublishedApplication,
+				$tariffAvailability,
+			);
+		}
+		if ($tariffAvailability === true)
+		{
+			return;
+		}
+		if ($tariffAvailability === false)
+		{
+			throw new FeatureNotAvailableOnCurrentPlanException();
+		}
+
 		if (!array_key_exists($app, static::$appDeniedException))
 		{
 			static::$appDeniedException[$app] = false;
@@ -103,38 +149,43 @@ class Access
 			{
 				static::$appDeniedException[$app] = null;
 			}
-			elseif (
-				!MarketSubscription::createByDefault()->isRequiredSubscriptionModelStarted()
-				&& self::isFeatureEnabled()
-			)
+			else
 			{
-				static::$appDeniedException[$app] = null;
-			}
-			elseif ($app !== '')
-			{
-				if (in_array($app, Immune::getList(), true))
+				$isFeatureEnabled = !ModuleManager::isModuleInstalled('bitrix24')
+					|| $tariffAccessService->isRestAccessAvailableByTariffFeatures();
+
+				if (
+					!MarketSubscription::createByDefault()->isRequiredSubscriptionModelStarted()
+					&& $isFeatureEnabled
+				)
 				{
 					static::$appDeniedException[$app] = null;
 				}
-				elseif ($appInfo = AppTable::getByClientId($app))
+				elseif ($app !== '')
 				{
-					if ($appInfo['CODE'] && in_array($appInfo['CODE'], Immune::getList(), true))
+					if (in_array($app, Immune::getList(), true))
 					{
 						static::$appDeniedException[$app] = null;
 					}
-					elseif ($appInfo['STATUS'] === AppTable::STATUS_FREE && self::isFeatureEnabled())
+					elseif ($appInfo = AppTable::getByClientId($app))
 					{
-						static::$appDeniedException[$app] = null;
+						if ($appInfo['CODE'] && in_array($appInfo['CODE'], Immune::getList(), true))
+						{
+							static::$appDeniedException[$app] = null;
+						}
+						elseif ($appInfo['STATUS'] === AppTable::STATUS_FREE && $isFeatureEnabled)
+						{
+							static::$appDeniedException[$app] = null;
+						}
 					}
 				}
-			}
 
-			if (static::$appDeniedException[$app] === false)
-			{
-				static::$appDeniedException[$app] = self::isFeatureEnabled()
-					? MarketSubscriptionRequiredException::class
-					: RestUnavailableException::class
-				;
+				if (static::$appDeniedException[$app] === false)
+				{
+					static::$appDeniedException[$app] = $isFeatureEnabled
+						? MarketSubscriptionRequiredException::class
+						: RestUnavailableException::class;
+				}
 			}
 		}
 
@@ -154,9 +205,26 @@ class Access
 			return false;
 		}
 
-		return static::isAvailable($appCode)
-			&& static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode)
-			|| static::isAllowFreeApp($installAppData);
+		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
+		$marketApplicationLimit = $tariffAccessService->getMarketApplicationLimit();
+		if ($marketApplicationLimit !== null)
+		{
+			return $tariffAccessService->canInstallMarketApplication(
+				$marketApplicationLimit,
+				true,
+				static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode),
+				static::isAllowFreeApp($installAppData),
+			);
+		}
+
+		$isApplicationAvailable = static::isAvailable($appCode);
+
+		return $tariffAccessService->canInstallMarketApplication(
+			$marketApplicationLimit,
+			$isApplicationAvailable,
+			$isApplicationAvailable && static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode),
+			static::isAllowFreeApp($installAppData),
+		);
 	}
 
 	public static function isAllowFreeApp(array $freeAppData): bool
@@ -192,18 +260,43 @@ class Access
 			return;
 		}
 
+		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
+		$tariffAvailability = $tariffAccessService->getRestAccessAvailability();
+		if ($tariffAvailability === true)
+		{
+			return;
+		}
+		if ($tariffAvailability === false)
+		{
+			$restServer = \CRestServer::instance();
+			$method = $restServer ? $restServer->getMethod() : null;
+			$isSystemPassword = ServiceContainer::getInstance()
+				->getAPAuthPasswordService()
+				->isSystemPasswordById($passwordId)
+			;
+			$tariffAccessService->ensureAPAuthAvailable(
+				$isSystemPassword,
+				$method,
+				static::SYSTEM_METHODS,
+				$tariffAvailability,
+			);
+
+			return;
+		}
+
 		if (Client::isSubscriptionAvailable())
 		{
 			return;
 		}
 
-		if (self::isFeatureEnabled() && !MarketSubscription::createByDefault()->isRequiredSubscriptionModelStarted())
+		$isFeatureEnabled = $tariffAccessService->isRestAccessAvailableByTariffFeatures();
+		if ($isFeatureEnabled && !MarketSubscription::createByDefault()->isRequiredSubscriptionModelStarted())
 		{
 			return;
 		}
 
 		if (
-			self::isFeatureEnabled()
+			$isFeatureEnabled
 			&& ServiceContainer::getInstance()->getAPAuthPasswordService()->isSystemPasswordById($passwordId)
 			&& (!\CRestServer::instance() || in_array(\CRestServer::instance()?->getMethod(), static::SYSTEM_METHODS, true))
 		)
@@ -211,7 +304,7 @@ class Access
 			return;
 		}
 
-		if (!self::isFeatureEnabled())
+		if (!$isFeatureEnabled)
 		{
 			throw new RestUnavailableException();
 		}
@@ -226,7 +319,7 @@ class Access
 	 * @return bool
 	 * @throws \Bitrix\Main\LoaderException
 	 */
-	public static function isAvailableCount(string $entityType, $entity = 0) : bool
+	public static function isAvailableCount(string $entityType, $entity = 0, bool $force = false) : bool
 	{
 		if (!static::isActiveRules())
 		{
@@ -234,11 +327,19 @@ class Access
 		}
 
 		$key = $entityType . $entity;
+		if ($force)
+		{
+			unset(static::$availableAppCount[$key]);
+		}
 		if (!array_key_exists($key, static::$availableAppCount))
 		{
 			static::$availableAppCount[$key] = true;
 			if ($entityType === static::ENTITY_TYPE_APP)
 			{
+				$marketApplicationLimit = ServiceContainer::getInstance()
+					->getVibePlusTariffAccessService()
+					->getMarketApplicationLimit()
+				;
 				$maxCount = static::getAvailableCount();
 				if ($maxCount >= 0)
 				{
@@ -251,13 +352,24 @@ class Access
 						}
 
 						$entityList = static::getActiveEntity(true);
-						if ($entityList[static::ENTITY_COUNT] > $maxCount)
+						$isInstalledApplication = in_array($entity, $entityList[$entityType], true);
+						if (
+							$marketApplicationLimit !== null
+							&& !$isInstalledApplication
+							&& $entityList[static::ENTITY_COUNT] >= $maxCount
+						)
 						{
 							static::$availableAppCount[$key] = false;
 						}
 						elseif (
-							$entityList[static::ENTITY_COUNT] === $maxCount
-							&& !in_array($entity, $entityList[$entityType], true)
+							$marketApplicationLimit === null
+							&& (
+								$entityList[static::ENTITY_COUNT] > $maxCount
+								|| (
+									$entityList[static::ENTITY_COUNT] === $maxCount
+									&& !$isInstalledApplication
+								)
+							)
 						)
 						{
 							static::$availableAppCount[$key] = false;
@@ -268,8 +380,9 @@ class Access
 							&& (
 								in_array($entity, Immune::getList(), true)
 								|| (
-									!static::needCheckCount()
-									&& in_array($entity, $entityList[$entityType], true)
+									$marketApplicationLimit === null
+									&& !static::needCheckCount()
+									&& $isInstalledApplication
 								)
 							)
 						)
@@ -290,6 +403,15 @@ class Access
 	 */
 	public static function getAvailableCount() : int
 	{
+		$tariffLimit = ServiceContainer::getInstance()
+			->getVibePlusTariffAccessService()
+			->getMarketApplicationLimit()
+		;
+		if ($tariffLimit !== null)
+		{
+			return $tariffLimit;
+		}
+
 		$result = -1;
 		$subscriptionActive = Client::isSubscriptionAvailable();
 		if (!$subscriptionActive)
@@ -357,6 +479,8 @@ class Access
 
 	private static function calcUsageEntity()
 	{
+		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
+		$marketApplicationLimit = $tariffAccessService->getMarketApplicationLimit();
 		$result = [
 			static::ENTITY_TYPE_APP => [],
 			static::ENTITY_TYPE_APP_STATUS => [
@@ -371,17 +495,25 @@ class Access
 		];
 		$immuneList = Immune::getList();
 
-		$res = AppTable::getList(
-			[
-				'filter' => [
-					'=ACTIVE' => AppTable::ACTIVE,
-				],
-				'select' => [
-					'CODE',
-					'STATUS',
-				],
-			]
-		);
+		$query = AppTable::query()
+			->setSelect([
+				'CODE',
+				'STATUS',
+			])
+		;
+		if ($marketApplicationLimit !== null)
+		{
+			$query
+				->where('INSTALLED', AppTable::INSTALLED)
+				->whereIn('STATUS', static::MARKETPLACE_APP_STATUSES)
+			;
+		}
+		else
+		{
+			$query->where('ACTIVE', AppTable::ACTIVE);
+		}
+
+		$res = $query->exec();
 		while ($item = $res->fetch())
 		{
 			if (!in_array($item['CODE'], $immuneList, true))
@@ -397,7 +529,11 @@ class Access
 					$result[static::ENTITY_TYPE_APP][] = $item['CODE'];
 				}
 
-				if ($item['STATUS'] === AppTable::STATUS_FREE)
+				if ($tariffAccessService->shouldCountMarketApplication(
+					$marketApplicationLimit,
+					$item['STATUS'] === AppTable::STATUS_LOCAL,
+					$item['STATUS'] === AppTable::STATUS_FREE,
+				))
 				{
 					$result[static::ENTITY_TYPE_APP][] = $item['CODE'];
 					$result[static::ENTITY_COUNT]++;

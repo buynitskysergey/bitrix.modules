@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Internal\Service\Registration;
 
-use Bitrix\Main\Config\Option;
+use Bitrix\Vibecodeconnector\Internal\Config\ModuleOptions;
 
 final class PairingSettings
 {
@@ -12,16 +12,22 @@ final class PairingSettings
 	public const MIN_TTL_SECONDS = 300;
 	public const MAX_TTL_SECONDS = 31536000;
 
+	private const OPTION_NAME = 'pairing_max_ttl_seconds';
+
+	public function __construct(private readonly ModuleOptions $options = new ModuleOptions())
+	{
+	}
+
 	public function getMaxTtlSeconds(): int
 	{
-		$value = (int)Option::get('vibecodeconnector', 'pairing_max_ttl_seconds', (string)self::DEFAULT_MAX_TTL_SECONDS);
+		$value = (int)$this->options->get(self::OPTION_NAME, (string)self::DEFAULT_MAX_TTL_SECONDS);
 
 		return $this->clamp($value);
 	}
 
 	public function setMaxTtlSeconds(int $seconds): void
 	{
-		Option::set('vibecodeconnector', 'pairing_max_ttl_seconds', (string)$this->clamp($seconds));
+		$this->options->set(self::OPTION_NAME, (string)$this->clamp($seconds));
 	}
 
 	public function computeExpiresAt(int $fetchedAt, int $publicKeyTtl): int

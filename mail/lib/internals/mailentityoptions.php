@@ -30,10 +30,40 @@ class MailEntityOptionsTable extends Entity\DataManager
 	const MAILBOX_TYPE_NAME = 'MAILBOX';
 	const MESSAGE_TYPE_NAME = 'MESSAGE';
 	const USER_TYPE_NAME = 'USER';
+	// Diagnostics of one b_mail_source_generation_match row
+	const SOURCE_GENERATION_MATCH_TYPE_NAME = 'SG_MATCH';
 
 	const CONNECT_ERROR_ATTEMPT_COUNT_PROPERTY_NAME = 'CONNECT_ERROR_ATTEMPT_COUNT';
 	const PROBLEM_STATUS_PROPERTY_NAME = 'PROBLEM_STATUS';
 	const SYNC_STATUS_PROPERTY_NAME = 'SYNC_STATUS';
+	/*
+		Beware of the ENTITY_ID meaning under the MESSAGE entity type: here it is the id of the uid row
+		from b_mail_message_uid, not the id of a stored message as UNSYNC_BODY puts there. The counter
+		belongs to a message that has no stored copy yet, so its MESSAGE_ID is still zero.
+	*/
+	const HISTORY_SYNC_ATTEMPT_COUNT_PROPERTY_NAME = 'HISTORY_SYNC_ATTEMPT_COUNT';
+	/*
+		The same count for the other operation that offers one message again and again - the tail of a
+		source generation transfer, which puts the letters the external service left behind onto the new
+		source itself. Under the MESSAGE entity type the ENTITY_ID is the id of the stored message here,
+		as UNSYNC_BODY puts there and unlike the counter above: the letter of the tail has a stored copy
+		and no uid row on the source it is being appended to. Kept apart from the history sync count
+		because the two say different things about the same letter, and a letter that cost the history
+		sync its attempts must not be given up on by the tail before it was ever offered.
+	*/
+	const SOURCE_GENERATION_TAIL_ATTEMPT_COUNT_PROPERTY_NAME = 'SG_TAIL_ATTEMPT_COUNT';
+	/*
+		Runs of the dir history sync that ended with a message let off its attempt. Lives under the DIR
+		entity type next to the coverage marker, because the excuses are limited per dir and not per
+		message: whatever message asks for them, they run out.
+	*/
+	const HISTORY_SYNC_EXCUSED_RUNS_PROPERTY_NAME = 'HISTORY_SYNC_EXCUSED_RUNS';
+	/*
+		The moment before which the dir history sync is not run again, as a unix timestamp. Written when a
+		run is refused at the level of the whole dir - the mail server would answer the next one the same
+		way, and ten minutes later is too soon to ask again.
+	*/
+	const HISTORY_SYNC_RETRY_AFTER_PROPERTY_NAME = 'HISTORY_SYNC_RETRY_AFTER';
 
 	private const MAILBOX_OPTION_CACHE_TTL = 86400;
 	private const MAILBOX_OPTION_CACHE_KEY_PREFIX = 'mail_mailbox_option_';
@@ -148,7 +178,7 @@ class MailEntityOptionsTable extends Entity\DataManager
 
 	public static function insertIgnore(
 		int $mailboxId,
-		int $entityId,
+		int|string $entityId,
 		string $entityType,
 		string $propertyName,
 		string $value,
@@ -298,7 +328,13 @@ class MailEntityOptionsTable extends Entity\DataManager
 			),
 			'ENTITY_TYPE' => array(
 				'data_type' => 'enum',
-				'values' => array(self::DIR_TYPE_NAME, self::MAILBOX_TYPE_NAME, self::MESSAGE_TYPE_NAME, self::USER_TYPE_NAME),
+				'values' => array(
+					self::DIR_TYPE_NAME,
+					self::MAILBOX_TYPE_NAME,
+					self::MESSAGE_TYPE_NAME,
+					self::USER_TYPE_NAME,
+					self::SOURCE_GENERATION_MATCH_TYPE_NAME,
+				),
 				'required'  => true,
 				'primary' => true,
 			),

@@ -4,27 +4,125 @@ namespace Bitrix\Bizproc\Api\Service;
 
 use Bitrix\Bizproc\Api\Data\WorkflowTemplateService\WorkflowTemplate;
 use Bitrix\Bizproc\Api\Enum\ErrorMessage;
+use Bitrix\Bizproc\Api\Enum\Template\TemplatePublicationType;
 use Bitrix\Bizproc\Api\Enum\Template\WorkflowTemplateType;
+use Bitrix\Bizproc\Api\Request\WorkflowTemplateHistoryService\RecordPublicationRequest;
 use Bitrix\Bizproc\Api\Request\WorkflowTemplateService as WorkflowTemplateRequest;
 use Bitrix\Bizproc\Api\Response\Error;
+use Bitrix\Bizproc\Api\Response\WorkflowTemplateHistoryService\RecordPublicationResponse;
 use Bitrix\Bizproc\Api\Response\WorkflowTemplateService as WorkflowTemplateResponse;
 use Bitrix\Bizproc\FieldType;
+use Bitrix\Bizproc\Internal\Config\TemplateHistory;
+use Bitrix\Bizproc\Internal\Entity\WorkflowTemplate\VersionChoice;
+use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\WorkflowTemplateRepository;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
+use Bitrix\Bizproc\Internal\Access\Permission\PermissionDictionary;
+use Bitrix\Bizproc\Internal\Service\Pilot\CommonRevisionWriter;
+use Bitrix\Bizproc\Internal\Service\Pilot\SettingsFreezeGate;
+use Bitrix\Bizproc\Internal\Service\Pilot\StartFormParameters;
 use Bitrix\Bizproc\Internal\Service\Trigger\Schedule\ScheduledTriggerSyncService;
+use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\PublishTemplateConstantsAccessPolicy;
+use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\TemplateConstantsAccessPolicyInterface;
+use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\TemplatePersistAccessService;
+use Bitrix\Bizproc\Public\Provider\PilotVisibilityProvider;
+use Bitrix\Bizproc\Public\Provider\TemplateAccessProvider;
+use Bitrix\Bizproc\Public\Service\TemplateAccessService;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Query\Query;
+use Bitrix\Main\Repository\Exception\PersistenceException;
 
 class WorkflowTemplateService
 {
 	private const TRACK_ON_INTERVAL = 7 * 86400; // 7 days in seconds
 	private WorkflowAccessService $accessService;
+	private TemplateAccessService $templateAccessService;
+	private TemplateAccessProvider $templateAccessProvider;
+	private WorkflowTemplateHistoryService $historyService;
+	private SettingsFreezeGate $settingsFreezeGate;
+	private StartFormParameters $startFormParameters;
+	private PilotVisibilityProvider $pilotVisibilityProvider;
+	private CommonRevisionWriter $commonRevisionWriter;
+	private TemplatePersistAccessService $templatePersistAccessService;
+	private TemplateConstantsAccessPolicyInterface $templateConstantsAccessPolicy;
 
-	public function __construct(?WorkflowAccessService $accessService = null)
+	public function __construct(
+		?WorkflowAccessService $accessService = null,
+		?TemplateAccessService $templateAccessService = null,
+		?TemplateAccessProvider $templateAccessProvider = null,
+		?WorkflowTemplateHistoryService $historyService = null,
+		?SettingsFreezeGate $settingsFreezeGate = null,
+		?StartFormParameters $startFormParameters = null,
+		?PilotVisibilityProvider $pilotVisibilityProvider = null,
+		?CommonRevisionWriter $commonRevisionWriter = null,
+		?TemplatePersistAccessService $templatePersistAccessService = null,
+		?TemplateConstantsAccessPolicyInterface $templateConstantsAccessPolicy = null,
+	)
 	{
 		$this->accessService = $accessService ?? new WorkflowAccessService();
+		$this->templateAccessService = $templateAccessService ?? new TemplateAccessService();
+		$this->templateAccessProvider = $templateAccessProvider ?? new TemplateAccessProvider();
+		$this->historyService = $historyService ?? new WorkflowTemplateHistoryService();
+		$this->settingsFreezeGate = $settingsFreezeGate ?? new SettingsFreezeGate();
+		$this->startFormParameters = $startFormParameters ?? new StartFormParameters();
+		$this->pilotVisibilityProvider = $pilotVisibilityProvider ?? new PilotVisibilityProvider();
+		$this->commonRevisionWriter = $commonRevisionWriter ?? new CommonRevisionWriter();
+		$this->templatePersistAccessService = $templatePersistAccessService
+			?? new TemplatePersistAccessService(
+				$this->accessService,
+				$this->templateAccessService,
+				$this->historyService,
+			);
+		$this->templateConstantsAccessPolicy = $templateConstantsAccessPolicy
+			?? new PublishTemplateConstantsAccessPolicy($this->templatePersistAccessService);
+	}
+
+	/**
+	 * Persist gate for the live-save / draft-save / constants paths. An existing template is writable only
+	 * through its own document type; on top of that Nodes templates are governed by the template ACL and
+	 * split into publish (activation of the live row) and edit (draft), while every other type and a new
+	 * template stay on the legacy document-type CreateWorkflow gate.
+	 */
+	private function canPersist(int $templateId, array $documentType, int $userId, bool $publish): bool
+	{
+		return $this->templatePersistAccessService->canPersist($templateId, $documentType, $userId, $publish);
+	}
+
+	/**
+	 * Import / export gate: the legacy CreateWorkflow right, and only on a document type the template
+	 * really belongs to. A request carrying another one reaches into a foreign entity.
+	 */
+	private function canTransfer(int $templateId, array $documentType, int $userId): bool
+	{
+		$template = $this->getTemplateAccessInfo($templateId);
+		if ($template !== null && !\CBPHelper::isEqualDocument($template['documentType'], $documentType))
+		{
+			return false;
+		}
+
+		return $this->accessService->canCreateWorkflow($documentType, $userId);
+	}
+
+	/**
+	 * The gates of one save ask about the same template row, so it is read once. The memory is dropped as
+	 * soon as the row is overwritten: a save can change both the type of the template and its document type.
+	 *
+	 * @return array{documentType: string[], isNodes: bool, inHistory: bool}|null null when there is no such
+	 * template row
+	 */
+	private function getTemplateAccessInfo(int $templateId): ?array
+	{
+		return $this->templatePersistAccessService->getTemplateAccessInfo($templateId);
+	}
+
+	private function isNewNodesTemplate(array $fields, array $documentType): bool
+	{
+		$fields['DOCUMENT_TYPE'] = $documentType;
+
+		return \CBPWorkflowTemplateLoader::getLoader()->getTemplateType($fields)
+			=== WorkflowTemplateType::Nodes->value;
 	}
 
 	public function getList(
@@ -44,7 +142,6 @@ class WorkflowTemplateService
 				'CREATED_USER',
 				'USER',
 			])
-			->where('CREATED_BY', $request->getFilterUserId())
 			->where('TYPE', WorkflowTemplateType::Nodes->value)
 			->whereNull('SYSTEM_CODE')
 			->setOrder($request->getOrder())
@@ -69,6 +166,17 @@ class WorkflowTemplateService
 					->whereLike('NAME', "%$searchQuery%")
 					->whereLike('DESCRIPTION', "%$searchQuery%"),
 			);
+		}
+
+		// Visibility scope by the caller's edit area (replaces the CREATED_BY=self filter). Applied after
+		// setFilter() so it is not overwritten; fail-closed for users without an edit scope.
+		$entityFilter = $this->templateAccessProvider->getEntityFilter(
+			$request->getFilterUserId(),
+			PermissionDictionary::BIZPROC_TEMPLATE_EDIT,
+		);
+		foreach ($entityFilter as $filterKey => $filterValue)
+		{
+			$query->addFilter($filterKey, $filterValue);
 		}
 
 		$queryResult = $query->exec();
@@ -136,7 +244,11 @@ class WorkflowTemplateService
 		{
 			foreach ($errors as $error)
 			{
-				$response->addError(new \Bitrix\Bizproc\Error($error['message'], $error['code']));
+				// the field key travels to the client: the start form moves the focus to the first
+				// control with an error and binds the error message to it
+				$customData = isset($error['parameter']) ? ['parameter' => $error['parameter']] : null;
+
+				$response->addError(new \Bitrix\Bizproc\Error($error['message'], $error['code'], $customData));
 			}
 		}
 
@@ -167,14 +279,21 @@ class WorkflowTemplateService
 		}
 
 		if (
-			!\CBPDocument::canUserOperateDocumentType(
-				\CBPCanUserOperateOperation::CreateWorkflow,
-				$request->userId,
+			!$this->templateConstantsAccessPolicy->canWrite(
+				$request->templateId,
 				$request->complexDocumentType,
+				$request->userId,
 			)
 		)
 		{
 			return WorkflowTemplateResponse\SetConstantsResponse::createError(new Error('access denied'));
+		}
+
+		// Check before parsing uploads, while the loader repeats the authoritative check under the row lock.
+		$freezeRefusal = $this->settingsFreezeGate->findRefusal($request->templateId);
+		if ($freezeRefusal !== null)
+		{
+			return WorkflowTemplateResponse\SetConstantsResponse::createError($freezeRefusal);
 		}
 
 		$constants = \CBPWorkflowTemplateLoader::getTemplateConstants($request->templateId);
@@ -210,6 +329,16 @@ class WorkflowTemplateService
 				'USER_ID' => $user->getId(),
 				'MODIFIER_USER' => $user,
 			]);
+		}
+		catch (\CBPWorkflowTemplateValidationException $exception)
+		{
+			$response = new WorkflowTemplateResponse\SetConstantsResponse();
+			foreach ($exception->getErrors() as $error)
+			{
+				$response->addError(new Error($error['message'], $error['code'] ?? 0));
+			}
+
+			return $response;
 		}
 		catch (\Exception $e)
 		{
@@ -262,19 +391,29 @@ class WorkflowTemplateService
 			return WorkflowTemplateResponse\PrepareStartParametersResponse::createError(Error::createFromThrowable($e));
 		}
 
-		$template
-			= \CBPWorkflowTemplateLoader::getList(
-				[],
-				[
-					'ID' => $request->templateId,
-					'DOCUMENT_TYPE' => $request->complexDocumentType,
-					'ACTIVE' => 'Y',
-					'<AUTO_EXECUTE' => \CBPDocumentEventType::Automation,
-				],
-				false,
-				false,
-			['ID', 'PARAMETERS'],
-		)->fetch();
+		// the identifier comes from the request and no list is built on the way here, so the templates a
+		// pilot acts on are asked about one by one: the narrowing of the lists alone would be bypassed by
+		// naming the identifier directly. The question is asked before the row is read, so a template this
+		// employee may not see leaves by the branch of a template that does not exist - same code, same
+		// message, same delay
+		$template = null;
+		if ($this->pilotVisibilityProvider->isVisible($request->targetUserId, $request->templateId))
+		{
+			$template
+				= \CBPWorkflowTemplateLoader::getList(
+					[],
+					[
+						'ID' => $request->templateId,
+						'DOCUMENT_TYPE' => $request->complexDocumentType,
+						'ACTIVE' => 'Y',
+						'<AUTO_EXECUTE' => \CBPDocumentEventType::Automation,
+					],
+					false,
+					false,
+					['ID', 'PARAMETERS'],
+				)->fetch()
+			;
+		}
 
 		if (!$template)
 		{
@@ -286,12 +425,21 @@ class WorkflowTemplateService
 			);
 		}
 
+		// the fields belong to the version that will be started for this employee, and not to the live row
+		// the template is read by
+		$templateParameters = $this->startFormParameters->forInitiator(
+			$request->templateId,
+			$request->targetUserId,
+			$request->manualStartSurface,
+			is_array($template['PARAMETERS']) ? $template['PARAMETERS'] : [],
+		);
+
 		$workflowParameters = [];
-		if (is_array($template['PARAMETERS']) && $template['PARAMETERS'])
+		if ($templateParameters)
 		{
 			$preparedParameters = $this->prepareParameters(
 				new WorkflowTemplateRequest\PrepareParametersRequest(
-					$template['PARAMETERS'],
+					$templateParameters,
 					$request->requestParameters,
 					$request->complexDocumentType,
 				),
@@ -309,15 +457,21 @@ class WorkflowTemplateService
 
 		$workflowParameters[\CBPDocument::PARAM_TAGRET_USER] = 'user_' . $request->targetUserId;
 		$workflowParameters[\CBPDocument::PARAM_DOCUMENT_EVENT_TYPE] = $request->eventType;
+		$workflowParameters[VersionChoice::PARAMETER_SCHEMA_TOKEN] = VersionChoice::parameterSchemaToken(
+			$templateParameters,
+		);
 
 		return (new WorkflowTemplateResponse\PrepareStartParametersResponse())->setParameters($workflowParameters);
 	}
 
 	public function saveTemplate(
 		WorkflowTemplateRequest\SaveTemplateRequest $request,
+		bool $withoutCommonVersion = false,
 	): WorkflowTemplateResponse\SaveTemplateResponse
 	{
 		$response = new WorkflowTemplateResponse\SaveTemplateResponse();
+		$isNewNodesTemplate = false;
+		$canPublishNewNodesTemplate = false;
 
 		if ($request->checkAccess)
 		{
@@ -333,7 +487,15 @@ class WorkflowTemplateService
 				return $response;
 			}
 
-			if (!$this->accessService->canCreateWorkflow($documentType, $request->user->getId()))
+			$isNewNodesTemplate = $request->templateId <= 0
+				&& $this->isNewNodesTemplate($request->fields, $documentType);
+			$canPublishNewNodesTemplate = $isNewNodesTemplate
+				&& $this->templateAccessService->canPublish(0, $request->user->getId(), $documentType);
+			$hasAccess = $isNewNodesTemplate
+				? $this->templateAccessService->canCreate($request->user->getId(), $documentType)
+				: $this->canPersist($request->templateId, $documentType, $request->user->getId(), publish: true);
+
+			if (!$hasAccess)
 			{
 				$response->addError(
 					ErrorMessage::ACCESS_DENIED->getError(),
@@ -347,15 +509,29 @@ class WorkflowTemplateService
 			$template = WorkflowTemplate::createFromRequest($request);
 			$templateId = $template->getTemplateId();
 			$fields = $template->getFields();
-			if ($templateId > 0)
+			if ($isNewNodesTemplate && !$canPublishNewNodesTemplate)
 			{
-				\CBPWorkflowTemplateLoader::update($templateId, $fields);
-				$response->setTemplateId($templateId);
+				$fields['TEMPLATE'] = [];
+				$fields['AUTO_EXECUTE'] = \CBPDocumentEventType::None;
 			}
-			else
+			// A write to a missing template must be refused by fact, not silently reported as success:
+			// the loader path swallows the ORM UpdateResult, so existence is verified here.
+			if ($templateId > 0 && !$this->templateExists($templateId))
 			{
-				$response->setTemplateId(\CBPWorkflowTemplateLoader::add($fields));
+				$response->addError($this->createTemplateNotFoundError($templateId));
+
+				return $response;
 			}
+
+			$writeResponse = $this->writeTemplate($templateId, $fields, $request, $withoutCommonVersion);
+			if (!$writeResponse->isSuccess())
+			{
+				$response->addErrors($writeResponse->getErrors());
+
+				return $response;
+			}
+
+			$response->setTemplateId($writeResponse->getTemplateId());
 
 			$this->handleTrackOnOption($response->getTemplateId(), $template->getFields());
 		}
@@ -377,6 +553,166 @@ class WorkflowTemplateService
 		}
 
 		return $response;
+	}
+
+	/**
+	 * The multi-table write (template + settings) and the version record run in one transaction so a
+	 * mid-write failure cannot leave a partial commit or a published version without its snapshot.
+	 */
+	private function writeTemplate(
+		int $templateId,
+		array $fields,
+		WorkflowTemplateRequest\SaveTemplateRequest $request,
+		bool $withoutCommonVersion,
+	): WorkflowTemplateResponse\SaveTemplateResponse
+	{
+		$response = new WorkflowTemplateResponse\SaveTemplateResponse();
+		$isUpdate = $templateId > 0;
+
+		$connection = \Bitrix\Main\Application::getConnection();
+		$connection->startTransaction();
+		try
+		{
+			if ($templateId > 0)
+			{
+				$publicationResponse = $this->writeCommonVersion($templateId, $fields, $request->user->getId());
+			}
+			else
+			{
+				// Creating a template publishes nothing: the journal only remembers the birth, so the
+				// history stays empty until the user publishes for the first time.
+				$templateId = (int)\CBPWorkflowTemplateLoader::add($fields);
+				$publicationResponse = new RecordPublicationResponse();
+				if (
+					$withoutCommonVersion
+					&& !$this->commonRevisionWriter->writeCommonRevisionForUpdate($templateId, [])
+				)
+				{
+					throw new PersistenceException(
+						"Unable to mark workflow template {$templateId} as having no common version",
+					);
+				}
+
+				if (!$this->recordCreation($templateId, $request))
+				{
+					$connection->rollbackTransaction();
+					$response->addError(ErrorMessage::TEMPLATE_HISTORY_UNAVAILABLE->getCodedError());
+
+					return $response;
+				}
+			}
+		}
+		catch (\Throwable $exception)
+		{
+			$connection->rollbackTransaction();
+
+			throw $exception;
+		}
+
+		if (!$publicationResponse->isSuccess())
+		{
+			$connection->rollbackTransaction();
+			$response->addErrors($publicationResponse->getErrors());
+
+			return $response;
+		}
+
+		$connection->commitTransaction();
+		if ($isUpdate)
+		{
+			\CBPWorkflowTemplateLoader::invalidateCachesAfterUpdate($templateId, $fields);
+		}
+
+		return $response->setTemplateId($templateId);
+	}
+
+	/**
+	 * Writes a pilot version as the common one without repeating the request-level access checks.
+	 *
+	 * The caller owns the transaction, including the row lock that protects the pilot identity. The common
+	 * template write and its history record therefore commit or roll back together with the pilot cascade.
+	 */
+	public function publishCommonVersion(int $templateId, array $fields, int $userId): RecordPublicationResponse
+	{
+		return $this->writeCommonVersion($templateId, $fields, $userId);
+	}
+
+	/**
+	 * The common-template write and its history record are inseparable. The caller is responsible for the
+	 * transaction boundary and for invalidating caches after its whole operation commits.
+	 */
+	private function writeCommonVersion(
+		int $templateId,
+		array $fields,
+		int $userId,
+	): RecordPublicationResponse
+	{
+		// Both the decision and the initial version are taken before the overwrite: afterwards the row
+		// already carries the publication being made, and the configuration it replaces is gone.
+		$isVersionedSave = $this->isVersionedSave($templateId, $fields);
+
+		if ($isVersionedSave && !$this->historyService->ensureHistoryInitialized($templateId))
+		{
+			$response = new RecordPublicationResponse();
+			$response->addError(ErrorMessage::TEMPLATE_HISTORY_UNAVAILABLE->getCodedError());
+
+			return $response;
+		}
+
+		\CBPWorkflowTemplateLoader::update(
+			$templateId,
+			$fields,
+			deferCacheInvalidation: true,
+			publishesCommonVersion: true,
+		);
+		$this->templatePersistAccessService->resetTemplateAccessInfo($templateId);
+
+		return $isVersionedSave
+			? $this->recordPublication($templateId, $fields, $userId)
+			: new RecordPublicationResponse()
+		;
+	}
+
+	private function recordCreation(
+		int $templateId,
+		WorkflowTemplateRequest\SaveTemplateRequest $request,
+	): bool
+	{
+		if (!TemplateHistory::isEnabled())
+		{
+			return true;
+		}
+
+		return $this->historyService->recordCreation($templateId, $request->user->getId());
+	}
+
+	/**
+	 * Only a save that actually wrote a graph into a template taking part in the history is published into
+	 * the journal: an empty shell carries nothing to restore later.
+	 */
+	private function isVersionedSave(int $templateId, array $fields): bool
+	{
+		return TemplateHistory::isEnabled()
+			&& array_key_exists('TEMPLATE', $fields)
+			&& !\CBPHelper::isEmptyValue($fields['TEMPLATE'])
+			&& ($this->getTemplateAccessInfo($templateId)['inHistory'] ?? false)
+		;
+	}
+
+	private function recordPublication(
+		int $templateId,
+		array $fields,
+		int $userId,
+	): RecordPublicationResponse
+	{
+		return $this->historyService->recordPublication(
+			new RecordPublicationRequest(
+				templateId: $templateId,
+				userId: $userId,
+				publicationType: TemplatePublicationType::Common,
+				templateFields: $fields,
+			),
+		);
 	}
 
 	private function handleTrackOnOption(int $templateId, array $fields): void
@@ -417,7 +753,7 @@ class WorkflowTemplateService
 			return $response;
 		}
 
-		if ($request->checkAccess && !$this->accessService->canCreateWorkflow($documentType, $request->user->getId()))
+		if ($request->checkAccess && !$this->canTransfer($request->id, $documentType, $request->user->getId()))
 		{
 			$response->addError(
 				ErrorMessage::IMPORT_ACCESS_DENIED->getError(),
@@ -491,7 +827,7 @@ class WorkflowTemplateService
 			return $response;
 		}
 
-		if ($request->checkAccess && !$this->accessService->canCreateWorkflow($documentType, $request->user->getId()))
+		if ($request->checkAccess && !$this->canTransfer($request->id, $documentType, $request->user->getId()))
 		{
 			$response->addError(
 				ErrorMessage::EXPORT_ACCESS_DENIED->getError(),
@@ -500,7 +836,13 @@ class WorkflowTemplateService
 			return $response;
 		}
 
-		$bp = \CBPWorkflowTemplateLoader::ExportTemplate($request->id);
+		// a template without a common version exports as a file with an empty scheme and confirms that the
+		// template is there, so it is refused by the branch of a template that does not exist - with a
+		// pilot of its own and without one alike
+		$bp = $this->hasCommonVersion($request->id)
+			? \CBPWorkflowTemplateLoader::ExportTemplate($request->id)
+			: false
+		;
 
 		if (!$bp)
 		{
@@ -534,7 +876,7 @@ class WorkflowTemplateService
 				return $response;
 			}
 
-			if (!$this->accessService->canCreateWorkflow($documentType, $request->user->getId()))
+			if (!$this->canPersist($request->templateId, $documentType, $request->user->getId(), publish: false))
 			{
 				$response->addError(
 					ErrorMessage::ACCESS_DENIED->getError(),
@@ -546,6 +888,15 @@ class WorkflowTemplateService
 
 		try
 		{
+			// The draft table only stores TEMPLATE_ID and never checks the parent template, so a draft
+			// for a deleted template would be created/updated silently. Refuse it by existence.
+			if ($request->templateId > 0 && !$this->templateExists($request->templateId))
+			{
+				$response->addError($this->createTemplateNotFoundError($request->templateId));
+
+				return $response;
+			}
+
 			$saveRequest = new \Bitrix\Bizproc\Api\Request\WorkflowTemplateService\SaveTemplateRequest(
 				$request->templateId,
 				$request->parameters,
@@ -587,6 +938,14 @@ class WorkflowTemplateService
 
 			if ($request->draftId)
 			{
+				$draft = WorkflowTemplateDraftTable::getByPrimary($request->draftId)->fetchObject();
+				if (!$draft || $draft->getTemplateId() !== $templateId)
+				{
+					$response->addError(ErrorMessage::ACCESS_DENIED->getError());
+
+					return $response;
+				}
+
 				$result = WorkflowTemplateDraftTable::update(
 					$request->draftId,
 					[
@@ -650,6 +1009,8 @@ class WorkflowTemplateService
 			if (!$draft)
 			{
 				$response->addError(ErrorMessage::GET_DATA_ERROR->getError());
+
+				return $response;
 			}
 
 			$response->setData($draft->collectValues());
@@ -660,6 +1021,24 @@ class WorkflowTemplateService
 		}
 
 		return $response;
+	}
+
+	// Existence-only delete guard: a row is "present" by primary key, independent of SYSTEM_CODE,
+	// so the answer matches WorkflowTemplateRepository::exists(). Access and SYSTEM_CODE/type gating
+	// for the node editor live upstream (Diagram::getTpl, canWriteTemplate, CreateWorkflow checks).
+	private function templateExists(int $templateId): bool
+	{
+		return (new WorkflowTemplateRepository())->exists($templateId);
+	}
+
+	private function hasCommonVersion(int $templateId): bool
+	{
+		return $this->commonRevisionWriter->hasCommonVersion($templateId);
+	}
+
+	private function createTemplateNotFoundError(int $templateId): \Bitrix\Bizproc\Error
+	{
+		return ErrorMessage::TEMPLATE_NOT_FOUND->getCodedError(['#ID#' => $templateId]);
 	}
 
 	private function isCorrectSignedFileIds(mixed $value): bool

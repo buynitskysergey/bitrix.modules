@@ -17,4 +17,5 @@ final class SecuritySettingsDto extends Dto
 	public RightsDto $takeScreenshotRights;
 	public RightsDto $copyTextRights;
 	public bool $isLoginHistoryAvailable;
+	public bool $isLogoutOtherDeviceAvailable;
 }

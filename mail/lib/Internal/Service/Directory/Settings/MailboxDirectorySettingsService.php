@@ -24,7 +24,7 @@ final readonly class MailboxDirectorySettingsService
 	/**
 	 * @return Result data on success: ['settings' => DirectoriesSettings]
 	 */
-	public function getSettings(int $mailboxId): Result
+	public function getSettings(int $mailboxId, bool $mayEditMailbox = false): Result
 	{
 		return $this->reader->read($mailboxId);
 	}
@@ -32,12 +32,14 @@ final readonly class MailboxDirectorySettingsService
 	/**
 	 * @return Result data on success: ['items' => DirectoryItem[]]
 	 */
-	public function loadChildren(int $mailboxId, string $dirMd5): Result
+	public function loadChildren(int $mailboxId, string $dirMd5, bool $mayEditMailbox = false): Result
 	{
 		return $this->childrenLoader->load($mailboxId, $dirMd5);
 	}
 
 	/**
+	 * Saves the folder settings of the mailbox.
+	 *
 	 * @param array<int, array{dirMd5?: string, value?: int|string}> $dirs
 	 * @param array<int, array{dirMd5?: string, type?: string}> $dirsTypes
 	 */

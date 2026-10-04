@@ -17,10 +17,11 @@ final class Entry extends TimelineEntry
 		$ownerTypeId = $params['OWNER_TYPE_ID'] ?? null;
 		$ownerId = $params['OWNER_ID'] ?? null;
 
+		$entryCreated = new DateTime();
 		$result = TimelineTable::add([
 			'TYPE_ID' => self::getTypeId(),
 			'TYPE_CATEGORY_ID' => self::getTypeCategoryId(),
-			'CREATED' => new DateTime(),
+			'CREATED' => $entryCreated,
 			'AUTHOR_ID' => $authorId,
 			'ASSOCIATED_ENTITY_TYPE_ID' => self::getOwnerTypeId(),
 			'ASSOCIATED_ENTITY_ID' => $activityId,
@@ -38,7 +39,7 @@ final class Entry extends TimelineEntry
 				'ENTITY_ID' => $ownerId,
 			]
 		];
-		TimelineEntry::registerBindings($id, $bindings);
+		TimelineEntry::registerBindings($id, $bindings, $entryCreated);
 
 		return $id;
 	}

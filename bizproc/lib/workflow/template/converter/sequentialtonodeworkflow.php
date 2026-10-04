@@ -2,6 +2,16 @@
 
 namespace Bitrix\Bizproc\Workflow\Template\Converter;
 
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasFragment;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasBranch;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasContainer;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasContainerLayoutAdapter;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasFrame;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasLayoutAdapter;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasLink;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasNode;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasNodeFactory;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\PortRef;
 use Bitrix\Bizproc\Activity\Enum\ActivityNodeType;
 use Bitrix\Bizproc\Starter\Dto\TriggerDescriptorDto;
 use Bitrix\Bizproc\Public\Entity\Document\Workflow;
@@ -16,14 +26,18 @@ class SequentialToNodeWorkflow
 	private const MANUAL_START_TRIGGER = 'ManualStartTrigger';
 	private const EDIT_DOCUMENT_TRIGGER = 'EditDocumentTrigger';
 	private const CREATE_DOCUMENT_TRIGGER = 'CreateDocumentTrigger';
-	protected const COLUMN_SIZE = 300;
-	protected const ROW_SIZE = 100;
+	protected const COLUMN_GAP = 1;
+	protected const COLUMN_SIZE = 375;
+	protected const ROW_SIZE = 110;
 
 	protected array $rootActivity;
 	private bool $isSystem = false;
 	private int $autoExecute = \CBPDocumentEventType::None;
-	private array $positions = [];
+	private array $anchors = [];
+	private array $nodeFrames = [];
 	private ?string $startTrigger = null;
+	private ?CanvasLayoutAdapter $canvasLayoutAdapter = null;
+	private ?CanvasNodeFactory $canvasNodeFactory = null;
 	private ?array $documentType = null;
 
 	public function __construct(array $template)
@@ -91,7 +105,14 @@ class SequentialToNodeWorkflow
 			$instance = static::makeByTemplateId($templateId);
 			$template = $instance->convert();
 
-			\CBPWorkflowTemplateLoader::update($templateId, ['TEMPLATE' => $template], true);
+			\CBPWorkflowTemplateLoader::update(
+				$templateId,
+				[
+					'TEMPLATE' => $template,
+					'AUTO_EXECUTE' => $instance->getRemainingAutoExecute(),
+				],
+				true,
+			);
 		}
 		catch (\Exception $exception)
 		{
@@ -156,15 +177,21 @@ class SequentialToNodeWorkflow
 
 	public function convert(): array
 	{
-		[$startName, $startLinks, $startChildren] = $this->createTriggers();
+		$conversion = $this->convertAndExtractLayout();
 
-		[$outputName, $rootLinks, $rootChildren] = $this->convertChildren($startName, $this->rootActivity['Children']);
-		[$links, $children] = $this->optimizeChildren(
-			[...$startLinks, ...$rootLinks],
-			[...$startChildren, ...$rootChildren]
-		);
+		return $conversion['template'];
+	}
 
-		return [$this->createRootActivity($links, $children)];
+	public function convertAndExtractLayout(): array
+	{
+		$layout = $this->buildLayout();
+		$this->anchors = $layout->anchors;
+		$this->nodeFrames = $layout->nodeFrames;
+
+		return [
+			'template' => [$this->createRootActivity($layout->links, $layout->children)],
+			'layout' => $layout,
+		];
 	}
 
 	/**
@@ -187,13 +214,16 @@ class SequentialToNodeWorkflow
 		];
 	}
 
+	/**
+	 * @return array{0: string, 1: Layout\LayoutResult}
+	 */
 	protected function createTriggers(): array
 	{
 		$merge = $this->createMergeNode();
-		$this->setPosition($merge['Name'], 1, 1.5);
-
-		$children = [$merge];
-		$links = [];
+		$triggerContainer = CanvasContainer::create('triggers')
+			->arrangeVertically()
+			->defineRowGap(0)
+		;
 
 		$triggers = [];
 
@@ -216,25 +246,114 @@ class SequentialToNodeWorkflow
 
 		if ($this->autoExecute & CBPDocumentEventType::Edit)
 		{
+			$descriptor = $this->resolveEditStartTriggerDescriptor();
 			$triggers[] = [
-				'type' => self::EDIT_DOCUMENT_TRIGGER,
-				'descriptor' => null,
+				'type' => $descriptor?->triggerType ?? self::EDIT_DOCUMENT_TRIGGER,
+				'descriptor' => $descriptor,
 			];
 		}
 
 		foreach ($triggers as $triggerConfig)
 		{
-			$trigger = $this->createTrigger($triggerConfig['type'], $triggerConfig['descriptor']);
-			$children[] = $trigger;
-			$links[] = $this->createLink($trigger['Name'], $merge['Name']);
-
-			$this->copyPosition($merge['Name'], $trigger['Name']);
-			$this->movePositionDown($merge['Name']);
+			$triggerContainer->appendNode($this->createCanvasNode($this->createTrigger($triggerConfig['type'], $triggerConfig['descriptor'])));
 		}
 
-		$this->movePosition($merge['Name'], -1, 1);
+		$mergePoint = new Layout\GridPoint(empty($triggers) ? 0 : count($triggers), 2.5);
+		$layout = Layout\LayoutResult::createFromNode($merge, $mergePoint)
+			->appendLayout(
+				(new CanvasContainerLayoutAdapter($this->getCanvasLayoutAdapter()))->convertContainerToLayout(
+					$triggerContainer,
+					$merge['Name'],
+					new Layout\GridPoint(0, $mergePoint->column - 1),
+					false
+				)
+			)
+		;
+		foreach ($triggerContainer->findNodeIdsRecursively() as $triggerNodeId)
+		{
+			$layout->addLink($triggerNodeId, $merge['Name']);
+		}
 
-		return [$merge['Name'], $links, $children];
+		return [$merge['Name'], $layout];
+	}
+
+	protected function createCanvasNode(array $activity): CanvasNode
+	{
+		return $this->getCanvasNodeFactory()->createFromActivity(
+			$activity,
+			$this->resolveCanvasNodeSpan($activity)
+		);
+	}
+
+	protected function resolveCanvasNodeSpan(array $activity): array
+	{
+		return $this->getCanvasNodeFactory()->resolveSpanFromActivity($activity);
+	}
+
+	protected function getCanvasNodeFactory(): CanvasNodeFactory
+	{
+		$this->canvasNodeFactory ??= new CanvasNodeFactory(static::COLUMN_SIZE, static::ROW_SIZE);
+
+		return $this->canvasNodeFactory;
+	}
+
+	protected function buildLayout(): Layout\LayoutResult
+	{
+		[$startName, $startLayout] = $this->createTriggers();
+		$rootLayout = $this->getCanvasLayoutAdapter()->convertFragmentToLayout(
+			$this->buildChildrenFragment($this->rootActivity['Children']),
+			$startName,
+			$startLayout->findAnchor($startName)->moveBy(0, 1)
+		);
+		$layout = $startLayout->appendLayout($rootLayout);
+		[$layout->links, $layout->children] = $this->optimizeChildren(
+			$layout->links,
+			$layout->children
+		);
+
+		return $layout;
+	}
+
+	protected function buildChildrenFragment(array $children): CanvasFragment
+	{
+		$fragment = CanvasFragment::create();
+
+		foreach ($children as $child)
+		{
+			$fragment->appendFragmentAfterExit($this->buildChildFragment($child));
+		}
+
+		return $fragment;
+	}
+
+	protected function buildChildFragment(array $child): CanvasFragment
+	{
+		$isSimpleChild = $this->isSimpleChild($child);
+		if ($isSimpleChild)
+		{
+			return CanvasFragment::createFromActivities([$child]);
+		}
+
+		$this->syncActivatedState($child);
+
+		switch ($child['Type'])
+		{
+			case 'EmptyBlockActivity':
+				return $this->buildEmptyBlockFragment($child);
+			case 'WhileActivity':
+			case 'ForEachActivity':
+				return $this->buildIterableFragment($child);
+			case 'IfElseActivity':
+				return $this->buildIfElseFragment($child);
+			case 'ParallelActivity':
+			case 'ListenActivity':
+				return $this->buildBranchableFragment($child);
+			case 'ApproveActivity':
+			case 'RequestInformationOptionalActivity':
+				return $this->buildYesNoFragment($child);
+		}
+
+		throw new \CBPArgumentException("Unsupported child type $child[Type]");
 	}
 
 	private function resolveCreateStartTriggerDescriptor(): ?TriggerDescriptorDto
@@ -247,6 +366,43 @@ class SequentialToNodeWorkflow
 		$moduleSettings = \CBPRuntime::getRuntime()->getDocumentService()->getStarterModuleSettings($this->documentType);
 
 		return $moduleSettings?->getCreateDocumentTrigger();
+	}
+
+	private function resolveEditStartTriggerDescriptor(): ?TriggerDescriptorDto
+	{
+		if (!$this->documentType)
+		{
+			return null;
+		}
+
+		$moduleSettings = \CBPRuntime::getRuntime()->getDocumentService()->getStarterModuleSettings($this->documentType);
+
+		return $moduleSettings?->getEditDocumentTrigger();
+	}
+
+	private function getRemainingAutoExecute(): int
+	{
+		$remainingAutoExecute = $this->autoExecute;
+		$createTriggerDescriptor = $this->resolveCreateStartTriggerDescriptor();
+		$editTriggerDescriptor = $this->resolveEditStartTriggerDescriptor();
+
+		if (
+			$createTriggerDescriptor instanceof TriggerDescriptorDto
+			&& $createTriggerDescriptor->triggerType !== ''
+		)
+		{
+			$remainingAutoExecute &= ~CBPDocumentEventType::Create;
+		}
+
+		if (
+			$editTriggerDescriptor instanceof TriggerDescriptorDto
+			&& $editTriggerDescriptor->triggerType !== ''
+		)
+		{
+			$remainingAutoExecute &= ~CBPDocumentEventType::Edit;
+		}
+
+		return $remainingAutoExecute;
 	}
 
 	private function createTrigger(string $type, ?TriggerDescriptorDto $descriptor = null): array
@@ -300,12 +456,12 @@ class SequentialToNodeWorkflow
 
 				foreach ($links as $j => [$outputName, $inputName])
 				{
-					if (str_starts_with($outputName, $mergeName))
+					if ($this->extractNodeName($outputName) === $mergeName)
 					{
 						$inputNames[] = $inputName;
 						unset($links[$j]);
 					}
-					if (str_starts_with($inputName, $mergeName))
+					if ($this->extractNodeName($inputName) === $mergeName)
 					{
 						$outputNames[] = $outputName;
 						unset($links[$j]);
@@ -317,6 +473,11 @@ class SequentialToNodeWorkflow
 		}
 
 		return [array_values($links), array_values($children)];
+	}
+
+	private function extractNodeName(string $nodeRef): string
+	{
+		return explode(':', $nodeRef, 2)[0];
 	}
 
 	protected function createRootActivity(array $links, array $children): array
@@ -332,13 +493,13 @@ class SequentialToNodeWorkflow
 
 	protected function makeNodeSettings(array $activity): array
 	{
-		$row = $this->getRow($activity['Name']);
-		$column = $this->getColumn($activity['Name']);
+		$point = $this->anchors[$activity['Name']] ?? new Layout\GridPoint(0, 0);
+		$frame = $this->nodeFrames[$activity['Name']] ?? Layout\GridFrame::createFromPoint($point);
 		$ports = [];
 		$runtime = \CBPRuntime::getRuntime();
 		$nodeType = ActivityNodeType::SIMPLE;
 
-		if (!str_ends_with($activity['Type'], 'Trigger'))
+		if (!$runtime->isTriggerActivity((string)$activity['Type']))
 		{
 			$ports[] = [
 				'type' => 'input',
@@ -355,34 +516,11 @@ class SequentialToNodeWorkflow
 			|| $activity['Type'] === 'ForEachActivity'
 			|| $activity['Type'] === 'ApproveActivity'
 			|| $activity['Type'] === 'RequestInformationOptionalActivity'
+			|| $activity['Type'] === 'IfElseBranchActivity'
 		)
 		{
-			$nodeType = ActivityNodeType::COMPLEX;
+			$nodeType = ActivityNodeType::OPERATORS;
 			$ports = $runtime->getActivityDescription($activity['Type'])['NODE_SETTINGS']['ports'] ?? $ports;
-		}
-		elseif ($activity['Type'] === 'IfElseActivity')
-		{
-			$nodeType = ActivityNodeType::COMPLEX;
-			foreach ($activity['Properties']['Conditions'] as $i => $condition)
-			{
-				$ports[] = [
-					'type' => 'output',
-					'id' => "o{$i}",
-					'title' => $condition['Title'],
-				];
-			}
-		}
-		elseif ($activity['Type'] === 'ListenActivity')
-		{
-			$nodeType = ActivityNodeType::COMPLEX;
-			foreach ($activity['Children'] as $i => $child)
-			{
-				$ports[] = [
-					'type' => 'output',
-					'id' => "o{$i}",
-					'title' => $child['Properties']['Title'],
-				];
-			}
 		}
 		else
 		{
@@ -396,8 +534,8 @@ class SequentialToNodeWorkflow
 			'id' => $activity['Name'],
 			'type' => $nodeType->value,
 			'position' => [
-				'x' => $column * static::COLUMN_SIZE,
-				'y' => $row * static::ROW_SIZE,
+				'x' => $point->column * static::COLUMN_SIZE,
+				'y' => $point->row * static::ROW_SIZE,
 			],
 			'dimensions' => [
 				'width' => null,
@@ -414,106 +552,21 @@ class SequentialToNodeWorkflow
 		if ($activity['Type'] === 'EmptyBlockActivity')
 		{
 			$node['type'] = ActivityNodeType::FRAME->value;
-			$node['position']['x'] -= 15;
-			$node['position']['y'] -= 15;
-			$node['dimensions']['width'] = $activity['width'] ?? null;
-			$node['dimensions']['height'] = $activity['height'] ?? null;
+			$node['position']['x'] = $frame->left * static::COLUMN_SIZE - 25;
+			$node['position']['y'] = $frame->top * static::ROW_SIZE - 25;
+			$node['dimensions']['width'] = $frame->calculateWidth() * static::COLUMN_SIZE;
+			$node['dimensions']['height'] = $frame->calculateHeight() * static::ROW_SIZE;
 			$node['node']['frameColorName'] = 'orange';
+			$node['node']['title'] = 'frame';
+			$node['ports'] = [];
 		}
 
 		return $node;
 	}
-	protected function setPosition(string $name, ?float $row = null, ?float $column = null): void
-	{
-		$this->positions[$name] ??= [0, 0];
-		if (isset($row))
-		{
-			$this->positions[$name][0] = $row;
-		}
-		if (isset($column))
-		{
-			$this->positions[$name][1] = $column;
-		}
-	}
-
-	protected function setChildPositionNextColumn(string $parentName, string $childName): void
-	{
-		$this->setPosition($childName, $this->getRow($parentName), $this->getColumn($parentName) + 1);
-	}
-
-	protected function setChildPositionNextRow(string $parentName, string $childName, int $step = 1): void
-	{
-		$this->setPosition($childName, $this->getRow($parentName) + $step, $this->getColumn($parentName));
-	}
-
-	protected function movePosition(string $name, float $rowShift = 0, float $columnShift = 0): void
-	{
-		$this->setPosition(
-			$name,
-			$this->getRow($name) + $rowShift,
-			$this->getColumn($name) + $columnShift
-		);
-	}
-
-	protected function movePositionUp(string $name): void
-	{
-		$this->setPosition($name, row: $this->getRow($name) - 1);
-	}
-
-	protected function movePositionDown(string $name): void
-	{
-		$this->setPosition($name, row: $this->getRow($name) + 1);
-	}
-
-	protected function movePositionRight(string $name): void
-	{
-		$this->setPosition($name, column: $this->getColumn($name) + 1);
-	}
-
-	protected function movePositionLeft(string $name): void
-	{
-		$this->setPosition($name, column: $this->getColumn($name) - 1);
-	}
-
-	protected function copyPosition(string $parentName, string $childName): void
-	{
-		$this->setPosition($childName, $this->getRow($parentName), $this->getColumn($parentName));
-	}
-
-	private function getTopRightPosition(array $parentNames): array
-	{
-		$pos = array_intersect_key($this->positions, array_flip($parentNames));
-
-		return [min(array_column($pos, 0)), max(array_column($pos, 1))];
-	}
-
-	private function getBottomLeftPosition(array $parentNames): array
-	{
-		$pos = array_intersect_key($this->positions, array_flip($parentNames));
-
-		return [max(array_column($pos, 0)), min(array_column($pos, 1))];
-	}
-
-	private function getBottomRightPosition(array $parentNames): array
-	{
-		$pos = array_intersect_key($this->positions, array_flip($parentNames));
-
-		return [max(array_column($pos, 0)), max(array_column($pos, 1))];
-	}
-
-	protected function getRow(string $name): float
-	{
-		return $this->positions[$name][0] ?? 0;
-	}
-
-	protected function getColumn(string $name): float
-	{
-		return $this->positions[$name][1] ?? 0;
-	}
 
 	protected function createLink(string $outputName, string $inputName): array
 	{
-		return [$outputName, $inputName];
+		return CanvasLink::createBetween($outputName, $inputName)->convertToArray();
 	}
 
 	private function createLinks(array $outputNames, array $inputNames): array
@@ -560,51 +613,88 @@ class SequentialToNodeWorkflow
 		}
 	}
 
-	protected function convertChildren(string $outputName, array $children): array
+	protected function convertChildren(string $outputName, Layout\GridPoint $outputPoint, array $children): Layout\LayoutResult
 	{
-		$newLinks = [];
-		$newChildren = [];
-
 		$parentOutputName = $outputName;
+		$parentOutputPoint = $outputPoint;
+		$result = Layout\LayoutResult::createFromAnchor($outputName, $outputPoint);
+		$pendingSimpleFragment = null;
+		$pendingSimpleEntryName = null;
+		$pendingSimpleEntryPoint = null;
+
 		foreach ($children as $child)
 		{
-			[$childOutputName, $links, $children] = $this->convertChild($parentOutputName, $child);
-			$parentOutputName = $childOutputName;
+			$isSimpleChild = $this->isSimpleChild($child);
+			if ($isSimpleChild)
+			{
+				if (!$pendingSimpleFragment)
+				{
+					$pendingSimpleFragment = CanvasFragment::create()
+						->defineExitPort(PortRef::createFromNodeId($parentOutputName, 'o0'))
+					;
+					$pendingSimpleEntryName = $parentOutputName;
+					$pendingSimpleEntryPoint = $parentOutputPoint;
+				}
 
-			if ($links)
-			{
-				array_push($newLinks, ...$links);
+				$pendingSimpleFragment->appendActivity($child);
+
+				continue;
 			}
-			if ($children)
+
+			if ($pendingSimpleFragment)
 			{
-				array_push($newChildren, ...$children);
+				$childLayout = $this->convertSimpleFragment(
+					$pendingSimpleFragment,
+					$pendingSimpleEntryName,
+					$pendingSimpleEntryPoint
+				);
+				$result->appendLayout($childLayout);
+				$parentOutputName = $childLayout->exitId;
+				$parentOutputPoint = $childLayout->findAnchor($childLayout->exitId);
+				$pendingSimpleFragment = null;
+				$pendingSimpleEntryName = null;
+				$pendingSimpleEntryPoint = null;
 			}
+
+			$childLayout = $this->convertChild($parentOutputName, $parentOutputPoint, $child, false);
+			$result->appendLayout($childLayout);
+			$parentOutputName = $childLayout->exitId;
+			$parentOutputPoint = $childLayout->findAnchor($childLayout->exitId);
 		}
 
-		return [$parentOutputName, $newLinks, $newChildren];
+		if ($pendingSimpleFragment)
+		{
+			$childLayout = $this->convertSimpleFragment(
+				$pendingSimpleFragment,
+				$pendingSimpleEntryName,
+				$pendingSimpleEntryPoint
+			);
+			$result->appendLayout($childLayout);
+			$parentOutputName = $childLayout->exitId;
+			$parentOutputPoint = $childLayout->findAnchor($childLayout->exitId);
+		}
+
+		$result->exitId = $parentOutputName;
+
+		return $result;
 	}
 
-	protected function convertChild(string $outputName, array $child): array
+	protected function convertChild(
+		string $outputName,
+		Layout\GridPoint $outputPoint,
+		array $child,
+		?bool $isSimpleChild = null
+	): Layout\LayoutResult
 	{
-		\CBPActivity::includeActivityFile($child['Type']);
-		$instance = \CBPActivity::createInstance($child['Type'], $child['Name']);
-
 		/*
 		 * RequestInformationActivity is not a real CompositeActivity.
 		 * It extends CBPCompositeActivity only for its child – RequestInformationOptionalActivity.
 		 */
 
-		if (
-			$child['Type'] === 'RequestInformationActivity'
-			|| !($instance instanceof \CBPCompositeActivity))
+		$isSimpleChild ??= $this->isSimpleChild($child);
+		if ($isSimpleChild)
 		{
-			$this->setChildPositionNextRow($outputName, $child['Name']);
-
-			return [
-				$child['Name'],
-				[$this->createLink($outputName, $child['Name'])],
-				[$child],
-			];
+			return $this->convertSimpleChild($outputName, $outputPoint, $child);
 		}
 
 		$this->syncActivatedState($child);
@@ -612,79 +702,248 @@ class SequentialToNodeWorkflow
 		switch ($child['Type'])
 		{
 			case 'EmptyBlockActivity':
-				return $this->convertEmptyBlockActivity($outputName, $child);
+				return $this->convertEmptyBlockActivity($outputName, $outputPoint, $child);
 			case 'WhileActivity':
 			case 'ForEachActivity':
-				return $this->convertIterableActivity($outputName, $child);
+				return $this->convertIterableActivity($outputName, $outputPoint, $child);
 			case 'IfElseActivity':
 			case 'ParallelActivity':
 			case 'ListenActivity':
-				return $this->convertBranchableActivity($outputName, $child);
+				return $this->convertBranchableActivity($outputName, $outputPoint, $child);
 			case 'ApproveActivity':
 			case 'RequestInformationOptionalActivity':
-				return $this->convertYesNoActivity($outputName, $child);
+				return $this->convertYesNoActivity($outputName, $outputPoint, $child);
 		}
 
 		throw new \CBPArgumentException("Unsupported child type $child[Type]");
 	}
 
-	private function convertEmptyBlockActivity(string $outputName, array $activity): array
+	protected function isSimpleChild(array $child): bool
+	{
+		\CBPActivity::includeActivityFile($child['Type']);
+		$instance = \CBPActivity::createInstance($child['Type'], $child['Name']);
+
+		return
+			$child['Type'] === 'RequestInformationActivity'
+			|| !($instance instanceof \CBPCompositeActivity)
+		;
+	}
+
+	private function convertSimpleChild(string $outputName, Layout\GridPoint $outputPoint, array $child): Layout\LayoutResult
+	{
+		$fragment = CanvasFragment::create()
+			->defineExitPort(PortRef::createFromNodeId($outputName, 'o0'))
+			->appendActivity($child)
+		;
+
+		return $this->convertSimpleFragment($fragment, $outputName, $outputPoint);
+	}
+
+	private function convertSimpleFragment(
+		CanvasFragment $fragment,
+		string $outputName,
+		Layout\GridPoint $outputPoint
+	): Layout\LayoutResult
+	{
+		return $this->getCanvasLayoutAdapter()->convertLinearFragmentToLayout($fragment, $outputName, $outputPoint);
+	}
+
+	protected function getCanvasLayoutAdapter(): CanvasLayoutAdapter
+	{
+		$this->canvasLayoutAdapter ??= new CanvasLayoutAdapter();
+
+		return $this->canvasLayoutAdapter;
+	}
+
+	private function buildEmptyBlockFragment(array $activity): CanvasFragment
 	{
 		$children = $activity['Children'][0]['Children'] ?? null;
 
 		if (empty($children))
 		{
-			return [$outputName, [], []];
+			return CanvasFragment::create();
 		}
 
-		$row = $this->getRow($outputName);
-		$column = $this->getColumn($outputName);
-		$this->setChildPositionNextRow($outputName, $activity['Name']);
+		$fragment = $this->buildChildrenFragment($children);
+		$frame = CanvasFrame::create(
+			$activity['Name'],
+			$activity['Properties']['Title'] ?? null
+		);
+		$frame->wrapNodes($fragment->findNodeIds());
+		$fragment->addFrame($frame);
 
-		[$parentOutputName, $newLinks, $newChildren] = $this->convertChildren($outputName, $children);
-
-		[$row2, $col2] = $this->getBottomRightPosition(array_column($newChildren, 'Name'));
-
-		$activity['width'] = ($col2 - $column + 1) * static::COLUMN_SIZE;
-		$activity['height'] = ($row2 - $row) * static::ROW_SIZE;
-
-		$newChildren[] = $activity;
-
-		return [$parentOutputName, $newLinks, $newChildren];
+		return $fragment;
 	}
 
-	private function convertIterableActivity(string $outputName, array $activity): array
+	private function buildIterableFragment(array $activity): CanvasFragment
+	{
+		$children = $activity['Children'][0]['Children'] ?? [];
+		unset($activity['Children']);
+
+		$activityNode = $this->createCanvasNode($activity);
+		$branch = CanvasBranch::createForNode($activity['Name'])
+			->addPath('o0', $this->buildChildrenFragment($children))
+		;
+
+		return CanvasFragment::create()
+			->addNode($activityNode)
+			->addBranch($branch)
+			->defineExitPort($activityNode->createOutputPortRef('o1'))
+		;
+	}
+
+	private function buildIfElseFragment(array $activity): CanvasFragment
+	{
+		$branches = $activity['Children'] ?? [];
+		$fragment = CanvasFragment::create();
+		$mergeNode = $this->createCanvasNode($this->createMergeNode());
+		$rootContainer = CanvasContainer::create($activity['Name'] . '_ifelse')
+			->arrangeHorizontally()
+			->defineColumnGap(0)
+		;
+
+		foreach ($branches as $index => $branchActivity)
+		{
+			$branchChildren = $branchActivity['Children'] ?? [];
+			unset($branchActivity['Children']);
+
+			$branchNode = $this->createCanvasNode($branchActivity);
+			$branch = CanvasBranch::createForNode($branchNode->findId())
+				->defineMergeNode($mergeNode)
+				->addPath('o0', $this->buildChildrenFragment($branchChildren))
+			;
+
+			$fragment->addNode($branchNode);
+			$fragment->addBranch($branch);
+			$rootContainer->appendContainer(
+				CanvasContainer::create($branchNode->findId() . '_slot')
+					->defineColumnOffset($index * static::COLUMN_GAP)
+					->appendNode($branchNode)
+			);
+		}
+
+		$fragment->addNode($mergeNode);
+		$rootContainer->appendNode($mergeNode);
+		$fragment->defineRootContainer($rootContainer);
+		$fragment->defineExitPort($mergeNode->createOutputPortRef());
+
+		return $fragment;
+	}
+
+	private function buildBranchableFragment(array $activity): CanvasFragment
+	{
+		$mergeFlow = $activity['Type'] === 'ParallelActivity';
+		$branches = $activity['Children'] ?? [];
+
+		$merge = $this->createMergeNode();
+		$branch = CanvasBranch::createForNode($merge['Name'])
+			->defineMergeNode($this->createCanvasNode($this->createMergeNode($mergeFlow)))
+		;
+
+		foreach ($branches as $i => $activityBranch)
+		{
+			$branchChildren = $activityBranch['Children'] ?? [];
+			$branch->addPath("o{$i}", $this->buildChildrenFragment($branchChildren));
+		}
+
+		unset($activity['Children']);
+		if ($mergeFlow)
+		{
+			$activity['Type'] = 'Merge';
+		}
+
+		$activityNode = $this->createCanvasNode($activity);
+		$mergeNode = $this->createCanvasNode($merge);
+
+		return CanvasFragment::create()
+			->addNode($activityNode)
+			->addNode($mergeNode)
+			->addBranch($branch)
+			->defineExitPort($branch->findMergeNode()->createOutputPortRef())
+		;
+	}
+
+	private function buildYesNoFragment(array $activity): CanvasFragment
+	{
+		$yesBranch = $activity['Children'][0] ?? null;
+		$noBranch = $activity['Children'][1] ?? null;
+		unset($activity['Children']);
+
+		$branch = CanvasBranch::createForNode($activity['Name'])
+			->defineMergeNode($this->createCanvasNode($this->createMergeNode()))
+			->addPath('o0', $this->buildChildrenFragment($yesBranch['Children'] ?? []))
+			->addPath('o1', $this->buildChildrenFragment($noBranch['Children'] ?? []))
+		;
+
+		return CanvasFragment::create()
+			->addNode($this->createCanvasNode($activity))
+			->addBranch($branch)
+			->defineExitPort($branch->findMergeNode()->createOutputPortRef())
+		;
+	}
+
+	private function convertEmptyBlockActivity(string $outputName, Layout\GridPoint $outputPoint, array $activity): Layout\LayoutResult
 	{
 		$children = $activity['Children'][0]['Children'] ?? null;
 
-		$this->setChildPositionNextRow($outputName, $activity['Name']);
-		$this->copyPosition($activity['Name'], $activity['Name'] . ':o0');
-		$this->setChildPositionNextRow($activity['Name'] . ':o0', $activity['Name'] . ':o0');
+		if (empty($children))
+		{
+			return Layout\LayoutResult::createFromAnchor($outputName, $outputPoint);
+		}
 
-		[$childOutputName, $links, $children] = $this->convertChildren($activity['Name'] . ':o0', $children);
+		$innerLayout = $this->convertChildren($outputName, $outputPoint, $children);
+		$visibleChildNames = array_map(
+			static fn(array $child) => $child['Name'],
+			array_filter(
+				$innerLayout->children,
+				static fn(array $child) => $child['Type'] !== 'Merge'
+			)
+		);
+		$frameFragment = CanvasFragment::createFromActivities(
+			array_filter(
+				$innerLayout->children,
+				static fn(array $child) => in_array($child['Name'], $visibleChildNames, true)
+			)
+		);
+		$frame = $frameFragment->wrapInFrame(
+			$activity['Name'],
+			$activity['Properties']['Title'] ?? null
+		);
+		$layout = $this->getCanvasLayoutAdapter()->appendFrameToLayout($innerLayout, $frame);
 
-		// link parent
-		$links[] = $this->createLink($outputName, $activity['Name']);
-		// link true-loop
+		if (!empty($layout->nodeFrames[$activity['Name']]))
+		{
+			$layout->anchors[$activity['Name']] = new Layout\GridPoint(
+				$layout->nodeFrames[$activity['Name']]->top,
+				$layout->nodeFrames[$activity['Name']]->left
+			);
+		}
+
+		return $layout;
+	}
+
+	private function convertIterableActivity(string $outputName, Layout\GridPoint $outputPoint, array $activity): Layout\LayoutResult
+	{
+		$children = $activity['Children'][0]['Children'] ?? null;
+		$bodyInputId = $activity['Name'] . ':o0';
+		$bodyInputPoint = $outputPoint->moveBy(2, 0);
+		$bodyLayout = $this->convertChildren($bodyInputId, $bodyInputPoint, $children ?? []);
 		$loopPortName = $activity['Type'] === 'WhileActivity' ? ':i0' : ':i1';
-		$links[] = $this->createLink($childOutputName, $activity['Name'] . $loopPortName);
 
 		unset($activity['Children']);
 
-		$this->setPosition(
-			$activity['Name'] . ':o1',
-			...$this->getBottomLeftPosition([$activity['Name'], ...array_column($children, 'Name')])
+		return $this->getCanvasLayoutAdapter()->convertLoopNodeToLayout(
+			$outputName,
+			$outputPoint,
+			CanvasNode::createFromActivity($activity),
+			$bodyLayout,
+			'o0',
+			substr($loopPortName, 1),
+			'o1'
 		);
-
-		$this->setPosition(
-			$activity['Name'] . ':o1',
-			column: $this->getColumn($activity['Name']),
-		);
-
-		return [$activity['Name'] . ':o1', $links, [$activity, ...$children]];
 	}
 
-	private function convertBranchableActivity(string $outputName, array $activity): array
+	private function convertBranchableActivity(string $outputName, Layout\GridPoint $outputPoint, array $activity): Layout\LayoutResult
 	{
 		$mergeFlow = $activity['Type'] === 'ParallelActivity';
 		$isListen = $activity['Type'] === 'ListenActivity';
@@ -693,177 +952,74 @@ class SequentialToNodeWorkflow
 
 		if (empty($branches))
 		{
-			return [$outputName, [], []];
+			return Layout\LayoutResult::createFromAnchor($outputName, $outputPoint);
 		}
 
-		if ($mergeFlow)
+		$canvasBranch = CanvasBranch::createForNode($activity['Name']);
+		$branchLayoutsByPortId = [];
+
+		foreach ($branches as $i => $activityBranch)
 		{
-			$this->copyPosition($outputName, $activity['Name']);
-		}
-		else
-		{
-			$this->setChildPositionNextRow($outputName, $activity['Name']);
-		}
-
-		$parentOutputName = $activity['Name'];
-		$allChildren = [];
-		$allLinks = [$this->createLink($outputName, $parentOutputName)];
-		$tails = [];
-		$rows = 0;
-
-		$cols = count($branches) + $this->countChildrenRows($branches);
-		$firstColPos = ($cols) / 2;
-
-		foreach ($branches as $i => $branch)
-		{
-			$branchPortId = $parentOutputName . ":o{$i}";
-			$this->setChildPositionNextRow($parentOutputName, $branchPortId);
-			if ($i === 0)
-			{
-				$this->setPosition(
-					$branchPortId,
-					column: $this->getColumn($parentOutputName) - $firstColPos
-				);
-			}
-
-			if ($rows > 0)
-			{
-				$this->setPosition(
-					$branchPortId,
-					column: $this->getColumn($branchPortId) + $rows
-				);
-			}
-			$branchChildren = $branch['Children'] ?? [];
+			$branchChildren = $activityBranch['Children'] ?? [];
 			if ($isListen)
 			{
 				$listenChildren[] = array_shift($branchChildren);
 			}
-			$rows += $this->countChildrenRows($branchChildren) + 1;
-
-			[$childOutputName, $links, $children] = $this->convertChildren($branchPortId, $branchChildren);
-
-			array_push($allChildren, ...$children);
-			array_push($allLinks, ...$links);
-
-			$tails[] = $childOutputName;
+			$portId = "o{$i}";
+			$canvasBranch->addPath($portId);
+			$branchLayout = $this->convertChildren($activity['Name'] . ":{$portId}", new Layout\GridPoint(1, 0), $branchChildren);
+			$branchLayoutsByPortId[$portId] = $branchLayout;
 		}
 
-		if ($activity['Type'] === 'IfElseActivity')
-		{
-			$activity['Properties']['Conditions'] = array_column($branches, 'Properties');
-		}
 		unset($activity['Children']);
-		if ($activity['Type'] === 'ListenActivity')
-		{
-			$activity['Children'] = $listenChildren;
-		}
 
 		$merge = $this->createMergeNode($mergeFlow);
-		$this->setPosition($merge['Name'], ...$this->getBottomLeftPosition([$activity['Name'], ...$tails]));
-		$this->setPosition(
-			$merge['Name'],
-			column: $this->getColumn($activity['Name'])
-		);
-		if ($mergeFlow)
-		{
-			$this->setChildPositionNextRow($merge['Name'], $merge['Name']);
-		}
-
-		$allChildren[] = $merge;
-		array_push($allLinks, ...$this->createLinks($tails, [$merge['Name']]));
 
 		if ($mergeFlow)
 		{
 			$activity['Type'] = 'Merge';
 		}
 
-		return [$merge['Name'], $allLinks, [$activity, ...$allChildren]];
+		return $this->getCanvasLayoutAdapter()->convertBranchNodeToLayout(
+			$outputName,
+			$outputPoint,
+			CanvasNode::createFromActivity($activity),
+			$canvasBranch,
+			$branchLayoutsByPortId,
+			$merge,
+			!$mergeFlow,
+			$mergeFlow
+		);
 	}
 
-	private function countChildrenRows(array $children): int
-	{
-		$rows = 0;
-
-		foreach ($children as $child)
-		{
-			if ($child['Type'] === 'ApproveActivity' || $child['Type'] === 'RequestInformationOptionalActivity')
-			{
-				$rows = 1;
-			}
-			elseif ($child['Type'] === 'IfElseActivity' || $child['Type'] === 'ListenActivity')
-			{
-				$rows = count($child['Children']) - 1;
-			}
-			elseif ($child['Type'] === 'ParallelActivity')
-			{
-				$rows = count(array_filter($child['Children'], fn($c) => !empty($c['Children']))) - 1;
-			}
-
-			if (!empty($child['Children']))
-			{
-				$rows += $this->countChildrenRows($child['Children']);
-			}
-		}
-
-		return $rows;
-	}
-
-	private function convertYesNoActivity(string $outputName, array $activity): array
+	private function convertYesNoActivity(string $outputName, Layout\GridPoint $outputPoint, array $activity): Layout\LayoutResult
 	{
 		$yesBranch = $activity['Children'][0] ?? null;
 		$noBranch = $activity['Children'][1] ?? null;
-		$cols = count($activity['Children']) + $this->countChildrenRows($activity['Children']);
-		$firstColPos = ($cols) / 2;
-
 		unset($activity['Children']);
+		$canvasBranch = CanvasBranch::createForNode($activity['Name']);
+		$branchLayoutsByPortId = [];
 
-		$allChildren = [];
-		$allLinks = [$this->createLink($outputName, $activity['Name'])];
-		$tails = [];
-
-		$this->setChildPositionNextRow($outputName, $activity['Name']);
-		$rows = 0;
-		$branches = [$yesBranch, $noBranch];
-
-		foreach ($branches as $i => $branch)
+		foreach ([$yesBranch, $noBranch] as $i => $activityBranch)
 		{
-			$branchPortId = $activity['Name'] . ":o{$i}";
-			$this->setChildPositionNextRow($activity['Name'], $branchPortId);
-			if ($i === 0)
-			{
-				$this->setPosition(
-					$branchPortId,
-					column: $this->getColumn($activity['Name']) - $firstColPos
-				);
-			}
-
-			if ($rows > 0)
-			{
-				$this->setPosition(
-					$branchPortId,
-					column: $this->getColumn($branchPortId) + $rows
-				);
-			}
-			$rows += $this->countChildrenRows($branch['Children'] ?? []) + 1;
-
-			[$childOutputName, $links, $children] = $this->convertChildren($branchPortId, $branch['Children'] ?? []);
-
-			array_push($allChildren, ...$children);
-			array_push($allLinks, ...$links);
-
-			$tails[] = $childOutputName;
+			$portId = "o{$i}";
+			$canvasBranch->addPath($portId);
+			$branchLayoutsByPortId[$portId] = $this->convertChildren(
+				$activity['Name'] . ":{$portId}",
+				new Layout\GridPoint(1, 0),
+				$activityBranch['Children'] ?? []
+			);
 		}
 
 		$merge = $this->createMergeNode();
-		$this->setPosition($merge['Name'], ...$this->getBottomLeftPosition([$activity['Name'], ...$tails]));
-		$this->setPosition(
-			$merge['Name'],
-			column: $this->getColumn($activity['Name'])
+
+		return $this->getCanvasLayoutAdapter()->convertBranchNodeToLayout(
+			$outputName,
+			$outputPoint,
+			CanvasNode::createFromActivity($activity),
+			$canvasBranch,
+			$branchLayoutsByPortId,
+			$merge
 		);
-
-		$allChildren[] = $merge;
-		array_push($allLinks, ...$this->createLinks($tails, [$merge['Name']]));
-
-		return [$merge['Name'], $allLinks, [$activity, ...$allChildren]];
 	}
 }

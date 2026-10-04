@@ -18,6 +18,7 @@ use Bitrix\Crm\Copilot\Pipeline\ScenarioResolver;
 use Bitrix\Crm\Integration\AI\Enum\GlobalSetting;
 use Bitrix\Crm\Integration\AI\Model\EO_Queue;
 use Bitrix\Crm\Integration\AI\Model\QueueTable;
+use Bitrix\Crm\Integration\AI\Operation\AbstractOperation;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\AutoLauncher;
 use Bitrix\Crm\Integration\Analytics\Builder\AI\CallActivityWithAudioRecordingEvent;
 use Bitrix\Crm\Integration\Analytics\Dictionary;
@@ -319,7 +320,11 @@ final class EventHandler
 			);
 			if ($scenarioName !== null)
 			{
-				ServiceLocator::getInstance()->get(PipelineExecutor::class)->continueAfterCompletion($result, $scenarioName);
+				ServiceLocator::getInstance()->get(PipelineExecutor::class)->continueAfterCompletion(
+					$result,
+					$scenarioName,
+					self::extractFillTargetFromEngineContext($event),
+				);
 			}
 		}
 
@@ -364,6 +369,57 @@ final class EventHandler
 		{
 			$operationClass::onQueueJobFail($event, $job);
 		}
+	}
+	//endregion
+
+	// region History
+	/**
+	 * TEMPORARY HACK: in the generate_call_criteria, dialog_quality_scorer and
+	 * script_description_generator scenarios the rendered prompt
+	 * (call transcription + criteria) does not fit
+	 * into b_ai_history.REQUEST_TEXT (MySQL TEXT, hard 65 535 byte limit).
+	 * Widening the column is not allowed for now, so we trim REQUEST_TEXT here -
+	 * this is an OnBeforeAdd on the history table, the actual prompt sent to the
+	 * AI engine is not affected.
+	 */
+	public static function onBeforeAiHistoryAdd(Event $event): EventResult
+	{
+		$result = new EventResult();
+
+		$fields = $event->getParameter('fields') ?? [];
+
+		$requestText = $fields['REQUEST_TEXT'] ?? null;
+		if (!is_string($requestText) || $requestText === '')
+		{
+			return $result;
+		}
+
+		$payloadJson = $fields['PAYLOAD'] ?? '';
+		if (
+			!is_string($payloadJson)
+			|| (
+				!str_contains($payloadJson, 'generate_call_criteria')
+				&& !str_contains($payloadJson, 'dialog_quality_scorer')
+				&& !str_contains($payloadJson, 'script_description_generator')
+			)
+		)
+		{
+			return $result;
+		}
+
+		$maxBytes = 60000;
+		$originalBytes = strlen($requestText);
+		if ($originalBytes <= $maxBytes)
+		{
+			return $result;
+		}
+
+		$marker = sprintf("\n\n[TRUNCATED FOR HISTORY: original %d bytes]", $originalBytes);
+		$truncated = mb_strcut($requestText, 0, $maxBytes - strlen($marker), 'UTF-8') . $marker;
+
+		$result->modifyFields(['REQUEST_TEXT' => $truncated]);
+
+		return $result;
 	}
 	//endregion
 
@@ -450,6 +506,14 @@ final class EventHandler
 		}
 	}
 
+	public static function onAfterEmailActivityAdd(array $activityFields): void
+	{
+		if (AutoLauncher::isEnabled())
+		{
+			(new AutoLauncher())->run(AutoLauncher\BaseChannelAutoStartStrategy::OPERATION_ADD, $activityFields);
+		}
+	}
+
 	public static function onAfterOpenLineActivityComplete(array $changedFields, array $newFields): void
 	{
 		if (AutoLauncher::isEnabled())
@@ -469,7 +533,7 @@ final class EventHandler
 
 	public static function onItemDelete(ItemIdentifier $target): void
 	{
-		QueueTable::deleteByItem($target);
+		QueueTable::deleteAllByItem($target);
 	}
 
 	public static function onItemRestoreFromRecycleBin(ItemIdentifier $target, ItemIdentifier $recycleBinItem): void
@@ -541,6 +605,19 @@ final class EventHandler
 		$scenario = $context->getParameters()['additionalInfo']['scenario'] ?? null;
 
 		return is_string($scenario) && $scenario !== '' ? $scenario : null;
+	}
+
+	/**
+	 * Recovers the manual FillFields target (the clicked entity) from the engine context.
+	 * Rides the same `additionalInfo` channel as `scenario` (@see self::extractScenarioNameFromEngineContext),
+	 * so a fresh manual launch keeps filling exactly the clicked entity across the async
+	 * Transcribe/Summarize→FillFields boundary (ALG-01, single-target). Null for the auto path.
+	 */
+	private static function extractFillTargetFromEngineContext(Event $event): ?ItemIdentifier
+	{
+		// Single source of truth for the read side lives on AbstractOperation, which reuses it in its
+		// error branches (onQueueJobExecute/onQueueJobFail) to badge the initiating entity (ERR-002/AC-030).
+		return AbstractOperation::extractFillTargetFromEngineContext($event);
 	}
 
 	private static function registerCallActivityWithAudioRecordingEvent(array $activityFields): void

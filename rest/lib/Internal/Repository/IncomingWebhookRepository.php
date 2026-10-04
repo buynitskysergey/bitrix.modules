@@ -163,6 +163,15 @@ class IncomingWebhookRepository implements IncomingWebhookRepositoryInterface
 		;
 	}
 
+	public function exists(WebhookFilter $filter): bool
+	{
+		return $this->buildFilterQuery($filter)
+			->setSelect(['ID'])
+			->setLimit(1)
+			->fetch() !== false
+		;
+	}
+
 	private function buildFilterQuery(WebhookFilter $filter): Query
 	{
 		$query = PasswordTable::query();
@@ -179,19 +188,30 @@ class IncomingWebhookRepository implements IncomingWebhookRepositoryInterface
 			$query->where('TYPE', $type->value);
 		}
 
+		$active = $filter->getActive();
+		if ($active !== null)
+		{
+			$query->where('ACTIVE', $active ? PasswordTable::ACTIVE : PasswordTable::INACTIVE);
+		}
+
 		$scopes = $filter->getScopes();
 		if ($scopes !== null)
 		{
 			$query->whereIn('ID', PermissionTable::query()
 				->setSelect(['PASSWORD_ID'])
-				->whereIn('PERM', $scopes))
-			;
+				->whereIn('PERM', $scopes));
 		}
 
 		$attributes = $filter->getExternalAttributes();
 		if ($attributes !== null)
 		{
 			$query->whereIn('ID', $this->buildPasswordIdsByExternalAttributesQuery($attributes));
+		}
+
+		$excludedAttributes = $filter->getExcludedExternalAttributes();
+		if ($excludedAttributes !== null)
+		{
+			$query->whereNotIn('ID', $this->buildPasswordIdsByExternalAttributesQuery($excludedAttributes));
 		}
 
 		return $query;

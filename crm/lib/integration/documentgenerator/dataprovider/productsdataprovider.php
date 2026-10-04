@@ -15,7 +15,7 @@ use Bitrix\DocumentGenerator\DataProviderManager;
 use Bitrix\DocumentGenerator\Dictionary;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Sale\Repository\PaymentRepository;
-use \Bitrix\Crm\Integration\DocumentGenerator\Value\TaxRate;
+use Bitrix\Crm\Integration\DocumentGenerator\Value\TaxRate;
 
 abstract class ProductsDataProvider extends CrmEntityDataProvider
 {

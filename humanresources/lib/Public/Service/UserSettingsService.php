@@ -94,6 +94,7 @@ class UserSettingsService
 							entityTypeFilter: NodeTypeFilter::fromNodeTypes([NodeEntityType::DEPARTMENT]),
 							active: NodeActiveFilter::ONLY_GLOBAL_ACTIVE,
 						),
+						withVirtualUsers: true,
 					),
 				)
 				->getAll();

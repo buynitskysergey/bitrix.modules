@@ -81,6 +81,8 @@ class SignB2eDocument extends LogMessage
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_REVIEWER => $this->getChannelIcon(),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_EDITOR => $this->getChannelIcon(),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CONFIGURATION_ERROR => Icon::ATTENTION,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED => Icon::DOCUMENT,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => Icon::DOCUMENT,
 			default => Icon::INFO,
 		};
 	}
@@ -111,6 +113,8 @@ class SignB2eDocument extends LogMessage
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_REVIEWER,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_EDITOR => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_EMPLOYEE_STOPPED'),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CONFIGURATION_ERROR => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_CONFIGURE_ERROR_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULLED_TITLE'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULMENT_CANCELED_TITLE'),
 			default => null,
 		};
 	}
@@ -137,13 +141,21 @@ class SignB2eDocument extends LogMessage
 			$blocks['doc'] = $this->getDocumentTitleBlock();
 		}
 
+		if (
+			$this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CREATED
+			&& !empty($document->uid)
+		)
+		{
+			$blocks['uid'] = $this->getDocumentUidBlock($document->uid);
+		}
+
 		if ($this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_SIGNED_BY_RESPONSIBILITY_PERSON)
 		{
 			$blocks['responsible'] = $this->getResponsiblePersonBlock($document->representativeId);
 		}
 
 		$member = $this->getMember();
-		if ($member)
+		if ($member && !$this->isAnnulmentEvent())
 		{
 			$blocks['employee'] = match ($member->role)
 			{
@@ -153,6 +165,12 @@ class SignB2eDocument extends LogMessage
 				Role::EDITOR => $this->getEditorBlock($member->entityId),
 			};
 			$blocks += $this->getSesSignBlocks($member->entityId);
+		}
+
+		if ($this->isAnnulmentEvent())
+		{
+			$blocks['annulledEmployee'] = $this->getAnnulledEmployeeBlock();
+			$blocks['annulledCount'] = $this->getAnnulledMembersCountBlock();
 		}
 
 		$goskeyOrderId = $this->loadMessageData()?->getGoskeyOrderId();
@@ -180,6 +198,11 @@ class SignB2eDocument extends LogMessage
 			$blocks['initiator'] = $this->getStopInitiatorBlock();
 		}
 
+		if ($this->loadDocumentData()->getInitiatorUserId() && $this->isAnnulmentEvent())
+		{
+			$blocks['initiator'] = $this->getAnnulmentInitiatorBlock();
+		}
+
 		return array_filter($blocks);
 	}
 
@@ -204,6 +227,19 @@ class SignB2eDocument extends LogMessage
 			->setContentBlock(
 				(new Layout\Body\ContentBlock\Text())
 					->setValue($this->getAssociatedEntityModel()->get('TITLE'))
+			)
+		;
+	}
+
+	private function getDocumentUidBlock(string $uid): Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline()
+			->setFixedWidth(false)
+			->setTitle(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_UID_TITLE'))
+			->setContentBlock(
+				(new Layout\Body\ContentBlock\Text())
+					->setValue($uid)
 			)
 		;
 	}
@@ -464,6 +500,7 @@ class SignB2eDocument extends LogMessage
 			SignProviderCode::SES_COM->value => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_DELIVERY_CHANNEL_SES_COM'),
 			SignProviderCode::SES_RU_EXPRESS->value => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_DELIVERY_CHANNEL_SES_RU_EXPRESS'),
 			SignProviderCode::GOS_KEY->value => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_DELIVERY_CHANNEL_GOSKEY'),
+			SignProviderCode::GOS_KEY_LITE->value => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_DELIVERY_CHANNEL_GOSKEY_LITE'),
 			default => $providerCode,
 		};
 	}
@@ -500,7 +537,9 @@ class SignB2eDocument extends LogMessage
 		return match ($this->model->getTypeCategoryId())
 		{
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CREATED,
-			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_DONE => true,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_DONE,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => true,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_STOPPED => empty($this->loadDocumentData()->getInitiatorUserId()),
 			default => false,
 		};
@@ -529,6 +568,91 @@ class SignB2eDocument extends LogMessage
 			->setFixedWidth(false)
 			->setTitle(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_EMPLOYEE_STOPPED_INITIATOR_TITLE'))
 			->setContentBlock($this->getUserNameLink($userId))
+		;
+	}
+
+	private function isAnnulmentEvent(): bool
+	{
+		return in_array($this->model->getTypeCategoryId(), [
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULMENT_CANCELED,
+		], true);
+	}
+
+	private function getAnnulmentInitiatorBlock(): ?Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		$userId = $this->loadDocumentData()->getInitiatorUserId();
+		if (!$userId)
+		{
+			return null;
+		}
+
+		$title = $this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED
+			? Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULLED_INITIATOR_TITLE')
+			: Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULMENT_CANCELED_INITIATOR_TITLE')
+		;
+
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline(true)
+			->setFixedWidth(false)
+			->setTitle($title)
+			->setContentBlock($this->getUserNameLink($userId))
+		;
+	}
+
+	/**
+	 * Employee (signer member) whose signing was annulled or restored.
+	 *
+	 * Only completed signers can be annulled, so the block is rendered for the
+	 * signer role only. It is optional: document-level annulment events carry no
+	 * member and the block is skipped, preserving the legacy layout.
+	 */
+	private function getAnnulledEmployeeBlock(): ?Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		$member = $this->getMember();
+		if (!$member || $member->role !== Role::SIGNER)
+		{
+			return null;
+		}
+
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline(true)
+			->setFixedWidth(false)
+			->setTitle(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_EMPLOYEE'))
+			->setContentBlock($this->getUserNameLink($member->entityId))
+		;
+	}
+
+	/**
+	 * Scale of a mass annulment: one entry covers the whole action, so the number
+	 * of affected signings is what tells a partial annulment from a complete one.
+	 *
+	 * Rendered instead of the employee block, which a mass action has no single
+	 * value for. A single record is skipped only on a member-scoped entry, where
+	 * the employee block names it; a document-scoped entry keeps the number even
+	 * then. Entries written before the counter existed carry none.
+	 */
+	private function getAnnulledMembersCountBlock(): ?Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		$count = $this->loadDocumentData()->getAnnulledMembersCount();
+		if ($count === null || $count < 1 || ($count === 1 && $this->getMember() !== null))
+		{
+			return null;
+		}
+
+		$title = $this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_ANNULLED
+			? Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULLED_COUNT_TITLE')
+			: Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_ANNULMENT_CANCELED_COUNT_TITLE')
+		;
+
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline(true)
+			->setFixedWidth(false)
+			->setTitle($title)
+			->setContentBlock(
+				(new Layout\Body\ContentBlock\Text())
+					->setValue((string)$count)
+			)
 		;
 	}
 

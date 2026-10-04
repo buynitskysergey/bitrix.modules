@@ -2,9 +2,18 @@
 
 namespace Bitrix\Bizproc\Workflow\Template\Entity;
 
+use Bitrix\Bizproc\Internal\Access\Permission\PermissionDictionary;
+use Bitrix\Bizproc\Internal\Access\PermissionCache;
+use Bitrix\Bizproc\Internal\Container;
+use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\PilotVersionRepository;
 use Bitrix\Bizproc\Internal\Service\DayPlanBot\DayPlanBotSyncService;
+use Bitrix\Bizproc\Internal\Service\Pilot\CommonRevisionWriter;
+use Bitrix\Bizproc\Internal\Service\Pilot\PilotCascadeHandler;
+use Bitrix\Bizproc\Internal\Service\Pilot\PilotPresence;
+use Bitrix\Bizproc\Internal\Service\Pilot\RestrictedTemplateArea;
 use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\ConstantsFileService;
 use Bitrix\Bizproc\Workflow\Template\Tpl;
+use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateChangeTable;
 use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
 use Bitrix\Main;
 use Bitrix\Main\ORM;
@@ -280,6 +289,7 @@ class WorkflowTemplateTable extends Main\ORM\Data\DataManager
 		{
 			$active = ($event->getParameter('fields')['ACTIVE'] ?? 'Y') === 'Y';
 			WorkflowTemplateTriggerTable::onTemplateAdd($id, $template, $active);
+			(new CommonRevisionWriter())->writeCommonRevision((int)$id, $template);
 		}
 
 		$constants = $event->getParameter('fields')['CONSTANTS'] ?? null;
@@ -299,6 +309,17 @@ class WorkflowTemplateTable extends Main\ORM\Data\DataManager
 		if (is_array($template))
 		{
 			WorkflowTemplateDraftTable::deleteByTemplateId($id);
+
+			// the pilot is stopped only once the fingerprint of the new common scheme is really stored:
+			// stopping it without one would leave the template marked as published to a pilot and with no
+			// common version recorded, and the visibility rule hides such a template from everyone
+			if ((new CommonRevisionWriter())->writeCommonRevisionForUpdate((int)$id, $template))
+			{
+				(new PilotCascadeHandler())->onCommonSchemeWritten(
+					(int)$id,
+					deferCacheInvalidation: true,
+				);
+			}
 		}
 
 		if (is_array($template) || $active !== null)
@@ -320,9 +341,73 @@ class WorkflowTemplateTable extends Main\ORM\Data\DataManager
 		$id = $event->getParameter('primary')['ID'];
 
 		WorkflowTemplateUserDataTable::deleteByFilter(['=TEMPLATE_ID' => $id]);
+		WorkflowTemplateChangeTable::deleteByFilter(['=TEMPLATE_ID' => $id]);
+		WorkflowTemplateDraftTable::deleteByFilter(['=TEMPLATE_ID' => $id]);
 
 		WorkflowTemplateTriggerTable::onTemplateDelete($id);
 		self::getConstantsFileService()->delete($id);
+
+		// unconditional as the ACL cleanup below: a reused template ID must not inherit a foreign pilot
+		if ((new PilotVersionRepository())->deleteByTemplateId((int)$id))
+		{
+			$presence = new PilotPresence();
+			$presence->synchronize();
+			$presence->invalidate();
+		}
+
+		// the settings of the template go with it, so the area of the visibility rule is answered anew -
+		// but only where there is an area at all: a portal with nothing hidden pays nothing for a deletion
+		$restrictedArea = new RestrictedTemplateArea();
+		$restrictedArea->synchronize();
+		$restrictedArea->invalidate();
+
+		self::cleanOrphanedAccessPermissions((int)$id);
+	}
+
+	/**
+	 * Drops ACL matrix rows that scoped this template ID so a later reuse of the ID cannot leak access to
+	 * a foreign template, then invalidates the effective-permission cache globally. The «all» sentinel
+	 * ({@see PermissionDictionary::VALUE_VARIATION_ALL}) is never a template ID, so it stays untouched.
+	 *
+	 * Only multivariables permissions store a template ID in VALUE; toggler permissions (e.g. CREATE) keep a
+	 * yes/no flag there, so the cleanup is narrowed to multivariables PERMISSION_IDs to avoid wiping toggler
+	 * grants whose VALUE happens to equal the deleted template ID.
+	 */
+	private static function cleanOrphanedAccessPermissions(int $templateId): void
+	{
+		if ($templateId <= 0)
+		{
+			return;
+		}
+
+		$permissionIds = self::getTemplateScopedPermissionIds();
+		if (!$permissionIds)
+		{
+			return;
+		}
+
+		if (Container::getAccessRepository()->deleteOrphanPermissionsByTemplate($templateId, $permissionIds))
+		{
+			PermissionCache::getInstance()->clearGlobal();
+		}
+	}
+
+	/**
+	 * @return string[] PERMISSION_IDs of multivariables (template-scoped) permissions from the dictionary.
+	 */
+	private static function getTemplateScopedPermissionIds(): array
+	{
+		$permissionIds = [];
+		foreach (array_keys(PermissionDictionary::getList()) as $permissionId)
+		{
+			$descriptor = PermissionDictionary::getPermission((string)$permissionId);
+			if (($descriptor['type'] ?? null) === PermissionDictionary::TYPE_MULTIVARIABLES)
+			{
+				$permissionIds[] = (string)$permissionId;
+			}
+		}
+
+		return $permissionIds;
 	}
 
 	private static function getConstantsFileService(): ConstantsFileService

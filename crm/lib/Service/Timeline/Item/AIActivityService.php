@@ -4,28 +4,34 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\Service\Timeline\Item;
 
-use Bitrix\Crm\Copilot\Pipeline\TargetResolver;
 use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Integration\AI\JobRepository;
 use Bitrix\Crm\Integration\AI\Operation\FillItemFieldsFromCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\FillRepeatSaleTips;
+use Bitrix\Crm\Integration\AI\Operation\Scenario;
 use Bitrix\Crm\Integration\AI\Operation\ScoreCall;
+use Bitrix\Crm\Integration\AI\Operation\ScoreCallV2;
 use Bitrix\Crm\Integration\AI\Operation\SummarizeCallTranscription;
 use Bitrix\Crm\Integration\AI\Operation\TranscribeCallRecording;
 use Bitrix\Crm\Integration\AI\Result;
+use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Timeline\Context;
 use Bitrix\Main\Application;
-use Bitrix\Main\DI\ServiceLocator;
+use CCrmActivity;
 use Exception;
 use InvalidArgumentException;
 
-final class AIActivityService
+class AIActivityService
 {
 	private const TRANSCRIPTION_LIMIT = 10;
 
 	private ?bool $isAIScope = null;
 	private ?bool $isFieldsFillingWrong = null;
 	private ?bool $isItemHashValid = null;
+	private bool $isEmailScope = false;
+
+	private int $summarizeActivityId;
+	private int $resultActivityId;
 
 	public function __construct(private readonly int $activityId, private readonly Context $context)
 	{
@@ -33,6 +39,34 @@ final class AIActivityService
 		{
 			throw new InvalidArgumentException('Activity ID must be greater than zero');
 		}
+
+		$this->summarizeActivityId = $activityId;
+		$this->resultActivityId = $activityId;
+	}
+
+	public function withEmailScope(): self
+	{
+		$clone = clone $this;
+		$clone->isEmailScope = true;
+		$clone->isItemHashValid = null;
+
+		return $clone;
+	}
+
+	public function withSummarizeActivityId(int $summarizeActivityId): self
+	{
+		$clone = clone $this;
+		$clone->summarizeActivityId = $summarizeActivityId > 0 ? $summarizeActivityId : $this->activityId;
+
+		return $clone;
+	}
+
+	public function withResultActivityId(int $resultActivityId): self
+	{
+		$clone = clone $this;
+		$clone->resultActivityId = $resultActivityId > 0 ? $resultActivityId : $this->activityId;
+
+		return $clone;
 	}
 
 	public function isAIScope(): bool
@@ -40,15 +74,23 @@ final class AIActivityService
 		if ($this->isAIScope === null)
 		{
 			$this->isAIScope = AIManager::isAiCallProcessingEnabled()
-				&& in_array(
-					$this->context->getEntityTypeId(),
-					AIManager::SUPPORTED_ENTITY_TYPE_IDS,
-					true
-				)
+				&& AIManager::isEntityTypeSupported($this->context->getEntityTypeId())
 			;
 		}
 
 		return $this->isAIScope;
+	}
+
+	/**
+	 * Single visibility gate of an AI scenario for the timeline item/action layer.
+	 *
+	 * The policy is portal-wide: the answer comes from the scenario registry, and nothing about
+	 * the current entity or activity is taken into account. It stays an instance method so that
+	 * a per-entity policy can be added here without changing callers.
+	 */
+	public function isScenarioVisible(string $scenario): bool
+	{
+		return Scenario::isEnabledScenario($scenario);
 	}
 
 	public function getAIJobResult(int $operationType, ?int $jobId = null): ?Result
@@ -63,9 +105,14 @@ final class AIActivityService
 		return match ($operationType)
 		{
 			TranscribeCallRecording::TYPE_ID => $repo->getTranscribeCallRecordingResultByActivity($this->activityId),
-			SummarizeCallTranscription::TYPE_ID => $repo->getSummarizeCallTranscriptionResultByActivity($this->activityId, $jobId),
-			FillItemFieldsFromCallTranscription::TYPE_ID => $repo->getFillItemFieldsFromCallTranscriptionResult($this->context->getIdentifier(), $this->activityId),
-			ScoreCall::TYPE_ID => $repo->getCallScoringResult($this->activityId, $jobId),
+			SummarizeCallTranscription::TYPE_ID => $repo->getSummarizeCallTranscriptionResultByActivity(
+				$this->summarizeActivityId,
+				$jobId,
+				$this->isEmailScope ? $this->context->getEntityTypeId() : null,
+				$this->isEmailScope ? $this->context->getEntityId() : null,
+			),
+			FillItemFieldsFromCallTranscription::TYPE_ID => $repo->getFillItemFieldsFromCallTranscriptionResult($this->context->getIdentifier(), $this->resultActivityId),
+			ScoreCall::TYPE_ID, ScoreCallV2::TYPE_ID => $repo->getCallScoringResult($this->activityId, $jobId),
 			FillRepeatSaleTips::TYPE_ID => $repo->getFillRepeatSaleTipsByActivity($this->activityId),
 			default => null,
 		};
@@ -92,9 +139,11 @@ final class AIActivityService
 	public function getSummarizeTranscriptionList(): array
 	{
 		$rawData = JobRepository::getInstance()->getSummarizeTranscriptionData(
-			$this->activityId,
+			$this->summarizeActivityId,
 			['ID', 'FINISHED_TIME'],
 			self::TRANSCRIPTION_LIMIT,
+			$this->isEmailScope ? $this->context->getEntityTypeId() : null,
+			$this->isEmailScope ? $this->context->getEntityId() : null,
 		);
 
 		$result = [];
@@ -121,13 +170,46 @@ final class AIActivityService
 	{
 		if ($this->isItemHashValid === null)
 		{
-			$possibleHash = ServiceLocator::getInstance()->get(TargetResolver::class)->findTarget($this->activityId)?->getHash();
-			$currentHash = $this->context->getIdentifier()->getHash();
+			$identifier = $this->context->getIdentifier();
 
-			$this->isItemHashValid = $possibleHash === $currentHash;
+			// The AI "fill fields" actions belong on the card of every entity that (a) is a supported
+			// (Factory-based) target type and (b) is actually one of the activity's own bindings.
+			// Previously the current card was compared against a single priority target
+			// (TargetResolver -> Deal/Lead), which hid the actions on every other linked entity
+			// (e.g. a Contact bound to the same call/chat as a Deal). See fill-fields-any-entity.
+			$this->isItemHashValid =
+				AIManager::isEntityTypeSupported($identifier->getEntityTypeId())
+				&& $this->isEntityBoundToActivity($identifier)
+			;
 		}
 
 		return $this->isItemHashValid;
+	}
+
+	private function isEntityBoundToActivity(ItemIdentifier $identifier): bool
+	{
+		foreach ($this->getActivityBindings() as $binding)
+		{
+			if (
+				(int)($binding['OWNER_TYPE_ID'] ?? 0) === $identifier->getEntityTypeId()
+				&& (int)($binding['OWNER_ID'] ?? 0) === $identifier->getEntityId()
+			)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @return array<int, array<string, mixed>>
+	 */
+	protected function getActivityBindings(): array
+	{
+		$bindings = CCrmActivity::GetBindings($this->activityId);
+
+		return is_array($bindings) ? $bindings : [];
 	}
 
 	private function isValidOperationType(int $type): bool

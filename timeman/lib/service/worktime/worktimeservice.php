@@ -93,10 +93,15 @@ class WorktimeService extends BaseService
 				if ($this->recordForm->userId > 0 &&
 					$this->recordForm->getFirstEventName() === WorktimeEventTable::EVENT_TYPE_START_WITH_ANOTHER_TIME)
 				{
-					$recordStartDate = $this->recordForm->buildStartTimestampBySecondsAndDate($this->recordForm->userId);
-					if ($recordStartDate > 0)
+					$recordStartTimestamp = $this->recordForm->buildStartTimestampBySecondsAndDate($this->recordForm->userId);
+					if ($recordStartTimestamp > 0)
 					{
-						$recordStartDate = TimeHelper::getInstance()->createUserDateTimeFromFormat('U', $recordStartDate, $this->recordForm->userId);
+						// Date-aware (P5.T2): place the absolute start instant into the employee's REAL IANA
+						// zone (DST-correct on the start date), so the calendar date / day-of-week used for
+						// shift selection in buildActionList() is right — replacing the legacy synthetic
+						// "+HH:MM as of now" zone (createUserDateTimeFromFormat).
+						$recordStartDate = (new \DateTime('@' . $recordStartTimestamp))
+							->setTimezone(TimeHelper::getInstance()->getUserDateTimeZone((int)$this->recordForm->userId));
 					}
 				}
 				return $this->checkActionEligibility(
@@ -257,7 +262,8 @@ class WorktimeService extends BaseService
 				$this->addStopWorkTimeTrigger(
 					$actualRecord->getUserId(),
 					$actualRecord->getId(),
-					$actualRecord->isFirstStop()
+					$actualRecord->isFirstStop(),
+					$actualRecord->buildRecordedStartDateTime()
 				);
 			}
 
@@ -269,7 +275,8 @@ class WorktimeService extends BaseService
 				$this->addStopWorkTimeTrigger(
 					$actualRecord->getUserId(),
 					$actualRecord->getId(),
-					true
+					true,
+					$actualRecord->buildRecordedStartDateTime()
 				);
 			}
 
@@ -288,6 +295,19 @@ class WorktimeService extends BaseService
 			}
 			$currentInfo = $tmUserObject->GetCurrentInfo();
 
+			// Absolute UTC instants come straight from the record (date-aware source of truth), instead
+			// of reparsing the legacy formatted DATE_* strings via MakeTimeStamp() - CTimeZone::GetOffset()
+			// (call-moment, date-unaware offset arithmetic).
+			$pushDateStart = (int)$actualRecord->getRecordedStartTimestamp();
+			// DATE_FINISH holds the DISPLAYED finish instant for every state: normal close (equals
+			// RECORDED_STOP_TIMESTAMP), pause (the pause moment), and future-stop-while-paused (actualNow,
+			// deliberately NOT the future RECORDED_STOP_TIMESTAMP that the record keeps). Client timers consume the
+			// displayed finish, so DATE_FINISH is the primary source; RECORDED_STOP_TIMESTAMP is only a fallback.
+			$pushDateFinish = (int)(
+				$actualRecord->getDateFinish()?->getTimestamp()
+				?? (int)$actualRecord->getRecordedStopTimestamp()
+			);
+
 			(new PushService())->sendEvent(
 				new PushEvent(
 					command: mb_strtolower($actionListResult->getWorktimeAction()->getType()),
@@ -296,8 +316,8 @@ class WorktimeService extends BaseService
 						'info' => [
 							'state' => $workTimeState,
 							'action' => $workTimeAction,
-							'dateStart' => $currentInfo['DATE_START'] ? (MakeTimeStamp($currentInfo['DATE_START']) - \CTimeZone::GetOffset()) : '',
-							'dateFinish' => $currentInfo['DATE_FINISH'] ? (MakeTimeStamp($currentInfo['DATE_FINISH']) - \CTimeZone::GetOffset()) : '',
+							'dateStart' => ($currentInfo['DATE_START'] && $pushDateStart > 0) ? $pushDateStart : '',
+							'dateFinish' => ($currentInfo['DATE_FINISH'] && $pushDateFinish > 0) ? $pushDateFinish : '',
 							'timeLeaks' => $currentInfo['TIME_LEAKS'] ?? null,
 							'lastPause' => $currentInfo['LAST_PAUSE'] ?? null,
 							'duration' => $currentInfo['DURATION'] ?? null,
@@ -515,7 +535,7 @@ class WorktimeService extends BaseService
 		;
 	}
 
-	private function addStopWorkTimeTrigger(int $userId, int $recordId, bool $isFirstStop): ?StartResult
+	private function addStopWorkTimeTrigger(int $userId, int $recordId, bool $isFirstStop, ?\DateTime $workdayStart = null): ?StartResult
 	{
 		if (!Loader::includeModule('bizproc'))
 		{
@@ -526,6 +546,7 @@ class WorktimeService extends BaseService
 			StopWorktimeTrigger::FIELD_USER_ID => $userId,
 			StopWorktimeTrigger::FIELD_RECORD_ID => $recordId,
 			StopWorktimeTrigger::FIELD_IS_FIRST_STOP => $isFirstStop,
+			StopWorktimeTrigger::FIELD_WORKDAY_START => $workdayStart,
 		];
 
 		return Starter::getByScenario(Scenario::onEvent)

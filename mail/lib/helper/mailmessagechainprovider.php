@@ -7,6 +7,7 @@ use Bitrix\Mail\Internals\MessageAccessTable;
 use Bitrix\Mail\MailMessageUidTable;
 use Bitrix\Main\ErrorCollection;
 use Bitrix\Mail\Helper\Dto\MailMessageChain;
+use Bitrix\Mail\Helper\Message\Loader\QueryBuilder;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Mail\MailMessageTable;
@@ -123,9 +124,10 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 			)
 			->setSelect($select)
 			->setFilter(
-				[
-					'=ID' => $id,
-				],
+				array_merge(
+					['=ID' => $id],
+					QueryBuilder::generationScopeFilterOfMessages([$id], 'MESSAGE_UID.'),
+				),
 			)->setLimit(1)->exec()->fetchAll()
 		;
 
@@ -273,7 +275,11 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 		if ($takeFiles)
 		{
 			$messageData = $this->getMessageAsArray($id, self::SELECT_MESSAGE_FIELDS_FOR_TAKE_ATTACHMENTS);
-			$messageId = (int)$messageData['ID'];
+
+			if (is_null($messageData))
+			{
+				return $message;
+			}
 
 			if (isset($messageData['OPTIONS']['attachments']) &&  isset($messageData['OPTIONS']['attachments']) > 0)
 			{
@@ -322,6 +328,12 @@ class MailMessageChainProvider extends AbstractMailMessageChainProvider
 				'=this.ID' => 'ref.MESSAGE_ID',
 			];
 		}
+
+		// A chain never leaves the mailbox of its root: the closure is built inside one mailbox
+		$filter = array_merge(
+			$filter,
+			QueryBuilder::generationScopeFilterOfMessages([$threadId], 'MESSAGE_UID.'),
+		);
 
 		$selectChainNodes = array_merge(
 			self::SELECT_MESSAGE_FIELDS,

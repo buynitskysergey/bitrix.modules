@@ -53,11 +53,14 @@ final class CursorStructure extends Structure
 		if ($value['value'] !== null)
 		{
 			$field = $dto->getFields()[$structure->field];
-			$itemValue = FieldsConverter::convertValueByType($field->getPropertyType(), $value['value']);
+			$itemValue = FieldsConverter::convertValueByDtoField($field, $value['value']);
 
-			if (!FieldsValidator::validateTypeAndValue($field->getPropertyType(), $itemValue))
+			if (!FieldsValidator::validateDtoFieldValue($field, $itemValue))
 			{
-				throw new InvalidRequestFieldTypeException($field->getPropertyName(), $field->getPropertyType());
+				$typeLabel = $field->getDynamicEnumProvider() !== null
+					? (new \ReflectionClass($field->getDynamicEnumProvider()))->getShortName()
+					: $field->getPropertyType();
+				throw new InvalidRequestFieldTypeException($field->getPropertyName(), $typeLabel);
 			}
 
 			$structure->value = $itemValue;

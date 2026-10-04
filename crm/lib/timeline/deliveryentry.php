@@ -24,7 +24,7 @@ class DeliveryEntry extends TimelineEntry
 			return null;
 		}
 
-		TimelineEntry::registerBindings($result->getId(), $bindings);
+		TimelineEntry::registerBindings($result->getId(), $bindings, $created);
 
 		return (int)$result->getId();
 	}

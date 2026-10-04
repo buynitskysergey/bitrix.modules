@@ -8,13 +8,15 @@ use Bitrix\Catalog\ProductTable;
 use Bitrix\Catalog\StoreProductTable;
 use Bitrix\Catalog\StoreTable;
 use Bitrix\Main\Application;
+use Bitrix\Main\Engine\Response\DataType\Page;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Catalog\Store\EnableWizard\Manager;
+use Bitrix\Main\UI\PageNavigation;
 
 final class StoreProduct extends Controller
 {
-	use ListAction; // default listAction realization
+	use ListAction;
 	use GetAction; // default getAction realization
 	use CheckExists; // default implementation of existence check
 
@@ -27,15 +29,27 @@ final class StoreProduct extends Controller
 		return [$this->getServiceItemName() => $this->getViewFields()];
 	}
 
-	/**
-	 * public function listAction
-	 * @see listAction
-	 */
+	public function listAction(
+		PageNavigation $pageNavigation,
+		array $select = [],
+		array $filter = [],
+		array $order = [],
+		bool $__calculateTotalCount = true,
+	): Page
+	{
+		$params = $this->modifyListActionParameters([
+			'select' => $select,
+			'filter' => $filter,
+			'order' => $order,
+		]);
+		$effectiveFilter = $this->getEffectiveFilter($params['filter']);
 
-	/**
-	 * public function getAction
-	 * @see GetAction::getAction
-	 */
+		return new Page(
+			$this->getServiceListName(),
+			$this->getList($params['select'], $effectiveFilter, $params['order'], $pageNavigation),
+			$__calculateTotalCount ? $this->count($effectiveFilter) : 0,
+		);
+	}
 
 	public function bulkSaveAction(array $items)
 	{
@@ -168,6 +182,31 @@ final class StoreProduct extends Controller
 		return new StoreProductTable();
 	}
 
+	protected function get($id)
+	{
+		$entityTable = $this->getEntityTable();
+
+		return $entityTable::getByPrimary($id, [
+			'filter' => $this->getAccessFilter(),
+		])->fetch();
+	}
+
+	private function getEffectiveFilter(array $filter): array
+	{
+		return [
+			$filter,
+			$this->getAccessFilter(),
+		];
+	}
+
+	private function getAccessFilter(): array
+	{
+		return $this->accessController->getEntityFilter(
+			ActionDictionary::ACTION_STORE_VIEW,
+			StoreProductTable::class,
+		) ?? [];
+	}
+
 	protected function checkReadPermissionEntity()
 	{
 		$r = new Result();
@@ -179,6 +218,7 @@ final class StoreProduct extends Controller
 		{
 			$r->addError($this->getErrorReadAccessDenied());
 		}
+
 		return $r;
 	}
 

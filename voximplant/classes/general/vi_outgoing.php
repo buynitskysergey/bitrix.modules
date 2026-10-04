@@ -257,7 +257,7 @@ class CVoxImplantOutgoing
 				$call->updateCrmBindings($activityBindings);
 			}
 
-			CVoxImplantCrmHelper::registerCallInCrm($call);
+			CVoxImplantCrmHelper::registerCallInCrmWithLeadLock($call, false, null, false);
 		}
 
 		$call->getSignaling()->sendOutgoing($call->getUserId(), $params['CALL_DEVICE']);

@@ -62,17 +62,46 @@ class AppAccessChecker
 
 	public function canInstallEmbedding(Entity\Application\App $app): bool
 	{
-		return $this->canInstallLocal() && $this->canAccessApp($app);
+		if ($app->isPersonal())
+		{
+			$canInstall = ($this->isAdmin() || $app->isOwnedBy($this->userId))
+				&& $this->canInstallPersonal();
+		}
+		else
+		{
+			$canInstall = $this->canInstallLocal()
+				&& ($this->isAdmin() || $app->getOrigin() === Entity\Application\AppOrigin::Local);
+		}
+
+		return $canInstall && $this->canAccessApp($app);
 	}
 
 	public function canUninstallEmbedding(Entity\Application\App $app): bool
 	{
-		return $this->canUninstallLocal($app) && $this->canAccessApp($app);
+		if ($app->isPersonal())
+		{
+			$canUninstall = $this->canUninstallPersonal($app);
+		}
+		else
+		{
+			$canUninstall = $this->canUninstallLocal($app)
+				&& ($this->isAdmin() || $app->getOrigin() === Entity\Application\AppOrigin::Local);
+		}
+
+		return $canUninstall && $this->canAccessApp($app);
 	}
 
 	public function canViewEmbeddingList(Entity\Application\App $app): bool
 	{
 		return $this->canAccessApp($app);
+	}
+
+	public function canViewAllEmbeddings(Entity\Application\App $app): bool
+	{
+		return $this->controller->check(
+			AppAction::ViewAllEmbeddings,
+			AppModel::createFromApp($app),
+		);
 	}
 
 	public function canViewPlacementList(Entity\Application\App $app): bool
@@ -83,5 +112,10 @@ class AppAccessChecker
 	public function canViewInstalledList(): bool
 	{
 		return $this->controller->check(AppAction::ViewInstalledList);
+	}
+
+	private function isAdmin(): bool
+	{
+		return \CRestUtil::isAdmin($this->userId);
 	}
 }

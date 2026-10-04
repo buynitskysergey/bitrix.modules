@@ -1,5 +1,6 @@
 <?php
 
+use Bitrix\Main\ArgumentException;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\ControllerBuilder;
 use Bitrix\Main\Engine\CurrentUser;
@@ -19,6 +20,7 @@ use Bitrix\Rest\V3\Attribute\ResolvedBy;
 use Bitrix\Rest\V3\Controller\RestController;
 use Bitrix\Rest\V3\DefaultLanguage;
 use Bitrix\Rest\V3\Exception\AccessDeniedException;
+use Bitrix\Rest\V3\Exception\HttpsRequiredException;
 use Bitrix\Rest\V3\Exception\InsufficientScopeException;
 use Bitrix\Rest\V3\Exception\Internal\InternalException;
 use Bitrix\Rest\V3\Exception\InvalidSelectException;
@@ -50,7 +52,7 @@ class CRestApiServer extends CRestServer
 	/**
 	 * @var Scope[]
 	 */
-	private array $availableScopes;
+	protected array $availableScopes;
 	private ?array $requestAccess = null;
 
 	protected SchemaManager $schemaManager;
@@ -440,6 +442,7 @@ class CRestApiServer extends CRestServer
 		$controller->setProcessedScope($availableScope);
 		$controller->setResponseLanguage($this->responseLanguage);
 		$controller->setServer($this);
+		$controller->setQueryParams($request->getQuery());
 
 		$manager = new RestManager();
 		$autoWirings = $manager->getAutoWirings();
@@ -577,6 +580,19 @@ class CRestApiServer extends CRestServer
 				if ($exception instanceof Internal\Exception\Payment\MarketSubscriptionRequiredException)
 				{
 					throw new V3\Exception\MarketSubscriptionRequiredException();
+				}
+
+				if ($exception instanceof Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface)
+				{
+					throw new V3\Exception\FeatureNotAvailableOnCurrentPlanException($exception);
+				}
+
+				if (
+					($res['error'] ?? null) === 'INVALID_REQUEST'
+					&& ($res['error_description'] ?? null) === 'Https required.'
+				)
+				{
+					throw new HttpsRequiredException();
 				}
 
 				throw new AccessDeniedException(
@@ -734,5 +750,37 @@ class CRestApiServer extends CRestServer
 		}
 
 		return $result;
+	}
+
+	public function setAvailableScopes(array $scopes): void
+	{
+		$availableScopes = [];
+
+		foreach ($scopes as $scope)
+		{
+			if ($scope instanceof Scope)
+			{
+				$availableScopes[$scope->path] = $scope;
+
+				continue;
+			}
+
+			if (is_array($scope) && isset($scope['path'], $scope['fields']))
+			{
+				$scopeObject = new Scope($scope['path'], $scope['fields']);
+				$availableScopes[$scopeObject->path] = $scopeObject;
+
+				continue;
+			}
+
+			throw new ArgumentException('Scope must be a Scope instance or an array with path and fields');
+		}
+
+		$this->availableScopes = $availableScopes;
+	}
+
+	public function getAvailableScopes(): array
+	{
+		return $this->availableScopes;
 	}
 }

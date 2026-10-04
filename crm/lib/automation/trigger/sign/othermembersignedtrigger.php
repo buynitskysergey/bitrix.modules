@@ -49,4 +49,33 @@ class OtherMemberSignedTrigger extends InitiatorSignedTrigger
 	{
 		return [ActivityGroup::DOCUMENT_FLOW->value];
 	}
+
+	/**
+	 * Same fields as the own-side signing node, but the date/time is the moment the counterpart signed.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_SIGN_OTHER_MEMBER_SIGNING_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getSignReturnProperties()
+		);
+	}
+
+	/**
+	 * ON_SIGN of a counterpart names the member who signed, so the member fields are reported.
+	 */
+	protected static function getSignReturnFieldIds(): array
+	{
+		return [
+			self::RETURN_SIGN_DOCUMENT_ID,
+			self::RETURN_SIGN_MEMBER_ROLE,
+			self::RETURN_SIGN_INITIATED_BY_TYPE,
+			self::RETURN_SIGNER_USER,
+			self::RETURN_SIGNER_NAME,
+		];
+	}
 }

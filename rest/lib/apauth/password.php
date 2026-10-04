@@ -8,6 +8,7 @@ use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
 use Bitrix\Main\ORM\Fields\EnumField;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\ORM;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Integration\Rest\EventHandlers\PasswordEventHandler;
 use Bitrix\Rest\Internal\Model\IncomingWebhookAttributeTable;
 use Bitrix\Rest\Internal\Service\SystemUserService;
@@ -173,6 +174,7 @@ class PasswordTable extends ORM\Data\DataManager
 
 	public static function onAfterAdd(Main\Entity\Event $event)
 	{
+		LicenseScannerStateInvalidator::reset();
 		EventController::onAfterAddAp($event);
 	}
 
@@ -197,6 +199,7 @@ class PasswordTable extends ORM\Data\DataManager
 			return;
 		}
 		self::clearServiceCache((int)$event->getParameter('id')['ID']);
+		LicenseScannerStateInvalidator::reset();
 		IncomingWebhookAttributeTable::deleteByPasswordId((int)$event->getParameter('id')['ID']);
 		if (isset(self::$itemsToDelete[(int)$event->getParameter('id')['ID']]))
 		{
@@ -213,6 +216,12 @@ class PasswordTable extends ORM\Data\DataManager
 			return;
 		}
 		self::clearServiceCache((int)$event->getParameter('id')['ID']);
+
+		$fields = (array)$event->getParameter('fields');
+		if (array_intersect_key($fields, ['ACTIVE' => true, 'TYPE' => true]) !== [])
+		{
+			LicenseScannerStateInvalidator::reset();
+		}
 	}
 
 	private static function clearServiceCache(int $id): void

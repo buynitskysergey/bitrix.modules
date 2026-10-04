@@ -6,6 +6,7 @@ use Bitrix\Mail\Internals\Access\AccessPermissionTable;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\ObjectPropertyException;
+use Bitrix\Main\ORM\Data\AddResult;
 use Bitrix\Main\SystemException;
 
 class PermissionRepository
@@ -18,8 +19,8 @@ class PermissionRepository
 	{
 		$permissions = [];
 
-		$rows =
-			AccessPermissionTable::query()
+		$rows
+			= AccessPermissionTable::query()
 				->addSelect("PERMISSION_ID")
 				->addSelect("VALUE")
 				->whereIn("ROLE_ID", $roleIds)
@@ -48,8 +49,8 @@ class PermissionRepository
 	{
 		$permissions = [];
 
-		$rows =
-			AccessPermissionTable::query()
+		$rows
+			= AccessPermissionTable::query()
 				->setSelect(['PERMISSION_ID', 'VALUE'])
 				->where('ROLE_ID', $roleId)
 				->fetchAll()
@@ -70,7 +71,12 @@ class PermissionRepository
 
 	public function add(int $roleId, string $permissionId, int $value): void
 	{
-		AccessPermissionTable::add([
+		$this->addWithResult($roleId, $permissionId, $value);
+	}
+
+	public function addWithResult(int $roleId, string $permissionId, int $value): AddResult
+	{
+		return AccessPermissionTable::add([
 			'ROLE_ID' => $roleId,
 			'PERMISSION_ID' => $permissionId,
 			'VALUE' => $value,

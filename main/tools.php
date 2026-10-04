@@ -5013,6 +5013,10 @@ function bxmail($to, $subject, $message, $additional_headers = "", $additional_p
 		]
 	);
 	$event->send();
+	if ($context->getSendingError() !== null)
+	{
+		return false;
+	}
 
 	$defaultMailConfiguration = Configuration::getValue("smtp");
 	$smtpEnabled =

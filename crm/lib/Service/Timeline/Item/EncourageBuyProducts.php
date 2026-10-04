@@ -57,7 +57,7 @@ class EncourageBuyProducts extends Configurable
 					Loc::getMessage('CRM_TIMELINE_ECOMMERCE_CLIENT_CUSTOMER_PLACED_ORDER')
 				)
 				->setFontSize(13)
-				->setColor(Text::COLOR_BASE_70)
+				->setColor(Text::COLOR_BASE_90)
 			,
 		];
 

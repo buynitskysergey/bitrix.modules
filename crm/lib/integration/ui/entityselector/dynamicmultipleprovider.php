@@ -15,10 +15,20 @@ use Bitrix\UI\EntitySelector\Dialog;
 use Bitrix\UI\EntitySelector\Item;
 use Bitrix\UI\EntitySelector\RecentItem;
 use Bitrix\UI\EntitySelector\SearchQuery;
+use Bitrix\UI\EntitySelector\Tab;
 
 class DynamicMultipleProvider extends BaseProvider
 {
 	public const DYNAMIC_MULTIPLE_ID = 'dynamic_multiple';
+
+	// Single synthetic item for "all smart processes" in the task list "CRM element" filter (DTO-01).
+	public const ALL_DYNAMIC_ID = 'ALL_T';
+
+	// Tab icon glyph (ui.icon-set outline) for the joint "Smart processes" tab.
+	private const TAB_ICON = 'o-smart-process';
+
+	protected bool $allowAllTypeItem = false;
+	protected bool $showTab = false;
 
 	public function __construct(array $options = [])
 	{
@@ -32,6 +42,13 @@ class DynamicMultipleProvider extends BaseProvider
 		}
 
 		$this->options['dynamicTypeIds'] = $this->prepareDynamicTypeIds($options['dynamicTypeIds']);
+
+		if (isset($options['allowAllTypeItem']))
+		{
+			$this->allowAllTypeItem = (bool)$options['allowAllTypeItem'];
+		}
+
+		$this->showTab = (bool)($options['showTab'] ?? false);
 	}
 
 	private function loadDynamicTypeIds(): array
@@ -100,17 +117,43 @@ class DynamicMultipleProvider extends BaseProvider
 
 	public function isAvailable(): bool
 	{
-		return !empty($this->getDynamicEntityIds());
+		// showTab keeps the provider available so the tab is rendered even on portals without smart processes.
+		return $this->showTab || !empty($this->getDynamicEntityIds());
 	}
 
 	public function getItems(array $ids): array
 	{
-		return $this->makeItemsByIds($ids);
+		$allDynamicItem = $this->makeAllDynamicItem();
+		$synthetic = ($allDynamicItem !== null && in_array(static::ALL_DYNAMIC_ID, $ids, true))
+			? [$allDynamicItem]
+			: [];
+
+		return array_merge($synthetic, $this->makeItemsByIds($ids));
 	}
 
 	public function getSelectedItems(array $ids): array
 	{
-		return $this->makeItemsByIds($ids);
+		return $this->getItems($ids);
+	}
+
+	/**
+	 * Single "all smart processes" synthetic item (ALL_T) for the task list "CRM element" filter.
+	 * Disabled by default; enabled through the dialog options of the filter field.
+	 */
+	protected function makeAllDynamicItem(): ?Item
+	{
+		if (!$this->allowAllTypeItem || empty($this->getDynamicEntityIds()))
+		{
+			return null;
+		}
+
+		return new Item([
+			'id' => static::ALL_DYNAMIC_ID,
+			'entityId' => $this->getItemEntityId(),
+			'title' => Loc::getMessage('CRM_ENTITY_SELECTOR_ALL_DYNAMIC_ITEM'),
+			'tabs' => [$this->getItemEntityId()],
+			'sort' => -2,
+		]);
 	}
 
 	protected function makeItemsByIds(array $ids): array
@@ -251,6 +294,7 @@ class DynamicMultipleProvider extends BaseProvider
 			'link' => $entityInfo['url'],
 			'linkTitle' => Loc::getMessage('CRM_COMMON_DETAIL'),
 			'avatar' => $entityInfo['image'],
+			'tabs' => [$this->getItemEntityId()],
 			'searchable' => true,
 			'hidden' => !$canReadItem,
 			'customData' => [
@@ -271,6 +315,12 @@ class DynamicMultipleProvider extends BaseProvider
 
 	public function fillDialog(Dialog $dialog): void
 	{
+		$allDynamicItem = $this->makeAllDynamicItem();
+		if ($allDynamicItem !== null)
+		{
+			$dialog->addItem($allDynamicItem);
+		}
+
 		$itemEntityId = $this->getItemEntityId();
 		$recentItems = $dialog->getRecentItems();
 		$recentItemsByEntityId = $recentItems->getEntityItems($itemEntityId);
@@ -321,6 +371,28 @@ class DynamicMultipleProvider extends BaseProvider
 				}
 			}
 		}
+
+		$this->addTab($dialog);
+	}
+
+	// Unlike the crm EntityProvider subclasses, this provider extends BaseProvider and must build the
+	// joint "Smart processes" tab itself; items carry tabs => [dynamic_multiple] to land on it.
+	private function addTab(Dialog $dialog): void
+	{
+		if (!$this->showTab)
+		{
+			return;
+		}
+
+		$dialog->addTab(new Tab([
+			'id' => $this->getItemEntityId(),
+			'title' => Loc::getMessage('CRM_ENTITY_SELECTOR_DYNAMIC_MULTIPLE_TAB'),
+			'stub' => true,
+			'icon' => [
+				'default' => self::TAB_ICON,
+				'selected' => self::TAB_ICON,
+			],
+		]));
 	}
 
 	protected function getRecentItemIds(int $entityTypeId, string $context): array

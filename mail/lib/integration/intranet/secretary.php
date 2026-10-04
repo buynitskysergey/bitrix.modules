@@ -4,6 +4,7 @@ namespace Bitrix\Mail\Integration\Intranet;
 use Bitrix\Mail\Helper\AnalyticsHelper;
 use Bitrix\Mail\Helper\Message;
 use Bitrix\Mail\Helper\MessageAccess;
+use Bitrix\Mail\Integration\Tasks\TaskMailSourceService;
 use Bitrix\Mail\Internals\MessageAccessTable;
 use Bitrix\Mail\MailMessageTable;
 use Bitrix\Mail\IMessageStorage;
@@ -110,8 +111,26 @@ class Secretary
 		return false;
 	}
 
-	public static function onTaskDelete($taskId)
+	public static function onTaskDelete($taskId, array $parameters = [])
 	{
+		if ($parameters['MOVED_TO_RECYCLEBIN'] ?? false)
+		{
+			return;
+		}
+
+		try
+		{
+			TaskMailSourceService::deleteByTaskId((int)$taskId);
+		}
+		catch (\Throwable $e)
+		{
+			// Task deletion must not fail if optional source storage is unavailable.
+			AddMessage2Log(
+				sprintf('TASKS_MAIL_SOURCE_DELETE_FAILED: task %d: %s', (int)$taskId, $e->getMessage()),
+				'mail',
+			);
+		}
+
 		$messageAccessQuery = MessageAccessTable::query()
 			->setSelect([
 				'TOKEN',

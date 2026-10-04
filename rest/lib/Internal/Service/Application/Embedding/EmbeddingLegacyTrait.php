@@ -38,9 +38,18 @@ trait EmbeddingLegacyTrait
 		);
 	}
 
-	protected function setServerAuthData(CRestServer $server, ReflectionClass $reflection, array $scopeList = []): void
+	protected function setServerAuthData(
+		CRestServer $server,
+		ReflectionClass $reflection,
+		array $scopeList = [],
+		int $userId = 0,
+	): void
 	{
 		$authData['scope'] = implode(',', $scopeList);
+		if ($userId > 0)
+		{
+			$authData['user_id'] = $userId;
+		}
 
 		$this->setReflectedPropertyValue($server, $reflection, 'authData', $authData);
 		$this->setReflectedPropertyValue($server, $reflection, 'authType', OAuth\Auth::AUTH_TYPE);

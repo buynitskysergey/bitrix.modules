@@ -228,7 +228,7 @@ array(
 								<?echo Bitrix\Sale\BasketItem::formatQuantity($arQuantities[$mi]); ?>&nbsp;x
 							</td>
 							<td class="tablebodycol" valign="top">
-								<?echo "[".$arBasket["PRODUCT_ID"]."] ".$arBasket["NAME"]; ?>
+								<?echo "[".$arBasket["PRODUCT_ID"]."] " . htmlspecialcharsbx($arBasket["NAME"]); ?>
 							</td>
 							<td class="tablebodycol" align="right" valign="top">
 								<b><?echo SaleFormatCurrency($item_price, $arOrder["CURRENCY"]);?></b>

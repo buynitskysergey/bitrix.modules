@@ -173,6 +173,8 @@ class CTimeManAdminReport
 					'ACTIVE' => $arRes['ACTIVE'] == 'Y',
 					'PAUSED' => $arRes['PAUSED'] == 'Y',
 					'ACTIVATED' => $arRes['ACTIVATED'] == 'Y',
+					// Both offsets cancel: the read added the site offset, GetOffset() takes it back.
+					// $ts_start stays wall-time on purpose: 'DAY' is the viewer's calendar cell.
 					'DATE_START' => MakeTimeStamp($arRes['DATE_START'])-CTimeZone::GetOffset(), // unchanged time
 					'DATE_FINISH' => $arRes['DATE_FINISH'] ? MakeTimeStamp($arRes['DATE_FINISH'])-CTimeZone::GetOffset() : '', // unchanged time
 					'TIME_START' => $arRes['TIME_START'], // unchanged time

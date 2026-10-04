@@ -42,7 +42,8 @@ class TimelineBindingTable  extends Entity\DataManager
             'OWNER_ID' => array('data_type' => 'integer', 'primary' => true),
 			'ENTITY_TYPE_ID' => array('data_type' => 'integer', 'primary' => true),
 			'ENTITY_ID' => array('data_type' => 'integer', 'primary' => true),
-			'IS_FIXED' => array('data_type' => 'boolean', 'values' => array('N', 'Y'), 'default_value' => 'N')
+			'IS_FIXED' => array('data_type' => 'boolean', 'values' => array('N', 'Y'), 'default_value' => 'N'),
+			'CREATED' => array('data_type' => 'datetime'),
 		);
 	}
     /**
@@ -77,6 +78,26 @@ class TimelineBindingTable  extends Entity\DataManager
 		if (isset($data['IS_FIXED']))
 		{
 			$fields['IS_FIXED'] = $data['IS_FIXED'];
+		}
+
+		$created = $data['CREATED'] ?? null;
+		if ($created === null)
+		{
+			$row = TimelineTable::getList([
+				'select' => ['CREATED'],
+				'filter' => ['=ID' => $ownerID],
+				'limit' => 1,
+			])->fetch();
+			if ($row && $row['CREATED'])
+			{
+				$created = $row['CREATED'];
+			}
+		}
+		if ($created !== null)
+		{
+			$fields['CREATED'] = $created instanceof Main\Type\DateTime
+				? $created
+				: new Main\Type\DateTime($created, 'Y-m-d H:i:s');
 		}
 
 		$connection = Main\Application::getConnection();
@@ -379,41 +400,48 @@ class TimelineBindingTable  extends Entity\DataManager
 		{
 			$typeSql = implode(',', $typeIDs);
 			$dbResult = $connection->query(
-				"SELECT b.OWNER_ID FROM b_crm_timeline_bind b INNER JOIN b_crm_timeline t ON b.OWNER_ID = t.ID AND t.TYPE_ID IN ({$typeSql}) AND b.ENTITY_TYPE_ID = {$srcEntityTypeID} AND b.ENTITY_ID = {$srcEntityID}"
+				"SELECT b.OWNER_ID, b.CREATED FROM b_crm_timeline_bind b"
+				. " INNER JOIN b_crm_timeline t"
+				. " ON b.OWNER_ID = t.ID AND t.TYPE_ID IN ({$typeSql})"
+				. " AND b.ENTITY_TYPE_ID = {$srcEntityTypeID}"
+				. " AND b.ENTITY_ID = {$srcEntityID}"
 			);
 		}
 		else
 		{
 			$dbResult = $connection->query(
-				"SELECT OWNER_ID FROM b_crm_timeline_bind WHERE ENTITY_TYPE_ID = {$srcEntityTypeID} AND ENTITY_ID = {$srcEntityID}"
+				"SELECT OWNER_ID, CREATED FROM b_crm_timeline_bind"
+				. " WHERE ENTITY_TYPE_ID = {$srcEntityTypeID}"
+				. " AND ENTITY_ID = {$srcEntityID}"
 			);
 		}
 
-		$ownerIDs = array();
-		while($fields = $dbResult->fetch())
+		$ownerRows = array();
+		while($row = $dbResult->fetch())
 		{
-			$ownerIDs[] = $fields['OWNER_ID'];
+			$ownerRows[] = $row;
 		}
 
-		foreach($ownerIDs as $ownerID)
+		foreach($ownerRows as $ownerRow)
 		{
+			$ownerID = $ownerRow['OWNER_ID'];
 			$fields = array(
 				'OWNER_ID' => $ownerID,
 				'ENTITY_TYPE_ID' => $targEntityTypeID,
 				'ENTITY_ID' => $targEntityID
 			);
 
-			$queries = $connection->getSqlHelper()->prepareMerge(
-				'b_crm_timeline_bind',
-				array('OWNER_ID', 'ENTITY_TYPE_ID', 'ENTITY_ID'),
-				$fields,
-				$fields
-			);
-
-			foreach($queries as $query)
+			if (!empty($ownerRow['CREATED']))
 			{
-				$connection->queryExecute($query);
+				$fields['CREATED'] = $ownerRow['CREATED'] instanceof Main\Type\DateTime
+					? $ownerRow['CREATED']
+					: new Main\Type\DateTime(
+						$ownerRow['CREATED'],
+						'Y-m-d H:i:s'
+					);
 			}
+
+			self::upsert($fields);
 		}
 
 		if (\CCrmOwnerType::IsDefined($targEntityTypeID) && $targEntityID > 0)

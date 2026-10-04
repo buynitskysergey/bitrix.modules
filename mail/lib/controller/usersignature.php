@@ -7,6 +7,7 @@ namespace Bitrix\Mail\Controller;
 use Bitrix\Mail\Internals\SharedSignatureAssignmentTable;
 use Bitrix\Mail\Internals\SharedSignatureTable;
 use Bitrix\Mail\Service\SharedSignature\SharedSignatureService;
+use Bitrix\Mail\Service\SharedSignature\SenderIdentityResolver;
 use Bitrix\Mail\Service\SharedSignature\SignatureMigrator;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Context;
@@ -18,9 +19,10 @@ use Bitrix\Main\Localization\Loc;
  * REST controller for personal signatures.
  * Scope: api — available as mail.api.usersignature.*
  *
- * A thin wrapper over the unified model: a personal signature is a signature of the owner scope,
- * its binding to a sender is an assignment with a string target, and an empty binding means no
- * assignments at all. The previous request and response shapes are kept for the clients that
+ * A thin wrapper over the unified model: a personal signature is a signature of the owner scope.
+ * The compatible fields.sender input remains a string; the service stores an unambiguous owned
+ * mailbox as a mailbox target and keeps other senders as a string fallback. An empty binding means
+ * no assignments at all. The previous request and response shapes are kept for the clients that
  * already call these methods — the signature editor and the personal signature grid; new callers
  * use mail.api.signature.* (API-01). The previous table is never written.
  *
@@ -136,17 +138,37 @@ class UserSignature extends Base
 			$values['signature'] = $this->readSignatureBody($fields);
 		}
 
-		// An absent sender key leaves the binding as it is, an empty one drops it.
-		$assignments = array_key_exists('sender', $fields)
-			? self::senderAssignments((string)$fields['sender'])
-			: null
-		;
+		// Old clients cannot distinguish an unavailable mailbox from the all-senders value.
+		$assignments = null;
+		$allowMailboxRoundTrip = false;
+		if (array_key_exists('sender', $fields))
+		{
+			$sender = (string)$fields['sender'];
+			$bindingChanged = ($fields['senderBindingChanged'] ?? null) === 'Y';
+			// An unchanged echo of the current sender keeps the assignments untouched: resolving
+			// the string anew could lose the ID binding once its address stopped being unambiguous.
+			$isUnchangedRoundTrip = !$bindingChanged
+				&& $sender !== ''
+				&& $sender === self::extractSender($entry['assignments'], $this->getUserId());
+			if (
+				!$isUnchangedRoundTrip
+				&& (
+					$sender !== ''
+					|| $bindingChanged
+					|| !self::hasUnresolvedMailboxAssignment($entry['assignments'], $this->getUserId())
+				)
+			)
+			{
+				$assignments = self::senderAssignments($sender);
+				$allowMailboxRoundTrip = !$bindingChanged;
+			}
+		}
 
 		// The identifier the client sent may be a legacy one, so the row that was actually found
 		// is the one to write.
 		$signatureId = (int)$entry['signature']->getId();
 
-		$result = $service->update($signatureId, $values, $assignments);
+		$result = $service->update($signatureId, $values, $assignments, $allowMailboxRoundTrip);
 
 		if (!$result->isSuccess())
 		{
@@ -297,10 +319,12 @@ class UserSignature extends Base
 	 */
 	private static function formatEntry(array $entry): array
 	{
+		$ownerId = (int)$entry['signature']->get('OWNER_ID');
+
 		return [
 			'id' => (int)$entry['signature']->getId(),
-			'userId' => (int)$entry['signature']->get('OWNER_ID'),
-			'sender' => self::extractSender($entry['assignments']),
+			'userId' => $ownerId,
+			'sender' => self::extractSender($entry['assignments'], $ownerId),
 			'signature' => (string)$entry['signature']->get('SIGNATURE'),
 		];
 	}
@@ -308,13 +332,32 @@ class UserSignature extends Base
 	/**
 	 * The sender string the signature is bound to; empty when it applies to every sender.
 	 */
-	private static function extractSender(array $assignments): string
+	private static function extractSender(array $assignments, int $ownerId): string
 	{
+		$mailboxAssignments = [];
 		foreach ($assignments as $assignment)
 		{
 			if ((string)$assignment['TARGET_TYPE'] === SharedSignatureAssignmentTable::TARGET_SENDER)
 			{
 				return (string)($assignment['TARGET_VALUE'] ?? '');
+			}
+			if ((string)$assignment['TARGET_TYPE'] === SharedSignatureAssignmentTable::TARGET_MAILBOX)
+			{
+				$mailboxAssignments[(int)$assignment['TARGET_ID']] = $assignment;
+			}
+		}
+
+		$mailboxEmails = (new SenderIdentityResolver())->resolveMailboxEmails(
+			array_fill_keys(array_keys($mailboxAssignments), $ownerId),
+		);
+		foreach ($mailboxAssignments as $mailboxId => $assignment)
+		{
+			$email = $mailboxEmails[$mailboxId] ?? '';
+			if ($email !== '')
+			{
+				$name = trim((string)($assignment['TARGET_VALUE'] ?? ''));
+
+				return $name === '' ? $email : sprintf('%s <%s>', $name, $email);
 			}
 		}
 
@@ -322,8 +365,9 @@ class UserSignature extends Base
 	}
 
 	/**
-	 * Expresses the binding to a sender as assignments of the unified model: a string target for
-	 * a bound signature, no assignments at all for the one that suits every sender.
+	 * Expresses the compatible string input as an assignment of the unified model. The service
+	 * replaces an unambiguous owned mailbox with a mailbox target and otherwise keeps this sender
+	 * target as a fallback. An empty input means no assignments at all.
 	 *
 	 * @return array<array{targetType: string, targetId: int, targetValue: string, isFlat: bool}>
 	 */
@@ -342,6 +386,27 @@ class UserSignature extends Base
 				'isFlat' => false,
 			],
 		];
+	}
+
+	private static function hasUnresolvedMailboxAssignment(array $assignments, int $ownerId): bool
+	{
+		$mailboxIds = [];
+		foreach ($assignments as $assignment)
+		{
+			if ((string)$assignment['TARGET_TYPE'] === SharedSignatureAssignmentTable::TARGET_MAILBOX)
+			{
+				$mailboxIds[(int)$assignment['TARGET_ID']] = $ownerId;
+			}
+		}
+
+		if ($mailboxIds === [])
+		{
+			return false;
+		}
+
+		$resolved = (new SenderIdentityResolver())->resolveMailboxEmails($mailboxIds);
+
+		return count($resolved) < count($mailboxIds);
 	}
 
 	/**

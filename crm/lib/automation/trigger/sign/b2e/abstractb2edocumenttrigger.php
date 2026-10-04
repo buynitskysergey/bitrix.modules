@@ -2,6 +2,7 @@
 
 namespace Bitrix\Crm\Automation\Trigger\Sign\B2e;
 
+use Bitrix\Crm\Automation\Trigger\Sign\SignTriggerReturnDataTrait;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Error;
@@ -9,10 +10,13 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Result;
 use Bitrix\Sign\Config\Feature;
 use Bitrix\Sign\Config\Storage;
+use Bitrix\Sign\Integration\CRM\Model\EventData;
 use Bitrix\Crm\Automation;
 
 class AbstractB2eDocumentTrigger extends Automation\Trigger\BaseTrigger
 {
+	use SignTriggerReturnDataTrait;
+
 	private const SUPPORTED_TYPE_LIST = [
 		\CCrmOwnerType::SmartB2eDocument,
 	];
@@ -115,5 +119,42 @@ class AbstractB2eDocumentTrigger extends Automation\Trigger\BaseTrigger
 		}
 
 		return $result;
+	}
+
+	public function setInputData($data)
+	{
+		if (is_callable([$this, 'setReturnValues']))
+		{
+			$this->setReturnValues(static::buildSignReturnValues(is_array($data) ? $data : []));
+		}
+
+		return parent::setInputData($data);
+	}
+
+	public static function getReturnProperties(): array
+	{
+		return array_merge(parent::getReturnProperties(), static::getSignReturnProperties());
+	}
+
+	/**
+	 * Each concrete node lists its own fields. This class is not a node itself and only satisfies the
+	 * trait, so an empty set here makes a node that forgot to declare its fields visible.
+	 */
+	protected static function getSignReturnFieldIds(): array
+	{
+		return [];
+	}
+
+	/**
+	 * Whether the installed sign module sends the acting user with the event. Modules are updated
+	 * independently, so a node whose event does name an actor declares the initiator only under this
+	 * check: on a portal with the older sign the field would always be empty.
+	 *
+	 * TODO temporary: drop this method together with the declarations guarded by it once the sign
+	 * update that sends the acting user is released.
+	 */
+	protected static function isInitiatorSentBySign(): bool
+	{
+		return Loader::includeModule('sign') && method_exists(EventData::class, 'setInitiatorUserId');
 	}
 }

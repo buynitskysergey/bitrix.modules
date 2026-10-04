@@ -15,6 +15,7 @@ use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\CatalogItemRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\HiddenRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\LastOpenedRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\PinRepository;
+use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\ViewedRepository;
 
 final class EntryWriter
 {
@@ -24,6 +25,7 @@ final class EntryWriter
 		private readonly HiddenRepository $hiddenRepository = new HiddenRepository(),
 		private readonly AccessRepository $accessRepository = new AccessRepository(),
 		private readonly LastOpenedRepository $lastOpenedRepository = new LastOpenedRepository(),
+		private readonly ViewedRepository $viewedRepository = new ViewedRepository(),
 		private readonly IconStorageService $iconStorage = new IconStorageService(),
 		private readonly CatalogItemColors $colors = new CatalogItemColors(),
 	) {}
@@ -115,6 +117,32 @@ final class EntryWriter
 		}
 	}
 
+	/**
+	 * @return int|null id of the file the item no longer references
+	 */
+	public function saveReplacingIconDeferred(CatalogItem $item, ?int $newIconFileId): ?int
+	{
+		$oldIconFileId = $item->getIconFileId();
+		$item->setIconFileId($newIconFileId);
+		try
+		{
+			$this->repository->save($item);
+		}
+		catch (\Throwable $e)
+		{
+			$item->setIconFileId($oldIconFileId);
+
+			throw $e;
+		}
+
+		if ($oldIconFileId === null || $oldIconFileId === $newIconFileId)
+		{
+			return null;
+		}
+
+		return $oldIconFileId;
+	}
+
 	public function delete(CatalogItem $item): void
 	{
 		$itemId = $item->getId();
@@ -133,6 +161,7 @@ final class EntryWriter
 			$this->hiddenRepository->deleteAllForCatalogItem($itemId);
 			$this->accessRepository->deleteAllForCatalogItem($itemId);
 			$this->lastOpenedRepository->deleteAllForCatalogItem($itemId);
+			$this->viewedRepository->deleteAllForCatalogItem($itemId);
 			$this->repository->delete($itemId);
 			if ($iconFileId !== null)
 			{

@@ -15,6 +15,7 @@ use Bitrix\HumanResources\Builder\Structure\Sort\NodeMemberSort;
 use Bitrix\HumanResources\Enum\EventName;
 use Bitrix\HumanResources\Enum\NodeActiveFilter;
 use Bitrix\HumanResources\Enum\SortDirection;
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Item\Collection\NodeMemberCollection;
 use Bitrix\HumanResources\Item\NodeMember;
 use Bitrix\HumanResources\Item\Role;
@@ -49,7 +50,7 @@ final class NodeMemberRepository
 		?StructureAction $structureAction = null,
 		NodeActiveFilter $nodeActiveFilter = NodeActiveFilter::ONLY_GLOBAL_ACTIVE,
 		?int $userId = null,
-
+		bool $withVirtualUsers = true,
 	): NodeMemberCollection
 	{
 		$entityIds = array_map('intval', array_filter($entityIds, 'is_numeric'));
@@ -76,6 +77,7 @@ final class NodeMemberRepository
 						entityIdFilter: EntityIdFilter::fromEntityIds($entityIds),
 						entityType: $memberEntityType,
 						nodeFilter: $nodeFilter,
+						withVirtualUsers: $withVirtualUsers,
 					),
 				)
 				->getAll()
@@ -93,7 +95,8 @@ final class NodeMemberRepository
 	 */
 	public function getMultipleNodeMembers(
 		NodeEntityType $nodeType,
-		bool $active = true
+		bool $active = true,
+		bool $withVirtualUsers = false,
 	): array
 	{
 		$subQuery = NodeMemberTable::query()
@@ -107,6 +110,11 @@ final class NodeMemberRepository
 			->setGroup(['ENTITY_ID'])
 			->where('MEMBER_CNT', '>=', 2)
 		;
+
+		if (!$withVirtualUsers)
+		{
+			RealUserFilter::applyToMemberQuery($subQuery);
+		}
 
 		$nodeMemberQuery = NodeMemberTable::query()
 			->setSelect(['ENTITY_ID', 'NODE_ID'])
@@ -190,11 +198,12 @@ final class NodeMemberRepository
 		return array_map(static fn (array $row): int => (int)$row['ENTITY_ID'], $rows);
 	}
 
-	public function countUniqueUsersByNodeIdWithSubNodes(int $nodeId): int
+	public function countUniqueUsersByNodeIdWithSubNodes(int $nodeId, bool $withVirtualUsers = false): int
 	{
 		$cacheManager = Container::getCacheManager();
 
-		$cacheId = 'node_with_subnodes_member_unique_user_count_' . $nodeId;
+		$cacheId = 'node_with_subnodes_member_unique_user_count_' . $nodeId
+			. RealUserFilter::cacheKeySuffix($withVirtualUsers);
 		$cacheDir = NodeMemberRepository::NODE_MEMBER_CACHE_DIR;
 
 		$result = $cacheManager->getData($cacheId, $cacheDir);
@@ -230,6 +239,11 @@ final class NodeMemberRepository
 					->cacheJoins(true)
 			;
 
+			if (!$withVirtualUsers)
+			{
+				RealUserFilter::applyToMemberQuery($countQuery);
+			}
+
 			$result = $countQuery->fetch();
 		}
 		catch (\Exception $e)
@@ -249,6 +263,7 @@ final class NodeMemberRepository
 		?int $limit = null,
 		?int $offset = null,
 		bool $ascendingSort = true,
+		bool $withVirtualUsers = false,
 	): NodeMemberCollection
 	{
 		$nodeMemberCollection = new NodeMemberCollection();
@@ -271,6 +286,7 @@ final class NodeMemberRepository
 			. "_limit_{$limit}"
 			. "_offset_{$offset}"
 			. "_sort_{$ascendingSort}"
+			. RealUserFilter::cacheKeySuffix($withVirtualUsers)
 		;
 
 		$cacheData = $cacheManager->getData($cacheKey, $cacheDir);
@@ -302,6 +318,7 @@ final class NodeMemberRepository
 					new NodeMemberFilter(
 						entityType: $memberEntityType,
 						nodeFilter: $nodeFilter,
+						withVirtualUsers: $withVirtualUsers,
 					),
 				)
 				->addStructureRole($structureRole)

@@ -17,6 +17,7 @@ final class AiQualityAssessmentItem
 	private int $managerUserId;
 	private int $ratedUserChatId;
 	private int $managerUserChatId;
+	private string $criteriaData = '';
 
 	public function __construct()
 	{
@@ -40,6 +41,7 @@ final class AiQualityAssessmentItem
 		$instance->managerUserId = $fields['MANAGER_USER_ID'] ?? 0;
 		$instance->ratedUserChatId = $fields['RATED_USER_CHAT_ID'] ?? 0;
 		$instance->managerUserChatId = $fields['MANAGER_USER_CHAT_ID'] ?? 0;
+		$instance->criteriaData = $fields['CRITERIA_DATA'] ?? '';
 
 		return $instance;
 	}
@@ -109,6 +111,11 @@ final class AiQualityAssessmentItem
 		return $this->managerUserChatId;
 	}
 
+	public function getCriteriaData(): string
+	{
+		return $this->criteriaData;
+	}
+
 	public function setUseInRating(bool $value): self
 	{
 		$this->useInRating = $value;
@@ -132,6 +139,7 @@ final class AiQualityAssessmentItem
 			'managerUserId' => $this->managerUserId,
 			'ratedUserChatId' => $this->ratedUserChatId,
 			'managerUserChatId' => $this->managerUserChatId,
+			'criteriaData' => $this->criteriaData,
 		];
 	}
 }

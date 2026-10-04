@@ -9,10 +9,13 @@ use Bitrix\AiAssistant\Exceptions\McpException;
 use Bitrix\AiAssistant\Facade\TracedLogger;
 use Bitrix\Mail\Internal\Service\Message\ClassificationLabel;
 use Bitrix\Mail\Internal\Service\Message\ClassificationService;
+use Bitrix\Mail\Internal\Service\Message\ClassificationSettings;
 
 class RemoveEmailClassificationTool extends ToolContract
 {
 	public const ACTION_NAME = 'remove_email_classification';
+
+	private ?ClassificationSettings $settings = null;
 
 	public function __construct(
 		private readonly ClassificationService $classificationService,
@@ -57,15 +60,19 @@ class RemoveEmailClassificationTool extends ToolContract
 		];
 	}
 
-	/* Registered but hidden from the assistant: labelling is not offered to users yet. */
 	public function canList(int $userId): bool
 	{
-		return false;
+		return $this->getSettings()->isAutoClassifyEnabled();
 	}
 
 	public function canRun(int $userId): bool
 	{
-		return false;
+		return $this->getSettings()->isAutoClassifyEnabled();
+	}
+
+	protected function getSettings(): ClassificationSettings
+	{
+		return $this->settings ??= new ClassificationSettings();
 	}
 
 	protected function executeStructured(int $userId, ...$args): array

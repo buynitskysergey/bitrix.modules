@@ -68,6 +68,11 @@ class RepeatSaleSegmentTable extends DataManager
 				->configureDefaultValue('Y')
 				->configureRequired()
 			,
+			(new BooleanField('IS_AUTO_DISABLED'))
+				->configureStorageValues('N', 'Y')
+				->configureDefaultValue('N')
+				->configureRequired()
+			,
 			(new BooleanField('IS_SYSTEM'))
 				->configureStorageValues('N', 'Y')
 				->configureDefaultValue('N')

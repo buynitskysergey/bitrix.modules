@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Integration\BizProc\Starter;
 use Bitrix\Bizproc\Starter\Document;
 use Bitrix\Bizproc\Starter\ModuleSettings;
 use Bitrix\Bizproc\Starter\Dto\TriggerDescriptorDto;
+use Bitrix\Bizproc\Starter\Dto\TriggerUpgradeDto;
 use Bitrix\Crm\Automation\Factory;
 use Bitrix\Crm\Automation\Trigger\BaseTrigger;
 use Bitrix\Crm\Integration\BizProc\Starter\Mixins\Dto\TriggerBindingDocumentsDto;
@@ -24,6 +25,8 @@ final class CrmModuleSettings extends ModuleSettings
 	use TriggerBindingDocumentsTrait;
 
 	private const CREATE_DOCUMENT_TRIGGER = 'CrmEntityCreateTrigger';
+	private const EDIT_DOCUMENT_TRIGGER = 'CrmEntityEditTrigger';
+	private const FIELD_CHANGED_DOCUMENT_TRIGGER = 'CrmEntityFieldChangedTrigger';
 
 	private int $entityTypeId;
 
@@ -57,19 +60,59 @@ final class CrmModuleSettings extends ModuleSettings
 
 	public function getCreateDocumentTrigger(): ?TriggerDescriptorDto
 	{
-		$preset = $this->resolveCreateDocumentTriggerPreset();
-		if ($preset === null)
+		return $this->resolveDocumentTriggerDescriptor(self::CREATE_DOCUMENT_TRIGGER, \CBPCrmEntityCreateTrigger::class);
+	}
+
+	/**
+	 * A legacy template started on update is converted into the current trigger in the any-change mode:
+	 * CrmEntityEditTrigger is not created any more, it only survives in the nodes saved before.
+	 * The activity has to be loaded before its constants are read, hence the guard of its own.
+	 */
+	public function getEditDocumentTrigger(): ?TriggerDescriptorDto
+	{
+		if (!\CBPRuntime::getRuntime()->includeActivityFile(mb_strtolower(self::FIELD_CHANGED_DOCUMENT_TRIGGER)))
 		{
 			return null;
 		}
 
-		return new TriggerDescriptorDto(
-			triggerType: self::CREATE_DOCUMENT_TRIGGER,
-			title: is_string($preset['NAME'] ?? null) ? $preset['NAME'] : null,
-			icon: $preset['NODE_ICON'],
-			properties: $this->getCreateDocumentTriggerProperties($preset),
-			presetId: $preset['ID'],
+		return $this->resolveDocumentTriggerDescriptor(
+			self::FIELD_CHANGED_DOCUMENT_TRIGGER,
+			\CBPCrmEntityFieldChangedTrigger::class,
+			[\CBPCrmEntityFieldChangedTrigger::REACTION_MODE_ID => \CBPCrmEntityFieldChangedTrigger::MODE_ANY],
 		);
+	}
+
+	/**
+	 * CrmEntityEditTrigger exists only for nodes saved before the reaction mode became a property of
+	 * CrmEntityFieldChangedTrigger. Such a node reacts to any change of the document, so the upgraded node
+	 * gets exactly that mode instead of the class default.
+	 *
+	 * The DTO of the map came with the same bizproc version as the map itself, and it is checked here rather
+	 * than in the guard of the file: an older bizproc must cost this module only the upgrade, while the rest
+	 * of the settings keeps answering the automation that asks for them.
+	 *
+	 * @return array<string, TriggerUpgradeDto>
+	 */
+	public function getTriggerUpgradeMap(): array
+	{
+		if (!class_exists(TriggerUpgradeDto::class))
+		{
+			return [];
+		}
+
+		if (!\CBPRuntime::getRuntime()->includeActivityFile(mb_strtolower(self::FIELD_CHANGED_DOCUMENT_TRIGGER)))
+		{
+			return [];
+		}
+
+		return [
+			self::EDIT_DOCUMENT_TRIGGER => new TriggerUpgradeDto(
+				triggerType: self::FIELD_CHANGED_DOCUMENT_TRIGGER,
+				properties: [
+					\CBPCrmEntityFieldChangedTrigger::REACTION_MODE_ID => \CBPCrmEntityFieldChangedTrigger::MODE_ANY,
+				],
+			),
+		];
 	}
 
 	public function getDocumentStatusFieldName(): string
@@ -132,21 +175,41 @@ final class CrmModuleSettings extends ModuleSettings
 		Factory::doAutocompleteActivities($this->entityTypeId, $entityId);
 	}
 
-	private function resolveCreateDocumentTriggerPreset(): ?array
+	/**
+	 * @param class-string $triggerClass CBP* trigger class exposing getPresetByComplexDocumentType().
+	 * @param array<string, mixed> $additionalProperties node properties the slot presets on top of the preset ones.
+	 */
+	private function resolveDocumentTriggerDescriptor(
+		string $triggerType,
+		string $triggerClass,
+		array $additionalProperties = [],
+	): ?TriggerDescriptorDto
 	{
-		if (!\CBPRuntime::getRuntime()->includeActivityFile(mb_strtolower(self::CREATE_DOCUMENT_TRIGGER)))
+		if (!\CBPRuntime::getRuntime()->includeActivityFile(mb_strtolower($triggerType)))
 		{
 			return null;
 		}
 
-		return \CBPCrmEntityCreateTrigger::getPresetByComplexDocumentType($this->complexType);
+		$preset = $triggerClass::getPresetByComplexDocumentType($this->complexType);
+		if ($preset === null)
+		{
+			return null;
+		}
+
+		return new TriggerDescriptorDto(
+			triggerType: $triggerType,
+			title: is_string($preset['NAME'] ?? null) ? $preset['NAME'] : null,
+			icon: $preset['NODE_ICON'],
+			properties: $this->buildTriggerProperties($preset, $additionalProperties),
+			presetId: $preset['ID'],
+		);
 	}
 
-	private function getCreateDocumentTriggerProperties(?array $preset): array
+	private function buildTriggerProperties(array $preset, array $additionalProperties): array
 	{
 		$properties = is_array($preset['PROPERTIES'] ?? null) ? $preset['PROPERTIES'] : [];
 		$properties['Document'] = implode('@', $this->complexType);
 
-		return $properties;
+		return array_merge($properties, $additionalProperties);
 	}
 }

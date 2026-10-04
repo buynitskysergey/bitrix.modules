@@ -5,7 +5,6 @@ namespace Bitrix\Rest\V3\Schema;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Localization\LocalizableMessage;
 use Bitrix\Rest\V3\CacheManager;
-use Bitrix\Rest\V3\Dto\Generator;
 
 final class SchemaManager
 {
@@ -108,11 +107,9 @@ final class SchemaManager
 			return $methodDescription;
 		}
 
-		$generatedDtos = $this->controllerDataManager->getGeneratedDtosByModuleId($methodDescription->module);
-		foreach ($generatedDtos as $generatedDto)
-		{
-			Generator::generateByDto($generatedDto);
-		}
+		// Restore only the found module's DTOs. Do not materialize all modules on
+		// unknown-method lookups: getMethodDescriptions() is reachable before auth.
+		$this->controllerDataManager->ensureGeneratedDtoClassesLoaded($methodDescription->module);
 
 		return $methodDescription;
 	}
@@ -124,7 +121,32 @@ final class SchemaManager
 
 	public function getControllersByModules(): array
 	{
-		return $this->controllerDataManager->getData()['byModule'] ?? [];
+		$byModule = $this->controllerDataManager->getData()['byModule'] ?? [];
+		$this->ensureGeneratedDtoClassesLoadedForModules(...array_keys($byModule));
+
+		return $byModule;
+	}
+
+	/**
+	 * Materializes eval-generated DTO classes for trusted bulk consumers
+	 * (documentation, scope list). Must not be called from pre-auth method lookup.
+	 *
+	 * @param MethodDescription[] $methodDescriptions
+	 */
+	public function ensureGeneratedDtoClassesLoadedFromMethodDescriptions(array $methodDescriptions): void
+	{
+		$moduleIds = [];
+		foreach ($methodDescriptions as $methodDescription)
+		{
+			$moduleIds[$methodDescription->module] = $methodDescription->module;
+		}
+
+		$this->ensureGeneratedDtoClassesLoadedForModules(...array_values($moduleIds));
+	}
+
+	private function ensureGeneratedDtoClassesLoadedForModules(string ...$moduleIds): void
+	{
+		$this->controllerDataManager->ensureGeneratedDtoClassesLoaded(...$moduleIds);
 	}
 
 	private function getActionCacheKey(string $action): string

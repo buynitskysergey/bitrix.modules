@@ -7,9 +7,17 @@ namespace Bitrix\Bizproc\Internal;
 use Bitrix\Bizproc\Internal\Repository\Debugger\DebugRepository;
 use Bitrix\Bizproc\Internal\Repository\Debugger\DebugSessionRepository;
 use Bitrix\Bizproc\Internal\Repository\Debugger\DebugTraceRepository;
+use Bitrix\Bizproc\Internal\Repository\Access\AccessRepositoryInterface;
+use Bitrix\Bizproc\Internal\Repository\AiAgent\ManagedAgentInstanceRepositoryInterface;
+use Bitrix\Bizproc\Internal\Repository\AiAgent\ManagedAgentResourceRepositoryInterface;
+use Bitrix\Bizproc\Internal\Repository\Mapper\AccessPermissionMapper;
+use Bitrix\Bizproc\Internal\Repository\Mapper\AccessRoleMapper;
+use Bitrix\Bizproc\Internal\Repository\Mapper\ManagedAgentInstanceMapper;
+use Bitrix\Bizproc\Internal\Repository\Mapper\ManagedAgentResourceMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\DebugOrmMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\DebugSessionOrmMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\DebugTraceOrmMapper;
+use Bitrix\Bizproc\Internal\Repository\Mapper\DataViewMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\StorageFieldMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\StorageItemMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\StorageTypeMapper;
@@ -18,6 +26,7 @@ use Bitrix\Bizproc\Internal\Repository\Mapper\TaskArchiveTasksMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\TaskMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\TaskUserMapper;
 use Bitrix\Bizproc\Internal\Repository\Mapper\WorkflowStateMapper;
+use Bitrix\Bizproc\Internal\Repository\DataViewRepository\DataViewRepositoryInterface;
 use Bitrix\Bizproc\Internal\Repository\StorageFieldRepository\StorageFieldRepositoryInterface;
 use Bitrix\Bizproc\Internal\Repository\StorageItemRepository\StorageItemRepositoryInterface;
 use Bitrix\Bizproc\Internal\Repository\StorageTypeRepository\StorageTypeRepositoryInterface;
@@ -76,6 +85,21 @@ class Container
 		return self::getService('bizproc.storage.type.repository');
 	}
 
+	public static function getAccessRepository(): ?AccessRepositoryInterface
+	{
+		return self::getService('bizproc.access.repository');
+	}
+
+	public static function getAccessRoleMapper(): ?AccessRoleMapper
+	{
+		return self::getService('bizproc.access.repository.mapper.role');
+	}
+
+	public static function getAccessPermissionMapper(): ?AccessPermissionMapper
+	{
+		return self::getService('bizproc.access.repository.mapper.permission');
+	}
+
 	public static function getStorageItemRepository(): ?StorageItemRepositoryInterface
 	{
 		return self::getService('bizproc.storage.item.repository');
@@ -84,6 +108,16 @@ class Container
 	public static function getStorageFieldRepository(): ?StorageFieldRepositoryInterface
 	{
 		return self::getService('bizproc.storage.field.repository');
+	}
+
+	public static function getDataViewRepository(): ?DataViewRepositoryInterface
+	{
+		return self::getService('bizproc.storage.data_view.repository');
+	}
+
+	public static function getDataViewRepositoryMapper(): ?DataViewMapper
+	{
+		return self::getService('bizproc.storage.data_view.repository.mapper');
 	}
 
 	public static function getWorkflowTemplateRepository(): ?WorkflowTemplateRepository
@@ -214,5 +248,25 @@ class Container
 	public static function getStorageLimitsService(): ?StorageLimitsService
 	{
 		return self::getService('bizproc.service.storage.limits');
+	}
+
+	public static function getManagedAgentInstanceRepositoryMapper(): ?ManagedAgentInstanceMapper
+	{
+		return self::getService('bizproc.ai_agent.managed_instance.repository.mapper');
+	}
+
+	public static function getManagedAgentInstanceRepository(): ?ManagedAgentInstanceRepositoryInterface
+	{
+		return self::getService('bizproc.ai_agent.managed_instance.repository');
+	}
+
+	public static function getManagedAgentResourceRepositoryMapper(): ?ManagedAgentResourceMapper
+	{
+		return self::getService('bizproc.ai_agent.managed_resource.repository.mapper');
+	}
+
+	public static function getManagedAgentResourceRepository(): ?ManagedAgentResourceRepositoryInterface
+	{
+		return self::getService('bizproc.ai_agent.managed_resource.repository');
 	}
 }

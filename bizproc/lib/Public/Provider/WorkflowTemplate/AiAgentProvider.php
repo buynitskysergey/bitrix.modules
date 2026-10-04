@@ -2,13 +2,58 @@
 
 namespace Bitrix\Bizproc\Public\Provider\WorkflowTemplate;
 
+use Bitrix\Bizproc\Api\Enum\ErrorMessage;
 use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\AiAgentRepository;
+use Bitrix\Main\Result;
+use CBPWorkflowTemplateUser;
 
 class AiAgentProvider
 {
+	/**
+	 * Stable, tariff-independent error code emitted when the current user may not launch an
+	 * already launched AI-agent copy owned by another user. Single source of truth for consumers.
+	 */
+	public const LAUNCH_ACCESS_DENIED_CODE = 'AI_AGENT_START_ACCESS_DENIED';
+
 	public function __construct(
 		private readonly AiAgentRepository $aiAgentRepository,
 	) {}
+
+	/**
+	 * Pre-check whether the current user may launch a system AI-agent before the setup wizard opens.
+	 *
+	 * A null id (no copy yet) always passes (first launch). For an existing copy the launch is allowed
+	 * only to its owner or an admin (via canManageLaunchedTemplate), otherwise a Result with the stable
+	 * LAUNCH_ACCESS_DENIED_CODE is returned. User id and admin flag are resolved server-side
+	 * (CBPWorkflowTemplateUser); the error exposes no identifiers in its message or customData.
+	 *
+	 * @param int|null $launchedTemplateId Id of the already found launched copy, or null when none exists.
+	 */
+	public function checkLaunchAccess(?int $launchedTemplateId = null): Result
+	{
+		$result = new Result();
+
+		if ($launchedTemplateId === null)
+		{
+			return $result;
+		}
+
+		$currentUser = new CBPWorkflowTemplateUser(CBPWorkflowTemplateUser::CurrentUser);
+		$canManage = $this->canManageLaunchedTemplate(
+			$launchedTemplateId,
+			(int)$currentUser->getId(),
+			$currentUser->isAdmin(),
+		);
+
+		if (!$canManage)
+		{
+			$result->addError(
+				ErrorMessage::START_ACCESS_DENIED->getError([], self::LAUNCH_ACCESS_DENIED_CODE),
+			);
+		}
+
+		return $result;
+	}
 
 	/**
 	 * @param list<int> $ids
@@ -18,10 +63,16 @@ class AiAgentProvider
 	public function getOnlyExistAndAllowedToDeleteTemplateIds(
 		array $ids,
 		int $userIdDeleteBy,
-		bool $isUserAdmin=false,
+		bool $isUserAdmin = false,
+		bool $ignoreOwner = false,
 	): array
 	{
-		return $this->aiAgentRepository->getOnlyExistAndAllowedToDeleteTemplateIds($ids, $isUserAdmin, $userIdDeleteBy);
+		return $this->aiAgentRepository->getOnlyExistAndAllowedToDeleteTemplateIds(
+			$ids,
+			$isUserAdmin,
+			$userIdDeleteBy,
+			$ignoreOwner,
+		);
 	}
 
 	/**
@@ -49,6 +100,19 @@ class AiAgentProvider
 			$isUserAdmin,
 			$requireStarted,
 		);
+	}
+
+	/**
+	 * Actuality predicate for a restart target (API-01 ERR-002). True only when $templateId is
+	 * still a started launched AI-agent copy (TYPE=Nodes, SYSTEM_CODE IS NULL, ACTIVATED_AT set),
+	 * regardless of owner. The restart action uses it to tell a stale template (deleted, or changed
+	 * so it is no longer a restartable launched copy) from a genuine access denial: staleness is
+	 * existence only, ownership is the separate canManageLaunchedTemplate() check. Bypasses the
+	 * owner filter (isUserAdmin=true) precisely because it must not fold ownership into staleness.
+	 */
+	public function isRestartableLaunchedTemplate(int $templateId): bool
+	{
+		return $this->canManageLaunchedTemplate($templateId, 0, isUserAdmin: true, requireStarted: true);
 	}
 
 	/**

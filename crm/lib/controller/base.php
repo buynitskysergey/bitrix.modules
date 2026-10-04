@@ -165,31 +165,51 @@ abstract class Base extends Controller
 		Field\Collection $fields
 	): void
 	{
-		foreach($filter as $name => &$value)
+		$fieldTypesByName = [];
+		foreach ($fields as $field)
 		{
-			if(is_array($value))
+			$type = $field->getType();
+			if ($type === Field::TYPE_DATE || $type === Field::TYPE_DATETIME)
 			{
-				$this->prepareDateTimeFieldsForFilter($value, $fields);
-				continue;
-			}
-			foreach ($fields as $field)
-			{
-				if($this->isCorrectFieldName($name, $field->getName()))
-				{
-					$type = $field->getType();
-					if ($type === Field::TYPE_DATE)
-					{
-						$value = \CRestUtil::unConvertDate($value);
-						break;
-					}
-					if ($type === Field::TYPE_DATETIME)
-					{
-						$value = \CRestUtil::unConvertDateTime($value);
-						break;
-					}
-				}
+				$fieldTypesByName[$field->getName()] = $type;
 			}
 		}
+
+		$this->convertDateTimeFilterValues($filter, $fieldTypesByName);
+	}
+
+	/**
+	 * Converts REST date/datetime filter values (ISO-8601) to the internal format.
+	 *
+	 * @param array<string, string> $fieldTypesByName field name => Field::TYPE_DATE|Field::TYPE_DATETIME
+	 */
+	protected function convertDateTimeFilterValues(array &$filter, array $fieldTypesByName): void
+	{
+		foreach ($filter as $name => &$value)
+		{
+			if (is_array($value))
+			{
+				$this->convertDateTimeFilterValues($value, $fieldTypesByName);
+				continue;
+			}
+			foreach ($fieldTypesByName as $fieldName => $type)
+			{
+				if (!$this->isCorrectFieldName($name, $fieldName))
+				{
+					continue;
+				}
+				if ($type === Field::TYPE_DATE)
+				{
+					$value = \CRestUtil::unConvertDate($value);
+				}
+				elseif ($type === Field::TYPE_DATETIME)
+				{
+					$value = \CRestUtil::unConvertDateTime($value);
+				}
+				break;
+			}
+		}
+		unset($value);
 	}
 
 	protected function isCorrectFieldName(string $filterName, string $field): bool

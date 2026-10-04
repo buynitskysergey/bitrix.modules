@@ -6,6 +6,7 @@ use Bitrix\Main;
 use Bitrix\Catalog\Product;
 use Bitrix\Catalog\VatTable;
 use Bitrix\Sale\Internals;
+use Bitrix\Sale\PriceMaths;
 
 class CatalogJSProductForm
 {
@@ -29,41 +30,26 @@ class CatalogJSProductForm
 	}
 
 	/**
-	 * Brings the fields to a consistent state.
+	 * Pick the JS field that already lives in the same coordinate system as
+	 * `basePrice` (= Sale's BasketItem.PRICE coords).
 	 *
-	 * Checks:
-	 * - discount price - must be equals difference base price and price;
-	 *
-	 * @param array $fields
-	 *
-	 * @return array
+	 * - taxIncluded='Y': basePrice and `price` are gross.
+	 * - taxIncluded='N': basePrice and `priceExclusive` are net (calculator's
+	 *   `price` for vatIncluded=N is brutto and does NOT match basePrice coords).
 	 */
-	private static function consistentFields(array $fields): array
+	private static function resolvePriceInBaseCoords(array $fields)
 	{
-		// prices
-		if (!empty($fields['discount']))
+		$taxIncluded = isset($fields['taxIncluded'])
+			? ($fields['taxIncluded'] === 'N' ? 'N' : 'Y')
+			: 'Y'
+		;
+
+		if ($taxIncluded === 'Y')
 		{
-			$price = (float)($fields['priceExclusive'] ?? $fields['price']);
-			$basePrice = (float)$fields['basePrice'];
-			$discountPrice = (float)$fields['discount'];
-
-			$realDiscountPrice = $basePrice - $price;
-			if ($discountPrice !== $realDiscountPrice)
-			{
-				$fields['discount'] = $realDiscountPrice;
-
-				if (isset($fields['discountRate']))
-				{
-					$fields['discountRate'] =
-						$basePrice > 0
-							? $realDiscountPrice / $basePrice * 100
-							: 0
-					;
-				}
-			}
+			return $fields['price'] ?? $fields['priceExclusive'] ?? 0;
 		}
 
-		return $fields;
+		return $fields['priceExclusive'] ?? $fields['price'] ?? 0;
 	}
 
 	/**
@@ -73,10 +59,8 @@ class CatalogJSProductForm
 	 */
 	protected static function obtainProductFields($fields) : array
 	{
-		$fields = self::consistentFields($fields);
-
-		$priceExclusive = $fields['priceExclusive'] ?? $fields['price'] ?? 0;
-		$basePrice = $fields['basePrice'] ?? 0;
+		$priceInBaseCoords = (float)self::resolvePriceInBaseCoords($fields);
+		$basePrice = (float)($fields['basePrice'] ?? 0);
 
 		$item = [
 			'QUANTITY' => (float)$fields['quantity'] > 0 ? (float)$fields['quantity'] : 1,
@@ -84,7 +68,7 @@ class CatalogJSProductForm
 			'BASKET_CODE' => $fields['code'] ?? '',
 			'PRODUCT_ID' => $fields['skuId'] ?? $fields['productId'] ?? 0,
 			'BASE_PRICE' => $basePrice,
-			'PRICE' => $priceExclusive,
+			'PRICE' => $priceInBaseCoords,
 			'DISCOUNT_PRICE' => 0,
 			'ORIGIN_BASKET_ID' => (int)($fields['additionalFields']['originBasketId'] ?? 0),
 			'ORIGIN_PRODUCT_ID' => (int)($fields['additionalFields']['originProductId'] ?? 0),
@@ -168,20 +152,11 @@ class CatalogJSProductForm
 			$item['PRODUCT_PROVIDER_CLASS'] = Product\Basket::getDefaultProviderName();
 		}
 
-		if (
-			empty($fields['discount'])
-			&& abs($priceExclusive - $basePrice) > 1e-10
-			&& (float)$basePrice > 0
-		)
+		$realDiscountPrice = PriceMaths::roundPrecision($basePrice - $priceInBaseCoords);
+		if ($realDiscountPrice > 0 && $basePrice > 0)
 		{
-			$fields['discount'] = $basePrice - $priceExclusive;
-		}
-
-		if ($fields['discount'] > 0)
-		{
-			$item['DISCOUNT_PRICE'] = $fields['discount'];
 			$item['CUSTOM_PRICE'] = 'Y';
-			$item['PRICE'] = $item['BASE_PRICE'] - $item['DISCOUNT_PRICE'];
+			$item['DISCOUNT_PRICE'] = $realDiscountPrice;
 		}
 
 		if (isset($fields['properties']))

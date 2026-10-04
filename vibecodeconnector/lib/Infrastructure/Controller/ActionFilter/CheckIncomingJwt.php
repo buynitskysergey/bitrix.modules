@@ -72,8 +72,11 @@ final class CheckIncomingJwt extends Base
 	): void {
 		try
 		{
-			ServiceLocator::getInstance()->get(IncomingJwtLog::class)->record(
-				jwt: $jwt,
+			$jwtLog = ServiceLocator::getInstance()->get(IncomingJwtLog::class);
+			$jwtLog->record(
+				hasToken: $jwt !== '',
+				claimsTrusted: $error === null,
+				technicalContext: $jwtLog->createTechnicalContext($jwt),
 				error: $error,
 				action: $action->getController()::class . '::' . $action->getName(),
 				sourceIp: $this->resolveSourceIp($request),

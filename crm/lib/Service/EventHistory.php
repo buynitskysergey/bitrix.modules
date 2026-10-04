@@ -276,7 +276,7 @@ class EventHistory
 		// Empty strings by default because old API (CCrmEvent) was using them instead of NULL value
 		return EventTable::createObject(
 			[
-				'CREATED_BY_ID' => $context->getUserId(),
+				'CREATED_BY_ID' => $this->resolveAuthorId($context),
 				'EVENT_ID' => '',
 				'EVENT_NAME' => $this->getDefaultEventName($eventType),
 				'EVENT_TYPE' => $eventType,
@@ -291,6 +291,35 @@ class EventHistory
 	protected function getDefaultEventName(int $eventType): string
 	{
 		return $this->getEventTypeCaption($eventType);
+	}
+
+	/**
+	 * Resolves the author for an event-history record from the context, by the
+	 * same rule as the timeline author resolution: the explicitly set context
+	 * user wins; the ambient current user is trusted only in interactive
+	 * scopes; otherwise the record is attributed to the portal system user.
+	 *
+	 * @param Context $context
+	 * @return int
+	 */
+	protected function resolveAuthorId(Context $context): int
+	{
+		$userId = (int)($context->getExplicitUserId() ?? 0);
+		if ($userId > 0)
+		{
+			return $userId;
+		}
+
+		if (!$context->isNonInteractiveScope())
+		{
+			$ambientUserId = $context->getUserId();
+			if ($ambientUserId > 0)
+			{
+				return $ambientUserId;
+			}
+		}
+
+		return (int)SystemUser::getDefaultAuthorId();
 	}
 
 	/**
@@ -312,7 +341,7 @@ class EventHistory
 				'ENTITY_TYPE' => '',
 				'ENTITY_ID' => 0,
 				'ENTITY_FIELD' => '',
-				'ASSIGNED_BY_ID' => $context->getUserId(),
+				'ASSIGNED_BY_ID' => $this->resolveAuthorId($context),
 			]
 		);
 	}

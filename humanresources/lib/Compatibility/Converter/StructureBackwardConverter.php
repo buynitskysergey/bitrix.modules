@@ -2,9 +2,14 @@
 
 namespace Bitrix\HumanResources\Compatibility\Converter;
 
+use Bitrix\HumanResources\Builder\Structure\Filter\Column\IdFilter;
+use Bitrix\HumanResources\Builder\Structure\Filter\NodeFilter;
+use Bitrix\HumanResources\Builder\Structure\Filter\NodeMemberFilter;
+use Bitrix\HumanResources\Builder\Structure\NodeMemberDataBuilder;
 use Bitrix\HumanResources\Compatibility\Adapter\StructureBackwardAdapter;
 use Bitrix\HumanResources\Compatibility\Utils\DepartmentBackwardAccessCode;
 use Bitrix\HumanResources\Enum\LoggerEntityType;
+use Bitrix\HumanResources\Enum\NodeActiveFilter;
 use Bitrix\HumanResources\Exception\CompanyStructureNotFoundException;
 use Bitrix\HumanResources\Exception\CreationFailedException;
 use Bitrix\HumanResources\Exception\ElementNotFoundException;
@@ -596,10 +601,19 @@ class StructureBackwardConverter
 
 		foreach ($nodes as $node)
 		{
-			$employees = Container::getNodeMemberService()->getAllEmployees(
-				nodeId: $node->id,
-				onlyActive: false,
-			)->filter(static fn ($nodeMember) => $nodeMember->active === false );
+			// virtual users must be reactivated too: their membership backs app permissions
+			$employees = NodeMemberDataBuilder::createWithFilter(
+				new NodeMemberFilter(
+					entityType: MemberEntityType::USER,
+					nodeFilter: new NodeFilter(
+						idFilter: IdFilter::fromId($node->id),
+						structureId: $node->structureId,
+						active: NodeActiveFilter::ALL,
+					),
+					active: false,
+					withVirtualUsers: true,
+				),
+			)->getAll();
 
 
 			foreach ($employees as $employee)

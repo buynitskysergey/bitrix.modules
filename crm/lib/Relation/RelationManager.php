@@ -18,7 +18,6 @@ use Bitrix\Crm\Relation;
 use Bitrix\Crm\RelationIdentifier;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Settings\InvoiceSettings;
-use Bitrix\Crm\Settings\QuoteSettings;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Result;
@@ -64,10 +63,7 @@ class RelationManager
 				\CCrmOwnerType::Deal => \CCrmOwnerType::Deal,
 				\CCrmOwnerType::Order => \CCrmOwnerType::Order,
 			];
-			if (QuoteSettings::getCurrent()->isFactoryEnabled())
-			{
-				$entityTypeIds[\CCrmOwnerType::Quote] = \CCrmOwnerType::Quote;
-			}
+			$entityTypeIds[\CCrmOwnerType::Quote] = \CCrmOwnerType::Quote;
 			if (InvoiceSettings::getCurrent()->isSmartInvoiceEnabled())
 			{
 				$entityTypeIds[\CCrmOwnerType::SmartInvoice] = \CCrmOwnerType::SmartInvoice;
@@ -153,6 +149,11 @@ class RelationManager
 		$this->customRelations = null;
 	}
 
+	protected function cleanRestCache(): void
+	{
+		\Bitrix\Crm\V2\Internal\Integration\Rest\V3\CacheManager::cleanAll();
+	}
+
 	/**
 	 * @internal
 	 */
@@ -191,7 +192,13 @@ class RelationManager
 
 		$this->dropRelationsCache($relation->getIdentifier());
 
-		return $this->updateEntityObject($relation->getSettings(), $entityObject);
+		$bindResult = $this->updateEntityObject($relation->getSettings(), $entityObject);
+		if ($bindResult->isSuccess())
+		{
+			$this->cleanRestCache();
+		}
+
+		return $bindResult;
 	}
 
 	public function updateTypesBinding(Relation $relation): Result
@@ -231,8 +238,13 @@ class RelationManager
 		}
 
 		$this->dropRelationsCache($relation->getIdentifier());
+		$bindResult = $this->updateEntityObject($relation->getSettings(), $entityObject);
+		if ($bindResult->isSuccess())
+		{
+			$this->cleanRestCache();
+		}
 
-		return $this->updateEntityObject($relation->getSettings(), $entityObject);
+		return $bindResult;
 	}
 
 	/**
@@ -266,8 +278,13 @@ class RelationManager
 		}
 
 		$this->dropRelationsCache($identifier);
+		$bindResult = $this->deleteRelation($identifier);
+		if ($bindResult->isSuccess())
+		{
+			$this->cleanRestCache();
+		}
 
-		return $this->deleteRelation($identifier);
+		return $bindResult;
 	}
 
 	/**
@@ -855,6 +872,11 @@ class RelationManager
 		$relations = new Relation\Collection();
 		foreach ($collection as $entityObject)
 		{
+			if ($entityObject->getSrcTypeId() === $entityObject->getDstTypeId())
+			{
+				continue;
+			}
+
 			$relation = new Relation(
 				new RelationIdentifier(
 					$entityObject->getSrcTypeId(),

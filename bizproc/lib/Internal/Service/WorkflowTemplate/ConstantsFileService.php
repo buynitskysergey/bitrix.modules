@@ -4,6 +4,8 @@ namespace Bitrix\Bizproc\Internal\Service\WorkflowTemplate;
 
 use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\FileRepository;
+use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateChangeTable;
+use Bitrix\Main\DB\SqlQueryException;
 use Bitrix\Main\Result;
 
 class ConstantsFileService
@@ -60,9 +62,47 @@ class ConstantsFileService
 
 	public function update(int $templateId, array $constants): Result
 	{
-		$fileIds = $this->getFileIdsFromConstants($constants);
+		$fileIds = array_merge(
+			$this->getFileIdsFromConstants($constants),
+			$this->getFileIdsKeptByHistory($templateId),
+		);
 
-		return $this->fileRepository->syncByTemplateId($templateId, $fileIds);
+		return $this->fileRepository->syncByTemplateId($templateId, array_values(array_unique($fileIds)));
+	}
+
+	/**
+	 * A file dropped from the live template is still the body of every published version made with it,
+	 * so it is released only when the last of those versions leaves the journal.
+	 *
+	 * @return list<int>
+	 */
+	private function getFileIdsKeptByHistory(int $templateId): array
+	{
+		try
+		{
+			$rows = WorkflowTemplateChangeTable::query()
+				->setSelect(['SNAPSHOT'])
+				->where('TEMPLATE_ID', $templateId)
+				->whereNotNull('SNAPSHOT')
+				->fetchAll()
+			;
+		}
+		catch (SqlQueryException)
+		{
+			return [];
+		}
+
+		$fileIds = [];
+		foreach ($rows as $row)
+		{
+			$constants = $row['SNAPSHOT']['CONSTANTS'] ?? null;
+			if (is_array($constants))
+			{
+				$fileIds = array_merge($fileIds, $this->getFileIdsFromConstants($constants));
+			}
+		}
+
+		return $fileIds;
 	}
 
 	public function delete(int $templateId): Result

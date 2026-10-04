@@ -214,6 +214,7 @@ class CAdminUiList extends CAdminList
 									if (preg_match_all("/(.*?)\[(.*?)]/", $value["name"], $listMatchKeys))
 									{
 										$listPreparedKeys = [];
+										$hasRawKey = false;
 										foreach ($listMatchKeys as $matchKeys)
 										{
 											foreach ($matchKeys as $matchKey)
@@ -224,13 +225,36 @@ class CAdminUiList extends CAdminList
 												}
 												if (!str_contains($matchKey, "[") && !str_contains($matchKey, "]"))
 												{
+													// drop the whole element if a reconstructed key segment is a raw-SQL marker
+													if (($c = substr($matchKey, 0, 1)) == '~' || $c == '=')
+													{
+														$hasRawKey = true;
+														break 2;
+													}
 													$listPreparedKeys[] = $matchKey;
 												}
 											}
 										}
+										if ($hasRawKey)
+										{
+											continue;
+										}
+										// force the write target to FIELDS[$id] of the current row;
+										// the FIELDS and id segments sent by the client are untrusted
+										if (($listPreparedKeys[0] ?? null) !== "FIELDS")
+										{
+											continue;
+										}
+										array_splice($listPreparedKeys, 0, 2);
+										if (!$listPreparedKeys)
+										{
+											continue;
+										}
 										$listPreparedKeys[] = $value["value"];
-										$customFields = array_replace_recursive($customFields, $this->prepareCustomKey(
-											array_shift($listPreparedKeys), $listPreparedKeys));
+										$customFields["FIELDS"][$id] = array_replace_recursive(
+											$customFields["FIELDS"][$id] ?? [],
+											$this->prepareCustomKey(array_shift($listPreparedKeys), $listPreparedKeys)
+										);
 									}
 								}
 								unset($arrays[$i]["FIELDS"][$id][$key]);

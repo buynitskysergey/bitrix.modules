@@ -12,6 +12,7 @@ use Bitrix\Rest\Internal\Integration\HumanResources\MemberService;
 use Bitrix\Rest\Internal\Repository\SystemUser\SystemUserRepository;
 use Bitrix\Rest\Internal\Repository\User\UserRepository;
 use Bitrix\Rest\Internal\Service\Security\SecurityAuditLogger;
+use Bitrix\Rest\Public\Contract\SystemUser\SystemUserAuth;
 use Bitrix\Rest\Public\Event\SystemUser\SystemUserActivatedEvent;
 use Bitrix\Rest\Public\Event\SystemUser\SystemUserCreatedEvent;
 use Bitrix\Rest\Public\Event\SystemUser\SystemUserDeactivatedEvent;
@@ -83,7 +84,7 @@ final class SystemUserCreationService
 			languageId: $originalUser->getLanguageId(),
 			groupIds: $groupIds,
 			adminNotes: $notes,
-			externalAuthId: 'rest_system',
+			externalAuthId: SystemUserAuth::EXTERNAL_AUTH_ID,
 		);
 
 		$this->userRepository->save($newUser);

@@ -3,20 +3,20 @@
 namespace Bitrix\Mobile\AppTabs;
 
 use Bitrix\Crm\Service\Container;
+use Bitrix\Intranet\Util;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Mobile\Context;
 use Bitrix\Mobile\Tab\Tabable;
 use Bitrix\Mobile\Tab\Utils;
 use Bitrix\MobileApp\Janative\Manager;
-use Bitrix\MobileApp\Mobile;
 
 class Crm implements Tabable
 {
 	private const INITIAL_COMPONENT = 'crm:crm.tabs';
 
 	/** @var Context $context */
-	private $context;
+	private Context $context;
 
 	public function isAvailable(): bool
 	{
@@ -28,12 +28,12 @@ class Crm implements Tabable
 			return false;
 		}
 
-		if (!\Bitrix\Crm\Service\Container::getInstance()->getIntranetToolsManager()->checkCrmAvailability())
+		if (!Container::getInstance()->getIntranetToolsManager()->checkCrmAvailability())
 		{
 			return false;
 		}
 
-		if (Loader::includeModule('intranet') && !\Bitrix\Intranet\Util::isIntranetUser())
+		if (Loader::includeModule('intranet') && !Util::isIntranetUser((int)$this->context->userId))
 		{
 			return false;
 		}
@@ -54,24 +54,6 @@ class Crm implements Tabable
 			'imageName' => 'crm',
 			'badgeCode' => 'crm_all_no_orders',
 			'component' => $this->getComponentParams(),
-		];
-	}
-
-	private function getComponentParams(): array
-	{
-		return [
-			'name' => 'JSStackComponent',
-			'title' => Loc::getMessage('TAB_NAME_CRM'),
-			'componentCode' => self::INITIAL_COMPONENT,
-			'scriptPath' => Manager::getComponentPath(self::INITIAL_COMPONENT),
-			'rootWidget' => [
-				'name' => 'layout',
-				'settings' => [
-					'objectName' => 'layout',
-					'useLargeTitleMode' => true,
-				],
-			],
-			'params' => [],
 		];
 	}
 
@@ -143,5 +125,23 @@ class Crm implements Tabable
 	public function getIconId(): string
 	{
 		return $this->getId();
+	}
+
+	private function getComponentParams(): array
+	{
+		return [
+			'name' => 'JSStackComponent',
+			'title' => Loc::getMessage('TAB_NAME_CRM'),
+			'componentCode' => self::INITIAL_COMPONENT,
+			'scriptPath' => Manager::getComponentPath(self::INITIAL_COMPONENT),
+			'rootWidget' => [
+				'name' => 'layout',
+				'settings' => [
+					'objectName' => 'layout',
+					'useLargeTitleMode' => true,
+				],
+			],
+			'params' => [],
+		];
 	}
 }

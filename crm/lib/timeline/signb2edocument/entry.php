@@ -37,6 +37,8 @@ class Entry extends TimelineEntry
 	public const TYPE_CATEGORY_MEMBER_STOPPED_BY_EDITOR = 21; // log
 	public const TYPE_CATEGORY_MEMBER_SIGNED_DELIVERED  = 22; // log
 	public const TYPE_CATEGORY_CONFIGURATION_ERROR = 23; // log
+	public const TYPE_CATEGORY_ANNULLED = 24; // log
+	public const TYPE_CATEGORY_ANNULMENT_CANCELED = 25; // log
 
 	public static function create(array $params): ?int
 	{
@@ -107,7 +109,7 @@ class Entry extends TimelineEntry
 			}
 		}
 
-		self::registerBindings($id, $bindings);
+		self::registerBindings($id, $bindings, $created);
 
 		return $id;
 	}

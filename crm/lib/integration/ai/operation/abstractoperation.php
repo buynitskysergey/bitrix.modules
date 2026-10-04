@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Integration\AI\Operation;
 
 use Bitrix\AI\Context;
 use Bitrix\AI\Engine;
+use Bitrix\AI\Engine\IEngine;
 use Bitrix\AI\Payload\IPayload;
 use Bitrix\AI\Tuning\Manager;
 use Bitrix\Crm\Badge;
@@ -63,6 +64,16 @@ abstract class AbstractOperation
 	private ?string $scenario;
 	private ?string $contextLanguageId;
 	private ?int $nextTypeIdOverride = null;
+	private array $contextExtra = [];
+
+	/**
+	 * The clicked entity of a manual FillFields launch, carried through the async engine context so
+	 * it survives the Transcribe/Summarize→FillFields boundary (ALG-01, single-target).
+	 * Set per step by PipelineExecutor::launchStep from StepContext::getManualTarget(); serialized into
+	 * the engine Context additionalInfo (see getContextAdditionalInfo) and re-read on the callback by
+	 * EventHandler::extractFillTargetFromEngineContext. Null for the auto path.
+	 */
+	private ?ItemIdentifier $manualFillTarget = null;
 
 	public function __construct(
 		protected ItemIdentifier $target,
@@ -79,12 +90,20 @@ abstract class AbstractOperation
 
 	public static function isAccessGranted(int $userId, ItemIdentifier $target): bool
 	{
-		return $userId > 0
-			&& in_array(
-				$target->getEntityTypeId(),
+		if ($userId <= 0)
+		{
+			return false;
+		}
+
+		$entityTypeId = $target->getEntityTypeId();
+
+		// Any Factory-based CRM entity is a valid fill target (single source of truth).
+		// Activity and CopilotCallAssessment stay allowed as technical step targets
+		// (transcription/summary target the Activity, scoring targets the assessment).
+		return AIManager::isEntityTypeSupported($entityTypeId)
+			|| in_array(
+				$entityTypeId,
 				[
-					CCrmOwnerType::Lead,
-					CCrmOwnerType::Deal,
 					CCrmOwnerType::Activity,
 					CCrmOwnerType::CopilotCallAssessment,
 				],
@@ -129,6 +148,25 @@ abstract class AbstractOperation
 		return $result;
 	}
 
+	private static function isHarmlessDuplicateResult(\Bitrix\Main\Result $checkJobsResult): bool
+	{
+		$errors = $checkJobsResult->getErrors();
+		if (empty($errors))
+		{
+			return false;
+		}
+
+		foreach ($errors as $error)
+		{
+			if ($error->getCode() !== ErrorCode::JOB_ALREADY_EXISTS)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	protected static function findDuplicateJob(ItemIdentifier $target, int $parentId): ?EO_Queue
 	{
 		return QueueTable::query()
@@ -157,6 +195,19 @@ abstract class AbstractOperation
 	public function setScenario(string $scenario): self
 	{
 		$this->scenario = $scenario;
+
+		return $this;
+	}
+
+	/**
+	 * Carries the clicked entity of a manual FillFields launch into the engine context so it survives
+	 * the async step boundary. Re-set on every step (Transcribe/Summarize/FillFields) so the last hop
+	 * before FillFields still carries it. Null clears it (auto path).
+	 * @see self::$manualFillTarget
+	 */
+	public function setManualFillTarget(?ItemIdentifier $target): self
+	{
+		$this->manualFillTarget = $target;
 
 		return $this;
 	}
@@ -221,6 +272,13 @@ abstract class AbstractOperation
 		return $this;
 	}
 
+	public function setContextExtra(string $key, mixed $value): self
+	{
+		$this->contextExtra[$key] = $value;
+
+		return $this;
+	}
+
 	public function launch(): Result
 	{
 		AIManager::logger()->debug(
@@ -252,7 +310,7 @@ abstract class AbstractOperation
 
 			$result->addError(ErrorCode::getLicenseNotAcceptedError());
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -266,7 +324,7 @@ abstract class AbstractOperation
 
 			$result->addError(ErrorCode::getAINotAvailableError());
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -290,7 +348,7 @@ abstract class AbstractOperation
 					: ErrorCode::getAIScenarioError()
 			);
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -309,7 +367,7 @@ abstract class AbstractOperation
 
 			$result->addError(\Bitrix\Crm\Controller\ErrorCode::getAccessDeniedError());
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -323,7 +381,7 @@ abstract class AbstractOperation
 
 			$result->addError(ErrorCode::getNotSuitableTargetError());
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -348,7 +406,7 @@ abstract class AbstractOperation
 				'isAiMarketplaceAppsExist' => $this->isAiMarketplaceAppsExist(),
 			]));
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -369,7 +427,12 @@ abstract class AbstractOperation
 
 			$result->addErrors($checkJobsResult->getErrors());
 
-			static::notifyAboutJobError($result, false);
+			// A harmless duplicate (operation already running/finished) must not be reported to the
+			// timeline as a scoring failure - only genuine failures (e.g. retries exceeded) are.
+			if (!self::isHarmlessDuplicateResult($checkJobsResult))
+			{
+				static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
+			}
 
 			return $result;
 		}
@@ -393,7 +456,7 @@ abstract class AbstractOperation
 
 			$result->addErrors($aiPayloadResult->getErrors());
 
-			static::notifyAboutJobError($result, false);
+			static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 			return $result;
 		}
@@ -499,7 +562,7 @@ abstract class AbstractOperation
 					static::notifyAboutLimitExceededError($result);
 				}
 
-				static::notifyAboutJobError($result, false);
+				static::notifyAboutJobError($result, false, target: $this->manualFillTarget);
 
 				return $result;
 			}
@@ -522,12 +585,12 @@ abstract class AbstractOperation
 
 			$result->addError($error);
 
-			static::notifyAboutJobError($result);
+			static::notifyAboutJobError($result, target: $this->manualFillTarget);
 
 			return $result;
 		}
 
-		self::logOperationProgress('operationLaunched', $this->target, (string)$hash, $this->parentJobId);
+		$this->logOperationLaunched((string)$hash, $this->parentJobId);
 
 		if ($previousJob instanceof EO_Queue)
 		{
@@ -578,7 +641,7 @@ abstract class AbstractOperation
 
 			$result->addErrors($dbSaveResult->getErrors());
 
-			static::notifyAboutJobError($result, true, false);
+			static::notifyAboutJobError($result, true, false, $this->manualFillTarget);
 
 			return $result;
 		}
@@ -656,10 +719,23 @@ abstract class AbstractOperation
 
 	protected function getContextAdditionalInfo(): array
 	{
-		return [
+		$additionalInfo = [
 			'myCompanyName' => Container::getInstance()->getCompanyBroker()->getTitle(EntityLink::getDefaultMyCompanyId()),
 			'scenario' => $this->scenario,
+			...$this->contextExtra,
 		];
+
+		// Manual FillFields target rides the same channel as `scenario` across the async boundary
+		// (ALG-01). Kept minimal (type/id) — categoryId is re-resolved lazily downstream.
+		if ($this->manualFillTarget !== null)
+		{
+			$additionalInfo['fillTarget'] = [
+				'entityTypeId' => $this->manualFillTarget->getEntityTypeId(),
+				'entityId' => $this->manualFillTarget->getEntityId(),
+			];
+		}
+
+		return $additionalInfo;
 	}
 
 	protected function getContextLanguageId(): string
@@ -749,6 +825,11 @@ abstract class AbstractOperation
 
 		$dummyResult = static::constructResult($job);
 
+		// Clicked entity carried across the async boundary (ALG-01); passed into the error branches so
+		// Transcribe/Summarize failures badge the initiating entity (ERR-002/AC-030), not a re-resolved
+		// priority Deal/Lead. Null for the auto path — notifyAboutJobError then falls back to findTarget.
+		$fillTarget = static::extractFillTargetFromEngineContext($event);
+
 		/** @var \Bitrix\AI\Result|null $aiResult */
 		$aiResult = $event->getParameter('result');
 
@@ -766,7 +847,7 @@ abstract class AbstractOperation
 
 			$dummyResult->addError(ErrorCode::getAIResultFoundError());
 
-			static::notifyAboutJobError($dummyResult);
+			static::notifyAboutJobError($dummyResult, target: $fillTarget);
 
 			return self::saveErrorToJobAndReturnResult($job, $dummyResult);
 		}
@@ -792,12 +873,12 @@ abstract class AbstractOperation
 
 			$result = self::saveErrorToJobAndReturnResult($job, $dummyResult);
 
-			static::notifyAboutJobError($dummyResult);
+			static::notifyAboutJobError($dummyResult, target: $fillTarget);
 
 			return $result;
 		}
 
-		$job->setResult(Json::encode($payload, 0));
+		$job->setResult(self::encodeResultWithTargetOwner($payload, $event->getParameter('engine')?->getContext()));
 		$job->setExecutionStatus(QueueTable::EXECUTION_STATUS_SUCCESS);
 
 		AIManager::logger()->debug(
@@ -825,7 +906,7 @@ abstract class AbstractOperation
 
 			$dummyResult->addErrors($dbSaveResult->getErrors());
 
-			static::notifyAboutJobError($dummyResult, true, false);
+			static::notifyAboutJobError($dummyResult, true, false, $fillTarget);
 
 			return self::saveErrorToJobAndReturnResult($job, $dummyResult);
 		}
@@ -850,7 +931,7 @@ abstract class AbstractOperation
 		}
 		else
 		{
-			static::notifyAboutJobError($result, true, false);
+			static::notifyAboutJobError($result, true, false, $fillTarget);
 		}
 
 		$builder = self::constructJobFinishEventBuilder($job)
@@ -960,10 +1041,16 @@ abstract class AbstractOperation
 		}
 	}
 
-	final protected static function notifyTimelinesAboutAutomationLaunchError(Result $result, int $activityId = null): void
+	final protected static function notifyTimelinesAboutAutomationLaunchError(
+		Result $result,
+		int $activityId = null,
+		?ItemIdentifier $target = null
+	): void
 	{
 		$activityId = $activityId ?? $result->getTarget()?->getEntityId();
-		$target = (new TargetResolver())->findTarget($activityId);
+		// Prefer the explicit job target (badge isolation per own entity, P3.T1); the auto path and
+		// non-fill operations pass no target and keep resolving the priority Deal/Lead via findTarget.
+		$target ??= (new TargetResolver())->findTarget($activityId);
 		if ($target)
 		{
 			$errorCodes = array_map(static fn($error) => $error->getCode(), $result->getErrors());
@@ -976,9 +1063,13 @@ abstract class AbstractOperation
 		}
 	}
 
-	final protected static function syncBadges(int $activityId, string $badgeValue = ''): void
+	final protected static function syncBadges(int $activityId, string $badgeValue = '', ?ItemIdentifier $target = null): void
 	{
-		$itemIdentifier = (new TargetResolver())->findTarget($activityId);
+		// The badge is written/removed strictly for the job's own entity (P3.T1): callers with an
+		// explicit target (FillFields → $result->getTarget()) isolate the status on the clicked entity.
+		// Callers without a target (Transcribe/Summarize/other operations) keep resolving the single
+		// priority Deal/Lead via findTarget — legacy "one target" behaviour, unchanged.
+		$itemIdentifier = $target ?? (new TargetResolver())->findTarget($activityId);
 		if (!$itemIdentifier)
 		{
 			return;
@@ -1050,7 +1141,9 @@ abstract class AbstractOperation
 
 		$result = static::constructResult($job);
 
-		static::notifyAboutJobError($result);
+		// Same async boundary as onQueueJobExecute: prefer the clicked entity (ERR-002/AC-030),
+		// fall back to findTarget for the auto path.
+		static::notifyAboutJobError($result, target: static::extractFillTargetFromEngineContext($event));
 
 		return $result;
 	}
@@ -1128,6 +1221,11 @@ abstract class AbstractOperation
 			return null;
 		}
 
+		unset(
+			$resultsArray['targetOwnerTypeId'],
+			$resultsArray['targetOwnerId'],
+		);
+
 		$class = static::PAYLOAD_CLASS;
 		$payload = new $class($resultsArray);
 		if ($payload->hasValidationErrors())
@@ -1136,6 +1234,56 @@ abstract class AbstractOperation
 		}
 
 		return $payload;
+	}
+
+	private static function encodeResultWithTargetOwner(Dto $payload, ?Context $context): string
+	{
+		$targetOwner = self::extractTargetOwnerFromContext($context);
+		if ($targetOwner === [])
+		{
+			return Json::encode($payload, 0);
+		}
+
+		return Json::encode($payload->toArray() + $targetOwner, 0);
+	}
+
+	private static function extractTargetOwnerFromContext(?Context $context): array
+	{
+		if ($context === null)
+		{
+			return [];
+		}
+
+		$additionalInfo = $context->getParameters()['additionalInfo'] ?? [];
+		if (
+			!is_array($additionalInfo)
+			|| !isset($additionalInfo['targetOwnerTypeId'], $additionalInfo['targetOwnerId'])
+		)
+		{
+			return [];
+		}
+
+		$ownerTypeId = (int)$additionalInfo['targetOwnerTypeId'];
+		$ownerId = (int)$additionalInfo['targetOwnerId'];
+		if ($ownerTypeId <= 0 || $ownerId <= 0)
+		{
+			return [];
+		}
+
+		return [
+			'targetOwnerTypeId' => $ownerTypeId,
+			'targetOwnerId' => $ownerId,
+		];
+	}
+
+	/**
+	 * Writes the operation-launched progress line. Extension point: a subclass may override to add its
+	 * own labelled progress line (calling parent first), e.g. to mark the launch source. Runs in
+	 * instance context, so the override can read launch parameters set on the operation.
+	 */
+	protected function logOperationLaunched(string $hash, ?int $parentJobId): void
+	{
+		self::logOperationProgress('operationLaunched', $this->target, $hash, $parentJobId);
 	}
 
 	protected static function logOperationProgress(string $operation, ItemIdentifier $target, string $hash, ?int $parentJobId): void
@@ -1179,6 +1327,34 @@ abstract class AbstractOperation
 	private static function extractActivityIdFromResult(Result $result): int
 	{
 		return self::getTargetRealId($result->getTarget(), $result->getParentJobId());
+	}
+
+	/**
+	 * Recovers the manual FillFields target (the clicked entity) from the engine context of a finished job.
+	 * Rides the same `additionalInfo` channel as `scenario` (@see self::getContextAdditionalInfo where it is
+	 * written), so a fresh manual launch keeps badging exactly the clicked entity across the async
+	 * Transcribe/Summarize→FillFields boundary (ALG-01, single-target). Null for the auto path.
+	 *
+	 * Single source of truth: also reused by EventHandler::extractFillTargetFromEngineContext.
+	 */
+	public static function extractFillTargetFromEngineContext(Event $event): ?ItemIdentifier
+	{
+		$engine = $event->getParameter('engine');
+		if (!($engine instanceof IEngine))
+		{
+			return null;
+		}
+
+		$fillTarget = $engine->getContext()->getParameters()['additionalInfo']['fillTarget'] ?? null;
+		if (!is_array($fillTarget))
+		{
+			return null;
+		}
+
+		return ItemIdentifier::createByParams(
+			(int)($fillTarget['entityTypeId'] ?? 0),
+			(int)($fillTarget['entityId'] ?? 0),
+		);
 	}
 
 	final protected static function sendCallParsingAnalyticsEvent(
@@ -1265,6 +1441,18 @@ abstract class AbstractOperation
 		return $result;
 	}
 
+	final protected static function stripUnresolvedMarkers(?string $value): ?string
+	{
+		if ($value === null)
+		{
+			return null;
+		}
+
+		$cleaned = trim(preg_replace('/\{\{\s*[A-Za-z0-9_]+\s*\}\}/', '', $value));
+
+		return $cleaned === '' ? null : $cleaned;
+	}
+
 	private static function constructJobFinishEventBuilder(EO_Queue $job): ?AIBaseEvent
 	{
 		$activityId = self::extractActivityIdFromJob($job);
@@ -1313,7 +1501,7 @@ abstract class AbstractOperation
 	// @todo: refactor
 	abstract protected static function notifyTimelineAfterSuccessfulLaunch(Result $result): void;
 	abstract protected static function notifyTimelineAfterSuccessfulJobFinish(Result $result): void;
-	abstract protected static function notifyAboutJobError(Result $result, bool $withSyncBadges = true, bool $withSendAnalytics = true): void;
+	abstract protected static function notifyAboutJobError(Result $result, bool $withSyncBadges = true, bool $withSendAnalytics = true, ?ItemIdentifier $target = null): void;
 	abstract protected static function extractPayloadFromAIResult(\Bitrix\AI\Result $result, EO_Queue $job): Dto;
 	abstract protected static function getJobFinishEventBuilder(): AIBaseEvent;
 }

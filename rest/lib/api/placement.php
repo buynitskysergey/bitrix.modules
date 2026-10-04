@@ -1,4 +1,5 @@
 <?php
+
 namespace Bitrix\Rest\Api;
 
 
@@ -18,10 +19,18 @@ use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\RestException;
 use Bitrix\Rest\Exceptions;
 use Bitrix\Rest\Lang;
+use Bitrix\Main\ArgumentTypeException;
+use Bitrix\Rest\Internal\Access\AppAccessChecker;
+use Bitrix\Rest\Internal\Entity\Application\App;
+use Bitrix\Main\DI\ServiceLocator;
 
 class Placement extends \IRestService
 {
 	const SCOPE_PLACEMENT = 'placement';
+
+	private const PERMISSION_BIND = 'permission.bind';
+	private const PERMISSION_UNBIND = 'permission.unbind';
+	private const PERMISSION_GET = 'permission.get';
 
 	public static function onRestServiceBuildDescription()
 	{
@@ -95,7 +104,7 @@ class Placement extends \IRestService
 
 	public static function bind($params, $n, \CRestServer $server)
 	{
-		static::checkPermission($server);
+		static::checkPermission($server, self::PERMISSION_BIND);
 
 		$params = array_change_key_case($params, CASE_UPPER);
 
@@ -155,6 +164,8 @@ class Placement extends \IRestService
 					PlacementTable::ERROR_PLACEMENT_USER_MODE
 				);
 			}
+
+			static::checkTargetUserAccess($server, (int)$placementBind['USER_ID']);
 
 			$langList = Lang::listLanguage();
 			$langDefault = reset($langList);
@@ -537,7 +548,7 @@ class Placement extends \IRestService
 
 	public static function unbind($params, $n, \CRestServer $server)
 	{
-		static::checkPermission($server);
+		static::checkPermission($server, self::PERMISSION_UNBIND);
 
 		$params = array_change_key_case($params, CASE_UPPER);
 
@@ -567,9 +578,19 @@ class Placement extends \IRestService
 				'=PLACEMENT' => $placement,
 			);
 
+			$userId = (int)($server->getAuthData()['user_id'] ?? null);
 			if (array_key_exists('USER_ID', $params))
 			{
-				$filter['USER_ID'] = (int)$params['USER_ID'];
+				$targetUserId = (int)$params['USER_ID'];
+				static::checkTargetUserAccess($server, $targetUserId);
+				$filter['USER_ID'] = $targetUserId;
+			}
+			elseif (!\CRestUtil::isAdmin($userId))
+			{
+				$filter['=USER_ID'] = [
+					PlacementTable::DEFAULT_USER_ID_VALUE,
+					$userId,
+				];
 			}
 
 			if($placementHandler <> '')
@@ -597,16 +618,35 @@ class Placement extends \IRestService
 
 	public static function get($params, $n, \CRestServer $server)
 	{
-		static::checkPermission($server);
+		static::checkPermission($server, self::PERMISSION_GET);
+
+		$params = array_change_key_case($params, CASE_UPPER);
 
 		$result = array();
 
 		$appInfo = static::getApplicationInfo($server);
 
+		$filter = array(
+			"=APP_ID" => $appInfo["ID"],
+		);
+
+		$userId = (int)($server->getAuthData()['user_id'] ?? null);
+		if (array_key_exists('USER_ID', $params))
+		{
+			$targetUserId = (int)$params['USER_ID'];
+			static::checkTargetUserAccess($server, $targetUserId);
+			$filter['=USER_ID'] = $targetUserId;
+		}
+		elseif (!\CRestUtil::isAdmin($userId))
+		{
+			$filter['=USER_ID'] = [
+				PlacementTable::DEFAULT_USER_ID_VALUE,
+				$userId,
+			];
+		}
+
 		$dbRes = PlacementTable::getList(array(
-			"filter" => array(
-				"=APP_ID" => $appInfo["ID"],
-			),
+			"filter" => $filter,
 			'order' => array(
 				"ID" => "ASC",
 			)
@@ -650,14 +690,72 @@ class Placement extends \IRestService
 		return $result;
 	}
 
-	protected static function checkPermission(\CRestServer $server)
+	protected static function checkPermission(\CRestServer $server, ?string $permission = null)
 	{
 		if($server->getAuthType() !== Auth::AUTH_TYPE)
 		{
 			throw new AuthTypeException("Application context required");
 		}
 
-		if(!\CRestUtil::isAdmin())
+		$userId = (int)($server->getAuthData()['user_id'] ?? null);
+
+		if(\CRestUtil::isAdmin($userId))
+		{
+			return;
+		}
+
+		$allowedPermissions = [
+			self::PERMISSION_BIND,
+			self::PERMISSION_UNBIND,
+			self::PERMISSION_GET,
+		];
+
+		if ($permission === null || !in_array($permission, $allowedPermissions) || $userId <= 0)
+		{
+			throw new AccessException();
+		}
+
+		$app = static::getApplicationEntity($server);
+		if ($app === null)
+		{
+			throw new AccessException();
+		}
+
+		$accessChecker = (new AppAccessChecker($userId));
+
+		$hasAccess = false;
+		switch ($permission)
+		{
+			case self::PERMISSION_BIND:
+				$hasAccess = $accessChecker->canInstallEmbedding($app);
+				break;
+			case self::PERMISSION_UNBIND:
+				$hasAccess = $accessChecker->canUninstallEmbedding($app);
+				break;
+			case self::PERMISSION_GET:
+				$hasAccess = $accessChecker->canViewEmbeddingList($app);
+				break;
+		}
+
+		if (!$hasAccess)
+		{
+			throw new AccessException();
+		}
+	}
+
+	protected static function checkTargetUserAccess(\CRestServer $server, int $targetUserId): void
+	{
+		$userId = (int)($server->getAuthData()['user_id'] ?? null);
+
+		if (\CRestUtil::isAdmin($userId))
+		{
+			return;
+		}
+
+		if (
+			$targetUserId !== PlacementTable::DEFAULT_USER_ID_VALUE
+			&& $targetUserId !== $userId
+		)
 		{
 			throw new AccessException();
 		}
@@ -691,6 +789,16 @@ class Placement extends \IRestService
 		}
 
 		return AppTable::getByClientId($server->getClientId());
+	}
+
+	protected static function getApplicationEntity(\CRestServer $server): ?App
+	{
+		if (empty($server->getClientId()))
+		{
+			return null;
+		}
+
+		return ServiceLocator::getInstance()->get('rest.repository.app')?->getByClientId($server->getClientId());
 	}
 
 	protected static function getPlacementList(\CRestServer $server, $scopeList = null)

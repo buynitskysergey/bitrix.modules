@@ -2,6 +2,10 @@
 
 namespace Bitrix\HumanResources\Service;
 
+use Bitrix\HumanResources\Builder\Structure\Filter\Column\IdFilter;
+use Bitrix\HumanResources\Builder\Structure\Filter\NodeFilter;
+use Bitrix\HumanResources\Builder\Structure\Filter\NodeMemberFilter;
+use Bitrix\HumanResources\Builder\Structure\NodeMemberDataBuilder;
 use Bitrix\HumanResources\Command\Structure\Node\NodeOrderCommand;
 use Bitrix\HumanResources\Config\Feature;
 use Bitrix\HumanResources\Contract;
@@ -10,6 +14,7 @@ use Bitrix\HumanResources\Contract\Repository\NodeRepository;
 use Bitrix\HumanResources\Contract\Repository\StructureRepository;
 use Bitrix\HumanResources\Enum\Direction;
 use Bitrix\HumanResources\Enum\EventName;
+use Bitrix\HumanResources\Enum\NodeActiveFilter;
 use Bitrix\HumanResources\Exception\DeleteFailedException;
 use Bitrix\HumanResources\Internals\Service\Container as InternalContainer;
 use Bitrix\HumanResources\Item\Collection\NodeRelationCollection;
@@ -19,6 +24,7 @@ use Bitrix\HumanResources\Model\NodeMemberTable;
 use Bitrix\HumanResources\Model\NodePathTable;
 use Bitrix\HumanResources\Repository\NodeRelationRepository;
 use Bitrix\HumanResources\Repository\RoleRepository;
+use Bitrix\HumanResources\Type\MemberEntityType;
 use Bitrix\HumanResources\Type\NodeEntityType;
 use Bitrix\Main;
 use Bitrix\Main\Application;
@@ -275,12 +281,23 @@ class StructureWalkerService implements Contract\Service\StructureWalkerService
 		$limit = 1000;
 		$roleEmployee = $this->roleRepository->findByXmlId(NodeMember::DEFAULT_ROLE_XML_ID['EMPLOYEE']);
 
-		while (($memberCollection = $this->nodeMemberRepository->findAllByNodeId(
-				nodeId: $node->id,
-				limit: $limit,
-				offset: $offset,
-				onlyActive: false,
-		)) && !$memberCollection->empty())
+		while (($memberCollection = NodeMemberDataBuilder::createWithFilter(
+				new NodeMemberFilter(
+					entityType: MemberEntityType::USER,
+					nodeFilter: new NodeFilter(
+						idFilter: IdFilter::fromId($node->id),
+						structureId: $node->structureId,
+						active: NodeActiveFilter::ALL,
+					),
+					active: null,
+					withVirtualUsers: true,
+				),
+			)
+				->setLimit($limit)
+				->setOffset($offset)
+				->setCacheTtl(0)
+				->getAll()
+		) && !$memberCollection->empty())
 		{
 			foreach ($memberCollection as $member)
 			{

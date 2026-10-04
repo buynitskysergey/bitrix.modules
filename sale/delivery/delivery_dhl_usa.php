@@ -1,8 +1,10 @@
-<?
+<?php
 /**********************************************************************
 Delivery services for DHL USA delivery service (http://www.dhl-usa.com/)
-It uses on-line calculator. Calculation only from USA.
+It uses on-line calculator. Calculation only from the USA.
 **********************************************************************/
+
+use Bitrix\Main\Web\HttpClient;
 
 CModule::IncludeModule("sale");
 
@@ -208,16 +210,15 @@ class CDeliveryDHLUSA
 		
 		CDeliveryDHLUSA::__Write2Log(print_r($arQuery, true));
 		CDeliveryDHLUSA::__Write2Log(implode('&', $arQuery));
+
 		// get data from server
-		$data = QueryGetData(
-			DELIVERY_DHL_USA_SERVER, 
-			DELIVERY_DHL_USA_SERVER_PORT,
-			DELIVERY_DHL_USA_SERVER_PAGE,
-			implode("&", $arQuery),
-			$error_number = 0,
-			$error_text = "",
-			DELIVERY_DHL_USA_SERVER_METHOD
+		$http = new HttpClient();
+		$http->query(
+			DELIVERY_DHL_USA_SERVER_METHOD,
+			(DELIVERY_DHL_USA_SERVER_PORT == 80 ? 'http://' : 'https://') . DELIVERY_DHL_USA_SERVER . DELIVERY_DHL_USA_SERVER_PAGE,
+			implode("&", $arQuery)
 		);
+		$data = $http->getResult();
 		
 		CDeliveryDHLUSA::__Write2Log($data);		
 		
@@ -307,4 +308,3 @@ class CDeliveryDHLUSA
 }
 
 AddEventHandler("sale", "onSaleDeliveryHandlersBuildList", array('CDeliveryDHLUSA', 'Init')); 
-?>

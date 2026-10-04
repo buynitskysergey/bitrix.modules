@@ -7,19 +7,21 @@ use Bitrix\Main\Filter\Settings;
 class AiAgentsFilterSettings extends Settings
 {
 	public const LAUNCHED_BY_FIELD = 'LAUNCHED_BY';
+	public const AGENT_TEMPLATE_FIELD = 'AGENT_TEMPLATE';
+	public const IS_ACTIVE_FIELD = 'IS_ACTIVE';
+
+	private const DECLARED_FIELDS = [
+		self::LAUNCHED_BY_FIELD,
+		self::AGENT_TEMPLATE_FIELD,
+		self::IS_ACTIVE_FIELD,
+	];
 
 	protected array $filterAvailability = [];
-	protected array $whiteList = [];
 
 	public function __construct(array $params)
 	{
 		parent::__construct($params);
 		$this->initFilterAvailability();
-
-		$this->whiteList = isset($params['WHITE_LIST']) && is_array($params['WHITE_LIST'])
-			? $params['WHITE_LIST']
-			: []
-		;
 	}
 
 	public function getFilterAvailability(): array
@@ -32,15 +34,20 @@ class AiAgentsFilterSettings extends Settings
 		return $this->getFilterAvailability()[$filterField] ?? true;
 	}
 
+	/**
+	 * Declared filter fields — the single source of truth for which fields the grid
+	 * is allowed to apply to the query. Independent from grid column visibility:
+	 * a filter-only field (e.g. AGENT_TEMPLATE) is not a grid column but is filterable.
+	 *
+	 * @return list<string>
+	 */
 	public function getWhiteList(): array
 	{
-		return $this->whiteList;
+		return self::DECLARED_FIELDS;
 	}
 
 	private function initFilterAvailability(): void
 	{
-		$this->filterAvailability = [
-			self::LAUNCHED_BY_FIELD => true,
-		];
+		$this->filterAvailability = array_fill_keys(self::DECLARED_FIELDS, true);
 	}
 }

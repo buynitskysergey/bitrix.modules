@@ -166,11 +166,14 @@ class CVoxImplantHistory
 
 			if ($call->getUserId())
 			{
-				CVoxImplantCrmHelper::registerCallInCrm($call);
-
-				if(\CVoxImplantConfig::GetLeadWorkflowExecution() == \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE)
+				$leadRegistrationResult = static::registerCallInCrmWithLeadLock($call, false);
+				if (
+					($leadRegistrationResult->getData()['outcome'] ?? null)
+						=== CVoxImplantCrmHelper::CRM_LEAD_OUTCOME_NOT_REQUIRED
+					&& static::isLeadWorkflowImmediate()
+				)
 				{
-					\CVoxImplantCrmHelper::StartCallTrigger($call);
+					static::startCallTrigger($call);
 				}
 			}
 		}
@@ -462,6 +465,21 @@ class CVoxImplantHistory
 		return true;
 	}
 
+	protected static function registerCallInCrmWithLeadLock(VI\Call $call, bool $onlyCreated): Result
+	{
+		return CVoxImplantCrmHelper::registerCallInCrmWithLeadLock($call, $onlyCreated);
+	}
+
+	protected static function isLeadWorkflowImmediate(): bool
+	{
+		return \CVoxImplantConfig::GetLeadWorkflowExecution() === \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE;
+	}
+
+	protected static function startCallTrigger(VI\Call $call): void
+	{
+		CVoxImplantCrmHelper::StartCallTrigger($call);
+	}
+
 	/**
 	 * @param int $historyID
 	 * @param string|null $recordUrl deprecated. Base64 encoded url
@@ -509,17 +527,29 @@ class CVoxImplantHistory
 			$tempPath = \CFile::GetTempName('', bx_basename($recordUrl));
 		}
 
-		$http = VI\HttpClientFactory::create(array(
-			"disableSslVerification" => true
-		));
-
 		try
 		{
-			$isDownloadSuccess = $http->download($recordUrl, $tempPath);
+			\Bitrix\Main\IO\Directory::createDirectory(\Bitrix\Main\IO\Path::getDirectory($tempPath));
 
-			if (!$isDownloadSuccess)
+			$file = new \Bitrix\Main\IO\File($tempPath);
+			$handler = $file->open('w+');
+
+			$downloadResult = VI\Security\RecordDownloader::downloadToStream($recordUrl, $handler);
+			$file->close();
+
+			$http = $downloadResult->getData()['httpClient'];
+
+			if (!$downloadResult->isSuccess())
 			{
-				self::DownloadAgentRequestErrorHandler($historyID, $recordUrl, $attachToCrm, $retryOnFailure, $http, "Call record download unsuccessful. Url: ");
+				self::DownloadAgentRequestErrorHandler(
+					$historyID,
+					$recordUrl,
+					$attachToCrm,
+					$retryOnFailure && !self::hasTerminalDownloadError($downloadResult),
+					$http,
+					"Call record download unsuccessful. Url: ",
+					self::formatResultErrors($downloadResult)
+				);
 
 				return false;
 			}
@@ -566,7 +596,8 @@ class CVoxImplantHistory
 		bool $attachToCrm,
 		bool $retryOnFailure,
 		\Bitrix\Main\Web\HttpClient $httpClient,
-		string $logMessage
+		string $logMessage,
+		array $resultErrors = []
 	)
 	{
 		if($retryOnFailure)
@@ -583,14 +614,48 @@ class CVoxImplantHistory
 			);
 		}
 
-		$errors = [];
-		foreach($httpClient->getError() as $code => $message)
+		$errors = $resultErrors;
+		if (empty($errors))
 		{
-			$errors[] = $code . ": " . $message;
+			foreach($httpClient->getError() as $code => $message)
+			{
+				$errors[] = $code . ": " . $message;
+			}
 		}
 		$error = !empty($errors) ? implode("; " , $errors) : $httpClient->getStatus();
 
 		static::WriteToLog($logMessage . $recordUrl . "; Error: " . $error);
+	}
+
+	/**
+	 * @return string[] Result errors as "CODE: message" strings.
+	 */
+	private static function formatResultErrors(Result $result): array
+	{
+		$errors = [];
+		foreach ($result->getErrors() as $error)
+		{
+			$errors[] = $error->getCode() . ": " . $error->getMessage();
+		}
+
+		return $errors;
+	}
+
+	/**
+	 * Tells whether the download failed with a deterministic error, so
+	 * scheduling a retry agent would only reproduce the same failure.
+	 */
+	private static function hasTerminalDownloadError(Result $result): bool
+	{
+		foreach ($result->getErrors() as $error)
+		{
+			if (in_array($error->getCode(), VI\Security\RecordDownloader::TERMINAL_ERROR_CODES, true))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	public static function AttachRecord($callId, array $recordFileFields)
@@ -1077,12 +1142,13 @@ class CVoxImplantHistory
 	{
 		CVoxImplantHistory::WriteToLog($call->toArray(), "detectResponsible");
 		$config = $call->getConfig();
+		$checkTimeman = is_array($config) && $config['TIMEMAN'] == 'Y';
 		if($call->getQueueId() > 0)
 		{
 			$queue = VI\Queue::createWithId($call->getQueueId());
 			if($queue instanceof VI\Queue)
 			{
-				$queueUser = $queue->getFirstUserId();
+				$queueUser = $queue->getFirstUserId($checkTimeman);
 				if ($queueUser > 0)
 				{
 					$queue->touchUser($queueUser);
@@ -1095,28 +1161,26 @@ class CVoxImplantHistory
 		{
 			if($call->getPrimaryEntityType() != '' && $call->getPrimaryEntityId() > 0)
 			{
-				$responsibleId = CVoxImplantCrmHelper::getResponsible($call->getPrimaryEntityType(), $call->getPrimaryEntityId());
-				if($responsibleId > 0)
-				{
-					return $responsibleId;
-				}
+				$responsibleId = (int)CVoxImplantCrmHelper::getResponsible($call->getPrimaryEntityType(), $call->getPrimaryEntityId());
 			}
 			else
 			{
 				$responsibleInfo = CVoxImplantIncoming::getCrmResponsible($call, false);
-				if($responsibleInfo)
-				{
-					return $responsibleInfo['USER_ID'];
-				}
+				$responsibleId = $responsibleInfo ? (int)$responsibleInfo['USER_ID'] : 0;
+			}
+
+			if($responsibleId > 0 && (!$checkTimeman || CVoxImplantUser::GetActiveStatusByTimeman($responsibleId)))
+			{
+				return $responsibleId;
 			}
 		}
 
-		if(is_array($config) && $config['QUEUE_ID'] > 0)
+		if(is_array($config) && $config['QUEUE_ID'] > 0 && (int)$config['QUEUE_ID'] !== $call->getQueueId())
 		{
 			$queue = VI\Queue::createWithId($config['QUEUE_ID']);
 			if($queue instanceof VI\Queue)
 			{
-				$queueUser = $queue->getFirstUserId();
+				$queueUser = $queue->getFirstUserId($checkTimeman);
 				if ($queueUser > 0)
 				{
 					$queue->touchUser($queueUser);

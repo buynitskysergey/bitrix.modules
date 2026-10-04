@@ -2,6 +2,7 @@
 
 namespace Bitrix\Crm\Integration\Rest;
 
+use Bitrix\Crm\RepeatSale\Segment\SubscriptionSegmentService;
 use Bitrix\Crm\Timeline\Entity\Repository\RestAppLayoutBlocksRepository;
 use Bitrix\Main\Event;
 use Bitrix\Main\Loader;
@@ -10,6 +11,20 @@ use Bitrix\Rest\EO_App;
 
 class EventHandler
 {
+	/**
+	 * Handles rest:onSubscriptionRenew — the internal event published when the paid subscription
+	 * date changes and the subscription is available again. The event carries no payload, so the
+	 * subscription state is not read from it; the positive transition is delegated to the domain
+	 * service, which re-reads the current state on its own. The service is idempotent against
+	 * repeated firings thanks to the auto-disable memory and the "seen" marker.
+	 *
+	 * @see \Bitrix\Rest\Marketplace\Client::onChangeSubscriptionDate() the event source
+	 */
+	public static function onSubscriptionRenew(Event $event): void
+	{
+		(new SubscriptionSegmentService())->onPositiveTransition();
+	}
+
 	public static function onRestAppDelete(array $app): void
 	{
 		if (

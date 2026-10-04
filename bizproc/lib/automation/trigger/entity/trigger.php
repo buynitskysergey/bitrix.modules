@@ -47,7 +47,10 @@ class TriggerTable extends Main\Entity\DataManager
 				'data_type' => 'integer',
 				'autocomplete' => true,
 			],
-			'NAME' => ['data_type' => 'string'],
+			'NAME' => [
+				'data_type' => 'string',
+				'save_data_modification' => [__CLASS__, 'getNameSaveModifiers'],
+			],
 			'CODE' => ['data_type' => 'string'],
 
 			'MODULE_ID' => ['data_type' => 'string'],
@@ -60,6 +63,22 @@ class TriggerTable extends Main\Entity\DataManager
 				'data_type' => 'string',
 				'serialized' => true,
 			],
+		];
+	}
+
+	/**
+	 * Save modifiers for the NAME field.
+	 *
+	 * NAME is not a meaningful field for a trigger (it is identified by CODE/DOCUMENT_STATUS),
+	 * so an empty string is the valid default. The modifier normalizes the value to a string
+	 * to prevent a null from reaching the NOT NULL column (both on add and on update).
+	 *
+	 * @return array Array of callbacks.
+	 */
+	public static function getNameSaveModifiers()
+	{
+		return [
+			static fn($value) => (string)$value,
 		];
 	}
 }

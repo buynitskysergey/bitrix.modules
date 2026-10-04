@@ -114,4 +114,5 @@ class ErrorEnumeration
 	// \Bitrix\Sale\Controller\Action\PaySystem\AddPaySystemAction
 	public const ADD_PAY_SYSTEM_ACTION_ACTION_FILE_NOT_FOUND = 202650000013;
 	public const ADD_PAY_SYSTEM_ACTION_PS_MODE_NOT_AVAILABLE = 202650000014;
+	public const ADD_PAY_SYSTEM_ACTION_ACTION_FILE_INVALID = 202650000015;
 }

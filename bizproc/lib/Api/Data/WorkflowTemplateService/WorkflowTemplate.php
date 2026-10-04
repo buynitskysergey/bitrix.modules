@@ -88,7 +88,7 @@ final class WorkflowTemplate
 		if (!empty($fields[$key]) && \CBPWorkflowTemplateLoader::getCompressedFieldLength($fields[$key]) > $maxSize)
 		{
 			throw new ArgumentException(
-				Loc::getMessage("BIZPROC_API_DATA_WORKFLOW_TEMPLATE_${key}_ERROR")
+				Loc::getMessage("BIZPROC_API_DATA_WORKFLOW_TEMPLATE_{$key}_ERROR")
 			);
 		}
 	}

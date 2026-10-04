@@ -4,6 +4,9 @@ namespace Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\InputScheme\Propert
 
 abstract class AbstractProperty
 {
+	use Validation\ConstValidationTrait;
+	use Validation\EnumValidationTrait;
+
 	protected bool $isRequired = false;
 	protected bool $isNullable = false;
 
@@ -24,7 +27,7 @@ abstract class AbstractProperty
 		return $this->description;
 	}
 
-	public function setIsRequired(bool $isRequired): self
+	public function setIsRequired(bool $isRequired): static
 	{
 		$this->isRequired = $isRequired;
 
@@ -36,7 +39,7 @@ abstract class AbstractProperty
 		return $this->isRequired;
 	}
 
-	public function setIsNullable(bool $isNullable): self
+	public function setIsNullable(bool $isNullable): static
 	{
 		$this->isNullable = $isNullable;
 
@@ -53,8 +56,24 @@ abstract class AbstractProperty
 	public function toArray(): array
 	{
 		return [
+			...$this->getBaseSchema(),
+			...$this->getCommonValidationSchema(),
+		];
+	}
+
+	protected function getBaseSchema(): array
+	{
+		return [
 			'description' => $this->description,
 			'type' => $this->isNullable ? [$this->getType(), 'null'] : $this->getType(),
+		];
+	}
+
+	protected function getCommonValidationSchema(): array
+	{
+		return [
+			...$this->getEnumValidationSchema(),
+			...$this->getConstValidationSchema(),
 		];
 	}
 }

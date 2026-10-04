@@ -15,7 +15,7 @@ class StorageTypeSort implements SortInterface
 
 	public function prepareSort(): array
 	{
-		return array_intersect_key($this->sort, array_flip([
+		$sort = array_intersect_key($this->sort, array_flip([
 			'ID',
 			'TITLE',
 			'CODE',
@@ -24,5 +24,9 @@ class StorageTypeSort implements SortInterface
 			'CREATED_TIME',
 			'UPDATED_TIME',
 		]));
+
+		$sort['ID'] ??= 'ASC';
+
+		return $sort;
 	}
 }

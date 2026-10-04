@@ -112,6 +112,12 @@ class Auth
 				if ($otpParams = Otp::getDeferredParams())
 				{
 					$result["otpType"] = $otpParams['OTP_TYPE'];
+
+					$portalUserId = self::resolvePortalUserId($otpParams);
+					if ($portalUserId !== null)
+					{
+						$result['userId'] = $portalUserId;
+					}
 				}
 
 
@@ -134,8 +140,8 @@ class Auth
 					&& ($otpParams['OTP_TYPE'] ?? null) === OtpType::Push->value
 				)
 				{
-					$userId = (int)($otpParams['USER_ID'] ?? 0);
-					if ($userId > 0)
+					$userId = self::resolvePortalUserId($otpParams);
+					if ($userId !== null)
 					{
 						$result['canLoginBySms'] = $otpService->canLoginBySms($userId);
 						$result['canLoginByEmail'] = $otpService->canLoginByEmail($userId);
@@ -146,5 +152,12 @@ class Auth
 		}
 
 		return $result;
+	}
+
+	private static function resolvePortalUserId(array $otpParams): ?int
+	{
+		$userId = (int)($otpParams['USER_ID'] ?? 0);
+
+		return $userId > 0 ? $userId : null;
 	}
 }

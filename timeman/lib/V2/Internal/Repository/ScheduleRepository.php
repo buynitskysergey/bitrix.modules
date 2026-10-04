@@ -10,7 +10,7 @@ use Bitrix\Timeman\V2\Internal\Entity\Schedule\Schedule;
 use Bitrix\Timeman\V2\Internal\Entity\Schedule\ScheduleCollection;
 use Bitrix\Timeman\V2\Internal\Repository\Mapper\ScheduleMapper;
 
-final class ScheduleRepository
+class ScheduleRepository
 {
 	private readonly ScheduleProvider $scheduleProvider;
 

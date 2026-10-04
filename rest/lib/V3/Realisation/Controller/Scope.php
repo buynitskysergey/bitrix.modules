@@ -30,6 +30,7 @@ final class Scope extends RestController
 			/** @var SchemaManager $schemaManager */
 			$schemaManager = ServiceLocator::getInstance()->get(SchemaManager::class);
 			$methodDescriptions = $schemaManager->getMethodDescriptions();
+			$schemaManager->ensureGeneratedDtoClassesLoadedFromMethodDescriptions($methodDescriptions);
 
 			$scopes = [];
 

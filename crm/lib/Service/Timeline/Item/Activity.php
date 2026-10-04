@@ -5,6 +5,7 @@ namespace Bitrix\Crm\Service\Timeline\Item;
 use Bitrix\Crm\Activity\Provider\ProviderManager;
 use Bitrix\Crm\Component\EntityDetails\Config\ScopeIdResolver;
 use Bitrix\Crm\Integration\StorageManager;
+use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Timeline\Config;
 use Bitrix\Crm\Service\Timeline\Item\Interfaces\Deadlinable;
 use Bitrix\Crm\Service\Timeline\Layout;
@@ -19,6 +20,8 @@ use Bitrix\Main\Type\DateTime;
 use CCrmActivity;
 use CCrmDateTimeHelper;
 use CCrmOwnerType;
+
+Container::getInstance()->getLocalization()->loadMessages();
 
 abstract class Activity extends Configurable implements Deadlinable
 {

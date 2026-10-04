@@ -457,17 +457,12 @@ class CCrmEntityHelper
 	}
 
 	/**
+	 * @deprecated New API is always enabled; the ?enableFactory toggle is no longer supported. Kept as a compatibility shim for portal customizations.
 	 * @param \Bitrix\Crm\Settings\Traits\EnableFactory $settings
 	 * @param \Bitrix\Main\Request $request
 	 */
 	public static function setEnabledFactoryFlagByRequest($settings, \Bitrix\Main\Request $request): void
 	{
-		if ($request->get('enableFactory') !== null)
-		{
-			$enableFactory = (string)$request->get('enableFactory');
-
-			$settings->setFactoryEnabled(mb_strtoupper($enableFactory) === 'Y');
-		}
 	}
 
 	public static function applySubQueryBasedFiltersWrapper(

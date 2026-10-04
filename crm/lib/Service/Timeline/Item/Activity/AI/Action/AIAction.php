@@ -44,11 +44,17 @@ abstract class AIAction
 	 */
 	abstract public static function getSupportedProviders(): array;
 
+	protected int $rootActivityId;
+
 	public function __construct(
 		readonly protected int $activityId,
 		readonly protected Context $context,
 		protected ?AssociatedEntityModel $model,
-	) {}
+		int $rootActivityId = 0,
+	)
+	{
+		$this->rootActivityId = $rootActivityId > 0 ? $rootActivityId : $activityId;
+	}
 
 	final public function getCurrentState(): string
 	{
@@ -68,6 +74,18 @@ abstract class AIAction
 		if ($this->getStateChecker()?->isPending())
 		{
 			$this->currentState = LayoutButton::STATE_AI_LOADING;
+			$this->isCurrentStateInit = true;
+
+			return $this->currentState;
+		}
+
+		// Global scenario policy is checked here and not in the overridable isHidden(),
+		// so that an action type cannot opt out of it. This is a lower bound only: the
+		// composite full scenario counts as enabled while any single toggle of it is on,
+		// so the stricter all-toggles rule in FullIn*::isHidden() is still required.
+		if (!$this->getAIService()->isScenarioVisible(static::getScenario()))
+		{
+			$this->currentState = LayoutButton::STATE_HIDDEN;
 			$this->isCurrentStateInit = true;
 
 			return $this->currentState;
@@ -175,7 +193,15 @@ abstract class AIAction
 	{
 		if ($this->aiService === null)
 		{
-			$this->aiService = new AIActivityService($this->activityId, $this->context);
+			$service = new AIActivityService($this->activityId, $this->context);
+			if ($this->rootActivityId !== $this->activityId)
+			{
+				$service = $service
+					->withResultActivityId($this->rootActivityId)
+					->withSummarizeActivityId($this->rootActivityId)
+				;
+			}
+			$this->aiService = $service;
 		}
 
 		return $this->aiService;

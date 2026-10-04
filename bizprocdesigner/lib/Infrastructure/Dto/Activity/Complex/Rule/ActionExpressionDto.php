@@ -21,6 +21,10 @@ class ActionExpressionDto extends BaseExpressionDto
 
 	public ?string $auxPortTitle;
 
+	public ?string $area;
+
+	public ?string $object;
+
 	public function __construct(
 		?string $actionId,
 		?array $rawActivityData,
@@ -28,6 +32,8 @@ class ActionExpressionDto extends BaseExpressionDto
 		?string $document,
 		?string $auxPortId = null,
 		?string $auxPortTitle = null,
+		?string $area = null,
+		?string $object = null,
 	)
 	{
 		$this->actionId = $actionId;
@@ -36,6 +42,8 @@ class ActionExpressionDto extends BaseExpressionDto
 		$this->document = $document;
 		$this->auxPortId = $auxPortId;
 		$this->auxPortTitle = $auxPortTitle;
+		$this->area = $area;
+		$this->object = $object;
 	}
 
 	public function jsonSerialize(): array
@@ -47,6 +55,8 @@ class ActionExpressionDto extends BaseExpressionDto
 			'document' => $this->document,
 			'auxPortId' => $this->auxPortId,
 			'auxPortTitle' => $this->auxPortTitle,
+			'area' => $this->area,
+			'object' => $this->object,
 		];
 	}
 
@@ -59,6 +69,8 @@ class ActionExpressionDto extends BaseExpressionDto
 			$data['document'] ?? null,
 			$data['auxPortId'] ?? null,
 			$data['auxPortTitle'] ?? null,
+			$data['area'] ?? null,
+			$data['object'] ?? null,
 		);
 	}
 }

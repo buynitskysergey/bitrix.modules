@@ -8,6 +8,7 @@ use Bitrix\Mail\Helper\Mailbox;
 use Bitrix\Mail\Helper\MailboxDirectoryHelper;
 use Bitrix\Mail\Internal\Entity\Directory\DirectoriesSettings;
 use Bitrix\Mail\Internal\Service\Directory\DirectorySerializer;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\Entity\MailboxDirectory;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
@@ -21,10 +22,13 @@ final readonly class SettingsReader
 	}
 
 	/**
+	 * @param GenerationScope|null $scope Folders of one prepared generation. Such folders are
+	 *                                    already stored, and their source is not the one the
+	 *                                    mailbox connects to, so no live listing is made.
 	 * @return Result Result data on success: DirectoriesSettings instance
 	 * @throws \Exception
 	 */
-	public function read(int $mailboxId): Result
+	public function read(int $mailboxId, ?GenerationScope $scope = null): Result
 	{
 		$result = new Result();
 
@@ -36,9 +40,9 @@ final readonly class SettingsReader
 			return $result;
 		}
 
-		$cacheFailed = $mailboxHelper->cacheDirs() === false;
+		$cacheFailed = $scope === null && $mailboxHelper->cacheDirs() === false;
 
-		$dirHelper = new MailboxDirectoryHelper($mailboxId);
+		$dirHelper = new MailboxDirectoryHelper($mailboxId, null, $scope);
 		$dirHelper->reloadDirs();
 
 		if ($cacheFailed && empty($dirHelper->getDirs()))

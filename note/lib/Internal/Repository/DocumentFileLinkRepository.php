@@ -88,6 +88,32 @@ class DocumentFileLinkRepository
 		return $this->collectionToRows($items);
 	}
 
+	/**
+	 * Keyset page of distinct DOCUMENT_IDs that own at least one linked file, DOCUMENT_ID > $afterId,
+	 * ascending, capped at $limit. Feeds the one-time OrphanFileCleanupAgent, which walks only the
+	 * documents that actually have files (a small subset of all documents) instead of scanning
+	 * everything. GROUP BY on the selected column keeps it MySQL 5.6 / PostgreSQL compatible.
+	 *
+	 * @return int[]
+	 */
+	public function listDocumentIdsAfter(int $afterId, int $limit): array
+	{
+		if ($limit <= 0)
+		{
+			return [];
+		}
+
+		$rows = DocumentFileTable::getList([
+			'select' => ['DOCUMENT_ID'],
+			'filter' => ['>DOCUMENT_ID' => max($afterId, 0)],
+			'group' => ['DOCUMENT_ID'],
+			'order' => ['DOCUMENT_ID' => 'ASC'],
+			'limit' => $limit,
+		])->fetchAll();
+
+		return array_map(static fn(array $row): int => (int)$row['DOCUMENT_ID'], $rows);
+	}
+
 	public function getByDocumentAndFileIds(int $documentId, array $fileIds): array
 	{
 		$normalizedFileIds = IdNormalizer::normalize($fileIds);

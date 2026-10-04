@@ -14,10 +14,10 @@ class AddEmbeddingCommand extends Main\Command\AbstractCommand
 {
 	public function __construct(
 		public readonly App $app,
-		public readonly int $currentUserId,
+		public readonly int $userId,
 		public readonly string $placement,
 		public readonly string $handler,
-		public readonly int $userId = 0,
+		public readonly int $targetUserId = 0,
 		public readonly ?string $title = null,
 		public readonly ?string $description = null,
 		public readonly ?string $groupName = null,

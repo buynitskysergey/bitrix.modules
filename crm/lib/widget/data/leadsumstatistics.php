@@ -96,10 +96,7 @@ class LeadSumStatistics extends LeadDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'SUM_TOTAL';
-		}
+		$name = $this->sanitizeSelectName($name, 'SUM_TOTAL');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -413,6 +410,15 @@ class LeadSumStatistics extends LeadDataSource
 			'title' => GetMessage('CRM_LEAD_GROUP_BY_SOURCE'),
 			'name' => self::GROUP_BY_SOURCE
 		);
+	}
+	protected function getAllowedSelectNames()
+	{
+		$names = array('COUNT', 'SUM_TOTAL');
+		foreach(LeadSumStatisticEntry::getBindingInfos() as $bindingInfo)
+		{
+			$names[] = $bindingInfo['SLOT_NAME'];
+		}
+		return $names;
 	}
 	/** @return array */
 	public function prepareEntityListFilter(array $filterParams)

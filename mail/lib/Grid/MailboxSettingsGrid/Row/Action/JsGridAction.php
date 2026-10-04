@@ -47,9 +47,9 @@ abstract class JsGridAction extends BaseAction
 		if (isset($control) && !$this->isEnabled($rawFields))
 		{
 			$disabledClass = 'menu-popup-item-disabled';
-			$control['className'] =
-				isset($control['className'])
-					? $control['className'] . ' ' . $disabledClass
+			$control['ICONCLASS'] =
+				isset($control['ICONCLASS'])
+					? $control['ICONCLASS'] . ' ' . $disabledClass
 					: $disabledClass
 			;
 

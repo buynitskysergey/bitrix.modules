@@ -967,10 +967,6 @@ class CAllUserCounter
 						}
 					}
 				}
-				else
-				{
-					CUserCounterPage::setNewEvent();
-				}
 			}
 		}
 	}

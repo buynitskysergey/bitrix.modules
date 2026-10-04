@@ -4,16 +4,24 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Integration\UI\EntitySelector;
 
+use Bitrix\Bizproc\Public\Provider\Params\StorageType\StorageTypeFilter;
+use Bitrix\Bizproc\Public\Provider\Params\StorageType\StorageTypeSelect;
+use Bitrix\Bizproc\Public\Provider\Params\StorageType\StorageTypeSort;
 use Bitrix\Bizproc\Public\Provider\StorageTypeProvider;
 use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\Main\Provider\Params\GridParams;
+use Bitrix\Main\Provider\Params\Pager;
 use Bitrix\UI\EntitySelector\BaseProvider;
 use Bitrix\UI\EntitySelector\Dialog;
 use Bitrix\UI\EntitySelector\Item;
+use Bitrix\UI\EntitySelector\SearchQuery;
 use Bitrix\Main\Localization\Loc;
 
 class StorageProvider extends BaseProvider
 {
 	public const ENTITY_ID = 'bizproc-storage';
+
+	private const ITEMS_LIMIT = 50;
 
 	public function __construct(array $options)
 	{
@@ -49,11 +57,35 @@ class StorageProvider extends BaseProvider
 		return $this->getItems($ids);
 	}
 
-	private function makeItems(): array
+	final public function doSearch(SearchQuery $searchQuery, Dialog $dialog): void
+	{
+		$search = trim($searchQuery->getQuery());
+		if (\CBPHelper::isEmptyValue($search))
+		{
+			return;
+		}
+
+		$searchQuery->setCacheable(false); // required for dynamicSearchMatchMode: 'all'
+
+		$items = $this->makeItems(new StorageTypeFilter(['TITLE' => $search]));
+		if ($items)
+		{
+			$dialog->addItems($items);
+		}
+	}
+
+	private function makeItems(?StorageTypeFilter $filter = null): array
 	{
 		$provider = new StorageTypeProvider();
 
-		$collection = $provider->getStoragesByFilter(select: ['ID', 'TITLE']);
+		$gridParams = new GridParams(
+			pager: new Pager(limit: self::ITEMS_LIMIT),
+			filter: $filter,
+			sort: new StorageTypeSort(['ID' => 'DESC']),
+			select: new StorageTypeSelect(['ID', 'TITLE']),
+		);
+
+		$collection = $provider->getList($gridParams);
 
 		$items = [];
 		foreach ($collection as $storageItem)

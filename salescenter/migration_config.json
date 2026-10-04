@@ -1,0 +1,7 @@
+{
+    "defaultTableName": "b_salescenter_page",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js"
+    }
+}

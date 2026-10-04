@@ -14,6 +14,10 @@ Loc::loadMessages(__FILE__);
 
 class InitiatorSignedTrigger extends Automation\Trigger\BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use SignTriggerReturnDataTrait;
+
 	public static function isEnabled()
 	{
 		return Main\Loader::includeModule('sign')
@@ -75,6 +79,55 @@ class InitiatorSignedTrigger extends Automation\Trigger\BaseTrigger
 	public static function getDescription(): string
 	{
 		return Loc::getMessage('CRM_AUTOMATION_TRIGGER_SIGN_INITIATOR_SIGNED_DESCRIPTION') ?? '';
+	}
+
+	public function setInputData($data)
+	{
+		if (is_callable([$this, 'setReturnValues']))
+		{
+			$this->setReturnValues(static::buildSignReturnValues(is_array($data) ? $data : []));
+		}
+
+		return parent::setInputData($data);
+	}
+
+	/**
+	 * The B2B events reach crm through the timeline callback of the signing service: an acting user
+	 * could only arrive with that callback, and nothing inside the portal fills one, so the node names
+	 * no initiator. The member who signed is reported by the signer fields instead.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_SIGN_INITIATOR_SIGNED_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getSignReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
+	}
+
+	/**
+	 * ON_SIGN names the member who signed, so the member fields are reported as well. The B2B nodes are
+	 * each raised by a single event, so the event type is not offered as a field.
+	 */
+	protected static function getSignReturnFieldIds(): array
+	{
+		return [
+			self::RETURN_SIGN_DOCUMENT_ID,
+			self::RETURN_SIGN_MEMBER_ROLE,
+			self::RETURN_SIGN_INITIATED_BY_TYPE,
+			self::RETURN_SIGNER_USER,
+			self::RETURN_SIGNER_NAME,
+		];
 	}
 
 	public static function toArray()

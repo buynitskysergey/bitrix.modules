@@ -51,7 +51,6 @@ class LeadSettings
 		$this->enableAutoUsingFinishedLead = new BooleanSetting('enable_auto_using_finished_lead', false);
 		$this->enableDeferredCleaning = new BooleanSetting('enable_lead_deferred_cleaning', true);
 		$this->enableRecycleBin = new BooleanSetting('enable_lead_recycle_bin', true);
-		$this->initIsFactoryEnabledSetting(\CCrmOwnerType::Lead);
 
 		$completionConfig = array();
 		foreach(Activity\Provider\ProviderManager::getCompletableProviderList() as $providerInfo)

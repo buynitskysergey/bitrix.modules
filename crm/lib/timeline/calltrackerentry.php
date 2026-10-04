@@ -31,7 +31,7 @@ class CallTrackerEntry extends TimelineEntry
 
 		$createdId = $result->getId();
 
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $created);
 		self::buildSearchContent($createdId);
 
 		return $createdId;

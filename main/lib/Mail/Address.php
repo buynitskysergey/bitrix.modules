@@ -161,6 +161,20 @@ class Address
 	}
 
 	/**
+	 * Canonical form of an address: the one an address is both stored in and looked up by. Storage and
+	 * lookup match only while both apply the very same operation, so it lives here in a single copy and
+	 * every caller delegates to it instead of repeating the operation. Says nothing about validity of
+	 * the address, only about the form of the value.
+	 *
+	 * @param null|string $email
+	 * @return string
+	 */
+	public static function normalizeEmail(?string $email): string
+	{
+		return mb_strtolower(trim($email ?? ''));
+	}
+
+	/**
 	 * Set email.
 	 *
 	 * @param null|string $email
@@ -168,7 +182,7 @@ class Address
 	 */
 	public function setEmail($email)
 	{
-		$email = mb_strtolower(trim($email));
+		$email = self::normalizeEmail($email);
 		if (!$this->checkMail($email))
 		{
 			$email = null;

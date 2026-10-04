@@ -14,6 +14,7 @@ use Bitrix\Disk\Security\FakeSecurityContext;
 use Bitrix\Disk\Uf\UserFieldManager;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Data\Cache;
+use Bitrix\Main\DB\DuplicateEntryException;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
@@ -137,6 +138,73 @@ final class Driver implements IErrorable
 		}
 
 		return self::addStorage($data, $rights);
+	}
+
+	private function addStorageIfNotExistWithCreationStatus(array $data, array $rights = array()): ?array
+	{
+		$filter = array_intersect_key($data, array(
+			'ID' => true,
+			'MODULE_ID' => true,
+			'ENTITY_TYPE' => true,
+			'ENTITY_ID' => true,
+		));
+
+		if (empty($filter))
+		{
+			throw new ArgumentException('Empty fields for filtering.');
+		}
+
+		$storage = Storage::getList(array(
+			'select' => array('ID'),
+			'filter' => $filter,
+		))->fetch();
+
+		if ($storage)
+		{
+			return [
+				'storage' => Storage::loadById($storage['ID']),
+				'created' => false,
+			];
+		}
+
+		$isDuplicateEntry = false;
+		try
+		{
+			$storage = self::addStorage($data, $rights);
+		}
+		catch (DuplicateEntryException)
+		{
+			$storage = null;
+			$isDuplicateEntry = true;
+		}
+
+		if ($storage)
+		{
+			return [
+				'storage' => $storage,
+				'created' => true,
+			];
+		}
+
+		if (!$isDuplicateEntry)
+		{
+			return null;
+		}
+
+		$storage = Storage::getList(array(
+			'select' => array('ID'),
+			'filter' => $filter,
+		))->fetch();
+
+		if ($storage)
+		{
+			return [
+				'storage' => Storage::loadById($storage['ID']),
+				'created' => false,
+			];
+		}
+
+		return null;
 	}
 
 	/**
@@ -304,6 +372,21 @@ final class Driver implements IErrorable
 		$data['ENTITY_TYPE'] = ProxyType\Common::className();
 
 		return self::addStorageIfNotExist($data, $rights);
+	}
+
+	public function addCommonStorageWithCreationStatus(array $data, array $rights): ?array
+	{
+		$this->checkRequiredInputParams($data, array(
+			'NAME',
+			'ENTITY_ID',
+			'SITE_ID',
+		));
+
+		$data['USE_INTERNAL_RIGHTS'] = 1;
+		$data['MODULE_ID'] = self::INTERNAL_MODULE_ID;
+		$data['ENTITY_TYPE'] = ProxyType\Common::className();
+
+		return $this->addStorageIfNotExistWithCreationStatus($data, $rights);
 	}
 
 	/**

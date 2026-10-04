@@ -27,9 +27,13 @@ final class CrmStarter
 	public const REST_SCOPE = 'rest';
 	public const MOVE_TO_BACKGROUND_DELAY = 0;
 	private const CREATE_DOCUMENT_TRIGGER = 'CrmEntityCreateTrigger';
+	private const EDIT_DOCUMENT_TRIGGER = 'CrmEntityEditTrigger';
 	private array $complexId;
 	private DocumentDto $document;
 	private string $contextModuleId = 'crm';
+	private bool $entityCategoryIdResolved = false;
+	private ?int $entityCategoryId = null;
+	private \SplObjectStorage $changedFieldsByRunData;
 
 	public function __construct(DocumentDto $document)
 	{
@@ -41,6 +45,7 @@ final class CrmStarter
 
 		$this->complexId = $complexId;
 		$this->document = $document;
+		$this->changedFieldsByRunData = new \SplObjectStorage();
 	}
 
 	public function setContextModuleId(string $moduleId): static
@@ -270,6 +275,9 @@ final class CrmStarter
 			$this->fillStarterByRunDto($dto, $starter);
 			if ($eventType !== \CCrmBizProcEventType::Create)
 			{
+				// Automation-only starter drops the process CrmEntityEditTrigger anyway; only the
+				// automation FieldChangedTrigger from fillStarterWithCommonTriggers is relevant here.
+				// Skipping addEditDocumentTriggerEvent avoids its unconditional category resolve (SQL).
 				$this->fillStarterWithCommonTriggers($dto, $starter);
 			}
 
@@ -370,6 +378,7 @@ final class CrmStarter
 
 			if (!$isNew)
 			{
+				$this->addEditDocumentTriggerEvent($dto, $starter);
 				$this->fillStarterWithCommonTriggers($dto, $starter);
 			}
 
@@ -400,6 +409,7 @@ final class CrmStarter
 		}
 		else
 		{
+			$this->addEditDocumentTriggerEvent($dto, $starter);
 			$this->fillStarterWithCommonTriggers($dto, $starter);
 		}
 
@@ -427,6 +437,39 @@ final class CrmStarter
 			$this->convertEventDocumentsToDocumentDto([$this->document]),
 			$parameters,
 			\CBPDocumentEventType::Create,
+			$dto->userId,
+		);
+	}
+
+	private function addEditDocumentTriggerEvent(RunDataDto $dto, Starter $starter): void
+	{
+		if (!$this->shouldPublishDocumentUpdateEvent($dto))
+		{
+			return;
+		}
+
+		$complexDocumentId = $this->resolveComplexDocumentIdFromDocument($this->document);
+		if (!$complexDocumentId)
+		{
+			return;
+		}
+
+		$parameters = [
+			'Document' => $complexDocumentId,
+			'initiatorUserId' => $dto->userId,
+		];
+
+		$categoryId = $this->resolveCategoryId($dto);
+		if ($categoryId !== null)
+		{
+			$parameters['CategoryId'] = $categoryId;
+		}
+
+		$starter->addEvent(
+			self::EDIT_DOCUMENT_TRIGGER,
+			$this->convertEventDocumentsToDocumentDto([$this->document]),
+			$parameters,
+			\CBPDocumentEventType::Edit,
 		);
 	}
 
@@ -449,28 +492,55 @@ final class CrmStarter
 			return (int)$actualCategoryId;
 		}
 
-		$item = $factory->getItem($this->document->entityId, [\Bitrix\Crm\Item::FIELD_NAME_CATEGORY_ID]);
+		// Category absent from actualFields means it did not change on update, so the previous value
+		// already carried by legacy update paths equals the stored one - avoid an extra getItem SELECT.
+		$previousCategoryId = $dto->previousFields[\Bitrix\Crm\Item::FIELD_NAME_CATEGORY_ID] ?? null;
+		if ($previousCategoryId !== null)
+		{
+			return (int)$previousCategoryId;
+		}
 
-		return $item?->getCategoryId();
+		if (!$this->entityCategoryIdResolved)
+		{
+			$item = $factory->getItem($this->document->entityId, [\Bitrix\Crm\Item::FIELD_NAME_CATEGORY_ID]);
+			$this->entityCategoryId = $item?->getCategoryId();
+			$this->entityCategoryIdResolved = true;
+		}
+
+		return $this->entityCategoryId;
 	}
 
 	private function fillStarterWithCommonTriggers(RunDataDto $dto, Starter $starter): void
 	{
-		$changedFields = $this->computeChangedFields($dto->actualFields ?? [], $dto->previousFields ?? []);
+		$changedFields = $this->getChangedFields($dto);
 		if (!$changedFields)
 		{
 			return;
 		}
 
+		$automationParameters = [
+			'CHANGED_FIELDS' => $changedFields,
+			'initiatorUserId' => $dto->userId,
+		];
+
+		$fieldChangedParameters = [
+			'Fields' => $changedFields,
+			'Document' => $this->resolveComplexDocumentIdFromDocument($this->document),
+			'initiatorUserId' => $dto->userId,
+		];
+
+		$categoryId = $this->resolveCategoryId($dto);
+		if ($categoryId !== null)
+		{
+			$fieldChangedParameters['CategoryId'] = $categoryId;
+		}
+
 		$events = [
-			new EventDto(FieldChangedTrigger::getCode(), [$this->document], ['CHANGED_FIELDS' => $changedFields]), // automation
+			new EventDto(FieldChangedTrigger::getCode(), [$this->document], $automationParameters), // automation
 			new EventDto(
 				'CrmEntityFieldChangedTrigger',
 				[$this->document],
-				[
-					'Fields' => $changedFields,
-					'Document' => $this->resolveComplexDocumentIdFromDocument($this->document),
-				],
+				$fieldChangedParameters,
 			), // process
 		];
 
@@ -481,7 +551,15 @@ final class CrmStarter
 		);
 		if (in_array($responsibleKey, $changedFields, true))
 		{
-			$events[] = new EventDto(ResponsibleChangedTrigger::getCode(), [$this->document]);
+			$events[] = new EventDto(
+				ResponsibleChangedTrigger::getCode(),
+				[$this->document],
+				[
+					'initiatorUserId' => $dto->userId,
+					'previousResponsibleId' => (int)(($dto->previousFields ?? [])[$responsibleKey] ?? 0),
+					'responsibleId' => (int)(($dto->actualFields ?? [])[$responsibleKey] ?? 0),
+				],
+			);
 
 			$target = Factory::getTarget($this->document->entityTypeId, $this->document->entityId);
 			$events[] = new EventDto(
@@ -489,7 +567,11 @@ final class CrmStarter
 				[],
 				[
 					'TARGET' => $target,
-					'INPUT_DATA' => $changedFields,
+					'INPUT_DATA' => [
+						'initiatorUserId' => $dto->userId,
+						'previousResponsibleId' => (int)(($dto->previousFields ?? [])[$responsibleKey] ?? 0),
+						'responsibleId' => (int)(($dto->actualFields ?? [])[$responsibleKey] ?? 0),
+					],
 					'TRIGGER_CLASS' => ResponsibleChangedTrigger::class,
 				]
 			);
@@ -513,10 +595,7 @@ final class CrmStarter
 			->setDocument(new \Bitrix\Bizproc\Starter\Dto\DocumentDto(
 				complexDocumentId: $this->complexId,
 				complexDocumentType: CCrmBizProcHelper::ResolveDocumentType($this->document->entityTypeId),
-				changedFieldNames: $this->computeChangedFields(
-					$dto->actualFields ?? [],
-					$dto->previousFields ?? []
-				)
+				changedFieldNames: $this->getChangedFields($dto)
 			))
 			->setContext(
 				$this->createContextDto($face, $dto->isManual)
@@ -563,6 +642,42 @@ final class CrmStarter
 			face: $face,
 		);
 	}
+
+	/**
+	 * The only place that decides whether an update publishes its document event.
+	 * An update without actual fields has nothing to compare, and its empty diff means "unknown",
+	 * not "unchanged": such a run publishes the event as it did before the comparison was introduced.
+	 * An empty set of actual fields is the opposite case - the run did collect its fields and none of
+	 * them changed, so the empty diff is a real "unchanged" and the event stays unpublished.
+	 */
+	private function shouldPublishDocumentUpdateEvent(RunDataDto $dto): bool
+	{
+		if ($dto->actualFields === null)
+		{
+			return true;
+		}
+
+		return $this->getChangedFields($dto) !== [];
+	}
+
+	/**
+	 * Every branch of one update reads the same run data, so the document fields are compared once per
+	 * update and never per entity: the memo is keyed by the run data of this very update, and the
+	 * instance itself is bound to a single entity by its constructor.
+	 */
+	private function getChangedFields(RunDataDto $dto): array
+	{
+		if (!$this->changedFieldsByRunData->contains($dto))
+		{
+			$this->changedFieldsByRunData[$dto] = $this->computeChangedFields(
+				$dto->actualFields ?? [],
+				$dto->previousFields ?? [],
+			);
+		}
+
+		return $this->changedFieldsByRunData[$dto];
+	}
+
 	private function computeChangedFields(array $actualFields, array $previousFields): array
 	{
 		return (new DocumentFieldComparator(

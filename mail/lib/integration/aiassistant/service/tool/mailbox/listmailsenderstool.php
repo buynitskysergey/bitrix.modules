@@ -27,8 +27,8 @@ class ListMailSendersTool extends ToolContract
 	public function getDescription(): string
 	{
 		return
-			"Returns the list of email addresses available to the user as senders. "
-			. "Use this before sending a message to pick a valid 'from' address."
+			"Returns the senders available to the user with their email and exact sender or mailbox identifiers. "
+			. "Use this before sending a message and pass the returned identifier together with 'from'."
 		;
 	}
 

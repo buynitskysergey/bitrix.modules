@@ -10,9 +10,30 @@ Loc::loadMessages(__FILE__);
 
 class GuestReturnTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
 	public static function getCode()
 	{
 		return 'GUEST_RETURN';
+	}
+
+	/**
+	 * The site is revisited by the client, so the node names no portal initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return [
+			static::getEventDateTimeProperty(
+				Loc::getMessage('CRM_AUTOMATION_TRIGGER_GUEST_RETURN_EVENT_DATE_TIME') ?? ''
+			),
+		];
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public static function getName()

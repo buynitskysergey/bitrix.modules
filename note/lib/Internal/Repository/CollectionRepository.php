@@ -46,8 +46,7 @@ class CollectionRepository
 	): array
 	{
 		$query = CollectionTable::query()
-			->setSelect(['ID', 'NAME', 'POSITION', 'POLICY_LEVEL', 'IS_ARCHIVED',
-						  'CREATED_BY', 'UPDATED_BY', 'CREATED_AT', 'UPDATED_AT'])
+			->setSelect(['ID', 'NAME', 'POSITION', 'POLICY_LEVEL', 'IS_ARCHIVED', 'CREATED_BY', 'UPDATED_BY', 'CREATED_AT', 'UPDATED_AT'])
 			->where('IS_ARCHIVED', 'N')
 			->addOrder('POSITION', 'DESC')
 			->addOrder('ID', 'DESC')
@@ -94,8 +93,7 @@ class CollectionRepository
 		}
 
 		$query = CollectionTable::query()
-			->setSelect(['ID', 'NAME', 'POSITION', 'POLICY_LEVEL', 'IS_ARCHIVED',
-						  'CREATED_BY', 'UPDATED_BY', 'CREATED_AT', 'UPDATED_AT'])
+			->setSelect(['ID', 'NAME', 'POSITION', 'POLICY_LEVEL', 'IS_ARCHIVED', 'CREATED_BY', 'UPDATED_BY', 'CREATED_AT', 'UPDATED_AT'])
 			->whereIn('ID', $ids)
 			->where('IS_ARCHIVED', 'N')
 			->addOrder('POSITION', 'DESC')
@@ -230,6 +228,9 @@ class CollectionRepository
 		$idSafe = (int)$id;
 		$connection->queryExecute("DELETE FROM b_note_collection_access WHERE COLLECTION_ID = {$idSafe}");
 		$connection->queryExecute("DELETE FROM b_note_import_map WHERE COLLECTION_ID = {$idSafe}");
+		// [P6.T1] Collection-scope subscriptions have no other cleanup hook — the
+		// collection row is gone after this call, so ENTITY_ID would otherwise dangle.
+		(new SubscriptionRepository())->deleteByCollectionId($id);
 
 		CollectionTable::delete($id);
 	}

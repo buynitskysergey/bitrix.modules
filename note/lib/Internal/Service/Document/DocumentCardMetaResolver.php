@@ -36,7 +36,7 @@ final class DocumentCardMetaResolver
 	 * @param array<int, int> $authorIdByDocumentId Map [documentId => authorUserId];
 	 *   authorUserId is SystemUser::ID for system-authored documents (welcome content)
 	 *   and a positive user id for regular ones. Negative ids are skipped.
-	 * @return array<int, array{excerpt: string, author: ?array{id: int, name: string, photoUrl: ?string, isSystem?: true}}>
+	 * @return array<int, array{excerpt: string, author: ?array{id: int, name: string, photoUrl: ?string, color: string, isSystem?: true}}>
 	 */
 	public function resolve(
 		array $authorIdByDocumentId,
@@ -97,8 +97,23 @@ final class DocumentCardMetaResolver
 	}
 
 	/**
-	 * Builds the "title\n<stripped>" body shape SnippetExtractor::extractPreview expects.
-	 *
+	 * Excerpt for a title/markdown pair already in memory, for callers that have just written the
+	 * projection themselves. Goes through the same stripping, body shape and limits as the list path,
+	 * so a card refreshed from here reads exactly as one rendered from the database.
+	 */
+	public function buildExcerpt(
+		string $title,
+		string $markdown,
+		int $previewMaxLines = self::DEFAULT_PREVIEW_MAX_LINES,
+		int $previewLineMaxLen = self::DEFAULT_PREVIEW_LINE_MAX_LEN,
+	): string
+	{
+		$body = $this->composeBody($title, mb_substr($markdown, 0, self::MARKDOWN_FETCH_LIMIT));
+
+		return $this->snippetExtractor->extractPreview($body, $previewMaxLines, $previewLineMaxLen);
+	}
+
+	/**
 	 * @param int[] $documentIds
 	 * @return array<int, string>
 	 */
@@ -126,11 +141,23 @@ final class DocumentCardMetaResolver
 			{
 				continue;
 			}
-			$title = trim((string)($row['TITLE'] ?? ''));
-			$content = $this->markdownStripper->strip((string)($row['MARKDOWN_HEAD'] ?? ''));
-			$out[$id] = $title !== '' ? $title . "\n" . $content : $content;
+			$out[$id] = $this->composeBody(
+				(string)($row['TITLE'] ?? ''),
+				(string)($row['MARKDOWN_HEAD'] ?? ''),
+			);
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Builds the "title\n<stripped>" body shape SnippetExtractor::extractPreview expects.
+	 */
+	private function composeBody(string $title, string $markdownHead): string
+	{
+		$trimmedTitle = trim($title);
+		$content = $this->markdownStripper->strip($markdownHead);
+
+		return $trimmedTitle !== '' ? $trimmedTitle . "\n" . $content : $content;
 	}
 }

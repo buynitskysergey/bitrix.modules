@@ -284,6 +284,7 @@ final class ProjectAdapterService
 			'dates' => $this->mapDates($project),
 			'tags' => $project->tags,
 			'avatar' => $project->avatar,
+			'notifications' => $project->notifications,
 		], static fn(mixed $value): bool => $value !== null));
 	}
 

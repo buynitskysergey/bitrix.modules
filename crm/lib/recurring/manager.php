@@ -200,7 +200,7 @@ class Manager
 		{
 			if (self::isAllowedExpose($typeEntity))
 			{
-				$agentNames[$typeEntity] = "\\".__CLASS__."::exposeAgent('".$typeEntity."');";
+				$agentNames[$typeEntity] = self::getExposeAgentName($typeEntity);
 			}
 		}
 
@@ -221,7 +221,7 @@ class Manager
 		{
 			if ($agent['LAST_EXEC'] < $agent['NEXT_EXEC'])
 			{
-				$listActive[$agent['NAME']] = $agent['ID'];
+				$listActive[self::normalizeExposeAgentName($agent['NAME'])] = $agent['ID'];
 			}
 			else
 			{
@@ -262,7 +262,7 @@ class Manager
 	 *
 	 * @return string
 	 */
-	public static function exposeAgent($typeEntity = self::INVOICE)
+	public static function exposeAgent($typeEntity = self::INVOICE, ?string $cursorDate = null, int $cursorId = 0)
 	{
 		global $USER;
 
@@ -275,6 +275,17 @@ class Manager
 			return '';
 
 		$limit = Main\Config\Option::get('crm', 'day_limit_exposing_invoices', 10);
+		if ($typeEntity === self::DYNAMIC)
+		{
+			$result = $entity->exposeAutomatically(
+				(int)$limit,
+				null,
+				$cursorDate === null ? null : new Date($cursorDate, 'Y-m-d'),
+				$cursorId,
+			);
+
+			return self::getDynamicExposeAgentName($result, (int)$limit);
+		}
 
 		$params = [
 			'select' => ['ID'],
@@ -299,7 +310,7 @@ class Manager
 			return '';
 		}
 
-		return "\\".__CLASS__."::exposeAgent('".$typeEntity."');";
+		return self::getExposeAgentName($typeEntity);
 	}
 
 	public static function exposeToday($limit = null, $typeEntity = self::INVOICE)
@@ -320,6 +331,51 @@ class Manager
 			],
 			'=ACTIVE' => 'Y',
 		];
+	}
+
+	private static function getExposeAgentName(
+		string $typeEntity,
+		?Date $cursorDate = null,
+		int $cursorId = 0,
+	): string
+	{
+		$name = "\\" . __CLASS__ . "::exposeAgent('" . $typeEntity . "'";
+		if ($typeEntity === self::DYNAMIC && $cursorDate !== null)
+		{
+			$name .= ", '" . $cursorDate->format('Y-m-d') . "', " . $cursorId;
+		}
+
+		return $name . ');';
+	}
+
+	private static function normalizeExposeAgentName(string $name): string
+	{
+		$dynamicPrefix = "\\" . __CLASS__ . "::exposeAgent('" . self::DYNAMIC . "'";
+
+		return str_starts_with($name, $dynamicPrefix)
+			? self::getExposeAgentName(self::DYNAMIC)
+			: $name;
+	}
+
+	private static function getDynamicExposeAgentName(Result $result, int $limit): string
+	{
+		$data = $result->getData();
+		if (empty($data[Entity\DynamicAgentSelector::KEY_HAS_CANDIDATES]))
+		{
+			return '';
+		}
+
+		$cursorDate = $data[Entity\DynamicAgentSelector::KEY_NEXT_CURSOR_DATE] ?? null;
+		if ($limit > 0 && is_string($cursorDate) && $cursorDate !== '')
+		{
+			return self::getExposeAgentName(
+				self::DYNAMIC,
+				new Date($cursorDate, 'Y-m-d'),
+				(int)($data[Entity\DynamicAgentSelector::KEY_NEXT_CURSOR_ID] ?? 0),
+			);
+		}
+
+		return self::getExposeAgentName(self::DYNAMIC);
 	}
 
 	/**

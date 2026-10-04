@@ -52,6 +52,11 @@ class DocumentAccessTable extends DataManager
 			new IntegerField('LEVEL', [
 				'required' => true,
 			]),
+			// 0 sentinel = explicit (non-inherited) grant; see DocumentAccessService::SOURCE_NONE.
+			new IntegerField('SOURCE_DOCUMENT_ID', [
+				'required' => true,
+				'default_value' => 0,
+			]),
 			new IntegerField('CREATED_BY', [
 				'required' => true,
 			]),

@@ -8,6 +8,7 @@ use Bitrix\Crm\Item;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Settings\LeadSettings;
 use Bitrix\Main\Application;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Web\Uri;
@@ -240,7 +241,12 @@ abstract class Notification
 	protected function getAbsoluteUrl(): Uri
 	{
 		$url = $this->getUrl();
-		$host = Application::getInstance()->getContext()->getRequest()->getServer()->getHttpHost();
+
+		$serverName = (string)Option::get('main', 'server_name');
+		$host = $serverName !== ''
+			? $serverName
+			: Application::getInstance()->getContext()->getRequest()->getServer()->getHttpHost()
+		;
 
 		return $url->setHost($host);
 	}

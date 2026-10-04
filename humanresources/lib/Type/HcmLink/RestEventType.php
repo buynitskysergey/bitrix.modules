@@ -11,4 +11,6 @@ enum RestEventType: string
 	case onEmployeeListRequested = 'OnHumanResourcesHcmLinkEmployeeListRequested';
 	case onFieldValueRequested = 'OnHumanResourcesHcmLinkFieldValueRequested';
 	case onEmployeeListMapped = 'OnHumanResourcesHcmLinkEmployeeListMapped';
+	case onPinRequested = 'OnHumanResourcesHcmLinkPinRequested';
+	case onSalaryVacationRequested = 'OnHumanResourcesHcmLinkSalaryVacationRequested';
 }

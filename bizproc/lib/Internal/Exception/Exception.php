@@ -25,4 +25,9 @@ class Exception extends SystemException
 	public const CODE_STORAGE_FIELD_REMOVE = 1011;
 
 	public const CODE_STORAGE_FIELD_NOT_FOUND = 1012;
+
+	public const CODE_DATA_VIEW_INVALID_DEFINITION = 1013;
+	public const CODE_DATA_VIEW_SAVE = 1014;
+	public const CODE_DATA_VIEW_CORRUPTED_STATE = 1015;
+	public const CODE_DATA_VIEW_MATERIALIZE = 1016;
 }

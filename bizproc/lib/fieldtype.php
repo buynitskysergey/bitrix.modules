@@ -102,6 +102,11 @@ class FieldType
 	public const ENTITYSELECTOR = 'entityselector';
 
 	/**
+	 * Base type CONDITIONGROUP
+	 */
+	public const CONDITIONGROUP = 'conditiongroup';
+
+	/**
 	 * Control render mode - Bizproc Designer
 	 */
 	public const RENDER_MODE_DESIGNER = 1;
@@ -523,6 +528,7 @@ class FieldType
 			static::USER => BaseType\User::class,
 			static::INTERNALSELECT => BaseType\InternalSelect::class,
 			static::ENTITYSELECTOR => BaseType\EntitySelector::class,
+			static::CONDITIONGROUP => BaseType\ConditionGroup::class,
 			static::TIME => BaseType\Time::class,
 			static::DOCUMENT_TYPE => BaseType\DocumentType::class,
 		);

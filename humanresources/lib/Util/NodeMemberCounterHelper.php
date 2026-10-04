@@ -2,9 +2,11 @@
 
 namespace Bitrix\HumanResources\Util;
 
+use Bitrix\HumanResources\Internals\Repository\Query\RealUserFilter;
 use Bitrix\HumanResources\Model;
 use Bitrix\HumanResources\Repository\NodeMemberRepository;
 use Bitrix\HumanResources\Service\Container;
+use Bitrix\HumanResources\Type\MemberEntityType;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 
 class NodeMemberCounterHelper
@@ -17,11 +19,16 @@ class NodeMemberCounterHelper
 	 *
 	 * @return int|null
 	 */
-	public function countByNodeId(int $nodeId, bool $withAllChildNodes = false): ?int
+	public function countByNodeId(
+		int $nodeId,
+		bool $withAllChildNodes = false,
+		bool $withVirtualUsers = false,
+	): ?int
 	{
 		$cacheManager = Container::getCacheManager();
 
-		$cacheId = 'node_member_count_' . $nodeId . '_' . ($withAllChildNodes ? 'Y' : 'N');
+		$cacheId = 'node_member_count_' . $nodeId . '_' . ($withAllChildNodes ? 'Y' : 'N')
+			. RealUserFilter::cacheKeySuffix($withVirtualUsers);
 		$cacheDir = NodeMemberRepository::NODE_MEMBER_CACHE_DIR;
 
 		$result = $cacheManager->getData($cacheId, $cacheDir);
@@ -48,6 +55,12 @@ class NodeMemberCounterHelper
 					->setCacheTtl(self::CACHE_TTL)
 					->cacheJoins(true)
 			;
+
+			if (!$withVirtualUsers)
+			{
+				$countQuery->where('ENTITY_TYPE', MemberEntityType::USER->value);
+				RealUserFilter::applyToMemberQuery($countQuery);
+			}
 
 			if (!$withAllChildNodes)
 			{

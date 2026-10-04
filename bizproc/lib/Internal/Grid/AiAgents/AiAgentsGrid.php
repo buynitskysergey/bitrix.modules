@@ -28,16 +28,6 @@ final class AiAgentsGrid extends Grid
 		);
 	}
 
-	public function getOrmParams(): array
-	{
-		$params = parent::getOrmParams();
-		$params['select'][] = 'ID';
-
-		$params['group'] = ['ID'];
-
-		return $params;
-	}
-
 	protected function createRows(): Rows
 	{
 		\Bitrix\Main\UI\Extension::load([
@@ -100,7 +90,6 @@ final class AiAgentsGrid extends Grid
 	{
 		$params = [
 			'ID' => $this->getId(),
-			'WHITE_LIST' => $this->getVisibleColumnsIds(),
 		];
 		$filterSettings = new AiAgentsFilterSettings($params);
 

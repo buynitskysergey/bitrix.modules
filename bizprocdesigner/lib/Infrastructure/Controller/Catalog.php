@@ -7,6 +7,7 @@ use Bitrix\Bizproc\Activity\Enum\ActivityGroup;
 use Bitrix\Bizproc\Activity\Enum\ActivityNodeType;
 use Bitrix\Bizproc\Activity\Enum\ActivityType;
 use Bitrix\Bizproc\Public\Entity\Document\Workflow;
+use Bitrix\Bizproc\Public\Service\ActivityGroup\GroupVisibilityServiceInterface;
 use Bitrix\Bizproc\Runtime\ActivitySearcher\Activities;
 use Bitrix\Bizproc\Runtime\ActivitySearcher\Searcher;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Catalog\NodeCatalogItemDtoFactory;
@@ -41,6 +42,10 @@ class Catalog extends JsonController
 	private function transformActivities(Activities $activities): array
 	{
 		$groups = ActivityGroup::toArray();
+		if (defined('\Bitrix\Bizproc\Dev\ENV'))
+		{
+			$groups['dev'] = $this->createDevGroup();
+		}
 
 		/** @var ActivityDescription $activityData */
 		foreach ($activities as $activityData)
@@ -67,6 +72,12 @@ class Catalog extends JsonController
 					$groups[$group]['items'][] = $item;
 				}
 			}
+		}
+
+		$serviceLocator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+		if ($serviceLocator->has(GroupVisibilityServiceInterface::class))
+		{
+			$groups = $serviceLocator->get(GroupVisibilityServiceInterface::class)->filterHidden($groups);
 		}
 
 		$groups = array_values(array_filter($groups, static fn($group) => !empty($group['items'])));
@@ -127,5 +138,15 @@ class Catalog extends JsonController
 		}
 
 		return $result;
+	}
+
+	private function createDevGroup(): array
+	{
+		return [
+			'id' => 'dev',
+			'icon' => '',
+			'title' => 'В разработке',
+			'items' => [],
+		];
 	}
 }

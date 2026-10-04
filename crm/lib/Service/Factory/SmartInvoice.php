@@ -10,7 +10,6 @@ use Bitrix\Crm\Integration\DocumentGeneratorManager;
 use Bitrix\Crm\InvoiceTable;
 use Bitrix\Crm\Item;
 use Bitrix\Crm\Model\Dynamic\TypeTable;
-use Bitrix\Crm\Recurring\Manager;
 use Bitrix\Crm\Relation;
 use Bitrix\Crm\RelationIdentifier;
 use Bitrix\Crm\Security\Role\RolePermission;
@@ -50,15 +49,6 @@ class SmartInvoice extends Dynamic
 		return static::USER_FIELD_ENTITY_ID;
 	}
 
-	public function isPaymentsEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isRecurringEnabled(): bool
-	{
-		return $this->isRecurringSupported() && Manager::isAllowedExpose(Manager::DYNAMIC);
-	}
 
 	protected function getFieldTitlesMap(): array
 	{
@@ -419,30 +409,4 @@ class SmartInvoice extends Dynamic
 		return $fields;
 	}
 
-	public function isCountersEnabled(): bool
-	{
-		// Rarely some portals hasn't b_crm_dynamic_items_31 table. This is unexpected situation, to prevent crash
-		// have to temporarily disabled counter for the smart invoice.
-		$hasTable = $this->checkSmartInvoiceTableExists();
-		return $hasTable;
-	}
-
-	private function checkSmartInvoiceTableExists(): bool
-	{
-		global $DB;
-		$cache = \Bitrix\Main\Application::getInstance()->getManagedCache();
-		$cacheKey = 'crm_check__b_crm_dynamic_items_31__table';
-
-		if ($cache->read(3600*24*7, $cacheKey))
-		{
-			$hasTable = (bool)$cache->get($cacheKey);
-		}
-		else
-		{
-			$hasTable = (bool)$DB->TableExists('b_crm_dynamic_items_31');
-			$cache->set($cacheKey, $hasTable);
-		}
-
-		return $hasTable;
-	}
 }

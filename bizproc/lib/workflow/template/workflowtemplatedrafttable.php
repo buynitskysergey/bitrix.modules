@@ -4,6 +4,7 @@ namespace Bitrix\Bizproc\Workflow\Template;
 
 use Bitrix\Main\ORM;
 use Bitrix\Main\ORM\Data\DataManager;
+use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
 
 /**
  * Class WorkflowTemplateDraftTable
@@ -23,8 +24,12 @@ use Bitrix\Main\ORM\Data\DataManager;
  */
 class WorkflowTemplateDraftTable extends DataManager
 {
+	use DeleteByFilterTrait;
+
 	public const STATUS_DRAFT = 0;
 	public const STATUS_AUTOSAVE = 1;
+	public const STATUS_RESTORED = 2;
+	public const STATUS_RESTORED_WITHOUT_BACKUP = 3;
 
 	public static function getTableName(): string
 	{
@@ -76,6 +81,68 @@ class WorkflowTemplateDraftTable extends DataManager
 		return static::getList([
 			'filter' => ['=TEMPLATE_ID' => $templateId],
 		])->fetchAll();
+	}
+
+	/**
+	 * The draft the editor itself works with: the freshest one of the template, without its configuration.
+	 * Every selection of a draft for the editor goes through this method or its variant carrying the
+	 * configuration, a template may have more than one draft.
+	 *
+	 * @return array<string, mixed>|null null when the template has no draft
+	 */
+	public static function getLatestDraftByTemplateId(int $templateId): ?array
+	{
+		return static::selectLatestDraft($templateId, ['ID', 'STATUS', 'CREATED']);
+	}
+
+	/**
+	 * The freshest draft of the template together with its configuration. Only for callers that really read
+	 * the configuration: it is stored as one blob and is the heaviest column of the table.
+	 *
+	 * @return array<string, mixed>|null null when the template has no draft
+	 */
+	public static function getLatestDraftWithDataByTemplateId(int $templateId): ?array
+	{
+		return static::selectLatestDraft($templateId, ['ID', 'STATUS', 'TEMPLATE_DATA', 'CREATED']);
+	}
+
+	/**
+	 * @return array<string, mixed> empty when the template has no draft
+	 */
+	public static function getLatestDraftDataByTemplateId(int $templateId): array
+	{
+		$row = static::getLatestDraftWithDataByTemplateId($templateId);
+
+		return is_array($row['TEMPLATE_DATA'] ?? null) ? $row['TEMPLATE_DATA'] : [];
+	}
+
+	public static function isRestoredDraft(?array $draftRow): bool
+	{
+		return $draftRow !== null && (int)$draftRow['STATUS'] === self::STATUS_RESTORED;
+	}
+
+	public static function hasRestoredMetadata(?array $draftRow): bool
+	{
+		return $draftRow !== null
+			&& in_array(
+				(int)$draftRow['STATUS'],
+				[self::STATUS_RESTORED, self::STATUS_RESTORED_WITHOUT_BACKUP],
+				true,
+			)
+		;
+	}
+
+	private static function selectLatestDraft(int $templateId, array $select): ?array
+	{
+		$row = static::query()
+			->setSelect($select)
+			->where('TEMPLATE_ID', $templateId)
+			->setOrder(['CREATED' => 'DESC', 'ID' => 'DESC'])
+			->setLimit(1)
+			->fetch()
+		;
+
+		return $row ?: null;
 	}
 
 	public static function deleteByTemplateId(string $templateId): void

@@ -336,6 +336,17 @@ final class MailManager implements ICanSendMessage
 			$activityFields['STORAGE_ELEMENT_IDS'] = $attachments;
 		}
 
+		$fromAddress = new \Bitrix\Main\Mail\Address($options['MESSAGE_FROM'] ?? null);
+		$replyTo = self::compileReplyTo($fromAddress->getEmail());
+		$emailMeta = [
+			'__email' => $fromAddress->getEmail(),
+			'from' => $fromAddress->get(),
+			'replyTo' => $replyTo,
+			'to' => $toEmail,
+		];
+		// the EmailSent trigger fires inside the add, so the addresses must already be in these fields
+		$activityFields['SETTINGS'] = ['EMAIL_META' => $emailMeta];
+
 		$activityId = (int)\CCrmActivity::Add(
 			$activityFields,
 			false,
@@ -362,10 +373,6 @@ final class MailManager implements ICanSendMessage
 		$urn = \CCrmActivity::PrepareUrn($activityFields);
 		$messageId = self::compileMessageId($urn);
 
-		$fromAddress = new \Bitrix\Main\Mail\Address($options['MESSAGE_FROM'] ?? null);
-
-		$replyTo = self::compileReplyTo($fromAddress->getEmail());
-
 		\CCrmActivity::Update(
 			$activityId,
 			[
@@ -376,12 +383,7 @@ final class MailManager implements ICanSendMessage
 						'Message-Id' => $messageId,
 						'Reply-To' => $replyTo ?: $fromAddress->get(),
 					],
-					'EMAIL_META' => [
-						'__email' => $fromAddress->getEmail(),
-						'from' => $fromAddress->get(),
-						'replyTo' => $replyTo,
-						'to' => $toEmail,
-					],
+					'EMAIL_META' => $emailMeta,
 				],
 			],
 			false,
@@ -415,6 +417,26 @@ final class MailManager implements ICanSendMessage
 			\Bitrix\Mail\MailboxTable::getUserMailboxes($userId),
 			fn(array $mailbox) => $mailbox['EMAIL'] === $fromAddress->getEmail(),
 		));
+		if (empty($fromMailbox))
+		{
+			$siteId = (string)\Bitrix\Main\Context::getCurrent()->getSite();
+			$resolverClass = \Bitrix\Mail\Public\Service\Mailbox\AddressResolver::class;
+			if ($siteId !== '' && class_exists($resolverClass) && method_exists($resolverClass, 'resolveForUser'))
+			{
+				$resolvedMailbox = (new $resolverClass())->resolveForUser(
+					(int)$userId,
+					$siteId,
+					$fromAddress->getEmail(),
+				);
+				if ($resolvedMailbox !== null)
+				{
+					$fromMailbox = current(array_filter(
+						\Bitrix\Mail\MailboxTable::getUserMailboxes($userId),
+						static fn(array $mailbox): bool => (int)$mailbox['ID'] === $resolvedMailbox->mailboxId,
+					));
+				}
+			}
+		}
 
 		$outgoingBody = $bodyHtml;
 
@@ -449,6 +471,19 @@ final class MailManager implements ICanSendMessage
 			}
 		}
 
+		$context =
+			(new \Bitrix\Main\Mail\Context())
+				->setCategory(\Bitrix\Main\Mail\Context::CAT_EXTERNAL)
+				->setPriority(\Bitrix\Main\Mail\Context::PRIORITY_LOW)
+				->setCallback(
+					(new \Bitrix\Main\Mail\Callback\Config())
+						->setModuleId('crm')
+						->setEntityType(self::CALLBACK_ENTITY_TYPE)
+						->setEntityId($urn)
+				)
+		;
+		\Bitrix\Crm\Integration\Mail\MessageSender::applySenderIdentity($context, $fromMailboxId);
+
 		$fields = [
 			'CHARSET' => SITE_CHARSET,
 			'CONTENT_TYPE' => 'html',
@@ -472,17 +507,7 @@ final class MailManager implements ICanSendMessage
 				'URL_PAGE' => '/pub/mail/click.php',
 				'URL_PARAMS' => [],
 			],
-			'CONTEXT' =>
-				(new \Bitrix\Main\Mail\Context())
-					->setCategory(\Bitrix\Main\Mail\Context::CAT_EXTERNAL)
-					->setPriority(\Bitrix\Main\Mail\Context::PRIORITY_LOW)
-					->setCallback(
-						(new \Bitrix\Main\Mail\Callback\Config())
-							->setModuleId('crm')
-							->setEntityType(self::CALLBACK_ENTITY_TYPE)
-							->setEntityId($urn)
-					)
-			,
+			'CONTEXT' => $context,
 		];
 
 		if (\Bitrix\Crm\WebForm\Manager::isEmbeddingAvailable())
@@ -494,12 +519,22 @@ final class MailManager implements ICanSendMessage
 			;
 		}
 
-		$isSuccess = \Bitrix\Main\Mail\Mail::send($fields);
+		$transportResult = null;
+		if (method_exists(\Bitrix\Main\Mail\Mail::class, 'sendResult'))
+		{
+			$transportResult = \Bitrix\Main\Mail\Mail::sendResult($fields);
+			$isSuccess = $transportResult->isSuccess();
+		}
+		else
+		{
+			$isSuccess = \Bitrix\Main\Mail\Mail::send($fields);
+		}
+
 		if (!$isSuccess)
 		{
 			\CCrmActivity::Delete($activityId);
 
-			return self::tryGetResultWithSendFailReason();
+			return self::tryGetResultWithTransportFailReason($transportResult);
 		}
 
 		addEventToStatFile(
@@ -745,6 +780,17 @@ final class MailManager implements ICanSendMessage
 		}
 
 		return $result;
+	}
+
+	private static function tryGetResultWithTransportFailReason(?Result $transportResult): Result
+	{
+		$controlledTransportError = Mail\MessageSender::getControlledTransportError($transportResult);
+		if ($controlledTransportError === null)
+		{
+			return self::tryGetResultWithSendFailReason();
+		}
+
+		return (new Result())->addError($controlledTransportError);
 	}
 
 	private static function deleteFilesFromActivity(array $activityFields): void

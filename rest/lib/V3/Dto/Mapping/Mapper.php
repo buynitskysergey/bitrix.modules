@@ -63,7 +63,12 @@ abstract class Mapper
 	}
 
 	/**
-	 * Automatically maps nested DTO relation fields from raw data using #[MappedBy] mappers.
+	 * Automatically maps nested DTO fields from raw data using #[MappedBy] mappers.
+	 *
+	 * Covers:
+	 *  - ORM-style relations with #[RelationToOne] / #[RelationToMany];
+	 *  - embedded nested DTOs / DtoCollections without FK attributes
+	 *    (entity-in-entity, filled inline by MappedBy).
 	 *
 	 * @param Dto    $dto          The parent DTO instance being populated.
 	 * @param array  $rawItem      Raw data for the parent DTO.
@@ -76,9 +81,19 @@ abstract class Mapper
 		foreach ($dto->getFields() as $field)
 		{
 			$relation = $field->getRelation();
-			if ($relation === null)
+			$propertyType = $field->getPropertyType();
+			$elementType = $field->getElementType();
+
+			$isMultipleEmbedded = $relation === null
+				&& $propertyType === DtoCollection::class
+				&& $elementType !== null
+				&& is_subclass_of($elementType, Dto::class);
+			$isSingleEmbedded = $relation === null
+				&& is_subclass_of($propertyType, Dto::class);
+
+			if ($relation === null && !$isMultipleEmbedded && !$isSingleEmbedded)
 			{
-				continue; // Not a relation field — skip
+				continue;
 			}
 
 			$fieldName = $field->getPropertyName();
@@ -103,26 +118,28 @@ abstract class Mapper
 			$structuredChild = is_array($fields[$fieldName] ?? null) ? $fields[$fieldName] : [];
 			$childFields = $nestedFields[$fieldName] ?? $structuredChild;
 
-			if ($relation->multiple)
+			$isMultiple = $relation?->multiple ?? $isMultipleEmbedded;
+			if ($isMultiple)
 			{
-				// RelationToMany: DtoCollection field
-				$elementType = $field->getElementType();
-				if ($elementType !== null && is_subclass_of($elementType, Dto::class))
+				$nestedDtoClass = $elementType;
+				if ($nestedDtoClass !== null && is_subclass_of($nestedDtoClass, Dto::class))
 				{
 					$rawNested = $rawItem[$fieldName];
-					$dto->{$fieldName} = is_array($rawNested)
-						? $this->resolveNestedCollection($elementType, $rawNested, $childFields)
-						: new DtoCollection($elementType);
+					if ($isMultipleEmbedded && $rawNested === null && $field->isNullable())
+					{
+						$dto->{$fieldName} = null;
+					}
+					else
+					{
+						$dto->{$fieldName} = is_array($rawNested)
+							? $this->resolveNestedCollection($nestedDtoClass, $rawNested, $childFields)
+							: new DtoCollection($nestedDtoClass);
+					}
 				}
 			}
-			else
+			elseif (is_subclass_of($propertyType, Dto::class))
 			{
-				// RelationToOne: direct Dto subclass field
-				$nestedDtoClass = $field->getPropertyType();
-				if (is_subclass_of($nestedDtoClass, Dto::class))
-				{
-					$dto->{$fieldName} = $this->resolveNested($nestedDtoClass, $rawItem[$fieldName], $childFields);
-				}
+				$dto->{$fieldName} = $this->resolveNested($propertyType, $rawItem[$fieldName], $childFields);
 			}
 		}
 	}

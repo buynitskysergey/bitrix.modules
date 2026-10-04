@@ -3,8 +3,14 @@
 namespace Bitrix\Voximplant\Rest;
 
 use Bitrix\Crm\Integration\StorageType;
+use Bitrix\Crm\Integrity\DuplicateCommunicationCriterion;
+use Bitrix\Crm\Item;
+use Bitrix\Crm\PhaseSemantics;
+use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\UserPermissions;
 use Bitrix\Disk\File;
 use Bitrix\Main\Application;
+use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\DB\SqlQueryException;
 use Bitrix\Main\Error;
 use Bitrix\Main\Event;
@@ -21,7 +27,6 @@ use Bitrix\Rest\AppTable;
 use Bitrix\Rest\EventTable;
 use Bitrix\Voximplant\Call;
 use Bitrix\Voximplant\Model\CallTable;
-use Bitrix\Voximplant\HttpClientFactory;
 use Bitrix\Voximplant\Integration\Im;
 use Bitrix\Voximplant\Model\ExternalLineTable;
 use Bitrix\Voximplant\Model\StatisticMissedTable;
@@ -36,6 +41,9 @@ class Helper
 	const EVENT_START_EXTERNAL_CALLBACK = 'OnExternalCallBackStart';
 	const PLACEMENT_CALL_CARD = 'CALL_CARD';
 	const FILE_FIELD = 'file';
+
+	private const EXTERNAL_CALL_REGISTRATION_LOCK_PREFIX = 'vi_ext_call_';
+	private const EXTERNAL_CALL_REGISTRATION_LOCK_TIMEOUT = 5;
 
 	/**
 	 * Returns user id of the user with given inner phone number, or false if user is not found.
@@ -82,6 +90,10 @@ class Helper
 	public static function registerExternalCall(array $fields)
 	{
 		$fields['USER_ID'] = (int)$fields['USER_ID'];
+		if (($fields['EXTERNAL_CALL_ID'] ?? '') === '')
+		{
+			unset($fields['EXTERNAL_CALL_ID']);
+		}
 
 		$result = new Result();
 		$callId = 'externalCall.'.md5(uniqid($fields['REST_APP_ID'].$fields['USER_ID'].$fields['PHONE_NUMBER'], true)).'.'.time();
@@ -216,9 +228,12 @@ class Helper
 			'=USER_ID' => $fields['USER_ID'],
 			'=CALLER_ID' => $phoneNumber,
 			'=INCOMING' => $fields['TYPE'],
-			'>DATE_CREATE' => (new DateTime())->add('-T30M'),
 			'=REST_APP_ID' => $fields['REST_APP_ID'],
 		];
+		if (!isset($fields['EXTERNAL_CALL_ID']))
+		{
+			$duplicateFilter['>DATE_CREATE'] = (new DateTime())->add('-T30M');
+		}
 		if ($lineId)
 		{
 			$duplicateFilter['=EXTERNAL_LINE_ID'] = $lineId;
@@ -228,44 +243,14 @@ class Helper
 			$duplicateFilter['=EXTERNAL_CALL_ID'] = $fields['EXTERNAL_CALL_ID'];
 		}
 
-		$duplicateCall = CallTable::getRow([
-			'filter' => $duplicateFilter
-		]);
-
-		if ($duplicateCall)
+		$duplicateCall = static::findDuplicateExternalCall($duplicateFilter);
+		if ($duplicateCall !== null)
 		{
-			$callId = $duplicateCall['CALL_ID'];
-			$call = Call::load($callId);
-
-			if ($call)
-			{
-				if ($fields['SHOW'] ?? null)
-				{
-					self::showExternalCall([
-						'CALL_ID' => $callId
-					]);
-				}
-
-				$createdEntities = array_map(
-					function($e)
-					{
-						return [
-							'ENTITY_TYPE' => $e['ENTITY_TYPE'],
-							'ENTITY_ID' => $e['ENTITY_ID'],
-						];
-					},
-					$call->getCreatedCrmEntities()
-				);
-
-				return $result->setData([
-					'CALL_ID' => $call->getCallId(),
-					'CRM_CREATED_LEAD' => (int)$call->getCreatedCrmLead() ?: null,
-					'CRM_CREATED_ENTITIES' => $createdEntities,
-					'CRM_ENTITY_TYPE' => $call->getPrimaryEntityType(),
-					'CRM_ENTITY_ID' => $call->getPrimaryEntityId() ?: null,
-				]);
-
-			}
+			return static::createRegisteredExternalCallResult(
+				$result,
+				$duplicateCall,
+				(bool)($fields['SHOW'] ?? false)
+			);
 		}
 
 		$crmCreate = (($fields['CRM'] ?? null) || $fields['CRM_CREATE']) && !$portalCall;
@@ -279,7 +264,7 @@ class Helper
 			'CRM' => $portalCall ? 'N' : 'Y',
 			'REST_APP_ID' => $fields['REST_APP_ID'],
 			'EXTERNAL_LINE_ID' => $lineId ?? null,
-			'PORTAL_NUMBER' => $lineNumber ?: \CVoxImplantConfig::MODE_REST_APP . ":" . $fields['REST_APP_ID'],
+			'PORTAL_NUMBER' => ($lineNumber ?? '') ?: \CVoxImplantConfig::MODE_REST_APP . ":" . $fields['REST_APP_ID'],
 			'LAST_PING' => null,
 			'QUEUE_ID' => null,
 		];
@@ -297,7 +282,61 @@ class Helper
 			$callFields['CRM_ACTIVITY_ID'] = (int)$fields['CRM_ACTIVITY_ID'];
 		}
 
-		$call = Call::create($callFields);
+		$registrationLockName = static::getExternalCallRegistrationLockName($fields, $phoneNumber, $lineId);
+		try
+		{
+			$isRegistrationLocked = static::acquireExternalCallRegistrationLock($registrationLockName);
+		}
+		catch (\Throwable $exception)
+		{
+			self::logExternalCallRegistrationLockFailure($registrationLockName, $exception);
+			$result->addError(new Error('Could not acquire external call registration lock'));
+
+			return $result;
+		}
+
+		if (!$isRegistrationLocked)
+		{
+			$duplicateCall = static::findDuplicateExternalCall($duplicateFilter);
+			if ($duplicateCall !== null)
+			{
+				return static::createRegisteredExternalCallResult(
+					$result,
+					$duplicateCall,
+					(bool)($fields['SHOW'] ?? false)
+				);
+			}
+
+			$result->addError(new Error('External call registration is already in progress'));
+
+			return $result;
+		}
+
+		try
+		{
+			$duplicateCall = static::findDuplicateExternalCall($duplicateFilter);
+			if ($duplicateCall !== null)
+			{
+				return static::createRegisteredExternalCallResult(
+					$result,
+					$duplicateCall,
+					(bool)($fields['SHOW'] ?? false)
+				);
+			}
+
+			$call = Call::create($callFields);
+		}
+		finally
+		{
+			try
+			{
+				static::releaseExternalCallRegistrationLock($registrationLockName);
+			}
+			catch (\Throwable $exception)
+			{
+				self::logExternalCallRegistrationLockFailure($registrationLockName, $exception);
+			}
+		}
 
 		try
 		{
@@ -343,8 +382,9 @@ class Helper
 
 			if ($crmCreate)
 			{
-				$createResult = \CVoxImplantCrmHelper::registerCallInCrm(
+				$createResult = static::registerCallInCrmWithLeadLock(
 					$call,
+					false,
 					[
 						'CRM' => 'Y',
 						'CRM_CREATE' => \CVoxImplantConfig::CRM_CREATE_LEAD,
@@ -353,15 +393,20 @@ class Helper
 					]
 				);
 
-				if (!$createResult)
+				if (!$createResult->isSuccess())
 				{
-					$leadCreationError = \CVoxImplantCrmHelper::$lastError;
+					$leadCreationError = \CVoxImplantCrmHelper::$lastError
+						?: implode('; ', $createResult->getErrorMessages())
+					;
 				}
 			}
 
-			if (\CVoxImplantConfig::GetLeadWorkflowExecution() == \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE)
+			if (
+				static::shouldStartExternalCallTrigger($crmCreate, $createResult ?? null)
+				&& static::isLeadWorkflowImmediate()
+			)
 			{
-				\CVoxImplantCrmHelper::StartCallTrigger($call);
+				static::startCallTrigger($call);
 			}
 
 			\CVoxImplantMain::sendCallStartEvent([
@@ -414,6 +459,163 @@ class Helper
 
 		$result->setData($resultData);
 		return $result;
+	}
+
+	protected static function findDuplicateExternalCall(array $duplicateFilter): ?Call
+	{
+		$connectionPool = Application::getInstance()->getConnectionPool();
+		$connectionPool->useMasterOnly(true);
+		try
+		{
+			$duplicateCall = CallTable::getRow([
+				'select' => ['CALL_ID'],
+				'filter' => $duplicateFilter,
+			]);
+
+			if (!$duplicateCall)
+			{
+				return null;
+			}
+
+			$call = static::loadCall($duplicateCall['CALL_ID']);
+
+			return $call instanceof Call ? $call : null;
+		}
+		finally
+		{
+			$connectionPool->useMasterOnly(false);
+		}
+	}
+
+	protected static function loadCall(string $callId)
+	{
+		return Call::load($callId);
+	}
+
+	private static function createRegisteredExternalCallResult(Result $result, Call $call, bool $show): Result
+	{
+		if ($show)
+		{
+			self::showExternalCall([
+				'CALL_ID' => $call->getCallId(),
+			]);
+		}
+
+		$createdEntities = array_map(
+			static fn(array $entity): array => [
+				'ENTITY_TYPE' => $entity['ENTITY_TYPE'],
+				'ENTITY_ID' => $entity['ENTITY_ID'],
+			],
+			$call->getCreatedCrmEntities()
+		);
+
+		return $result->setData([
+			'CALL_ID' => $call->getCallId(),
+			'CRM_CREATED_LEAD' => (int)$call->getCreatedCrmLead() ?: null,
+			'CRM_CREATED_ENTITIES' => $createdEntities,
+			'CRM_ENTITY_TYPE' => $call->getPrimaryEntityType(),
+			'CRM_ENTITY_ID' => $call->getPrimaryEntityId() ?: null,
+		]);
+	}
+
+	protected static function getExternalCallRegistrationLockName(
+		array $fields,
+		string $phoneNumber,
+		?int $lineId
+	): string
+	{
+		$identity = [
+			'USER_ID' => (int)$fields['USER_ID'],
+			'CALLER_ID' => $phoneNumber,
+			'INCOMING' => (int)$fields['TYPE'],
+			'REST_APP_ID' => (int)$fields['REST_APP_ID'],
+			'EXTERNAL_LINE_ID' => (int)$lineId,
+			'EXTERNAL_CALL_ID' => isset($fields['EXTERNAL_CALL_ID']) ? (string)$fields['EXTERNAL_CALL_ID'] : null,
+		];
+
+		return self::EXTERNAL_CALL_REGISTRATION_LOCK_PREFIX . md5(serialize($identity));
+	}
+
+	protected static function acquireExternalCallRegistrationLock(string $lockName): bool
+	{
+		return (bool)Application::getConnection()->lock(
+			$lockName,
+			self::EXTERNAL_CALL_REGISTRATION_LOCK_TIMEOUT
+		);
+	}
+
+	protected static function releaseExternalCallRegistrationLock(string $lockName): void
+	{
+		Application::getConnection()->unlock($lockName);
+	}
+
+	private static function logExternalCallRegistrationLockFailure(
+		string $lockName,
+		\Throwable $exception
+	): void
+	{
+		try
+		{
+			$wrappedException = new SystemException(
+				'Voximplant external call registration lock error: '
+				. $lockName
+				. '; '
+				. $exception->getMessage(),
+				$exception->getCode(),
+				$exception->getFile(),
+				$exception->getLine(),
+				$exception
+			);
+			Application::getInstance()->getExceptionHandler()->writeToLog($wrappedException);
+		}
+		catch (\Throwable)
+		{
+		}
+	}
+
+	protected static function registerCallInCrmWithLeadLock(
+		Call $call,
+		bool $onlyCreated = false,
+		$config = null,
+		bool $startCallTrigger = true
+	): \Bitrix\Main\Result
+	{
+		return \CVoxImplantCrmHelper::registerCallInCrmWithLeadLock(
+			$call,
+			$onlyCreated,
+			$config,
+			$startCallTrigger
+		);
+	}
+
+	protected static function shouldStartExternalCallTrigger(
+		bool $crmCreate,
+		?\Bitrix\Main\Result $createResult = null
+	): bool
+	{
+		if (!$crmCreate)
+		{
+			return true;
+		}
+
+		if ($createResult === null || !$createResult->isSuccess())
+		{
+			return false;
+		}
+
+		$outcome = $createResult->getData()['outcome'] ?? null;
+
+		return $outcome === \CVoxImplantCrmHelper::CRM_LEAD_OUTCOME_NOT_REQUIRED;
+	}
+
+	protected static function isLeadWorkflowImmediate(): bool
+	{
+		return \CVoxImplantConfig::GetLeadWorkflowExecution() == \CVoxImplantConfig::WORKFLOW_START_IMMEDIATE;
+	}
+
+	protected static function startCallTrigger(Call $call): void
+	{
+		\CVoxImplantCrmHelper::StartCallTrigger($call);
 	}
 
 	/**
@@ -1170,40 +1372,19 @@ class Helper
 			return $result;
 		}
 
-		$httpClient = HttpClientFactory::create([
-			"disableSslVerification" => true
-		]);
-
-		$httpClient->setOutputStream($handler);
-		$queryResult = $httpClient->query('GET', $recordUrl);
-		$httpClient->getResult();
+		$downloadResult = static::downloadRecordToStream($recordUrl, $handler);
 		$file->close();
 
-		if ($queryResult === false)
+		if (!$downloadResult->isSuccess())
 		{
-			$httpClientErrors = $httpClient->getError();
-			if (!empty($httpClientErrors))
-			{
-				foreach ($httpClientErrors as $code => $message)
-				{
-					return $result->addError(new Error($code . ": " . $message, 'SERVER_NOT_AVAILABLE'));
-				}
-			}
+			return $result->addErrors($downloadResult->getErrors());
 		}
 
-		if ($httpClient->getStatus() !== 200)
+		$downloadData = $downloadResult->getData();
+		$status = (int)($downloadData['status'] ?? 0);
+		if ($status !== 200)
 		{
-			return $result->addError(new Error('Server returns HTTP error code ' . $httpClient->getStatus()));
-		}
-
-		//check for http errors once more
-		$httpClientErrors = $httpClient->getError();
-		if (!empty($httpClientErrors))
-		{
-			foreach ($httpClientErrors as $code => $message)
-			{
-				return $result->addError(new Error($code . ": " . $message, 'SERVER_NOT_AVAILABLE'));
-			}
+			return $result->addError(new Error('Server returns HTTP error code ' . $status));
 		}
 
 		// Resolve the type from the content first. The response Content-Type is attacker-controlled
@@ -1216,7 +1397,11 @@ class Helper
 			&& ($fileType === '' || $fileType === 'application/octet-stream')
 		)
 		{
-			$fileType = $httpClient->getHeaders()->getContentType() ?: $fileType;
+			$httpClient = $downloadData['httpClient'] ?? null;
+			if ($httpClient instanceof \Bitrix\Main\Web\HttpClient)
+			{
+				$fileType = $httpClient->getHeaders()->getContentType() ?: $fileType;
+			}
 		}
 
 		$fileArray = \CFile::MakeFileArray($tempPath, $fileType);
@@ -1266,6 +1451,17 @@ class Helper
 		]);
 
 		return $result;
+	}
+
+	/**
+	 * Seam over the SSRF-hardened record download so tests can drive the file-validation
+	 * flow against a local server without weakening the production validator.
+	 *
+	 * @param resource $stream
+	 */
+	protected static function downloadRecordToStream(string $recordUrl, $stream): \Bitrix\Main\Result
+	{
+		return Security\RecordDownloader::downloadToStream($recordUrl, $stream);
 	}
 
 	/**
@@ -1365,6 +1561,25 @@ class Helper
 
 		$userId = Security\Helper::getCurrentUserId();
 		$searchResult = \CCrmSipHelper::findByPhoneNumber($phoneNumber, ['USER_ID' => $userId]);
+		$activeLeadFields = $searchResult[\CCrmOwnerType::LeadName][0] ?? null;
+		if (
+			!is_array($activeLeadFields)
+			|| ($activeLeadFields['CAN_READ'] ?? false) !== true
+			|| ($activeLeadFields['IS_FINAL'] ?? null) !== false
+		)
+		{
+			$activeLeadFields = self::findActiveLeadByPhoneNumber($phoneNumber, $userId);
+		}
+
+		if ($activeLeadFields !== null)
+		{
+			$searchResult[\CCrmOwnerType::LeadName] = [$activeLeadFields];
+		}
+		else
+		{
+			unset($searchResult[\CCrmOwnerType::LeadName]);
+		}
+
 		$resultData = [];
 		$userIds = [];
 		$entities = [];
@@ -1447,6 +1662,70 @@ class Helper
 		$result->setData($resultData);
 
 		return $result;
+	}
+
+	private static function findActiveLeadByPhoneNumber(string $phoneNumber, int $userId): ?array
+	{
+		if ($userId <= 0)
+		{
+			$userId = Container::getInstance()->getContext()->getUserId();
+		}
+
+		$leadFactory = Container::getInstance()->getFactory(\CCrmOwnerType::Lead);
+		if (!$leadFactory)
+		{
+			return null;
+		}
+
+		$duplicateSearchQuery = (new DuplicateCommunicationCriterion('PHONE', $phoneNumber))
+			->prepareSearchQuery(
+				\CCrmOwnerType::Lead,
+				['ENTITY_ID'],
+				null,
+				0
+			)
+		;
+		$leadItems = $leadFactory->getItemsFilteredByPermissions(
+			[
+				'select' => [Item::FIELD_NAME_ID],
+				'filter' => [
+					'@' . Item::FIELD_NAME_ID => new SqlExpression($duplicateSearchQuery->getQuery()),
+					'=' . Item::FIELD_NAME_STAGE_SEMANTIC_ID => PhaseSemantics::PROCESS,
+				],
+				'order' => [
+					Item::FIELD_NAME_ID => 'ASC',
+				],
+				'limit' => 1,
+			],
+			$userId,
+			UserPermissions::OPERATION_READ
+		);
+
+		$lead = $leadItems[0] ?? null;
+		if (!$lead instanceof Item)
+		{
+			return null;
+		}
+
+		$leadFields = \CCrmSipHelper::getEntityFields(
+			\CCrmOwnerType::Lead,
+			$lead->getId(),
+			[
+				'USER_ID' => $userId,
+				'ENABLE_EXTENDED_MODE' => false,
+			]
+		);
+
+		if (
+			is_array($leadFields)
+			&& ($leadFields['CAN_READ'] ?? false) === true
+			&& ($leadFields['IS_FINAL'] ?? null) === false
+		)
+		{
+			return $leadFields;
+		}
+
+		return null;
 	}
 
 	/**

@@ -89,7 +89,7 @@ class ShiftPlanService extends BaseService
 		$shiftStart = $shift->buildUtcStartByUserId($shiftPlanForm->userId, $shiftPlanForm->getDateAssignedUtc());
 		$shiftStart->setTimezone(TimeHelper::getInstance()->getUserTimezone($shiftPlanForm->userId));
 
-		$shiftWithDate = new ShiftWithDate($shift, $shift->obtainSchedule(), $shiftStart);
+		$shiftWithDate = new ShiftWithDate($shift, $shift->obtainSchedule(), $shiftStart, (int)$shiftPlanForm->userId);
 
 		$dateFrom = clone $shiftWithDate->getDateTimeStart();
 		$dateFrom->sub(new \DateInterval('P1D'));
@@ -111,7 +111,7 @@ class ShiftPlanService extends BaseService
 				continue;
 			}
 			$start->setTimezone(TimeHelper::getInstance()->getUserTimezone($shiftPlanForm->userId));
-			$comparing = new ShiftWithDate($shiftPlan->obtainShift(), $shiftPlan->obtainSchedule(), $start);
+			$comparing = new ShiftWithDate($shiftPlan->obtainShift(), $shiftPlan->obtainSchedule(), $start, (int)$shiftPlanForm->userId);
 			if ($comparing->isEqualsTo($shiftWithDate)
 				||
 				$comparing->getDateTimeStart()->getTimestamp() >= $shiftWithDate->getDateTimeEnd()->getTimestamp()

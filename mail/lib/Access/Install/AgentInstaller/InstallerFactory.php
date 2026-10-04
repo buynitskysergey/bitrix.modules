@@ -15,6 +15,7 @@ class InstallerFactory
 			-1 => PermissionReInstaller::class,
 			0 => DefaultPermissionInstaller::class,
 			1 => MailboxCrmIntegrationPermissionInstaller::class,
+			2 => SharedSignaturePermissionInstaller::class,
 		];
 	}
 

@@ -402,30 +402,6 @@ class Quote extends Factory
 		throw new NotSupportedException('Quote doesn\'t support categories');
 	}
 
-	public function isBeginCloseDatesEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isLinkWithProductsEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isClientEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isCrmTrackingEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isMyCompanyEnabled(): bool
-	{
-		return true;
-	}
 
 	public function isNewRoutingForListEnabled(): bool
 	{
@@ -434,7 +410,7 @@ class Quote extends Factory
 
 	public function isNewRoutingForDetailEnabled(): bool
 	{
-		return QuoteSettings::getCurrent()->isFactoryEnabled();
+		return true;
 	}
 
 	public function getStagesEntityId(?int $categoryId = null): ?string
@@ -636,20 +612,6 @@ class Quote extends Factory
 		]);
 	}
 
-	public function isAutomationEnabled(): bool
-	{
-		return true;
-	}
-
-	public function isBizProcSupported(): bool
-	{
-		return true;
-	}
-
-	public function isCountersEnabled(): bool
-	{
-		return true;
-	}
 
 	public function isCommunicationRoutingSupported(): bool
 	{

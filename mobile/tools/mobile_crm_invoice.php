@@ -179,7 +179,7 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && $_POST["action"] <> '' && check_bitrix_
 			{
 				CSalePaySystemAction::InitParamArrays(
 					$arOrder,
-					$ID,
+					0,
 					"",
 					array(
 						'REQUISITE' => is_array($paymentData['REQUISITE']) ? $paymentData['REQUISITE'] : null,

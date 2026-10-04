@@ -4,8 +4,8 @@ namespace Bitrix\Crm\Controller\Timeline;
 
 use Bitrix\Crm\Controller\Base;
 use Bitrix\Crm\Controller\ErrorCode;
-use Bitrix\Crm\Controller\Timeline\trait\ActivityLoader;
-use Bitrix\Crm\Controller\Timeline\trait\ActivityPermissionsChecker;
+use Bitrix\Crm\Controller\Timeline\Trait\ActivityLoader;
+use Bitrix\Crm\Controller\Timeline\Trait\ActivityPermissionsChecker;
 use Bitrix\Crm\Exclusion\Manager;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Error;

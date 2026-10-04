@@ -6,14 +6,11 @@ use Bitrix\Crm\Activity\TodoCreateNotification;
 use Bitrix\Crm\Activity\TodoPingSettingsProvider;
 use Bitrix\Crm\Component\EntityList\Settings\PermissionItem;
 use Bitrix\Crm\Integration\AI\AIManager;
-use Bitrix\Crm\Integration\AI\BaasManager;
-use Bitrix\Crm\Integration\AI\Config;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Factory;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\UI\Extension;
-use Bitrix\Main\Web\Json;
 use CUtil;
 
 final class SettingsButtonExtenderParams
@@ -175,6 +172,7 @@ JS;
 			'entityTypeId' => $entityTypeId,
 			'categoryId' => $this->categoryId,
 			'pingSettings' => (new TodoPingSettingsProvider($entityTypeId, (int)$this->categoryId))->fetchAll(),
+			'isAutomationSliderAvailable' => $this->isAutomationSliderAvailable($entityTypeId),
 		];
 
 		$skipPeriod = (new TodoCreateNotification($entityTypeId))->getCurrentSkipPeriod();
@@ -188,33 +186,18 @@ JS;
 			$params['targetItemId'] = $this->targetItemId;
 		}
 
-		if (
-			AIManager::isAiCallProcessingEnabled()
-			&& in_array($entityTypeId, AIManager::SUPPORTED_ENTITY_TYPE_IDS, true)
-			&& !$this->isAllItemsCategory()
-			&& FillFieldsSettings::checkSavePermissions($entityTypeId, $this->categoryId)
-		)
-		{
-			if (
-				AIManager::isAiCallAutomaticProcessingAllowed()
-				&& BaasManager::isAvailable()
-			)
-			{
-				$settings = FillFieldsSettings::get($entityTypeId, $this->categoryId);
-
-				$params['aiAutostartSettings'] = Json::encode($settings);
-			}
-
-			$params['aiCopilotLanguageId'] = Config::getLanguageId(
-				Container::getInstance()->getContext()->getUserId(),
-				$entityTypeId,
-				$this->categoryId
-			);
-		}
-
 		$params['expandsBehindThan'] = $this->expandsBehindThan;
 
 		return $params;
+	}
+
+	private function isAutomationSliderAvailable(int $entityTypeId): bool
+	{
+		return AIManager::isAiCallProcessingEnabled()
+			&& in_array($entityTypeId, AIManager::SUPPORTED_ENTITY_TYPE_IDS, true)
+			&& !$this->isAllItemsCategory()
+			&& FillFieldsSettings::checkSavePermissions($entityTypeId, $this->categoryId)
+		;
 	}
 
 	private function isAllItemsCategory(): bool

@@ -27,6 +27,7 @@ use Bitrix\Crm\Service\Factory\Dynamic;
 use Bitrix\Crm\Service\Timeline\Monitor;
 use Bitrix\Crm\StatusTable;
 use Bitrix\Crm\Timeline\TimelineEntry;
+use Bitrix\Crm\V2\Internal\Integration\Rest\V3\SchemaCacheInvalidator;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\Config\Option;
@@ -401,6 +402,7 @@ class TypeTable extends UserField\Internal\TypeDataManager
 			$factory?->createDefaultCategoryIfNotExist();
 
 			static::clearBindingMenuCache();
+			static::clearRestCache();
 		}
 
 		return $result;
@@ -471,6 +473,7 @@ class TypeTable extends UserField\Internal\TypeDataManager
 		Container::getInstance()->getRestEventManager()->deleteDynamicItemEventsByEntityTypeId($type->getEntityTypeId());
 		Integration\Rest\AppPlacementManager::deleteAllHandlersForType($type->getEntityTypeId());
 		static::clearBindingMenuCache();
+		static::clearRestCache();
 		Monitor::getInstance()->onEntityTypeDelete($type->getEntityTypeId());
 		Container::getInstance()->getPullEventsQueue()->onEntityTypeDelete($type->getEntityTypeId());
 
@@ -789,6 +792,7 @@ class TypeTable extends UserField\Internal\TypeDataManager
 		}
 
 		static::clearBindingMenuCache();
+		static::clearRestCacheIfSchemaAffected($data, $oldData);
 
 		return parent::onAfterUpdate($event);
 	}
@@ -1130,6 +1134,20 @@ class TypeTable extends UserField\Internal\TypeDataManager
 	protected static function clearBindingMenuCache(): void
 	{
 		Integration\Intranet\BindingMenu::clearCache();
+	}
+
+	protected static function clearRestCache(): void
+	{
+		SchemaCacheInvalidator::invalidate();
+	}
+
+	/**
+	 * Dropping the REST schema clears the cache of every module, so a save of a type row pays for it
+	 * only when it changed something the schema is built from.
+	 */
+	protected static function clearRestCacheIfSchemaAffected(array $newFields, array $oldFields): void
+	{
+		SchemaCacheInvalidator::invalidateIfSchemaAffected($newFields, $oldFields);
 	}
 
 	public static function getFieldsInfo(): array

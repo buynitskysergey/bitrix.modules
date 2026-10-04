@@ -40,6 +40,16 @@ class FileDataParameterService
 	 */
 	public function getEncryptedFileData(mixed $file): ?string
 	{
+		return $this->getEncryptedData($file);
+	}
+
+	public function getEncryptedPreviewFileData(mixed $file): ?string
+	{
+		return $this->getEncryptedData($file, true);
+	}
+
+	private function getEncryptedData(mixed $file, bool $preview = false): ?string
+	{
 		if (!$this->quickAccessReadinessChecker->isReady())
 		{
 			return null;
@@ -50,12 +60,18 @@ class FileDataParameterService
 		{
 			return null;
 		}
+		if ($preview && !($provider instanceof FileInfo\DiskProvider))
+		{
+			return null;
+		}
 
-		$cacheKey = $provider->getSourceId();
+		$cacheKey = $provider->getSourceId() . ($preview ? ':preview' : '');
 
 		if (!isset($this->encryptedFileDataCache[$cacheKey]))
 		{
-			$fileInfo = $provider->getFileInfo();
+			$fileInfo = $preview
+				? $provider->getPreviewFileInfo()
+				: $provider->getFileInfo();
 
 			if ($fileInfo === null)
 			{
@@ -63,7 +79,7 @@ class FileDataParameterService
 			}
 
 			$extendedFileInfo = $fileInfo->toArray();
-			$extendedFileInfo['l'] = $provider->getFileName();
+			$extendedFileInfo['l'] = $preview ? $fileInfo->filename : $provider->getFileName();
 
 			try
 			{

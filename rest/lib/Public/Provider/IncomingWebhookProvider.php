@@ -50,13 +50,20 @@ class IncomingWebhookProvider
 		return $this->repository->getCount($this->toWebhookFilter($filter));
 	}
 
+	public function hasAny(IncomingWebhookFilter $filter): bool
+	{
+		return $this->repository->exists($this->toWebhookFilter($filter));
+	}
+
 	private function toWebhookFilter(IncomingWebhookFilter $filter): WebhookFilter
 	{
 		return (new WebhookFilter())
 			->userId($filter->userId)
 			->scopes($filter->scopes !== [] ? $filter->scopes : null)
 			->externalAttributes($filter->attributes !== [] ? $filter->attributes : null)
+			->withoutExternalAttributes($filter->excludeAttributes !== [] ? $filter->excludeAttributes : null)
 			->type($filter->type)
+			->active($filter->active)
 		;
 	}
 

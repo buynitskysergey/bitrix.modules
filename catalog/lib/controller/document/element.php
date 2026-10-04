@@ -195,26 +195,88 @@ class Element extends Controller
 		bool $__calculateTotalCount = true
 	): Page
 	{
-		$filter['@DOCUMENT.DOC_TYPE'] = array_keys(Catalog\Controller\Document::getAvailableRestDocumentTypes());
-
-		$accessFilter = AccessController::getCurrent()->getEntityFilter(
+		$accessController = AccessController::getCurrent();
+		$documentTypeAccessFilter = $accessController->getEntityFilter(
 			ActionDictionary::ACTION_STORE_DOCUMENT_VIEW,
 			get_class($this->getEntityTable())
 		);
-		if ($accessFilter)
-		{
-			// combines through a new array so that the `OR` condition does not bypass the access filter.
-			$filter = [
-				$accessFilter,
-				$filter,
-			];
-		}
+		$storeAccessFilter = $accessController->getEntityFilter(
+			ActionDictionary::ACTION_STORE_VIEW,
+			get_class($this->getEntityTable())
+		);
+		$filter = array_values(array_filter([
+			[
+				'@DOCUMENT.DOC_TYPE' => array_keys(Catalog\Controller\Document::getAvailableRestDocumentTypes()),
+			],
+			$documentTypeAccessFilter,
+			$storeAccessFilter,
+			$filter,
+		]));
 
 		return new Page(
 			'DOCUMENT_ELEMENTS',
 			$this->getList($select, $filter, $order, $pageNavigation),
 			$__calculateTotalCount ? $this->count($filter) : 0
 		);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	protected function getList(
+		array $select,
+		array $filter,
+		array $order,
+		PageNavigation $pageNavigation = null
+	): array
+	{
+		$serviceFields = [];
+		foreach (['STORE_FROM', 'STORE_TO'] as $field)
+		{
+			if (!empty($select) && !in_array($field, $select, true))
+			{
+				$select[] = $field;
+				$serviceFields[] = $field;
+			}
+		}
+
+		$rows = parent::getList($select, $filter, $order, $pageNavigation);
+		$accessController = AccessController::getCurrent();
+		$allowedStores = $accessController->getPermissionValue(ActionDictionary::ACTION_STORE_VIEW) ?? [];
+		$hasFullStoreAccess = $accessController->checkCompleteRight(ActionDictionary::ACTION_STORE_VIEW);
+		$allowedStores = array_map('intval', (array)$allowedStores);
+		$canViewPurchasingPrice = $accessController->check(ActionDictionary::ACTION_PRODUCT_PURCHASE_INFO_VIEW);
+
+		foreach ($rows as &$row)
+		{
+			$storeIds = array_values(array_filter([
+				(int)($row['STORE_FROM'] ?? 0),
+				(int)($row['STORE_TO'] ?? 0),
+			]));
+			$canViewStores = $hasFullStoreAccess || empty(array_diff($storeIds, $allowedStores));
+			if (!$canViewStores)
+			{
+				foreach (['STORE_FROM', 'STORE_TO', 'AMOUNT', 'PURCHASING_PRICE'] as $field)
+				{
+					if (array_key_exists($field, $row))
+					{
+						$row[$field] = null;
+					}
+				}
+			}
+			elseif (!$canViewPurchasingPrice && array_key_exists('PURCHASING_PRICE', $row))
+			{
+				$row['PURCHASING_PRICE'] = null;
+			}
+
+			foreach ($serviceFields as $field)
+			{
+				unset($row[$field]);
+			}
+		}
+		unset($row);
+
+		return $rows;
 	}
 
 	/**

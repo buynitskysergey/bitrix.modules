@@ -8,7 +8,7 @@ use Bitrix\Main\Entity\Base;
 use Bitrix\Main\Entity\Query;
 use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\Entity\ExpressionField;
-use \Bitrix\Crm;
+use Bitrix\Crm;
 use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Statistics\Entity\DealActivityStatisticsTable;
 class DealActivityStatisticEntry

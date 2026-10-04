@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Integration\AiAssistant\Helper;
 
 use Bitrix\Crm\Field;
 use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\Field\MultipleValueMerger;
 use Bitrix\Crm\Item;
 use Bitrix\Crm\Result;
 use Bitrix\Crm\Service\Container;
@@ -158,22 +159,17 @@ final class UserFieldHelper
 		$currentValue = $item->get($field->getName());
 		if ($field->isMultiple())
 		{
-			if ($field->isValueEmpty($currentValue))
-			{
-				$newValue = [$normalizedValue];
-			}
-			elseif (is_array($currentValue))
-			{
-				$newValue = array_merge($currentValue, [$normalizedValue]);
-				if ($field->getType() === EnumType::USER_TYPE_ID)
-				{
-					$newValue = array_map(intval(...), $newValue);
-					$newValue = array_unique($newValue);
-				}
-			}
-			else
+			if (!$field->isValueEmpty($currentValue) && !is_array($currentValue))
 			{
 				return Result::fail('Cannot merge field value');
+			}
+
+			$multipleValueMerger = new MultipleValueMerger();
+			$currentValues = $multipleValueMerger->merge($field, $currentValue, []);
+			$newValue = $multipleValueMerger->merge($field, $currentValue, [$normalizedValue]);
+			if (count($newValue) === count($currentValues))
+			{
+				return Result::success();
 			}
 		}
 		else
@@ -181,7 +177,7 @@ final class UserFieldHelper
 			$newValue = $normalizedValue;
 		}
 
-		$item->setFromCompatibleData([ $field->getName() => $newValue ]);
+		$item->setFromCompatibleData([$field->getName() => $newValue]);
 
 		return Result::success();
 	}

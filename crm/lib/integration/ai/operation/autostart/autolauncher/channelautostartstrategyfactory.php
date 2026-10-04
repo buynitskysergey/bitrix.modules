@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Integration\AI\Operation\Autostart\AutoLauncher;
 
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\CallChannelSettings;
 use Bitrix\Crm\Integration\AI\Operation\Autostart\FillFieldsSettings\ChatChannelSettings;
+use Bitrix\Crm\Integration\AI\Operation\Autostart\Slider\AutomationScenarioRegistry;
 
 final class ChannelAutoStartStrategyFactory
 {
@@ -13,6 +14,7 @@ final class ChannelAutoStartStrategyFactory
 		{
 			CallChannelSettings::CHANNEL_TYPE => new CallAutoStartStrategy($activityOperation, $activityFields),
 			ChatChannelSettings::CHANNEL_TYPE => new ChatAutoStartStrategy($activityOperation, $activityFields),
+			AutomationScenarioRegistry::CHANNEL_EMAIL => new MailAutoStartStrategy($activityOperation, $activityFields),
 			default => null,
 		};
 	}

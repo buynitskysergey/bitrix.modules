@@ -11,7 +11,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_1###"
+            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_1###",
+            "Source": "SetupTemplateActivity"
         },
         "PromptReminder": {
             "Name": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_NAME_3###",
@@ -20,7 +21,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_2###"
+            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_2###",
+            "Source": "SetupTemplateActivity"
         },
         "PromptDelayed": {
             "Name": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_NAME_4###",
@@ -29,7 +31,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_3###"
+            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_3###",
+            "Source": "SetupTemplateActivity"
         },
         "PromptCancellation": {
             "Name": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_NAME_5###",
@@ -38,7 +41,8 @@
             "Required": 0,
             "Multiple": 0,
             "Options": [],
-            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_4###"
+            "Default": "###BIZPROC_NODES_BITRIX_BOOKING_AI_CALL_DEFAULT_4###",
+            "Source": "SetupTemplateActivity"
         }
     },
     "TEMPLATE": [

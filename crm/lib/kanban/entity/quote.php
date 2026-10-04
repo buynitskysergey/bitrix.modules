@@ -8,7 +8,6 @@ use Bitrix\Crm\Kanban\Entity;
 use Bitrix\Crm\PhaseSemantics;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
-use Bitrix\Crm\Settings\QuoteSettings;
 
 class Quote extends Entity
 {
@@ -74,7 +73,7 @@ class Quote extends Entity
 
 	public function isInlineEditorSupported(): bool
 	{
-		return QuoteSettings::getCurrent()->isFactoryEnabled();
+		return true;
 	}
 
 	public function isEntitiesLinksInFilterSupported(): bool

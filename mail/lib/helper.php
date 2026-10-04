@@ -6,6 +6,9 @@ use Bitrix\Main;
 use Bitrix\Mail\Helper\Enum\CrmFlag;
 use Bitrix\Mail\Helper\Mailbox\CrmImapFilter;
 use Bitrix\Mail\Helper\Message\MessageInternalDateHandler;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
+use Bitrix\Mail\Internal\Service\SourceGeneration\MigrationActionGuard;
+use Bitrix\Mail\Internal\Service\SourceGeneration\MigrationMetrics;
 
 class Helper
 {
@@ -278,6 +281,7 @@ class Helper
 		$queryMessage
 			->setSelect([
 				'ID',
+				'MAILBOX_ID',
 			])
 			->where(\Bitrix\Main\ORM\Query\Query::filter()
 				->logic('and')
@@ -311,12 +315,169 @@ class Helper
 
 		$messageIdsWithoutUid = array_map('intval', array_values(array_diff($messageIds, $existingMessageIds)));
 
+		$mailboxIdByMessageId = array_column($rowsMailMessage, 'MAILBOX_ID', 'ID');
+
 		foreach($messageIdsWithoutUid as $messageId)
 		{
-			\CMailMessage::delete($messageId);
+			\CMailMessage::delete($messageId, (int)$mailboxIdByMessageId[$messageId]);
 		}
 
 		return sprintf('Bitrix\Mail\Helper::removeUnattachedMessagesAgent(%u, %u);', $maxId, $packSize);
+	}
+
+	/**
+	 * Every physical trace of a logical message, in all source generations of its mailbox:
+	 * the placements, the queue rows that address them and the matching fingerprints. Called
+	 * while the message itself is being deleted, so it stays silent: the deletion event
+	 * belongs to the paths where a placement disappears and the message survives.
+	 *
+	 * @param int $mailboxId Pass it when the caller knows it; resolved from the placements otherwise.
+	 */
+	public static function deleteMessagePlacements(int $messageId, int $mailboxId = 0): void
+	{
+		if ($messageId <= 0)
+		{
+			return;
+		}
+
+		$connection = Main\Application::getConnection();
+		$sqlHelper = $connection->getSqlHelper();
+
+		$placements = $connection->query(sprintf(
+			'SELECT ID, MAILBOX_ID FROM b_mail_message_uid WHERE MESSAGE_ID = %u',
+			$messageId,
+		))->fetchAll();
+
+		$queued = [];
+		foreach ($placements as $placement)
+		{
+			$queued[(int)$placement['MAILBOX_ID']][] = "'" . $sqlHelper->forSql((string)$placement['ID']) . "'";
+		}
+
+		foreach ($queued as $queueMailboxId => $placementIds)
+		{
+			/*
+				An outgoing letter may still be waiting for the upload of one of these
+				placements. The whole letter goes in one statement: the mass callers of this
+				method walk every letter of a mailbox, so a query per placement is a query
+				per placement of every letter of it.
+			*/
+			$connection->queryExecute(sprintf(
+				'DELETE FROM b_mail_message_upload_queue WHERE MAILBOX_ID = %u AND ID IN (%s)',
+				$queueMailboxId,
+				implode(', ', $placementIds),
+			));
+		}
+
+		if (!empty($placements))
+		{
+			$connection->queryExecute(sprintf('DELETE FROM b_mail_message_uid WHERE MESSAGE_ID = %u', $messageId));
+		}
+
+		$mailboxId = $mailboxId > 0 ? $mailboxId : (int)($placements[0]['MAILBOX_ID'] ?? 0);
+
+		if ($mailboxId <= 0)
+		{
+			return;
+		}
+
+		$connection->queryExecute(sprintf(
+			'DELETE FROM b_mail_message_delete_queue WHERE MAILBOX_ID = %u AND MESSAGE_ID = %u',
+			$mailboxId,
+			$messageId,
+		));
+
+		try
+		{
+			/*
+				A fingerprint left behind would keep answering the matching of the next
+				migration, and the imported letter would resolve to a local identity that
+				does not exist anymore. The table comes with the source generation update,
+				so its absence is tolerated the same way the backfill tolerates it.
+			*/
+			$connection->queryExecute(sprintf(
+				'DELETE FROM b_mail_message_fingerprint WHERE MAILBOX_ID = %u AND MESSAGE_ID = %u',
+				$mailboxId,
+				$messageId,
+			));
+		}
+		catch (\Throwable)
+		{
+			self::countGenerationCleanupError($mailboxId);
+		}
+
+		/*
+			A cleanup of its own on purpose: one of the two failing must not take the other with it.
+			A terminal matching result left behind would be reused by the next import of the same uid -
+			the matcher answers with the stored decision before it decides anything - and the new
+			placement would start serving a letter that is gone: after the switch that letter is
+			invisible. The candidate list of such a result hangs on its row and goes with it.
+		*/
+		try
+		{
+			$matchIds = array_column(
+				$connection->query(sprintf(
+					'SELECT ID FROM b_mail_source_generation_match WHERE MAILBOX_ID = %u AND MESSAGE_ID = %u',
+					$mailboxId,
+					$messageId,
+				))->fetchAll(),
+				'ID',
+			);
+
+			if ($matchIds !== [])
+			{
+				/*
+					The candidate list of a matching result is written to b_mail_entity_data, so it is
+					removed from there. The ids are collected first and the rows are named by them: the
+					column holding them is a string one, so a subquery would compare a string with a
+					number - portable on one database engine and an error on another.
+				*/
+				$connection->queryExecute(sprintf(
+					"DELETE FROM b_mail_entity_data WHERE MAILBOX_ID = %u AND ENTITY_TYPE = '%s' AND ENTITY_ID IN (%s)",
+					$mailboxId,
+					$sqlHelper->forSql(Internals\MailEntityOptionsTable::SOURCE_GENERATION_MATCH_TYPE_NAME),
+					implode(', ', array_map(
+						static fn ($id): string => "'" . $sqlHelper->forSql((string)$id) . "'",
+						$matchIds,
+					)),
+				));
+
+				$connection->queryExecute(sprintf(
+					'DELETE FROM b_mail_source_generation_match WHERE MAILBOX_ID = %u AND MESSAGE_ID = %u',
+					$mailboxId,
+					$messageId,
+				));
+			}
+		}
+		catch (\Throwable)
+		{
+			self::countGenerationCleanupError($mailboxId);
+		}
+	}
+
+	/**
+	 * A fingerprint that could not be removed is a cleanup error of the generation data of
+	 * the mailbox: the next migration would match an imported letter against a message
+	 * that is gone. Counted with the active generation and never in the way of a deletion -
+	 * a mailbox whose schema knows nothing about generations counts nothing.
+	 */
+	private static function countGenerationCleanupError(int $mailboxId): void
+	{
+		try
+		{
+			$generationId = GenerationScope::forMailbox($mailboxId)->getStampGenerationId();
+
+			if ($generationId > 0)
+			{
+				// The cleanup belongs to no migration operation of its own
+				$metrics = new MigrationMetrics($mailboxId, $generationId, '', MigrationMetrics::SCOPE_CLEANUP);
+				$metrics->countCleanupError();
+				$metrics->save();
+			}
+		}
+		catch (\Throwable)
+		{
+		}
 	}
 
 	/**
@@ -388,13 +549,7 @@ class Helper
 
 		$mailboxHelper->setCheckpoint();
 
-		MailMessageUidTable::deleteList(
-			[
-				'=MAILBOX_ID' => $id,
-				'!=MESSAGE_ID' => 0,
-				'=IS_OLD' => \Bitrix\Mail\MailMessageUidTable::REMOTE,
-			]
-		);
+		$remoteDismissed = $mailboxHelper->dismissRemoteMessages();
 
 		$stage1 = $mailboxHelper->dismissOldMessages();
 		$stage2 = $mailboxHelper->dismissDeletedUidMessages();
@@ -402,7 +557,7 @@ class Helper
 
 		global $pPERIOD;
 
-		$pPERIOD = min($pPERIOD, max($stage1 && $stage2 && $stage3 ? $pPERIOD : 600, 60));
+		$pPERIOD = min($pPERIOD, max($remoteDismissed && $stage1 && $stage2 && $stage3 ? $pPERIOD : 600, 60));
 
 		if ($pPERIOD === null)
 		{
@@ -518,14 +673,30 @@ class Helper
 		return $result;
 	}
 
-	public static function getLastDeletedOldMessageInternaldate($mailboxId,$dirPath,$filter = [])
+	/**
+	 * The boundary the IS_OLD marking of a run works from. Both generations of a switched
+	 * mailbox keep folders of the same path, so an unfinished placement of a retained one
+	 * would set the boundary of the active generation and drop the wrong messages out of
+	 * its counters.
+	 *
+	 * @param GenerationScope|null $generationScope The scope of the run; the active generation
+	 *                                              of the mailbox when the caller has none.
+	 */
+	public static function getLastDeletedOldMessageInternaldate(
+		$mailboxId,
+		$dirPath,
+		$filter = [],
+		?GenerationScope $generationScope = null
+	)
 	{
+		$generationScope ??= GenerationScope::forMailbox((int)$mailboxId);
+
 		$firstSyncUID = MailMessageUidTable::getList(
 			[
 				'select' => [
 					'INTERNALDATE'
 				],
-				'filter' => array_merge(
+				'filter' => $generationScope->apply(array_merge(
 					[
 						'!=IS_OLD' => 'D',
 						'=MESSAGE_ID' => 0,
@@ -533,7 +704,7 @@ class Helper
 						'=DIR_MD5' => md5($dirPath),
 					],
 					$filter
-				),
+				)),
 				'order' => [
 					'INTERNALDATE' => 'DESC',
 				],
@@ -632,7 +803,7 @@ class Helper
 			$counterHasChanged = true;
 		}
 
-		if ($counterHasChanged)
+		if ($counterHasChanged && Main\Loader::includeModule('pull'))
 		{
 			\CPullWatch::addToStack(
 				'mail_mailbox_' .$mailboxId,
@@ -650,7 +821,7 @@ class Helper
 
 	public static function updateMailboxUnseenCounter($mailboxId)
 	{
-		$count = Internals\MailCounterTable::getList([
+		$parameters = [
 			'filter' => [
 				'ENTITY_TYPE' => 'DIR',
 				'MAILBOX_ID' => $mailboxId,
@@ -661,7 +832,37 @@ class Helper
 			'select' => [
 				'COUNT'
 			]
-		])->fetchAll();
+		];
+
+		$scope = GenerationScope::forMailbox((int)$mailboxId);
+		if ($scope->getGenerationIds() !== null)
+		{
+			/*
+				A folder of a retained generation keeps its own counter row, and its path is
+				the same as that of the folder serving the user now, so the rows can only be
+				told apart by the generation of the folder each of them addresses. The folders
+				are read separately rather than joined: ENTITY_ID of a counter is a string
+				while the folder id is an integer, and no portable comparison of the two
+				exists - PostgreSQL has no operator for it at all. A mailbox holds units of
+				folders, so the list stays short and the condition stays in the query.
+			*/
+			$directoryIds = array_column(
+				Internals\MailboxDirectoryTable::getList([
+					'select' => ['ID'],
+					'filter' => $scope->apply(['=MAILBOX_ID' => (int)$mailboxId]),
+				])->fetchAll(),
+				'ID',
+			);
+
+			if (empty($directoryIds))
+			{
+				return;
+			}
+
+			$parameters['filter']['@ENTITY_ID'] = array_map('strval', $directoryIds);
+		}
+
+		$count = Internals\MailCounterTable::getList($parameters)->fetchAll();
 
 		if(!is_null($count[0]["COUNT"]))
 		{
@@ -822,9 +1023,9 @@ class Helper
 	{
 		$error = null;
 
-		$res = MailMessageUidTable::getList(array(
+		$items = MailMessageUidTable::getList(array(
 			'select' => array(
-				'ID', 'MAILBOX_ID', 'IS_SEEN',
+				'ID', 'MAILBOX_ID', 'IS_SEEN', 'GENERATION_ID',
 				'MAILBOX_USER_ID' => 'MAILBOX.USER_ID',
 				'MAILBOX_OPTIONS' => 'MAILBOX.OPTIONS',
 			),
@@ -832,10 +1033,30 @@ class Helper
 				'=HEADER_MD5'  => $hash,
 				'==DELETE_TIME' => 0,
 			),
-		));
+		))->fetchAll();
 
-		while ($item = $res->fetch())
+		$mailboxIds = array_column($items, 'MAILBOX_ID');
+		// The active generations and migration states of the mailboxes involved are resolved together, once
+		$scopes = GenerationScope::forMailboxes($mailboxIds);
+		$migrationGuards = (new MigrationActionGuard())->checkMany($mailboxIds);
+
+		foreach ($items as $item)
 		{
+			$mailboxId = (int)$item['MAILBOX_ID'];
+			$scope = $scopes[$mailboxId] ?? null;
+			$migrationGuard = $migrationGuards[$mailboxId] ?? null;
+
+			// The same header hash matches the rows of every generation; only the active one is writable
+			if (
+				$scope === null
+				|| !$scope->includes((int)$item['GENERATION_ID'])
+				|| $migrationGuard === null
+				|| !$migrationGuard->isSuccess()
+			)
+			{
+				continue;
+			}
+
 			$isOwner = $item['MAILBOX_USER_ID'] == $userId;
 			$isPublic = in_array('crm_public_bind', (array) $item['MAILBOX_OPTIONS']['flags']);
 			$inQueue = in_array($userId, (array) $item['MAILBOX_OPTIONS']['crm_lead_resp']);

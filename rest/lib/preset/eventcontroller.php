@@ -39,6 +39,11 @@ class EventController
 		return true;
 	}
 
+	public static function isEventsDisabled(): bool
+	{
+		return static::$skipMode;
+	}
+
 	/**
 	 * Event on after add application. Create integration for external create local application.
 	 *

@@ -58,10 +58,7 @@ class ActivityStreamStatistics extends DataSource
 
 		list($providerId, $providerTypeId) = $this->getActivityProviderInfo();
 
-		if($name === '')
-		{
-			$name = 'TOTAL';
-		}
+		$name = $this->sanitizeSelectName($name, 'TOTAL');
 
 		$permissionSql = '';
 		if($this->enablePermissionCheck)
@@ -360,6 +357,10 @@ class ActivityStreamStatistics extends DataSource
 		);
 	}
 
+	protected function getAllowedSelectNames()
+	{
+		return array('TOTAL', 'INCOMING_QTY', 'OUTGOING_QTY', 'REVERSING_QTY', 'MISSING_QTY');
+	}
 	/**
 	 * @return void
 	 */

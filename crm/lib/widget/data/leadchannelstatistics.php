@@ -72,10 +72,7 @@ class LeadChannelStatistics extends LeadDataSource
 			}
 		}
 
-		if($name === '')
-		{
-			$name = 'COUNT';
-		}
+		$name = $this->sanitizeSelectName($name, 'COUNT');
 
 		if($aggregate !== '' && !in_array($aggregate, array('SUM', 'COUNT', 'MAX', 'MIN')))
 		{
@@ -369,6 +366,10 @@ class LeadChannelStatistics extends LeadDataSource
 			)
 		);
 		return $result;
+	}
+	protected function getAllowedSelectNames()
+	{
+		return array('COUNT', 'SUM_TOTAL');
 	}
 	/** @return array */
 	public function prepareEntityListFilter(array $filterParams)

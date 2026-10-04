@@ -75,6 +75,11 @@ class CModule
 	{
 	}
 
+	protected function configureMigrationContext(\Bitrix\Main\UpdateSystem\Migration\Context $context): void
+	{
+		// no-op by default; overridden by a module installer to call $context->setConnection(...)
+	}
+
 	protected function installMigrations(): \Bitrix\Main\Result
 	{
 		$moduleDir = getLocalPath('modules/' . $this->MODULE_ID);
@@ -93,27 +98,44 @@ class CModule
 		$eventsMigrationFile = $moduleMigrationDir . 'events.php';
 		$agentsMigrationFile = $moduleMigrationDir . 'agents.php';
 
-		foreach ([
-			$tablesMigrationFile,
-			$eventsMigrationFile,
-			$agentsMigrationFile,
-		] as $migrationFile)
-		{
-			if (file_exists($migrationFile))
-			{
-				ConfigFactory::setDefaultConfig($migrationConfig);
-				$result = include($migrationFile);
-				if ($result instanceof \Bitrix\Main\Result && !$result->isSuccess())
-				{
-					ConfigFactory::clearDefaultConfig();
+		$result = new \Bitrix\Main\Result();
 
-					return $result;
+		try
+		{
+			ConfigFactory::setDefaultConfig($migrationConfig);
+			$this->configureMigrationContext(
+				\Bitrix\Main\UpdateSystem\Migration::getInstance()->context()
+			);
+
+			foreach ([
+				$tablesMigrationFile,
+				$eventsMigrationFile,
+				$agentsMigrationFile,
+			] as $migrationFile)
+			{
+				if (!file_exists($migrationFile))
+				{
+					continue;
+				}
+
+				ConfigFactory::setDefaultConfig($migrationConfig); // restore per-file default config in case an included file replaced it
+				$migrationFileResult = include($migrationFile);
+				if ($migrationFileResult instanceof \Bitrix\Main\Result && !$migrationFileResult->isSuccess())
+				{
+					return $migrationFileResult;
 				}
 			}
 		}
-		ConfigFactory::clearDefaultConfig();
+		catch (\Bitrix\Main\UpdateSystem\Migration\Exception $e)
+		{
+			$result->addError(new \Bitrix\Main\Error($e->getMessage(), $e->getCode()));
+		}
+		finally
+		{
+			ConfigFactory::clearDefaultConfig();
+		}
 
-		return new \Bitrix\Main\Result();
+		return $result;
 	}
 
 	protected function uninstallMigrations(bool $dropTables): \Bitrix\Main\Result
@@ -134,31 +156,47 @@ class CModule
 		$tablesMigrationFile = $moduleMigrationDir . 'tables.php';
 		$eventsMigrationFile = $moduleMigrationDir . 'events.php';
 
-		if ($dropTables && file_exists($tablesMigrationFile))
+		$migrationFiles = [];
+		if ($dropTables)
+		{
+			$migrationFiles[] = $tablesMigrationFile;
+		}
+		$migrationFiles[] = $eventsMigrationFile;
+
+		$result = new \Bitrix\Main\Result();
+
+		try
 		{
 			ConfigFactory::setDefaultConfig($migrationConfig);
-			$result = include($tablesMigrationFile);
-			if ($result instanceof \Bitrix\Main\Result && !$result->isSuccess())
-			{
-				ConfigFactory::clearDefaultConfig();
+			$this->configureMigrationContext(
+				\Bitrix\Main\UpdateSystem\Migration::getInstance()->context()
+			);
 
-				return $result;
+			foreach ($migrationFiles as $migrationFile)
+			{
+				if (!file_exists($migrationFile))
+				{
+					continue;
+				}
+
+				ConfigFactory::setDefaultConfig($migrationConfig); // restore per-file default config in case an included file replaced it
+				$migrationFileResult = include($migrationFile);
+				if ($migrationFileResult instanceof \Bitrix\Main\Result && !$migrationFileResult->isSuccess())
+				{
+					return $migrationFileResult;
+				}
 			}
 		}
-		if (file_exists($eventsMigrationFile))
+		catch (\Bitrix\Main\UpdateSystem\Migration\Exception $e)
 		{
-			ConfigFactory::setDefaultConfig($migrationConfig);
-			$result = include($eventsMigrationFile);
-			if ($result instanceof \Bitrix\Main\Result && !$result->isSuccess())
-			{
-				ConfigFactory::clearDefaultConfig();
-
-				return $result;
-			}
+			$result->addError(new \Bitrix\Main\Error($e->getMessage(), $e->getCode()));
 		}
-		ConfigFactory::clearDefaultConfig();
+		finally
+		{
+			ConfigFactory::clearDefaultConfig();
+		}
 
-		return new \Bitrix\Main\Result();
+		return $result;
 	}
 
 	public function GetModuleTasks()

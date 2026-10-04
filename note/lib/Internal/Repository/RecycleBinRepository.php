@@ -9,6 +9,7 @@ use Bitrix\Main\DB\Ddl\DbType;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Entity\RecycleBin\RecycleBinRecord;
+use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\RecycleBinTable;
 use Bitrix\Note\Internal\Repository\Mapper\RecycleBinRecordMapper;
 
@@ -283,6 +284,11 @@ class RecycleBinRepository
 	 * Authorship/trashedBy alone is NOT enough to expose a document whose collection is alive but
 	 * the user has lost VIEW access to.
 	 *
+	 * Main documents are never listed: they are collection description carriers with no place in
+	 * the tree, so restoring one would hand back a document nothing can show. DeleteCollectionCommand
+	 * hard-deletes them with the collection, and this predicate also hides the rows trashed before
+	 * that (they expire through the TTL cleanup).
+	 *
 	 * @param int[] $accessibleCollectionIds
 	 * @param array{trashedAt: string, recycleBinId: int}|null $afterCursor
 	 * @return array<int, array{id: int, trashedAt: string}>
@@ -299,7 +305,10 @@ class RecycleBinRepository
 			return [];
 		}
 
-		$query = RecycleBinTable::query()->setSelect(['ID', 'TRASHED_AT']);
+		$query = RecycleBinTable::query()
+			->setSelect(['ID', 'TRASHED_AT'])
+			->where('DOCUMENT.IS_MAIN', DocumentTable::IS_MAIN_NO)
+		;
 
 		if ($userId !== null)
 		{

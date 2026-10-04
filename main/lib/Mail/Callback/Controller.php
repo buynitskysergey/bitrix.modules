@@ -251,6 +251,9 @@ class Controller
 	/**
 	 * Decrease limits.
 	 *
+	 * Stays address-wide on purpose: the provider rates the reputation of the address and its domain,
+	 * not of a single account, so every sender of the address gets the lowered limit.
+	 *
 	 * @return void
 	 */
 	public function decreaseLimit()

@@ -3,6 +3,7 @@
 namespace Bitrix\Mail\Helper;
 
 use Bitrix\Mail\Integration\Calendar\ICal\ICalMailManager;
+use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Mail\Internals\MailMessageAttachmentTable;
 use Bitrix\Mail\Internals\MessageAccessTable;
 use Bitrix\Mail\Internals\MessageClosureTable;
@@ -21,6 +22,8 @@ use Bitrix\Main\Web\Uri;
 
 class Message
 {
+	private const ORIGINAL_RECIPIENT_SEARCH_TOKEN_PREFIX = 'xrcpt';
+
 	// entity types with special access rules (group tokens)
 	public const ENTITY_TYPE_USER_MESSAGE = MessageAccessTable::ENTITY_TYPE_USER_MESSAGE;
 	public const ENTITY_TYPE_CHAT_MESSAGE = MessageAccessTable::ENTITY_TYPE_CHAT_MESSAGE;
@@ -144,6 +147,37 @@ class Message
 	}
 
 	/**
+	 * Returns Bcc recipients from a parsed message header.
+	 */
+	public static function getBccFromParsedHeader(\CMailHeader $parsedHeader): string
+	{
+		return join(', ', (array)$parsedHeader->getHeader('BCC'));
+	}
+
+	/**
+	 * Returns envelope recipients from a parsed message header.
+	 */
+	public static function getOriginalRecipientsFromParsedHeader(\CMailHeader $parsedHeader): string
+	{
+		return join(', ', (array)$parsedHeader->getHeader('X-Original-Rcpt-to'));
+	}
+
+	/**
+	 * Returns envelope recipients from a raw message header.
+	 */
+	public static function getOriginalRecipientsFromHeader(string $header): string
+	{
+		if ($header === '')
+		{
+			return '';
+		}
+
+		$parsedHeader = \CMailMessage::parseHeader($header, LANG_CHARSET);
+
+		return self::getOriginalRecipientsFromParsedHeader($parsedHeader);
+	}
+
+	/**
 	 * Adapts a message(result of Mail\MailMessageTable::getList) for output in the public interface.
 	 *
 	 * @param array &$message(result of Mail\MailMessageTable::getList. Changes the data in a variable!).
@@ -174,23 +208,52 @@ class Message
 
 		if ('' != $message['HEADER'])
 		{
+			$restoreAddressFields = false;
 			foreach ($fieldsMap as $field)
 			{
-				if (mb_strlen($message[$field]) == 255)
+				if (mb_strlen((string)($message[$field] ?? '')) == 255)
 				{
-					$parsedHeader = \CMailMessage::parseHeader($message['HEADER'], LANG_CHARSET);
+					$restoreAddressFields = true;
+					break;
+				}
+			}
 
+			$legacyOriginalRecipientInBcc = false;
+			if (!$restoreAddressFields && (string)($message['FIELD_BCC'] ?? '') !== '')
+			{
+				$originalRecipientHeaders = [];
+				preg_match_all(
+					'/(?:^|\r?\n)X-Original-Rcpt-to\s*:\s*([^\r\n]+)/i',
+					(string)$message['HEADER'],
+					$originalRecipientHeaders,
+				);
+				foreach ($originalRecipientHeaders[1] ?? [] as $originalRecipient)
+				{
+					$originalRecipient = trim($originalRecipient);
+					if (
+						$originalRecipient !== ''
+						&& mb_stripos((string)$message['FIELD_BCC'], $originalRecipient) !== false
+					)
+					{
+						$legacyOriginalRecipientInBcc = true;
+						break;
+					}
+				}
+			}
+
+			if ($restoreAddressFields || $legacyOriginalRecipientInBcc)
+			{
+				$parsedHeader = \CMailMessage::parseHeader($message['HEADER'], LANG_CHARSET);
+
+				if ($restoreAddressFields)
+				{
 					$message['FIELD_FROM'] = $parsedHeader->getHeader('FROM');
 					$message['FIELD_REPLY_TO'] = $parsedHeader->getHeader('REPLY-TO');
 					$message['FIELD_TO'] = $parsedHeader->getHeader('TO');
 					$message['FIELD_CC'] = $parsedHeader->getHeader('CC');
-					$message['FIELD_BCC'] = join(', ', array_merge(
-						(array) $parsedHeader->getHeader('X-Original-Rcpt-to'),
-						(array) $parsedHeader->getHeader('BCC')
-					));
-
-					break;
 				}
+
+				$message['FIELD_BCC'] = self::getBccFromParsedHeader($parsedHeader);
 			}
 		}
 
@@ -418,7 +481,7 @@ class Message
 		return $access;
 	}
 
-	public static function prepareSearchContent(&$fields)
+	public static function prepareSearchContent(&$fields, string $originalRecipients = '')
 	{
 		// @TODO: filter short words, filter duplicates, str_rot13?
 		return str_rot13(join(
@@ -429,6 +492,7 @@ class Message
 				$fields['FIELD_TO'],
 				$fields['FIELD_CC'],
 				$fields['FIELD_BCC'],
+				self::prepareOriginalRecipientsSearchContent($originalRecipients),
 				$fields['SUBJECT'],
 				self::isolateBase64Files((string)$fields['BODY']),
 			)
@@ -438,6 +502,45 @@ class Message
 	public static function prepareSearchString($string)
 	{
 		return str_rot13($string);
+	}
+
+	public static function prepareOriginalRecipientsSearchString(string $string): string
+	{
+		$searchToken = self::prepareOriginalRecipientSearchToken($string);
+
+		return $searchToken === '' ? '' : self::prepareSearchString($searchToken);
+	}
+
+	private static function prepareOriginalRecipientsSearchContent(string $originalRecipients): string
+	{
+		if ($originalRecipients === '')
+		{
+			return '';
+		}
+
+		$searchContent = [];
+		foreach (\CMailUtil::extractAllMailAddresses($originalRecipients) as $originalRecipient)
+		{
+			$searchToken = self::prepareOriginalRecipientSearchToken($originalRecipient);
+			if ($searchToken !== '')
+			{
+				$searchContent[] = $searchToken;
+			}
+		}
+
+		return join(' ', array_unique($searchContent));
+	}
+
+	private static function prepareOriginalRecipientSearchToken(string $originalRecipient): string
+	{
+		$address = new Main\Mail\Address($originalRecipient);
+		if (!$address->validate())
+		{
+			return '';
+		}
+
+		return self::ORIGINAL_RECIPIENT_SEARCH_TOKEN_PREFIX
+			. hash('sha256', mb_strtolower($address->getEmail()));
 	}
 
 	/**
@@ -598,28 +701,495 @@ class Message
 
 	public static function parseAddressList($column)
 	{
-		$column = trim($column);
-		//'email@email' => 'email@domain'
-		//'Name <email@domain>, Name2 <email2@domain2>' => 'Name <email@domain'
-		$columns = preg_split("/>,?/", $column);
-		$validColumns = [];
+		return self::parseAddressListInternal(trim($column));
+	}
 
-		foreach ($columns as $value)
+	private static function parseAddressListInternal(
+		string $column,
+		bool $ignoreQuotes = false,
+		bool $recoverUnclosedComment = true,
+		bool $forceCommaSeparators = false
+	): array
+	{
+		$columns = [];
+		$currentColumn = '';
+		$isQuoted = false;
+		$isEscaped = false;
+		$isAngleAddress = false;
+		$isAngleAddressClosed = false;
+		$angleAddressEnd = null;
+		$commentDepth = 0;
+		$commentStartIndex = null;
+		$isCommentEscaped = false;
+		$isGroup = false;
+		$isAfterAddressTerminator = false;
+		$groupColumns = [];
+		$groupPrefix = '';
+		$canBeBareAddress = true;
+		$canStartBareAddressComment = true;
+		$columnLength = strlen($column);
+
+		for ($index = 0; $index < $columnLength; $index++)
 		{
-			//'email@email' => 'email@domain'
-			//'Name <email@domain' => 'Name <email@domain>'
-			if(preg_match("/</", $value))
+			$character = $column[$index];
+			if ($isAfterAddressTerminator)
 			{
-				$value.='>';
+				if (
+					$character === ','
+					|| ($character === ';' && !$isGroup)
+					|| $character === '>'
+					|| strpos(" \t\r\n", $character) !== false
+				)
+				{
+					continue;
+				}
+
+				$isAfterAddressTerminator = false;
 			}
 
-			if($value !== '')
+			if (
+				$isGroup
+				&& empty($groupColumns)
+				&& $currentColumn === ''
+				&& strpos(" \t\r\n", $character) !== false
+			)
 			{
-				$validColumns[] = $value;
+				$groupPrefix .= $character;
+
+				continue;
+			}
+
+			if ($commentDepth > 0)
+			{
+				if ($isCommentEscaped)
+				{
+					$isCommentEscaped = false;
+				}
+				elseif ($character === '\\')
+				{
+					$isCommentEscaped = true;
+				}
+				elseif ($character === '(')
+				{
+					$commentDepth++;
+				}
+				elseif ($character === ')')
+				{
+					$commentDepth--;
+					if ($commentDepth === 0)
+					{
+						$commentStartIndex = null;
+					}
+				}
+
+				continue;
+			}
+
+			$isCommentStart = false;
+			if ($character === '(' && !$isQuoted)
+			{
+				$isCommentStart = $isAngleAddressClosed;
+				if (!$isCommentStart && !$isAngleAddress && $canStartBareAddressComment)
+				{
+					$isCommentStart = self::isCompleteAddress($currentColumn);
+					$canStartBareAddressComment = $isCommentStart;
+				}
+			}
+			if ($isCommentStart)
+			{
+				$commentDepth = 1;
+				$commentStartIndex = $index;
+
+				continue;
+			}
+
+			if (!$ignoreQuotes && $character === '"' && !$isEscaped)
+			{
+				$isQuoted = !$isQuoted;
+			}
+
+			if (
+				$character === ':'
+				&& !$isQuoted
+				&& !$isGroup
+				&& !$isAngleAddress
+			)
+			{
+				$groupPrefix = $currentColumn . ':';
+				$groupColumns = [];
+				$currentColumn = '';
+				$isEscaped = false;
+				$angleAddressEnd = null;
+				$isGroup = true;
+				$canBeBareAddress = true;
+				$canStartBareAddressComment = true;
+
+				continue;
+			}
+
+			if (!$isQuoted && $character === '<')
+			{
+				if ($isAngleAddressClosed)
+				{
+					$closedAddressParts = self::splitClosedAngleAddress($currentColumn, $angleAddressEnd);
+					if ($closedAddressParts !== null)
+					{
+						[$addressColumn, $currentColumn] = $closedAddressParts;
+						self::appendAddressColumn(
+							$columns,
+							$groupColumns,
+							$addressColumn,
+							$isGroup
+						);
+						if ($currentColumn !== '')
+						{
+							$currentColumn .= ' ';
+						}
+						$isEscaped = false;
+						$isAngleAddress = false;
+						$isAngleAddressClosed = false;
+						$angleAddressEnd = null;
+						$canBeBareAddress = true;
+						$canStartBareAddressComment = true;
+					}
+				}
+				$isAngleAddress = true;
+			}
+			elseif (!$isQuoted && $character === '>')
+			{
+				if ($isAngleAddress && !$isAngleAddressClosed)
+				{
+					$isAngleAddressClosed = true;
+					$angleAddressEnd = strlen($currentColumn);
+				}
+				else
+				{
+					if ($isAngleAddressClosed)
+					{
+						$closedAddressParts = self::splitClosedAngleAddress($currentColumn, $angleAddressEnd);
+						if ($closedAddressParts !== null)
+						{
+							[$addressColumn, $tailColumn] = $closedAddressParts;
+							self::appendAddressColumn($columns, $groupColumns, $addressColumn, $isGroup);
+							self::appendAddressColumn(
+								$columns,
+								$groupColumns,
+								self::normalizeAddressColumn($tailColumn, false, false),
+								$isGroup
+							);
+						}
+						else
+						{
+							self::appendAddressColumn(
+								$columns,
+								$groupColumns,
+								self::normalizeAddressColumn($currentColumn, true, true),
+								$isGroup
+							);
+						}
+					}
+					else
+					{
+						self::appendAddressColumn(
+							$columns,
+							$groupColumns,
+							self::normalizeAddressColumn($currentColumn, false, false),
+							$isGroup
+						);
+					}
+
+					$currentColumn = '';
+					$isEscaped = false;
+					$isAngleAddress = false;
+					$isAngleAddressClosed = false;
+					$angleAddressEnd = null;
+					$isAfterAddressTerminator = true;
+					$canBeBareAddress = true;
+					$canStartBareAddressComment = true;
+
+					continue;
+				}
+			}
+
+			$hasSplitClosedAngleAddress = false;
+			if (
+				!$isQuoted
+				&& ($character === ',' || $character === ';')
+				&& $isAngleAddressClosed
+			)
+			{
+				$closedAddressParts = self::splitClosedAngleAddress($currentColumn, $angleAddressEnd);
+				if ($closedAddressParts !== null && $closedAddressParts[1] !== '')
+				{
+					[$addressColumn, $currentColumn] = $closedAddressParts;
+					self::appendAddressColumn(
+						$columns,
+						$groupColumns,
+						$addressColumn,
+						$isGroup
+					);
+					$isEscaped = false;
+					$isAngleAddress = false;
+					$isAngleAddressClosed = false;
+					$angleAddressEnd = null;
+					$canBeBareAddress = true;
+					$canStartBareAddressComment = true;
+					$hasSplitClosedAngleAddress = true;
+				}
+			}
+
+			if ($character === ',' && !$isQuoted)
+			{
+				$isSeparator = $isAngleAddressClosed || $forceCommaSeparators;
+				if (!$isSeparator && $canBeBareAddress)
+				{
+					$isSeparator = self::isCompleteAddress($currentColumn);
+					$canBeBareAddress = false;
+				}
+
+				if ($isSeparator)
+				{
+					$addressColumn = self::normalizeAddressColumn(
+						$currentColumn,
+						$isAngleAddress,
+						$isAngleAddressClosed
+					);
+					self::appendAddressColumn($columns, $groupColumns, $addressColumn, $isGroup);
+					$currentColumn = '';
+					$isEscaped = false;
+					$isAngleAddress = false;
+					$isAngleAddressClosed = false;
+					$angleAddressEnd = null;
+					$canBeBareAddress = true;
+					$canStartBareAddressComment = true;
+
+					continue;
+				}
+			}
+			elseif (
+				$character === ';'
+				&& !$isQuoted
+				&& ($isGroup || $isAngleAddressClosed || $hasSplitClosedAngleAddress)
+			)
+			{
+				$addressColumn = self::normalizeAddressColumn(
+					$currentColumn,
+					$isAngleAddress,
+					$isAngleAddressClosed
+				);
+				self::appendAddressColumn($columns, $groupColumns, $addressColumn, $isGroup);
+				if ($isGroup)
+				{
+					self::appendGroupColumns($columns, $groupColumns, $groupPrefix, true);
+				}
+				$currentColumn = '';
+				$isEscaped = false;
+				$isAngleAddress = false;
+				$isAngleAddressClosed = false;
+				$angleAddressEnd = null;
+				$isGroup = false;
+				$isAfterAddressTerminator = true;
+				$groupColumns = [];
+				$groupPrefix = '';
+				$canBeBareAddress = true;
+				$canStartBareAddressComment = true;
+
+				continue;
+			}
+
+			$currentColumn .= $character;
+			$isEscaped = $character === '\\' && !$isEscaped;
+		}
+
+		if ($isQuoted && !$ignoreQuotes)
+		{
+			return self::parseAddressListInternal(
+				$column,
+				true,
+				$recoverUnclosedComment,
+				$forceCommaSeparators
+			);
+		}
+
+		$unclosedCommentTail = null;
+		if ($commentDepth > 0 && $commentStartIndex !== null && $recoverUnclosedComment)
+		{
+			$unclosedCommentTail = substr($column, $commentStartIndex);
+		}
+
+		if ($isAngleAddressClosed)
+		{
+			$closedAddressParts = self::splitClosedAngleAddress($currentColumn, $angleAddressEnd);
+			if ($closedAddressParts !== null && $closedAddressParts[1] !== '')
+			{
+				[$addressColumn, $currentColumn] = $closedAddressParts;
+				self::appendAddressColumn(
+					$columns,
+					$groupColumns,
+					$addressColumn,
+					$isGroup
+				);
+				$isAngleAddress = false;
+				$isAngleAddressClosed = false;
+				$angleAddressEnd = null;
+
+				$addressColumn = self::normalizeAddressColumn(
+					$currentColumn,
+					false,
+					false
+				);
+				self::appendAddressColumn($columns, $groupColumns, $addressColumn, $isGroup);
+				$currentColumn = '';
 			}
 		}
 
-		return $validColumns;
+		$addressColumn = self::normalizeAddressColumn(
+			$currentColumn,
+			$isAngleAddress,
+			$isAngleAddressClosed
+		);
+		self::appendAddressColumn($columns, $groupColumns, $addressColumn, $isGroup);
+
+		if ($isGroup)
+		{
+			self::appendGroupColumns($columns, $groupColumns, $groupPrefix, false);
+		}
+
+		if ($unclosedCommentTail !== null)
+		{
+			$columns = array_merge(
+				$columns,
+				self::recoverAddressesFromUnclosedComment($unclosedCommentTail)
+			);
+		}
+
+		return $columns;
+	}
+
+	private static function appendAddressColumn(
+		array &$columns,
+		array &$groupColumns,
+		?string $addressColumn,
+		bool $isGroup
+	): void
+	{
+		if ($addressColumn === null)
+		{
+			return;
+		}
+
+		if ($isGroup)
+		{
+			$groupColumns[] = $addressColumn;
+		}
+		else
+		{
+			$columns[] = $addressColumn;
+		}
+	}
+
+	private static function appendGroupColumns(
+		array &$columns,
+		array $groupColumns,
+		string $groupPrefix,
+		bool $isClosed
+	): void
+	{
+		if (!empty($groupColumns))
+		{
+			if (!$isClosed)
+			{
+				$groupColumns[0] = trim($groupPrefix . $groupColumns[0]);
+			}
+
+			foreach ($groupColumns as $groupColumn)
+			{
+				$columns[] = $groupColumn;
+			}
+
+			return;
+		}
+
+		$groupPrefix = trim($groupPrefix);
+		if ($groupPrefix !== '')
+		{
+			$columns[] = $groupPrefix . ($isClosed ? ';' : '');
+		}
+	}
+
+	private static function splitClosedAngleAddress(string $column, ?int $closedAddressEnd): ?array
+	{
+		if (
+			$closedAddressEnd === null
+			|| $closedAddressEnd < 0
+			|| $closedAddressEnd >= strlen($column)
+			|| $column[$closedAddressEnd] !== '>'
+		)
+		{
+			return null;
+		}
+
+		$addressColumn = self::normalizeAddressColumn(
+			substr($column, 0, $closedAddressEnd + 1),
+			true,
+			true
+		);
+		if ($addressColumn === null)
+		{
+			return null;
+		}
+
+		return [
+			$addressColumn,
+			trim(substr($column, $closedAddressEnd + 1)),
+		];
+	}
+
+	private static function recoverAddressesFromUnclosedComment(string $commentTail): array
+	{
+		$columns = self::parseAddressListInternal(
+			substr($commentTail, 1),
+			false,
+			false,
+			true
+		);
+		$recoveredColumns = [];
+		foreach ($columns as $column)
+		{
+			if (strpos($column, '<') !== false && self::isCompleteAddress($column))
+			{
+				$recoveredColumns[] = $column;
+			}
+		}
+
+		return $recoveredColumns;
+	}
+
+	private static function normalizeAddressColumn(
+		string $column,
+		bool $isAngleAddress,
+		bool $isAngleAddressClosed
+	): ?string
+	{
+		$column = trim($column);
+		if ($column === '')
+		{
+			return null;
+		}
+
+		if ($isAngleAddress && !$isAngleAddressClosed)
+		{
+			$column .= '>';
+		}
+
+		return $column;
+	}
+
+	private static function isCompleteAddress(string $candidate): bool
+	{
+		$address = new Main\Mail\Address(trim($candidate));
+
+		return $address->validate();
 	}
 
 	public static function isolateSelector($matches): string
@@ -813,19 +1383,11 @@ class Message
 			return false;
 		}
 
-		$messages = \Bitrix\Mail\MailMessageUidTable::getList([
-			'select' => [
-				'*'
-			],
-			'filter' => [
-				'=MAILBOX_ID' => $mailboxId,
-				'@MESSAGE_ID' => $messageIds,
-			],
-		]);
+		$messages = self::getPlacementsToDownloadBodyThrough((int)$mailboxId, $messageIds);
 
 		$notProcessed = array_combine($messageIds, $messageIds);
 
-		$mailboxHelper = Mailbox::createInstance($mailboxId, false);
+		$mailboxHelper = static::resolveMailbox((int)$mailboxId);
 
 		if(!empty($mailboxHelper))
 		{
@@ -833,6 +1395,7 @@ class Message
 
 			while ($message = $messages->fetch())
 			{
+				$bodyArrived = false;
 				$technicalTitle = $mailboxHelper->downloadMessage($message);
 				if ($technicalTitle)
 				{
@@ -854,9 +1417,11 @@ class Message
 								MailMessageTable::FIELD_SANITIZE_ON_VIEW => 1,
 							]
 						);
+						$bodyArrived = true;
 					}
 				}
 				self::updateMailEntityOptionsRow($mailboxId, (int)$message['MESSAGE_ID']);
+				self::publishBodySynced((int)$mailboxId, (int)$message['MESSAGE_ID'], $bodyArrived);
 				unset($notProcessed[$message['MESSAGE_ID']]);
 			}
 		}
@@ -864,9 +1429,58 @@ class Message
 		foreach ($notProcessed as $messageId)
 		{
 			self::updateMailEntityOptionsRow($mailboxId, (int)$messageId);
+			self::publishBodySynced((int)$mailboxId, (int)$messageId, false);
 		}
 
 		return true;
+	}
+
+	/**
+	 * The placements the body of a message can still be downloaded through: those of the
+	 * generation the mailbox is served by now.
+	 *
+	 * A placement of a retained generation names the folder and the uid of a physical source
+	 * the mailbox has left, and the same uid on the source it lives on now belongs to
+	 * another letter, so a download through such a placement would fill the message with a
+	 * foreign body. A message left without any placement of the active generation cannot be
+	 * completed at all: it keeps the body it has and is marked as attempted, instead of
+	 * being chased through a source that never held it.
+	 *
+	 * @param int[]|string[] $messageIds
+	 */
+	private static function getPlacementsToDownloadBodyThrough(int $mailboxId, array $messageIds): Main\ORM\Query\Result
+	{
+		return \Bitrix\Mail\MailMessageUidTable::getList([
+			'select' => [
+				'*'
+			],
+			'filter' => GenerationScope::forMailbox($mailboxId)->apply([
+				'=MAILBOX_ID' => $mailboxId,
+				'@MESSAGE_ID' => $messageIds,
+			]),
+		]);
+	}
+
+	/**
+	 * Kept apart so a test can drive the loop over a mailbox that answers without a socket.
+	 */
+	protected static function resolveMailbox(int $mailboxId): Mailbox|bool
+	{
+		return Mailbox::createInstance($mailboxId, false);
+	}
+
+	/**
+	 * Published for every message of the pass, including the ones whose body never arrived:
+	 * a subscriber waiting for the body has no other moment to learn that the wait is over.
+	 */
+	private static function publishBodySynced(int $mailboxId, int $messageId, bool $bodyArrived): void
+	{
+		$event = new Main\Event('mail', 'onMailMessageBodySynced', [
+			'mailboxId' => $mailboxId,
+			'messageId' => $messageId,
+			'bodyArrived' => $bodyArrived,
+		]);
+		$event->send();
 	}
 
 	public static function getSaltByEntityType(string $entityType, int $entityId, ?int $userId = null): string
@@ -1111,10 +1725,10 @@ class Message
 		));
 	}
 
-	private static function normalizeBodyText(string $body): string
+	public static function normalizeBodyText(string $body): string
 	{
 		$text = $body;
-		if (str_contains($text, '<') && str_contains($text, '>'))
+		if (self::hasMarkup($text))
 		{
 			$text = preg_replace(
 				'#</?(?:br|div|p|li|tr|td|th|h[1-6]|blockquote|hr|ol|ul|pre|section|article|header|footer)\b[^>]*>#i',
@@ -1127,5 +1741,14 @@ class Message
 		$text = trim(preg_replace('/\s+/u', ' ', $text));
 
 		return trim(preg_replace('/^[\p{P}\p{S}\p{Z}\p{C}]+/u', '', $text));
+	}
+
+	/**
+	 * An opening tag with a name of its own, not a pair of angle brackets: an address in angle brackets is
+	 * plain text.
+	 */
+	private static function hasMarkup(string $text): bool
+	{
+		return preg_match('#<(?:/?[a-z][a-z0-9]*[\s/>]|!--)#i', $text) === 1;
 	}
 }

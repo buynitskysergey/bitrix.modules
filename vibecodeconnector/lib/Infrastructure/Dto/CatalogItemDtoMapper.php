@@ -9,7 +9,7 @@ use Bitrix\Vibecodeconnector\Public\Dto\CatalogItemCollection;
 
 final class CatalogItemDtoMapper
 {
-	public function toDto(CatalogItem $item): CatalogItemDto
+	public function toDto(CatalogItem $item, bool $isAdmin = false): CatalogItemDto
 	{
 		return new CatalogItemDto(
 			id: $item->id,
@@ -30,18 +30,20 @@ final class CatalogItemDtoMapper
 			isMine: $item->isMine,
 			isHidden: $item->isHidden,
 			isNew: $item->isNew,
+			isDescriptionDefault: $item->isDescriptionDefault,
+			canShare: $item->kind === 'application' && ($item->isMine || $isAdmin),
 		);
 	}
 
 	/**
 	 * @return array<int, array<string, mixed>>
 	 */
-	public function toArrayList(CatalogItemCollection $collection): array
+	public function toArrayList(CatalogItemCollection $collection, bool $isAdmin = false): array
 	{
 		$result = [];
 		foreach ($collection as $item)
 		{
-			$result[] = $this->toDto($item)->toArray();
+			$result[] = $this->toDto($item, $isAdmin)->toArray();
 		}
 
 		return $result;

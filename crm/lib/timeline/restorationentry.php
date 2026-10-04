@@ -39,7 +39,7 @@ class RestorationEntry extends TimelineEntry
 			];
 		}
 
-		self::registerBindings($createdId, $bindings);
+		self::registerBindings($createdId, $bindings, $created);
 
 		if ($entityTypeId === CCrmOwnerType::Activity)
 		{

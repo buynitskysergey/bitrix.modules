@@ -72,9 +72,14 @@ final class FillFieldsInChat extends AIAction
 		$stateChecker = $this->getStateChecker();
 		$messages = OpenLine::getMessagesForCopilot($this->activityId);
 
+		// AC-013: the cumulative "enough new information" gate is keyed on the entity whose card shows
+		// the button (the manual fill target), so each linked entity counts new messages since its own
+		// last fill. The total-volume gate (checkLastVolume=false) stays entity-agnostic.
+		$target = $this->context->getIdentifier();
+
 		return OpenLineScenarioAvailability::isDisabled(
 			OpenLine::isCopilotProcessingAvailable($this->activityId, $messages, false),
-			OpenLine::isCopilotProcessingAvailable($this->activityId, $messages),
+			OpenLine::isCopilotProcessingAvailable($this->activityId, $messages, true, $target),
 			$stateChecker?->isSuccess() ?? false,
 			$stateChecker?->isPending() ?? false,
 			$stateChecker?->isErrorsLimitExceeded() ?? false,

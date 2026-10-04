@@ -36,7 +36,13 @@ class DocumentItemDto extends Dto
 
 	public ?int $position;
 	public ?int $createdBy;
+
+	// Structural change of the document record (rename, move, archive, REST overwrite). An edit in
+	// the collaborative editor deliberately moves neither: it reports through contentUpdatedAt.
 	public ?int $updatedBy;
 	public ?string $createdAt;
 	public ?string $updatedAt;
+
+	// [DTO-01] Read-only (no #[Editable]): moment the returned markdown was built. Null until materialized.
+	public ?string $contentUpdatedAt;
 }

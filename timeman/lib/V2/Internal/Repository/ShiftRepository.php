@@ -19,7 +19,7 @@ use Bitrix\Timeman\V2\Internal\Entity\Shift\Shift;
 use Bitrix\Timeman\V2\Internal\Entity\Shift\ShiftCollection;
 use Bitrix\Timeman\V2\Internal\Repository\Mapper\ScheduleMapper;
 
-final class ShiftRepository
+class ShiftRepository
 {
 	private readonly WorktimeRepository $worktimeRepository;
 	private readonly ScheduleProvider $scheduleProvider;
@@ -85,7 +85,7 @@ final class ShiftRepository
 		$shiftsManager = DependencyManager::getInstance()->buildShiftsManager($userId, $legacySchedules);
 		$latestRecord = $this->worktimeRepository->findLatestRecord($userId);
 		$currentShift = $this->buildRecordShiftWithDate($shiftsManager, $latestRecord);
-		$userNow = TimeHelper::getInstance()->getUserDateTimeNow($userId);
+		$userNow = new \DateTime('now', TimeHelper::getInstance()->getUserDateTimeZone($userId));
 		$nextShift = $shiftsManager->buildNextShiftWithDate($userNow, $currentShift);
 		if ($nextShift === null)
 		{
@@ -119,11 +119,8 @@ final class ShiftRepository
 			return $shifts;
 		}
 
-		$utcNow = TimeHelper::getInstance()->createDateTimeFromFormat(
-			'U',
-			(string)TimeHelper::getInstance()->getUtcNowTimestamp(),
-		);
-		$dayStart = (clone $utcNow)->setTime(0, 0);
+		$timeZone = TimeHelper::getInstance()->getUserDateTimeZone($userId);
+		$dayStart = (new \DateTime('now', $timeZone))->setTime(0, 0);
 		$nextDayStart = (clone $dayStart)->add(new \DateInterval('P2D'));
 
 		if ($legacySchedules->hasFlextime())

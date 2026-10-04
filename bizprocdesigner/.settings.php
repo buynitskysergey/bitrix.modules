@@ -2,6 +2,11 @@
 
 
 return [
+	'rest' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\BizprocDesigner\\Infrastructure\\Rest\\Controller',
+		],
+	],
 	'controllers' => [
 		'value' => [
 			'namespaces' => [
@@ -20,6 +25,9 @@ return [
 			'bizprocdesigner.pull.manager' => [
 				'className' => \Bitrix\BizprocDesigner\Internal\Integration\Pull\BizprocDesignerPullManager::class,
 			],
+			'bizprocdesigner.activity.node.filter.availability' => [
+				'className' => \Bitrix\BizprocDesigner\Internal\Service\Activity\NodeFilterAvailability::class,
+			],
 			'bizprocdesigner.ai.assistant.draft.service' => [
 				'className' => \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AiAssistantDraftCreatorService::class,
 			],
@@ -34,6 +42,12 @@ return [
 			],
 			'bizprocdesigner.ai.assistant.user.block.service' => [
 				'className' => \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\UserBlockService::class,
+			],
+			'bizprocdesigner.ai.assistant.agent.workflow.resolver.service' => [
+				'className' => \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AgentWorkflowResolverService::class,
+			],
+			'bizprocdesigner.ai.assistant.agent.draft.service' => [
+				'className' => \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AgentDraftService::class,
 			],
 			'bizprocdesigner.default.logger' => [
 				'className' => \Bitrix\BizprocDesigner\Internal\Service\AddMessage2LogLogger::class,

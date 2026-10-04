@@ -25,6 +25,10 @@ enum ErrorMessage: string
 	case USER_NOT_FOUND = 'USER_NOT_FOUND';
 	case ACTIVITY_NOT_FOUND = 'ACTIVITY_NOT_FOUND';
 	case TEMPLATE_NOT_FOUND = 'TEMPLATE_NOT_FOUND';
+	case TEMPLATE_VERSION_NOT_FOUND = 'TEMPLATE_VERSION_NOT_FOUND';
+	case TEMPLATE_HISTORY_UNAVAILABLE = 'TEMPLATE_HISTORY_UNAVAILABLE';
+	case TEMPLATE_VERSION_CONFLICT = 'TEMPLATE_VERSION_CONFLICT';
+	case TEMPLATE_RESTORE_UNDO_UNAVAILABLE = 'TEMPLATE_RESTORE_UNDO_UNAVAILABLE';
 	case ENTITY_NOT_EXISTS = 'ENTITY_NOT_EXISTS';
 	case INVALID_TYPE = 'INVALID_TYPE';
 	case INVALID_FILE = 'INVALID_FILE';
@@ -74,6 +78,7 @@ enum ErrorMessage: string
 			self::USER_NOT_FOUND => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_USER_NOT_FOUND', $replace),
 			self::ACTIVITY_NOT_FOUND => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_ACTIVITY_NOT_FOUND', $replace),
 			self::TEMPLATE_NOT_FOUND => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_TEMPLATE_NOT_FOUND', $replace),
+			self::TEMPLATE_VERSION_NOT_FOUND => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_TEMPLATE_VERSION_NOT_FOUND') ?? '',
 			self::ENTITY_NOT_EXISTS => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_ENTITY_NOT_EXISTS'),
 			self::GET_DATA_ERROR => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_GET_DATA_ERROR'),
 			self::CREATE_WORKFLOW => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_CREATE_WORKFLOW'),
@@ -98,11 +103,19 @@ enum ErrorMessage: string
 			self::FEATURE_DISABLED => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_FEATURE_DISABLED'),
 			self::OVER_LIMITED => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_OVER_LIMITED'),
 			self::AI_AGENT_DELETE_ERROR => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_AI_AGENT_DELETE_ERROR'),
+			self::TEMPLATE_HISTORY_UNAVAILABLE => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_TEMPLATE_HISTORY_UNAVAILABLE') ?? '',
+			self::TEMPLATE_VERSION_CONFLICT => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_TEMPLATE_VERSION_CONFLICT') ?? '',
+			self::TEMPLATE_RESTORE_UNDO_UNAVAILABLE => Loc::getMessage('BIZPROC_API_ENUM_ERRORS_TEMPLATE_RESTORE_UNDO_UNAVAILABLE') ?? '',
 		};
 	}
 
 	public function getError(array $replace = [], $code = 0, $customData = null): Error
 	{
 		return new Error($this->get($replace), $code, $customData);
+	}
+
+	public function getCodedError(array $replace = [], $customData = null): Error
+	{
+		return new Error($this->get($replace), $this->value, $customData);
 	}
 }

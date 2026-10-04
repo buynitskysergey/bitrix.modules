@@ -131,9 +131,10 @@ class Numerator extends Base
 		{
 			$fields['settings'] = [];
 		}
-		$config = array_merge($numerator->getConfig(), [
+		unset($fields['settings'][$numerator::getType()]);
+		$config = array_merge($numerator->getConfig(), $fields['settings'], [
 			$numerator::getType() => $typeConfig,
-		], $fields['settings']);
+		]);
 		$numerator->setConfig($config);
 		$saveResult = $numerator->save();
 		if($saveResult->isSuccess())

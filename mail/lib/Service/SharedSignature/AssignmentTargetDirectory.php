@@ -9,6 +9,8 @@ use Bitrix\Mail\Internals\SharedSignatureAssignmentTable;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\UserTable;
 
 /**
@@ -117,11 +119,28 @@ class AssignmentTargetDirectory
 		{
 			SharedSignatureAssignmentTable::TARGET_ALL => (string)Loc::getMessage('MAIL_SIGNATURE_TARGET_ALL'),
 			SharedSignatureAssignmentTable::TARGET_SENDER => trim((string)($assignment['TARGET_VALUE'] ?? '')),
-			SharedSignatureAssignmentTable::TARGET_MAILBOX => $this->mailboxTitles[$targetId] ?? '',
+			SharedSignatureAssignmentTable::TARGET_MAILBOX => $this->mailboxTargetTitle($assignment, $targetId),
 			SharedSignatureAssignmentTable::TARGET_USER => $this->userTitles[$targetId] ?? '',
 			SharedSignatureAssignmentTable::TARGET_DEPARTMENT => $this->departmentTitles[$targetId] ?? '',
 			default => '',
 		};
+	}
+
+	/**
+	 * A personal mailbox target keeps the chosen display name in TARGET_VALUE, and the column shows
+	 * the same identity the editor and the compatible API answer with. Shared mailbox targets store
+	 * no name and stay a bare address.
+	 */
+	private function mailboxTargetTitle(array $assignment, int $targetId): string
+	{
+		$address = $this->mailboxTitles[$targetId] ?? '';
+		$name = trim((string)($assignment['TARGET_VALUE'] ?? ''));
+		if ($address === '' || $name === '')
+		{
+			return $address;
+		}
+
+		return sprintf('%s <%s>', $name, $address);
 	}
 
 	/**
@@ -167,10 +186,6 @@ class AssignmentTargetDirectory
 		$ids = $this->findSignatureIdsBySender($query);
 
 		$ids = array_merge($ids, $this->findSignatureIdsByTargetIds(
-			SharedSignatureAssignmentTable::TARGET_MAILBOX,
-			$this->findMailboxIds($query),
-		));
-		$ids = array_merge($ids, $this->findSignatureIdsByTargetIds(
 			SharedSignatureAssignmentTable::TARGET_USER,
 			$this->findUserIds($query),
 		));
@@ -191,8 +206,8 @@ class AssignmentTargetDirectory
 	}
 
 	/**
-	 * IDs of the signatures bound to a sender whose string contains the given text. This is the
-	 * binding every personal signature has, which is what the live search of the grid looks for.
+	 * IDs of the signatures bound to a sender whose string or current mailbox contains the given
+	 * text. The live search treats both assignment representations as the same sender identity.
 	 *
 	 * The sender is the one target matched by its text rather than by an identifier, so this is also
 	 * the only lookup no index of the assignments narrows: the type alone is the largest part of the
@@ -210,14 +225,31 @@ class AssignmentTargetDirectory
 		{
 			return [];
 		}
+		if ($signatureIds !== null)
+		{
+			$signatureIds = $this->normalizeIds($signatureIds);
+			if ($signatureIds === [])
+			{
+				return [];
+			}
+		}
 
-		return $this->selectSignatureIds(
+		$ids = $this->selectSignatureIds([
 			[
-				'=TARGET_TYPE' => SharedSignatureAssignmentTable::TARGET_SENDER,
-				'%TARGET_VALUE' => $query,
+				'LOGIC' => 'OR',
+				[
+					'=TARGET_TYPE' => SharedSignatureAssignmentTable::TARGET_SENDER,
+					'%TARGET_VALUE' => $query,
+				],
+				[
+					'=TARGET_TYPE' => SharedSignatureAssignmentTable::TARGET_MAILBOX,
+					'%TARGET_VALUE' => $query,
+				],
 			],
-			$signatureIds,
-		);
+		], $signatureIds);
+		$ids = array_merge($ids, $this->findSignatureIdsByMailboxQuery($query, $signatureIds));
+
+		return array_slice(array_values(array_unique($ids)), 0, self::SEARCH_LIMIT);
 	}
 
 	/**
@@ -267,10 +299,7 @@ class AssignmentTargetDirectory
 			return $this->fetchSignatureIds($filter, self::SEARCH_LIMIT);
 		}
 
-		$signatureIds = array_values(array_unique(array_filter(
-			array_map('intval', $signatureIds),
-			static fn(int $signatureId): bool => $signatureId > 0,
-		)));
+		$signatureIds = $this->normalizeIds($signatureIds);
 		if (empty($signatureIds))
 		{
 			return [];
@@ -317,27 +346,66 @@ class AssignmentTargetDirectory
 	}
 
 	/**
+	 * IDs of the signatures whose mailbox target currently matches the text. The mailbox rows are
+	 * joined right into the assignment lookup and the answer is grouped by the signature, so the
+	 * limit bounds the distinct signatures found — one signature holding hundreds of matched
+	 * mailboxes cannot crowd the other ones out of the answer.
+	 *
+	 * @param int[]|null $signatureIds null — every signature, [] — none of them.
 	 * @return int[]
 	 */
-	private function findMailboxIds(string $query): array
+	private function findSignatureIdsByMailboxQuery(string $query, ?array $signatureIds): array
 	{
 		$ids = [];
-		$result = MailboxTable::getList([
-			'select' => ['ID'],
-			'filter' => [
-				'LOGIC' => 'OR',
-				'%EMAIL' => $query,
-				'%NAME' => $query,
-				'%USERNAME' => $query,
-			],
-			'limit' => self::SEARCH_LIMIT,
-		]);
-		while ($row = $result->fetch())
+		$chunks = $signatureIds === null ? [null] : array_chunk($signatureIds, self::SCOPE_CHUNK_SIZE);
+		foreach ($chunks as $chunk)
 		{
-			$ids[] = (int)$row['ID'];
+			$limit = self::SEARCH_LIMIT - count($ids);
+			if ($limit <= 0)
+			{
+				break;
+			}
+
+			$filter = [
+				'=TARGET_TYPE' => SharedSignatureAssignmentTable::TARGET_MAILBOX,
+				[
+					'LOGIC' => 'OR',
+					'%MAILBOX.EMAIL' => $query,
+					'%MAILBOX.NAME' => $query,
+					'%MAILBOX.LOGIN' => $query,
+					'%MAILBOX.USERNAME' => $query,
+				],
+			];
+			if ($chunk !== null)
+			{
+				$filter['=SIGNATURE_ID'] = $chunk;
+			}
+
+			$result = SharedSignatureAssignmentTable::getList([
+				'select' => ['SIGNATURE_ID'],
+				'filter' => $filter,
+				'group' => ['SIGNATURE_ID'],
+				'limit' => $limit,
+				'runtime' => [
+					new Reference('MAILBOX', MailboxTable::class, Join::on('this.TARGET_ID', 'ref.ID')),
+				],
+			]);
+			while ($row = $result->fetch())
+			{
+				$ids[] = (int)$row['SIGNATURE_ID'];
+			}
 		}
 
-		return $ids;
+		return array_values(array_unique($ids));
+	}
+
+	/** @param int[] $ids */
+	private function normalizeIds(array $ids): array
+	{
+		return array_values(array_unique(array_filter(
+			array_map('intval', $ids),
+			static fn(int $id): bool => $id > 0,
+		)));
 	}
 
 	/**

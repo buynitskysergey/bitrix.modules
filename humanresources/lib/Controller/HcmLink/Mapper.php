@@ -2,6 +2,7 @@
 
 namespace Bitrix\HumanResources\Controller\HcmLink;
 
+use Bitrix\HumanResources\Contract\Service\HcmLink\JobService;
 use Bitrix\HumanResources\Engine\HcmLinkController;
 use Bitrix\HumanResources\Exception\UpdateFailedException;
 use Bitrix\HumanResources\Item\HcmLink\Person;
@@ -105,11 +106,8 @@ class Mapper extends HcmLinkController
 			return [];
 		}
 
-		$company = Container::getHcmLinkCompanyRepository()->getById($companyId);
-		if ($company === null)
+		if (!$this->checkCompanyExists($companyId))
 		{
-			$this->addError(new Main\Error(Main\Localization\Loc::getMessage('HUMANRESOURCES_COMPANY_LINK_NOT_FOUND')));
-
 			return [];
 		}
 
@@ -125,8 +123,8 @@ class Mapper extends HcmLinkController
 			$map[(int)$item['personId']] = (int)$item['userId'];
 		}
 
-		$personCollection = $personRepository->getByIdsExcludeMapped(array_keys($map), $company->id);
-		$mappedUserIds = $personRepository->getMappedUserIdsByCompanyId($company->id);
+		$personCollection = $personRepository->getByIdsExcludeMapped(array_keys($map), $companyId);
+		$mappedUserIds = $personRepository->getMappedUserIdsByCompanyId($companyId);
 		/** @var string[] $failedMappedPersons */
 		$failedPersonsTitles = [];
 		if (!empty($map))
@@ -178,7 +176,7 @@ class Mapper extends HcmLinkController
 
 		if (!$personCollection->empty())
 		{
-			Container::getHcmLinkJobService()->completeMapping($company->id);
+			Container::getHcmLinkJobService()->completeMapping($companyId);
 		}
 
 		return [];
@@ -231,7 +229,7 @@ class Mapper extends HcmLinkController
 			return compact('jobId', 'status', 'finishedAt');
 		}
 
-		$this->addErrors($result->getErrors());
+		$this->addJobServiceErrors($result->getErrors());
 
 		return [];
 	}
@@ -243,8 +241,7 @@ class Mapper extends HcmLinkController
 			return [];
 		}
 
-		$company = Container::getHcmLinkCompanyRepository()->getById($companyId);
-		$result = Container::getHcmLinkJobService()->completeMapping($company->id);
+		$result = Container::getHcmLinkJobService()->completeMapping($companyId);
 		if ($result instanceof JobServiceResult)
 		{
 			$jobId = $result->job->id;
@@ -252,7 +249,7 @@ class Mapper extends HcmLinkController
 			return compact('jobId');
 		}
 
-		$this->addErrors($result->getErrors());
+		$this->addJobServiceErrors($result->getErrors());
 
 		return [];
 	}
@@ -340,6 +337,40 @@ class Mapper extends HcmLinkController
 		if (!Container::getHcmLinkAccessService()->canRead())
 		{
 			$this->addError($this->makeAccessDeniedError());
+
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * @param Main\Error[] $errors
+	 */
+	private function addJobServiceErrors(array $errors): void
+	{
+		foreach ($errors as $error)
+		{
+			if ($error->getCode() === JobService::ERROR_COMPANY_NOT_FOUND)
+			{
+				$this->addError(
+					new Main\Error(Loc::getMessage('HUMANRESOURCES_COMPANY_LINK_NOT_FOUND'))
+				);
+
+				continue;
+			}
+
+			$this->addError($error);
+		}
+	}
+
+	private function checkCompanyExists(int $companyId): bool
+	{
+		if (Container::getHcmLinkCompanyRepository()->getById($companyId) === null)
+		{
+			$this->addError(
+				new Main\Error(Loc::getMessage('HUMANRESOURCES_COMPANY_LINK_NOT_FOUND'))
+			);
 
 			return false;
 		}

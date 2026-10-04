@@ -1,6 +1,6 @@
 <?php
 namespace Bitrix\Crm\Merger;
-use \Bitrix\Crm\Binding;
+use Bitrix\Crm\Binding;
 
 class DealContactBindingMerger extends EntityBindingMerger
 {

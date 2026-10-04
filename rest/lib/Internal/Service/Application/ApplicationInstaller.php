@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Bitrix\Rest\Internal\Service\Application;
 
 use Bitrix\Main;
-use Bitrix\Main\Security\Random;
 use Bitrix\Rest\Internal\Entity\Application\App;
 use Bitrix\Rest\Internal\Entity\Application\AppAttributeCode;
 use Bitrix\Rest\Internal\Exception\Application\ApplicationNotInstalledException;
@@ -18,8 +17,7 @@ use Bitrix\Rest\Enum\Integration\ElementCodeType;
 class ApplicationInstaller
 {
 	public function __construct(
-		private readonly AppRepository
-		$appRepository,
+		private readonly AppRepository $appRepository,
 		private readonly IntegrationRepository $integrationRepository = new IntegrationRepository(),
 		private readonly SecurityAuditLogger $securityAuditLogger = new SecurityAuditLogger(),
 	) {}
@@ -56,13 +54,13 @@ class ApplicationInstaller
 			],
 			ElementCodeType::APPLICATION->value,
 			$existingIntegration?->getId(),
-			$userId
+			$userId,
 		);
 
 		if (!$integrationResult['status'])
 		{
 			throw new Main\SystemException(
-				implode('; ', $integrationResult['errors'] ?? ['Failed to create integration'])
+				implode('; ', $integrationResult['errors'] ?? ['Failed to create integration']),
 			);
 		}
 
@@ -102,6 +100,7 @@ class ApplicationInstaller
 		bool $onlyApi,
 		?string $applicationToken = null,
 		?int $initiatorUserId = null,
+		bool $skipTariffCheck = false,
 	): App
 	{
 		$installerUserId = $initiatorUserId ?? $userId;
@@ -129,14 +128,15 @@ class ApplicationInstaller
 			],
 			ElementCodeType::APPLICATION->value,
 			$existingIntegration?->getId(),
-			$installerUserId //Delete after refactoring Provider::saveIntegration
+			$installerUserId,
+			$skipTariffCheck,
 		);
 		// endregion
 
 		if (!$integrationResult['status'])
 		{
 			throw new ApplicationNotInstalledException(
-				implode('; ', $integrationResult['errors'] ?? ['Failed to create integration'])
+				implode('; ', $integrationResult['errors'] ?? ['Failed to create integration']),
 			);
 		}
 
@@ -154,6 +154,14 @@ class ApplicationInstaller
 
 		$savedApp->setAccess('U' . $userId);
 		$savedApp->setAttribute(AppAttributeCode::OwnerUserId->value, (string)$userId);
+		if ($skipTariffCheck)
+		{
+			$savedApp->setAttribute(AppAttributeCode::ForceInstalled->value, 'Y');
+		}
+		else
+		{
+			$savedApp->removeAttribute(AppAttributeCode::ForceInstalled->value);
+		}
 		if ($applicationToken !== null)
 		{
 			$savedApp->setApplicationToken($applicationToken);

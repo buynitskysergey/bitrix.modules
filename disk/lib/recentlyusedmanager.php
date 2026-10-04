@@ -14,6 +14,8 @@ use Bitrix\Main\Type\DateTime;
 
 final class RecentlyUsedManager
 {
+	private const FILE_PICKER_MAX_COUNT = 100;
+
 	/** @var  ErrorCollection */
 	protected $errorCollection;
 
@@ -180,6 +182,55 @@ final class RecentlyUsedManager
 	 */
 	public function getFileModelListByUser($user, array $filter = array())
 	{
+		return $this->loadFileModelListByUser(
+			$user,
+			$filter,
+			RecentlyUsedTable::MAX_COUNT_FOR_USER,
+		);
+	}
+
+	/**
+	 * Returns recent files with their last-use time for FilePicker.
+	 *
+	 * @param mixed|int|User|\CUser $user User.
+	 * @param array $filter Filter.
+	 * @return array<int, array{file: File, recentTime: DateTime}>
+	 * @internal
+	 */
+	public function getFileModelListWithRecentTimeByUser($user, array $filter = array()): array
+	{
+		$files = $this->loadFileModelListByUser(
+			$user,
+			$filter,
+			self::FILE_PICKER_MAX_COUNT,
+			[
+				'RECENT_TIME' => 'RECENTLY_USED.CREATE_TIME',
+			],
+			'RECENTLY_USED',
+			'CREATE_TIME',
+		);
+		$records = [];
+		foreach ($files as $file)
+		{
+			$recentTime = $file->getExtra()->get('RECENT_TIME');
+			if ($recentTime instanceof DateTime)
+			{
+				$records[] = ['file' => $file, 'recentTime' => $recentTime];
+			}
+		}
+
+		return $records;
+	}
+
+	private function loadFileModelListByUser(
+		$user,
+		array $filter,
+		int $limit,
+		array $extra = [],
+		string $activityRelation = 'RECENTLY_USED',
+		string $activityTimeField = 'CREATE_TIME',
+	): array
+	{
 		$userId = User::resolveUserId($user);
 		if(!$userId)
 		{
@@ -205,15 +256,20 @@ final class RecentlyUsedManager
 		}
 
 		$securityContext = $storage->getCurrentUserSecurityContext();
+		$activityTime = "{$activityRelation}.{$activityTimeField}";
 		$parameters = array(
 			'filter' => array(
-				'RECENTLY_USED.USER_ID' => $userId,
-				'DELETED_TYPE' => ObjectTable::DELETED_TYPE_NONE,
-				'TYPE' => ObjectTable::TYPE_FILE,
+				"={$activityRelation}.USER_ID" => $userId,
+				'=DELETED_TYPE' => ObjectTable::DELETED_TYPE_NONE,
+				'=TYPE' => ObjectTable::TYPE_FILE,
 			),
-			'order' => array('RECENTLY_USED.CREATE_TIME' => 'DESC'),
-			'limit' => RecentlyUsedTable::MAX_COUNT_FOR_USER,
+			'order' => array($activityTime => 'DESC'),
+			'limit' => $limit,
 		);
+		if ($extra)
+		{
+			$parameters['extra'] = $extra;
+		}
 
 		if($filter)
 		{

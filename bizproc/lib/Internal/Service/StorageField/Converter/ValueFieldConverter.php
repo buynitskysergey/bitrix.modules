@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Internal\Service\StorageField\Converter;
 
+use Bitrix\Bizproc\BaseType\Value;
+use Bitrix\Bizproc\FieldType;
+
 class ValueFieldConverter
 {
 	private static array $converters = [];
@@ -26,7 +29,10 @@ class ValueFieldConverter
 	 */
 	public static function toStorageValues(mixed $value, string $type, bool $isMultiple): array
 	{
-		$values = $isMultiple ? (array)$value : [$value];
+		$values = $isMultiple
+			? (is_array($value) ? $value : [$value])
+			: (is_array($value) ? array_slice($value, 0, 1) : [$value])
+		;
 		$result = [];
 
 		foreach ($values as $one)
@@ -75,6 +81,48 @@ class ValueFieldConverter
 		if ($converter)
 		{
 			return $converter->fromStorage($value);
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Converts the whole field value (single or multiple) into a flat array of read-ready values.
+	 * The viewer offset is stripped first: a value read for a viewer carries it, storage does not.
+	 *
+	 * @return array<mixed>
+	 */
+	public static function toReadValues(mixed $value, string $type, bool $isMultiple): array
+	{
+		$stored = self::toStorageValues(self::stripViewerOffset($value), $type, $isMultiple);
+
+		return array_map(static fn (mixed $element): mixed => self::fromStorageForRead($element, $type), $stored);
+	}
+
+	/**
+	 * Date and datetime keep their storage string form: fromStorage() would wrap them into
+	 * viewer-offset value objects, which is a presentation form and not a read form.
+	 */
+	private static function fromStorageForRead(mixed $value, string $type): mixed
+	{
+		if ($type === FieldType::DATE || $type === FieldType::DATETIME)
+		{
+			return $value;
+		}
+
+		return self::fromStorage($value, $type);
+	}
+
+	private static function stripViewerOffset(mixed $value): mixed
+	{
+		if (is_array($value))
+		{
+			return array_map(static fn (mixed $element): mixed => self::stripViewerOffset($element), $value);
+		}
+
+		if ($value instanceof Value\DateTime)
+		{
+			return new Value\DateTime($value->getTimestamp() - (int)\CTimeZone::GetOffset());
 		}
 
 		return $value;

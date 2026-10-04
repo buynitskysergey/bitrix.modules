@@ -12,11 +12,46 @@ Loc::loadMessages(__FILE__);
 
 class ShipmentChangedTrigger extends BaseTrigger
 {
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use OrderReturnTrait;
+
 	public static function isSupported($entityTypeId)
 	{
 		return (
 			$entityTypeId === \CCrmOwnerType::Order
 		);
+	}
+
+	protected static function getOrderReturnFieldIds(): array
+	{
+		return [
+			self::ORDER_RETURN_SHIPMENT_ID,
+			self::ORDER_RETURN_STATUS_PREVIOUS,
+			self::ORDER_RETURN_STATUS_ACTUAL,
+		];
+	}
+
+	/**
+	 * A shipment keeps no acting user for its status, so the node names no initiator.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_SHIPMENT_CHANGED_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getOrderReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], $this->buildOrderReturnValues(), [
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
 	}
 
 	public static function isEnabled()
@@ -71,6 +106,7 @@ class ShipmentChangedTrigger extends BaseTrigger
 			[
 				'Id' => 'shipmentCondition',
 				'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_SHIPMENT_CHANGED_CONDITION'),
+				'ShowFieldLabel' => false,
 				'Type' => '@condition-group-selector',
 				'Settings' => [
 					'Fields' => $fields,

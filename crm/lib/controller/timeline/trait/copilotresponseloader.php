@@ -37,9 +37,9 @@ trait CopilotResponseLoader
 		return $payload->toArray();
 	}
 
-	final protected function loadSummary(int $activityId, ?int $jobId = null): ?array
+	final protected function loadSummary(int $activityId, ?int $jobId = null, ?int $ownerTypeId = null, ?int $ownerId = null): ?array
 	{
-		$summaryResult = $this->jobRepository->getSummarizeCallTranscriptionResultByActivity($activityId, $jobId);
+		$summaryResult = $this->jobRepository->getSummarizeCallTranscriptionResultByActivity($activityId, $jobId, $ownerTypeId, $ownerId);
 		if (is_null($summaryResult))
 		{
 			$this->addError(new Error('Summary result is not found'));

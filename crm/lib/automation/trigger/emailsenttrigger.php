@@ -10,9 +10,45 @@ Loc::loadMessages(__FILE__);
 
 class EmailSentTrigger extends BaseTrigger
 {
+	protected const EVENT_INITIATOR_ID = 'Initiator';
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
+	use EmailReturnTrait;
+
 	public static function getCode()
 	{
 		return 'EMAIL_SENT';
+	}
+
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventInitiatorProperty(),
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_EMAIL_SENT_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getEmailReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_INITIATOR_ID => $this->buildEventInitiatorValue(),
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
+	}
+
+	/**
+	 * Outgoing email is authored by an employee: the initiator is the activity author.
+	 */
+	protected function resolveEventInitiatorUserId(): ?int
+	{
+		$authorId = (int)($this->getInputData('AUTHOR_ID') ?? 0);
+
+		return $authorId > 0 ? $authorId : null;
 	}
 
 	public static function getName()

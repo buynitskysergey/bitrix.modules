@@ -2,6 +2,10 @@
 
 namespace Bitrix\Bizproc\Workflow\Template\Converter;
 
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasContainer;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasFragment;
+use Bitrix\Bizproc\Workflow\Template\Converter\Canvas\CanvasNode;
+
 final class StateChildToNodeWorkflow extends SequentialToNodeWorkflow
 {
 	/** @noinspection PhpMissingParentConstructorInspection */
@@ -19,21 +23,21 @@ final class StateChildToNodeWorkflow extends SequentialToNodeWorkflow
 		}
 
 		$this->rootActivity = $stateActivity;
+		//$this->setStartTrigger($stateActivity['Type']);
 	}
 
-	protected function createTriggers(): array
+	protected function buildChildFragment(array $child): CanvasFragment
 	{
-		$merge = $this->createMergeNode();
-		$this->setPosition($merge['Name'], 1, 1);
+		if ($child['Type'] === 'SetStateActivity')
+		{
+			$child['Type'] = 'SetStateNode';
+		}
 
-		$trigger = $this->rootActivity;
+		return parent::buildChildFragment($child);
+	}
 
-		$this->copyPosition($merge['Name'], $trigger['Name']);
-		$this->movePosition($merge['Name'], 0, 1);
-
-		$children = [$merge, $trigger];
-		$links = [$this->createLink($trigger['Name'], $merge['Name'])];
-
-		return [$merge['Name'], $links, $children];
+	protected function createTrigger(string $type): array
+	{
+		return $this->rootActivity;
 	}
 }

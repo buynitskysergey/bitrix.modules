@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Controller\RepeatSale;
 
 use Bitrix\Crm\Controller\ErrorCode;
+use Bitrix\Crm\Integration\AI\BaasManager;
 use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Crm\RepeatSale\Logger;
 use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentAssignmentUserController;
@@ -136,11 +137,13 @@ final class Segment extends JsonController
 			$segmentItemCheckResult = SegmentItemChecker::getInstance()->setItem($segmentItem)->run();
 			if (!$segmentItemCheckResult->isSuccess())
 			{
-				// @todo need more specific error code
-				$this->addError(ErrorCode::getAccessDeniedError());
+				$this->addError($this->prepareActiveError($segmentItemCheckResult));
 
 				return new Result();
 			}
+
+			// manual enable revokes the auto-disable memory so subscription recovery no longer touches it
+			$segmentItem->setIsAutoDisabled(false);
 		}
 
 		$segmentItem->setIsEnabled($isEnabledValue);
@@ -150,8 +153,17 @@ final class Segment extends JsonController
 		{
 			$this->addErrors($result->getErrors());
 		}
+		else
+		{
+			$childrenResult = $this->synchronizeChildrenActivity($segmentItem, $isEnabledValue);
+			if (!$childrenResult->isSuccess())
+			{
+				$result->addErrors($childrenResult->getErrors());
+				$this->addErrors($childrenResult->getErrors());
+			}
+		}
 
-		if ($isEnabledValue && $availabilityChecker->isEnablePending())
+		if ($result->isSuccess() && $isEnabledValue && $availabilityChecker->isEnablePending())
 		{
 			(new Flow())->enableAction();
 			$this->sendAnalytics();
@@ -163,12 +175,67 @@ final class Segment extends JsonController
 				'userId' => $this->getCurrentUser()?->getId() ?? Container::getInstance()->getContext()->getUserId(),
 				'segmentCode' => $segmentItem->getCode(),
 				'segmentId' => $segmentItem->getId(),
-			]
+			],
 		);
 
 		return $result;
 	}
 	// endregion
+
+	private function synchronizeChildrenActivity(SegmentItem $parent, bool $isEnabled): Result
+	{
+		$result = new Result();
+		$parentCode = $parent->getCode();
+		if ($parentCode === null)
+		{
+			return $result;
+		}
+
+		$controller = RepeatSaleSegmentController::getInstance();
+		$children = $controller->getList([
+			'select' => ['*', 'ASSIGNMENT_USERS.USER_ID'],
+			'filter' => [
+				'=BASE_SEGMENT_CODE' => $parentCode,
+			],
+			'limit' => 0,
+		]);
+
+		foreach ($children as $child)
+		{
+			$childItem = SegmentItem::createFromEntity($child)
+				->setIsEnabled($isEnabled)
+			;
+			if ($isEnabled)
+			{
+				$childItem->setIsAutoDisabled(false);
+			}
+
+			$updateResult = $controller->update($childItem->getId(), $childItem);
+			if (!$updateResult->isSuccess())
+			{
+				$result->addErrors($updateResult->getErrors());
+			}
+		}
+
+		return $result;
+	}
+
+	private function prepareActiveError(Result $checkResult): \Bitrix\Main\Error
+	{
+		foreach ($checkResult->getErrors() as $error)
+		{
+			if ($error->getCode() === SegmentItemChecker::SUBSCRIPTION_UNAVAILABLE)
+			{
+				return new \Bitrix\Main\Error(
+					$error->getMessage(),
+					$error->getCode(),
+					['sliderCode' => BaasManager::getEmptyPackagesSliderCode()],
+				);
+			}
+		}
+
+		return ErrorCode::getAccessDeniedError();
+	}
 
 	private function prepareSegmentItem(SegmentItem $segmentItem): void
 	{

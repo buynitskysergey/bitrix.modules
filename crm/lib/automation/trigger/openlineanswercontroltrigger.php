@@ -31,20 +31,41 @@ class OpenLineAnswerControlTrigger extends OpenLineTrigger
 		return parent::setInputData($data);
 	}
 
+	/**
+	 * The channel and the operator are already exposed as own session fields, so the shared
+	 * copies are skipped.
+	 */
+	protected static function getOpenLineReturnFieldIds(): array
+	{
+		return [self::RETURN_OL_CHAT_ID, self::RETURN_OL_CLIENT_ID];
+	}
+
+	/**
+	 * The operator who answered is already exposed as an own session field, so the node names no
+	 * initiator.
+	 */
 	public static function getReturnProperties(): array
 	{
-		return array_values(
-			array_map(
-				function ($field)
-				{
-					if (isset($field['ReturnId']))
+		return array_merge(
+			[
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_OPENLINE_ANSWER_CTRL_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getOpenLineReturnProperties(),
+			array_values(
+				array_map(
+					function ($field)
 					{
-						$field['Id'] = $field['ReturnId'];
-						unset($field['ReturnId']);
-						return array_merge($field, ['Default' => null]);
-					}
-				},
-				self::getSessionFields()
+						if (isset($field['ReturnId']))
+						{
+							$field['Id'] = $field['ReturnId'];
+							unset($field['ReturnId']);
+							return array_merge($field, ['Default' => null]);
+						}
+					},
+					self::getSessionFields()
+				)
 			)
 		);
 	}

@@ -4,10 +4,10 @@ namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator;
 
 use Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentSetting;
-use Bitrix\Main\Error;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Error\GraphError;
 use Bitrix\Main\Result;
 
-class AgentBlockSettingValidator
+final class AgentBlockSettingValidator
 {
 	private ?AgentSetting $validSetting = null;
 	private readonly AgentSettingNameValidator $nameValidator;
@@ -25,9 +25,10 @@ class AgentBlockSettingValidator
 	public function validate(mixed $setting, string $path, ?BlockTypeDetail $blockTypeDetail): Result
 	{
 		$this->validSetting = null;
+
 		if (!is_array($setting))
 		{
-			return (new Result())->addError(new Error("{$path} should be object"));
+			return (new Result())->addError(GraphError::at($path, "{$path} should be object"));
 		}
 
 		$result = new Result();
@@ -45,10 +46,7 @@ class AgentBlockSettingValidator
 			&& $this->valueValidator->getExpectedTypeValue() !== null
 		)
 		{
-			$this->validSetting = new AgentSetting(
-				name: $name,
-				value: $this->valueValidator->getExpectedTypeValue(),
-			);
+			$this->validSetting = new AgentSetting($name, $this->valueValidator->getExpectedTypeValue());
 		}
 
 		return $result;

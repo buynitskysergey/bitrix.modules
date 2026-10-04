@@ -2,6 +2,7 @@
 
 namespace Bitrix\Crm\Copilot\CallAssessment\Enum;
 
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Main\Localization\Loc;
 
 enum CallType: int
@@ -10,7 +11,7 @@ enum CallType: int
 	case INCOMING = 2;
 	case OUTGOING = 3;
 
-	public static function fromName(string $name): string
+	public static function fromName(string $name): int
 	{
 		foreach (self::cases() as $status)
 		{
@@ -27,19 +28,36 @@ enum CallType: int
 	{
 		if ($value === self::ALL->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CALL_TYPE_ALL');
+			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CALL_TYPE_ALL_MSGVER_1');
 		}
+
+		$isCallScoringV2 = AIManager::isCallScoringV2Enabled();
 
 		if ($value === self::INCOMING->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CALL_TYPE_INCOMING');
+			$code = 'CRM_COPILOT_CALL_ASSESSMENT_CALL_TYPE_INCOMING_MSGVER_';
 		}
-
-		if ($value === self::OUTGOING->value)
+		elseif ($value === self::OUTGOING->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CALL_TYPE_OUTGOING');
+			$code = 'CRM_COPILOT_CALL_ASSESSMENT_CALL_TYPE_OUTGOING_MSGVER_';
+		}
+		else
+		{
+			return null;
 		}
 
-		return null;
+		return Loc::getMessage($code . ($isCallScoringV2 ? '2' : '1'));
+	}
+
+	public static function toArray(): array
+	{
+		return array_column(
+			array_map(
+				static fn($case) => ['value' => $case->value, 'title' => $case->getTitle($case->value)],
+				self::cases(),
+			),
+			'title',
+			'value',
+		);
 	}
 }

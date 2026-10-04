@@ -30,6 +30,20 @@ class AddPaySystemAction extends Sale\Controller\Action\BaseAction
 					Sale\Controller\ErrorEnumeration::ADD_PAY_SYSTEM_ACTION_ACTION_FILE_NOT_FOUND
 				)
 			);
+
+			return $result;
+		}
+
+		if (!self::isValidActionFile($fields['ACTION_FILE']))
+		{
+			$result->addError(
+				new Main\Error(
+					'actionFile is invalid',
+					Sale\Controller\ErrorEnumeration::ADD_PAY_SYSTEM_ACTION_ACTION_FILE_INVALID
+				)
+			);
+
+			return $result;
 		}
 
 		if (!empty($fields['PS_MODE']))
@@ -47,6 +61,50 @@ class AddPaySystemAction extends Sale\Controller\Action\BaseAction
 		}
 
 		return $result;
+	}
+
+	private static function isValidActionFile(mixed $actionFile): bool
+	{
+		if (!is_string($actionFile) || self::hasInvalidSegment($actionFile))
+		{
+			return false;
+		}
+
+		return self::isHandlerFolder($actionFile) || self::isExactRestHandlerCode($actionFile);
+	}
+
+	private static function hasInvalidSegment(string $actionFile): bool
+	{
+		$segments = explode('/', str_replace('\\', '/', $actionFile));
+
+		// Only the first segment may be empty: it is the leading slash of a full path
+		return
+			in_array($segments[0], ['.', '..'], true)
+			|| array_intersect(array_slice($segments, 1), ['', '.', '..']) !== []
+		;
+	}
+
+	private static function isHandlerFolder(string $actionFile): bool
+	{
+		try
+		{
+			return Sale\PaySystem\Manager::getPathToHandlerFolder($actionFile) !== null;
+		}
+		catch (Main\IO\InvalidPathException)
+		{
+			return false;
+		}
+	}
+
+	private static function isExactRestHandlerCode(string $actionFile): bool
+	{
+		$restHandler = Sale\Internals\PaySystemRestHandlersTable::getRow([
+			'select' => ['CODE'],
+			'filter' => ['=CODE' => $actionFile],
+		]);
+
+		// The column collation matches codes regardless of case and full-width forms
+		return $restHandler !== null && $restHandler['CODE'] === $actionFile;
 	}
 
 	public function run(array $fields)

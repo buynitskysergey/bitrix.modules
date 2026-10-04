@@ -1,9 +1,9 @@
 <?php
 /**
  * Bitrix Framework
- * @package    bitrix
+ * @package bitrix
  * @subpackage main
- * @copyright  2001-2018 Bitrix
+ * @copyright 2001-2026 Bitrix
  */
 
 namespace Bitrix\Main\ORM\Objectify;
@@ -20,12 +20,11 @@ use Bitrix\Main\NotImplementedException;
 use Bitrix\Main\ORM\Fields\FieldTypeMask;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Text\StringHelper;
-use Bitrix\Main\Web\Json;
 
 /**
  * Collection of entity objects. Used to hold 1:N and N:M object collections.
  *
- * @property-read \Bitrix\Main\ORM\Entity $entity
+ * @property-read Entity $entity
  *
  * @package    bitrix
  * @subpackage main
@@ -57,7 +56,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 	protected $_objectsChanges;
 
 	/** @var  EntityObject[] */
-	protected $_objectsRemoved;
+	protected $_objectsRemoved = [];
 
 	/** @var EntityObject[] Used for Iterator interface, allows to delete elements during foreach loop */
 	protected $_iterableObjects;
@@ -71,7 +70,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 	/**
 	 * Collection constructor.
 	 *
-	 * @param Entity $entity
+	 * @param Entity|null $entity
 	 *
 	 * @throws ArgumentException
 	 * @throws SystemException
@@ -102,8 +101,8 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 
 	public function __clone()
 	{
-		$this->_objects = \Bitrix\Main\Type\Collection::clone((array)$this->_objects);
-		$this->_objectsRemoved = \Bitrix\Main\Type\Collection::clone((array)$this->_objectsRemoved);
+		$this->_objects = \Bitrix\Main\Type\Collection::clone($this->_objects);
+		$this->_objectsRemoved = \Bitrix\Main\Type\Collection::clone($this->_objectsRemoved);
 		$this->_iterableObjects = null;
 	}
 
@@ -255,7 +254,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 
 		if (empty($object))
 		{
-			$object = $this->entity->wakeUpObject($srPrimary);
+			$object = $this->entity->wakeUpObject($this->sysUnserializePrimaryKey($srPrimary));
 		}
 
 		unset($this->_objects[$srPrimary]);
@@ -364,7 +363,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 			$result->fetchCollection();
 		}
 
-		// return field value it it was only one
+		// return field value if it was only one
 		if (is_array($fields) && count($fields) == 1 && $this->entity->hasField(current($fields)))
 		{
 			$fieldName = current($fields);
@@ -374,6 +373,8 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 				? $this->sysGetCollection($fieldName)
 				: $this->sysGetList($fieldName);
 		}
+
+		return null;
 	}
 
 	final public function save($ignoreEvents = false)
@@ -561,7 +562,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 	 * @param $name
 	 * @param $arguments
 	 *
-	 * @return array
+	 * @return array|Collection
 	 * @throws ArgumentException
 	 * @throws SystemException
 	 */
@@ -649,10 +650,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 	/**
 	 * @internal For internal system usage only.
 	 *
-	 * @param \Bitrix\Main\ORM\Objectify\EntityObject $object
-	 *
-	 * @throws ArgumentException
-	 * @throws SystemException
+	 * @param EntityObject $object
 	 */
 	public function sysAddActual(EntityObject $object)
 	{
@@ -786,7 +784,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 		$values = [];
 
 		// collect field values
-		foreach ($this->_objects as $objectPrimary => $object)
+		foreach ($this->_objects as $object)
 		{
 			$values[] = $object->sysGetValue($fieldName);
 		}
@@ -810,7 +808,7 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 		$values = $field->getRefEntity()->createCollection();
 
 		// collect field values
-		foreach ($this->_objects as $objectPrimary => $object)
+		foreach ($this->_objects as $object)
 		{
 			$value = $object->sysGetValue($fieldName);
 
@@ -895,13 +893,10 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 	}
 
 	/**
-	 * @internal For internal system usage only.
+	 * @internal For internal system usage only
 	 *
-	 * @param \Bitrix\Main\ORM\Objectify\EntityObject $object
-	 *
-	 * @return false|mixed|string
-	 * @throws ArgumentException
-	 * @throws SystemException
+	 * @param EntityObject $object
+	 * @return false|string
 	 */
 	protected function sysGetPrimaryKey(EntityObject $object)
 	{
@@ -919,18 +914,27 @@ abstract class Collection implements \ArrayAccess, \Iterator, \Countable
 	 * @internal For internal system usage only.
 	 *
 	 * @param $primary
-	 *
-	 * @return false|mixed|string
-	 * @throws ArgumentException
+	 * @return false|string
 	 */
 	protected function sysSerializePrimaryKey($primary)
 	{
 		if ($this->_isSinglePrimary)
 		{
-			return current($primary);
+			return json_encode(current($primary));
 		}
 
-		return Json::encode(array_values($primary));
+		return json_encode($primary);
+	}
+
+	/**
+	 * @internal For internal system usage only.
+	 *
+	 * @param $primary
+	 * @return mixed
+	 */
+	protected function sysUnserializePrimaryKey($primary)
+	{
+		return json_decode($primary, true);
 	}
 
 	/**

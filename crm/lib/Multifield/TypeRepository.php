@@ -27,6 +27,14 @@ final class TypeRepository
 		return (string)self::getType($typeId)?->getValueTypeCaption((string)$valueType);
 	}
 
+	/**
+	 * @return string[]
+	 */
+	public static function getValueTypes(string $typeId): array
+	{
+		return self::getType($typeId)?->getValueTypes() ?? [];
+	}
+
 	public static function getValueTypeByValueTypeCaption(mixed $typeId, string $valueTypeCaption): ?string
 	{
 		$type = self::getType($typeId);

@@ -1,6 +1,6 @@
 <?php
 
-namespace Bitrix\Crm\Controller\Timeline\trait;
+namespace Bitrix\Crm\Controller\Timeline\Trait;
 
 use Bitrix\Crm\Activity\BindIdentifier;
 use Bitrix\Crm\Controller\ErrorCode;

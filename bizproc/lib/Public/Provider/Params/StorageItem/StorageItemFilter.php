@@ -117,7 +117,16 @@ class StorageItemFilter implements FilterInterface
 			}
 		}
 
-		$this->appendConditions($result, $this->filter, $lowerFieldMap);
+		// (DOCUMENT_ID → MODULE_ID/ENTITY/DOCUMENT_TYPE, *_WITHIN → CREATED_TIME/UPDATED_TIME).
+
+		$generalFilter = $this->filter;
+		unset(
+			$generalFilter['DOCUMENT_ID'],
+			$generalFilter['CREATED_WITHIN'],
+			$generalFilter['UPDATED_WITHIN'],
+		);
+
+		$this->appendConditions($result, $generalFilter, $lowerFieldMap);
 
 		return $result;
 	}

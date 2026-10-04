@@ -2,9 +2,12 @@
 
 namespace Bitrix\Crm\Copilot\CallAssessment;
 
+use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentAvailabilityController;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
+use Bitrix\Crm\Copilot\CallAssessment\Enum\AvailabilityType;
 use Bitrix\Crm\Copilot\CallAssessment\Enum\CallType;
 use Bitrix\Crm\Copilot\CallAssessment\Enum\ClientType;
+use Bitrix\Crm\Feature;
 use Bitrix\Crm\Integration\VoxImplant\Call;
 use Bitrix\Crm\Integration\VoxImplantManager;
 use Bitrix\Crm\MultiValueStoreService;
@@ -15,7 +18,26 @@ use CCrmOwnerType;
 
 final class ItemFactory
 {
-	public static function getByActivityId(int $activityId): ?CallAssessmentItem
+	/**
+	 * Upper bound of the candidate list. The settings go into the prompt of the script selector, so the
+	 * list has to be bounded; the bound is high enough that a portal reaches it only with an unusable
+	 * number of scripts for one call.
+	 */
+	private const CANDIDATES_LIMIT = 50;
+
+	/**
+	 * @param bool $requireScoringCriteria limits the selection to settings the V2 script selector accepts:
+	 *        it takes only settings with criteria, so without the same condition here the newest matching
+	 *        setting can hide a ready one behind it. A setting pinned to the call is exempt - it is an
+	 *        explicit choice of the user and must not be silently replaced by another one.
+	 * @param bool $requireCurrentAvailability rejects a pinned setting outside its availability window
+	 *        instead of silently replacing the explicit choice. Regular selection always applies this gate.
+	 */
+	public static function getByActivityId(
+		int $activityId,
+		bool $requireScoringCriteria = false,
+		bool $requireCurrentAvailability = false,
+	): ?CallAssessmentItem
 	{
 		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
 		if (!$activity)
@@ -35,7 +57,10 @@ final class ItemFactory
 			$savedAssessmentItemByCallId = self::getSavedAssessmentItemByCallId($callId);
 			if ($savedAssessmentItemByCallId)
 			{
-				return $savedAssessmentItemByCallId;
+				return !$requireCurrentAvailability || self::isCurrentlyAvailable($savedAssessmentItemByCallId)
+					? $savedAssessmentItemByCallId
+					: null
+				;
 			}
 		}
 
@@ -45,7 +70,64 @@ final class ItemFactory
 			return null;
 		}
 
-		return self::getAssessmentByClientAndCallType($clientType, self::getCallType((int)$activity['DIRECTION']));
+		return self::getAssessmentByClientAndCallType(
+			$clientType,
+			self::getCallType((int)$activity['DIRECTION']),
+			$requireScoringCriteria,
+		);
+	}
+
+	/**
+	 * Every setting admissible for this call, in the order of the single lookup - so the head of the list
+	 * is what getByActivityId() returns with the same arguments.
+	 *
+	 * This is what the V2 script selector chooses between. Handing it the single pick instead left it no
+	 * choice at all and the script of a call was decided by the freshest UPDATED_AT of the most specific
+	 * client type; leaving it free to query on its own is the other extreme, because the selector applies
+	 * no availability window. The list keeps the gates on the CRM side and the choice within them on the
+	 * model side.
+	 *
+	 * @return int[]
+	 */
+	public static function getCandidateIdsByActivityId(
+		int $activityId,
+		bool $requireScoringCriteria = false,
+		bool $requireCurrentAvailability = false,
+	): array
+	{
+		$activity = Container::getInstance()->getActivityBroker()->getById($activityId);
+		if (!$activity || (int)$activity['TYPE_ID'] !== CCrmActivityType::Call)
+		{
+			return [];
+		}
+
+		$originId = $activity['ORIGIN_ID'] ?? '';
+		if (VoxImplantManager::isVoxImplantOriginId($originId))
+		{
+			$callId = VoxImplantManager::extractCallIdFromOriginId($originId);
+			$savedAssessmentItemByCallId = self::getSavedAssessmentItemByCallId($callId);
+			if ($savedAssessmentItemByCallId)
+			{
+				// the setting pinned to the call is an explicit choice of the user: it is the only candidate,
+				// and the selector must not be given the freedom to replace it
+				return !$requireCurrentAvailability || self::isCurrentlyAvailable($savedAssessmentItemByCallId)
+					? [(int)$savedAssessmentItemByCallId->getId()]
+					: []
+				;
+			}
+		}
+
+		$clientType = (new AssessmentClientTypeResolver())->resolveByActivityId($activityId);
+		if (!$clientType)
+		{
+			return [];
+		}
+
+		return self::getAssessmentIdsByClientAndCallType(
+			$clientType,
+			self::getCallType((int)$activity['DIRECTION']),
+			$requireScoringCriteria,
+		);
 	}
 
 	public static function getByCallId(string $callId): ?CallAssessmentItem
@@ -115,13 +197,93 @@ final class ItemFactory
 		return CallAssessmentItem::createFromEntity($callAssessmentItem);
 	}
 
-	private static function getAssessmentByClientAndCallType(ClientType $assessmentClientType, CallType $callType): ?CallAssessmentItem
+	private static function isCurrentlyAvailable(CallAssessmentItem $callAssessmentItem): bool
+	{
+		if (!Feature::enabled(Feature\CopilotCallAssessmentAvailability::class))
+		{
+			return true;
+		}
+
+		$availabilityType = $callAssessmentItem->getAvailabilityType();
+		if ($availabilityType === AvailabilityType::ALWAYS_ACTIVE->value)
+		{
+			return true;
+		}
+
+		$assessmentId = $callAssessmentItem->getId();
+		if ($assessmentId === null || !AvailabilityType::isExtendedAvailabilityType($availabilityType))
+		{
+			return false;
+		}
+
+		$currentAvailableAssessmentIds = CopilotCallAssessmentAvailabilityController::getInstance()
+			->getCurrentAvailableAssessmentIds()
+		;
+
+		return in_array($assessmentId, $currentAvailableAssessmentIds, true);
+	}
+
+	private static function getAssessmentByClientAndCallType(
+		ClientType $assessmentClientType,
+		CallType $callType,
+		bool $requireScoringCriteria = false,
+	): ?CallAssessmentItem
+	{
+		$assessment = CopilotCallAssessmentController::getInstance()->getList([
+			'filter' => self::buildClientAndCallTypeFilter($assessmentClientType, $callType, $requireScoringCriteria),
+			'limit' => 1,
+			'order' => self::getSelectionOrder(),
+		])->current();
+
+		return $assessment
+			? CallAssessmentItem::createFromEntity($assessment)
+			: null
+		;
+	}
+
+	/**
+	 * @return int[]
+	 */
+	private static function getAssessmentIdsByClientAndCallType(
+		ClientType $assessmentClientType,
+		CallType $callType,
+		bool $requireScoringCriteria = false,
+	): array
+	{
+		$assessments = CopilotCallAssessmentController::getInstance()->getList([
+			'select' => ['ID'],
+			'filter' => self::buildClientAndCallTypeFilter($assessmentClientType, $callType, $requireScoringCriteria),
+			// the default limit of the controller is 10, and a portal keeps more scripts than that
+			'limit' => self::CANDIDATES_LIMIT,
+			'order' => self::getSelectionOrder(),
+		]);
+
+		$ids = [];
+		foreach ($assessments as $assessment)
+		{
+			// a setting of both a specific client type and the ANY fallback comes back once per join row
+			$ids[] = (int)$assessment->getId();
+		}
+
+		return array_values(array_unique($ids));
+	}
+
+	private static function buildClientAndCallTypeFilter(
+		ClientType $assessmentClientType,
+		CallType $callType,
+		bool $requireScoringCriteria,
+	): array
 	{
 		$filter = [
 			'=CALL_TYPE' => [CallType::ALL->value, $callType->value],
-			'=CLIENT_TYPES.CLIENT_TYPE_ID' => [$assessmentClientType->value],
+			'=CLIENT_TYPES.CLIENT_TYPE_ID' => [$assessmentClientType->value, ClientType::ANY->value],
 			'=IS_ENABLED' => true,
 		];
+
+		if ($requireScoringCriteria)
+		{
+			$filter['!=CRITERIA.ID'] = null;
+		}
 
 		$additionalFilter = CopilotCallAssessmentController::getInstance()->getCurrentAvailableAssessmentFilter();
 		if ($additionalFilter)
@@ -129,16 +291,19 @@ final class ItemFactory
 			$filter[] = $additionalFilter;
 		}
 
-		$assessment = CopilotCallAssessmentController::getInstance()->getList([
-			'filter' => $filter,
-			'limit' => 1,
-			'order' => ['UPDATED_AT' => 'DESC'],
-		])->current();
+		return $filter;
+	}
 
-		return $assessment
-			? CallAssessmentItem::createFromEntity($assessment)
-			: null
-		;
+	/**
+	 * A script bound to the exact client type must win over the ANY fallback even if ANY was updated later:
+	 * ClientType::ANY has the highest value, so specific types sort first, then the freshest within each group.
+	 */
+	private static function getSelectionOrder(): array
+	{
+		return [
+			'CLIENT_TYPES.CLIENT_TYPE_ID' => 'ASC',
+			'UPDATED_AT' => 'DESC',
+		];
 	}
 
 	private static function getCallType(int $callDirection): CallType

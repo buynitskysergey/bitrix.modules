@@ -26,6 +26,7 @@ class WorkflowTemplateSettingsTable extends DataManager
 {
 	const SHOW_CATEGORY_PREFIX = 'SHOW_CATEGORY_ID_';
 	const ORIGIN_SYSTEM_CODE = 'ORIGIN_SYSTEM_CODE';
+	const ORIGIN_SYSTEM_VERSION = 'ORIGIN_SYSTEM_VERSION';
 
 	public static function getTableName(): string
 	{

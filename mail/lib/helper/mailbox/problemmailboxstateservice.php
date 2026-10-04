@@ -106,19 +106,79 @@ final class ProblemMailboxStateService
 		return self::buildTransitionResult($wasProblem, false);
 	}
 
+	/**
+	 * When the mailbox last recorded a state of its synchronization: the mark a started
+	 * and a finished pass both move. A pure read, so a caller may take a snapshot of it
+	 * before a pass and tell a pass that ran from one that refused to start.
+	 *
+	 * @return int|null Null when the mailbox has never recorded such a state.
+	 */
+	public function getSyncStatusTime(int $mailboxId): ?int
+	{
+		$syncStatus = $this->getMailboxOption(
+			$mailboxId,
+			MailEntityOptionsTable::SYNC_STATUS_PROPERTY_NAME,
+			['DATE_INSERT'],
+		);
+
+		$recordedAt = $syncStatus['DATE_INSERT'] ?? null;
+
+		return $recordedAt instanceof DateTime ? $recordedAt->getTimestamp() : null;
+	}
+
 	public function isProblemMailbox(int $mailboxId): bool
 	{
-		$problemStatus = $this->getMailboxOption(
-			$mailboxId,
-			MailEntityOptionsTable::PROBLEM_STATUS_PROPERTY_NAME,
-		);
-		if (($problemStatus['VALUE'] ?? null) === self::PROBLEM_STATUS_VALUE)
+		if ($this->hasProblemStatus($mailboxId))
 		{
 			return true;
 		}
 
 		return $this->getConnectErrorAttemptCount($mailboxId)
 			>= MailboxSyncManager::MAX_CONNECTION_ATTEMPTS_BEFORE_UNAVAILABLE;
+	}
+
+	/**
+	 * Both answers a live check of the connection needs, from one read of the attempt row: whether the
+	 * mailbox is already known to be unavailable, and whether it is time to try again. The count of the
+	 * attempts and the moment of the last one share a row, so asking the two questions apart read that
+	 * row twice. A mailbox already known to be unavailable is never due: only an explicit sync clears
+	 * a raised problem status, so the attempt row is not even read for it.
+	 *
+	 * @return array{isProblem: bool, isAttemptDue: bool}
+	 */
+	public function getConnectionCheckState(int $mailboxId, ?DateTime $checkedAt = null): array
+	{
+		if ($this->hasProblemStatus($mailboxId))
+		{
+			return [
+				'isProblem' => true,
+				'isAttemptDue' => false,
+			];
+		}
+
+		$lastAttempt = $this->getMailboxOption(
+			$mailboxId,
+			MailEntityOptionsTable::CONNECT_ERROR_ATTEMPT_COUNT_PROPERTY_NAME,
+		);
+
+		return [
+			'isProblem' => (int)($lastAttempt['VALUE'] ?? 0)
+				>= MailboxSyncManager::MAX_CONNECTION_ATTEMPTS_BEFORE_UNAVAILABLE,
+			'isAttemptDue' => $this->shouldIncreaseAttemptCount(
+				$lastAttempt['DATE_INSERT'] ?? null,
+				$checkedAt ?? new DateTime(),
+			),
+		];
+	}
+
+	private function hasProblemStatus(int $mailboxId): bool
+	{
+		$problemStatus = $this->getMailboxOption(
+			$mailboxId,
+			MailEntityOptionsTable::PROBLEM_STATUS_PROPERTY_NAME,
+		);
+
+		return ($problemStatus['VALUE'] ?? null) === self::PROBLEM_STATUS_VALUE;
 	}
 
 	/**

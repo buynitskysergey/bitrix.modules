@@ -18,6 +18,7 @@ use Bitrix\Crm\Integration\Analytics\Builder\AI\AIBaseEvent;
 use Bitrix\Crm\Integration\Analytics\Builder\AI\FillRepeatSaleTipsEvent;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\RepeatSale\Logger;
+use Bitrix\Crm\RepeatSale\Segment\SegmentCode;
 use Bitrix\Crm\RepeatSale\Segment\SegmentItemChecker;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Timeline\AI\Controller;
@@ -169,11 +170,18 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 			);
 		}
 
-		EditActivityEvent::createDefault(CCrmOwnerType::Deal) // @todo: extent entity type ID in future
+		$segmentCode = SegmentCode::tryFrom(RepeatSale::getSegmentCodeByActivity($activityId));
+
+		$event = EditActivityEvent::createDefault(CCrmOwnerType::Deal) // @todo: extent entity type ID in future
 			->setType(Dictionary::REPEAT_SALE_TYPE)
 			->setElement(Dictionary::REPEAT_SALE_ELEMENT_SYS)
 			->setStatus($analyticsStatus)
-			->setP5('segment', str_replace('_', '-', RepeatSale::getSegmentCodeByActivity($activityId)))
+		;
+		if ($segmentCode !== null)
+		{
+			$event->setP5('segment', $segmentCode->toAnalyticsAlias());
+		}
+		$event
 			->buildEvent()
 			->send()
 		;
@@ -182,7 +190,8 @@ final class FillRepeatSaleTips extends AbstractFillRepeatSaleTips
 	protected static function notifyAboutJobError(
 		Result $result,
 		bool $withSyncBadges = true,
-		bool $withSendAnalytics = true
+		bool $withSendAnalytics = true,
+		?ItemIdentifier $target = null
 	): void
 	{
 		$activityId = $result->getTarget()?->getEntityId();

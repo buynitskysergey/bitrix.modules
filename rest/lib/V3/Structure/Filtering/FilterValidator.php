@@ -6,6 +6,7 @@ use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Rest\V3\Attribute\Filterable;
 use Bitrix\Rest\V3\Dto\Dto;
+use Bitrix\Rest\V3\Dto\DynamicEnum\DynamicEnumRegistry;
 use Bitrix\Rest\V3\Exception\InvalidFilterException;
 use Bitrix\Rest\V3\Exception\UnknownDtoPropertyException;
 use Bitrix\Rest\V3\Exception\UnknownFilterOperatorException;
@@ -57,25 +58,29 @@ class FilterValidator
 			if (!$condition->getRightOperand() instanceof Expression)
 			{
 				self::validateSimpleCondition($condition, $dto);
-			}
 
-			$field = $dto->getFields()[$condition->getLeftOperand()];
+				$field = $dto->getFields()[$condition->getLeftOperand()];
+				$dynamicEnumProvider = $field->getDynamicEnumProvider();
+				$dynamicEnumDefinition = $dynamicEnumProvider !== null
+					? DynamicEnumRegistry::resolve($dynamicEnumProvider)
+					: null;
+				$typeLabel = $dynamicEnumProvider !== null
+					? (new \ReflectionClass($dynamicEnumProvider))->getShortName()
+					: $field->getPropertyType();
 
-			if (is_array($condition->getRightOperand()))
-			{
-				foreach ($condition->getRightOperand() as $rightOperand)
+				$rightOperands = is_array($condition->getRightOperand())
+					? $condition->getRightOperand()
+					: [$condition->getRightOperand()];
+
+				foreach ($rightOperands as $rightOperand)
 				{
-					if (!FieldsValidator::validateTypeAndValue($field->getPropertyType(), $rightOperand))
+					$isValid = $dynamicEnumDefinition !== null
+						? FieldsValidator::validateDynamicEnumValue($dynamicEnumDefinition, $rightOperand)
+						: FieldsValidator::validateDtoFieldValue($field, $rightOperand);
+					if (!$isValid)
 					{
-						throw new InvalidRequestFieldTypeException($field->getPropertyName(), $field->getPropertyType());
+						throw new InvalidRequestFieldTypeException($field->getPropertyName(), $typeLabel);
 					}
-				}
-			}
-			else
-			{
-				if (!FieldsValidator::validateTypeAndValue($field->getPropertyType(), $condition->getRightOperand()))
-				{
-					throw new InvalidRequestFieldTypeException($field->getPropertyName(), $field->getPropertyType());
 				}
 			}
 		}

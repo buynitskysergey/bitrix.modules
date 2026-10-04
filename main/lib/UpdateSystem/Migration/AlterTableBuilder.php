@@ -12,7 +12,29 @@ class AlterTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\AlterTableBuilder
 {
 	private bool $preliminaryExecutionDisabled = false;
 
-	public function dropColumn(string $columnName): self
+	public function __construct(
+		string $tableName,
+		?\Closure $columnFilter = null,
+		?\Closure $addedIndexFilter = null,
+		?\Closure $currentPrimaryKeyResolver = null,
+		?\Closure $dropIndexNameResolver = null,
+		?\Closure $modifiedColumnFilter = null,
+		?\Closure $columnStateFactory = null,
+		private readonly ?IndexNameProcessor $indexNameProcessor = null,
+	)
+	{
+		parent::__construct(
+			$tableName,
+			$columnFilter,
+			$addedIndexFilter,
+			$currentPrimaryKeyResolver,
+			$dropIndexNameResolver,
+			$modifiedColumnFilter,
+			$columnStateFactory,
+		);
+	}
+
+	public function dropColumn(string $columnName): static
 	{
 		throw new Exception(
 			1010,
@@ -24,7 +46,7 @@ class AlterTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\AlterTableBuilder
 		);
 	}
 
-	public function renameColumn(string $oldName, string $newName): self
+	public function renameColumn(string $oldName, string $newName): static
 	{
 		throw new Exception(
 			1011,
@@ -37,7 +59,7 @@ class AlterTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\AlterTableBuilder
 		);
 	}
 
-	public function disablePreliminaryExecution(): self
+	public function disablePreliminaryExecution(): static
 	{
 		$this->preliminaryExecutionDisabled = true;
 
@@ -48,6 +70,14 @@ class AlterTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\AlterTableBuilder
 	{
 		/** @var AlterTableData */
 		return parent::toData();
+	}
+
+	/**
+	 * @param IndexColumn[] $columns
+	 */
+	protected function prepareIndexName(string $type, string $indexName, array $columns): string
+	{
+		return $this->indexNameProcessor?->process($type, $this->tableName, $indexName, $columns) ?? $indexName;
 	}
 
 	/**
@@ -82,6 +112,7 @@ class AlterTableBuilder extends \Bitrix\Main\DB\Ddl\Builder\AlterTableBuilder
 			droppedColumns: $droppedColumns,
 			renamedColumns: $renamedColumns,
 			preliminaryExecutionDisabled: $this->preliminaryExecutionDisabled,
+			columnStates: $this->getColumnStatesForData(),
 		);
 	}
 }

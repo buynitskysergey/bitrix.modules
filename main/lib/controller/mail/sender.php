@@ -54,7 +54,7 @@ class Sender extends Controller
 
 	public function getAvailableSendersAction(): array
 	{
-		return Main\Mail\Sender::prepareUserMailboxes();
+		return UserSenderDataProvider::getUserAvailableSenderIdentities();
 	}
 
 	public function getSenderTransitionalDataAction(int $senderId): ?array
@@ -99,7 +99,7 @@ class Sender extends Controller
 
 		$useName = ($data['useName'] ?? 'N') === 'Y';
 		$name = $useName ? (trim($data['name'] ?? '')) : '';
-		$email = mb_strtolower(trim((string)($data['email'] ?? '')));
+		$email = Mail\Address::normalizeEmail((string)($data['email'] ?? ''));
 		$isPublic = ($data['public'] ?? 'N') === 'Y';
 		$smtp =  $data['smtp'] ?? [];
 
@@ -161,6 +161,7 @@ class Sender extends Controller
 
 		$fields['USER_ID'] = $userId;
 		$fields['IS_CONFIRMED'] = true;
+		// the limit travels inside the smtp options, so the new record is created with it already set
 		$fields['OPTIONS']['smtp'] = $smtp;
 		$fields['OPTIONS']['useSenderName'] = $useName;
 
@@ -180,8 +181,7 @@ class Sender extends Controller
 			return null;
 		}
 
-		$this->prepareLimits($smtp, $email);
-		$senderId = $result['senderId'] ?? 0;
+		$senderId = (int)($result['senderId'] ?? 0);
 
 		return [
 			'senderId' => $senderId,
@@ -291,17 +291,5 @@ class Sender extends Controller
 		}
 
 		return false;
-	}
-
-	private function prepareLimits(array $smtp, string $email): void
-	{
-		if ($smtp && $smtp['limit'] !== null)
-		{
-			Main\Mail\Sender::setEmailLimit($email, $smtp['limit']);
-		}
-		elseif ($smtp && !isset($smtp['limit']))
-		{
-			Main\Mail\Sender::removeEmailLimit($email);
-		}
 	}
 }

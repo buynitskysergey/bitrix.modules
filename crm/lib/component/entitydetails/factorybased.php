@@ -48,6 +48,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ObjectException;
 use Bitrix\Main\Request;
+use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\UserField\Dispatcher;
 use Bitrix\Main\UserField\Types\DateTimeType;
@@ -65,6 +66,7 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 {
 	use Traits\EditorInitialMode;
 	use Traits\InitializeAdditionalFieldsData;
+	use Traits\InitializeExternalContextId;
 
 	public const TAB_NAME_EVENT = 'tab_event';
 	public const TAB_NAME_PRODUCTS = 'tab_products';
@@ -154,6 +156,7 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 	public function init(): void
 	{
 		parent::init();
+		$this->initializeExternalContextId();
 		Loc::loadMessages(__FILE__);
 		if($this->getErrors())
 		{
@@ -546,7 +549,7 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 		if (!$this->item->isNew())
 		{
 			$params['receiversJSONString'] = \Bitrix\Main\Web\Json::encode(
-				ChannelRepository::create(ItemIdentifier::createByItem($this->item))->getToList(),
+				ChannelRepository::createWithPermissions(ItemIdentifier::createByItem($this->item))->getToList(),
 			);
 		}
 
@@ -668,12 +671,11 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 		{
 			$entityTypeId = $this->factory->getEntityTypeId();
 			$userPermissions = Container::getInstance()->getUserPermissions();
-			$type = Container::getInstance()->getTypeByEntityTypeId($entityTypeId);
+			$automatedSolutionId = $this->getAutomatedSolutionIdByEntityTypeId($entityTypeId);
 
-			if ($type)
+			if ($automatedSolutionId !== null)
 			{
-				$customSectionId = $type->getCustomSectionId();
-				if ($customSectionId !== null && !$userPermissions->automatedSolutionEvent()->canRead($customSectionId))
+				if (!$userPermissions->automatedSolutionEvent()->canRead($automatedSolutionId))
 				{
 					return null;
 				}
@@ -845,6 +847,29 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 		}
 
 		return [];
+	}
+
+	/**
+	 * Returns id of the automated solution the entity type belongs to, or null if it belongs to none.
+	 *
+	 * Type::getCustomSectionId() holds an automated solution id despite its legacy name, and "no automated solution"
+	 * is stored both as NULL and as 0: portals kept the 0 written by crm.type.update before e18cdcd60158.
+	 */
+	protected function getAutomatedSolutionIdByEntityTypeId(int $entityTypeId): ?int
+	{
+		$type = Container::getInstance()->getTypeByEntityTypeId($entityTypeId);
+		$automatedSolutionId = (int)($type?->getCustomSectionId() ?? 0);
+		if ($automatedSolutionId <= 0)
+		{
+			return null;
+		}
+
+		$automatedSolution = Container::getInstance()
+			->getAutomatedSolutionManager()
+			->getAutomatedSolution($automatedSolutionId)
+		;
+
+		return $automatedSolution ? $automatedSolutionId : null;
 	}
 
 	protected function getTabs(): array
@@ -1286,6 +1311,7 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 			'ENABLE_PAGE_TITLE_EDIT' => $this->isPageTitleEditable(),
 			'ENABLE_USER_FIELD_CREATION' => $isUserFieldCreationEnabled,
 			'USER_FIELD_ENTITY_ID' => $userFieldEntityId,
+			'EXTERNAL_CONTEXT_ID' => $this->arResult['EXTERNAL_CONTEXT_ID'],
 			'USER_FIELD_CREATE_PAGE_URL' => Container::getInstance()->getRouter()->getUserFieldDetailUrl(
 				$this->getEntityTypeID(),
 				0
@@ -1558,6 +1584,22 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 			}
 		}
 
+		if (
+			$this->factory->isClientEnabled()
+			&& isset($data[EditorAdapter::FIELD_CLIENT_DATA_NAME])
+			&& $this->editorAdapter->hasNewClientInData($data[EditorAdapter::FIELD_CLIENT_DATA_NAME])
+		)
+		{
+			// Validate non-client required fields before creating a new client, so an empty required
+			// field does not leave an orphaned client behind (client creation has side effects).
+			$guardResponse = $this->checkRequiredFieldsBeforeClientCreation();
+			if ($guardResponse !== null)
+			{
+				return $guardResponse;
+			}
+		}
+
+		$createdClientEntities = [];
 		if ($this->factory->isClientEnabled() && isset($data[EditorAdapter::FIELD_CLIENT_DATA_NAME]))
 		{
 			// TODO: compare incoming category ID with actual category ID from store
@@ -1575,6 +1617,8 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 				{
 					$this->addRecentlyUsedItem($identifier->getEntityTypeId(), $identifier->getEntityId());
 				}
+				/** @var array[] $createdClientEntities - clients created in this submit (CREATED_CLIENT_ENTITIES records) */
+				$createdClientEntities = $result->getData()['createdEntities'] ?? [];
 				$requisiteBinding = (array)($result->getData()['requisiteBinding'] ?? []);
 				if (!empty($requisiteBinding))
 				{
@@ -1628,24 +1672,10 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 
 		if(!$result->isSuccess())
 		{
-			$checkErrors = [];
-			$errors = $result->getErrors();
-			foreach ($errors as $error)
+			$checkErrorsResponse = $this->buildCheckErrorsResponse($result, $createdClientEntities);
+			if ($checkErrorsResponse !== null)
 			{
-				if (
-					$error->getCode() === Field::ERROR_CODE_REQUIRED_FIELD_ATTRIBUTE
-					&& !empty($error->getCustomData()['fieldName'])
-				)
-				{
-					$checkErrors[$error->getCustomData()['fieldName']] = $error->getMessage();
-				}
-			}
-			if (!empty($checkErrors))
-			{
-				return [
-					'CHECK_ERRORS' => $checkErrors,
-					'ERROR' => implode(', ', $result->getErrorMessages()),
-				];
+				return $checkErrorsResponse;
 			}
 			$this->errorCollection->add($result->getErrors());
 
@@ -1723,6 +1753,81 @@ abstract class FactoryBased extends BaseComponent implements Controllerable, Sup
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Runs required-fields validation before a new inline client is created.
+	 * Client binding fields are excluded: their requiredness is verified by launch() after the
+	 * client is bound. Returns a CHECK_ERRORS response on failure, null otherwise.
+	 */
+	private function checkRequiredFieldsBeforeClientCreation(): ?array
+	{
+		// Field::process() (fields processing) is intentionally NOT run here: it has side effects
+		// (e.g. Field\Category emits OnBeforeDealMoveToCategory) and running it before the ACL check
+		// in launch()->preSaveChecks() would fire those handlers pre-authorization and again on save.
+		// Required-field defaults do not depend on it: user field defaults are filled at item creation.
+		$result = $this->getOperation()->checkRequiredFieldsExcept($this->getClientBindingFieldNames());
+		if ($result->isSuccess())
+		{
+			return null;
+		}
+
+		return $this->buildCheckErrorsResponse($result);
+	}
+
+	private function getClientBindingFieldNames(): array
+	{
+		return [
+			EditorAdapter::FIELD_CLIENT,
+			Item::FIELD_NAME_COMPANY_ID,
+			Item::FIELD_NAME_CONTACT_ID,
+			Item::FIELD_NAME_CONTACTS,
+			Item::FIELD_NAME_CONTACT_IDS,
+			Item::FIELD_NAME_CONTACT_BINDINGS,
+		];
+	}
+
+	/**
+	 * @param Result $result
+	 * @param array[] $createdClientEntities - clients created in this submit as CREATED_CLIENT_ENTITIES
+	 *        records ({ENTITY_TYPE_ID, ENTITY_ID, FIELD_NAME, INDEX}), empty for the pre-creation guard.
+	 * @return array|null
+	 */
+	private function buildCheckErrorsResponse(Result $result, array $createdClientEntities = []): ?array
+	{
+		$checkErrors = [];
+		foreach ($result->getErrors() as $error)
+		{
+			if (
+				$error->getCode() === Field::ERROR_CODE_REQUIRED_FIELD_ATTRIBUTE
+				&& !empty($error->getCustomData()['fieldName'])
+			)
+			{
+				$checkErrors[$error->getCustomData()['fieldName']] = $error->getMessage();
+			}
+		}
+
+		// Additive, error-path only: let the client control reuse the already created client on resubmit
+		// instead of creating a duplicate. Only clients created in this submit are reported; each record
+		// carries the source field name and original index so the front applies it to the exact control/box.
+		if (empty($checkErrors) && empty($createdClientEntities))
+		{
+			return null;
+		}
+
+		$response = [
+			'ERROR' => implode(', ', $result->getErrorMessages()),
+		];
+		if (!empty($checkErrors))
+		{
+			$response['CHECK_ERRORS'] = $checkErrors;
+		}
+		if (!empty($createdClientEntities))
+		{
+			$response['CREATED_CLIENT_ENTITIES'] = $createdClientEntities;
+		}
+
+		return $response;
 	}
 
 	public function exposeAction(int $entityId, int $entityTypeId): ?int

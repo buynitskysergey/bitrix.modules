@@ -493,12 +493,19 @@ class EntityEditorConfig
 		if (!array_key_exists($cacheKey, $data))
 		{
 			$data[$cacheKey] = [];
+			// A card whose layout was never saved is rendered from the default configuration, so its
+			// fields are on the screen even though nothing is stored for the current scope.
 			$config = $this->get();
+			if (!is_array($config))
+			{
+				$config = $this->getDefault();
+			}
+
 			if (is_array($config))
 			{
 				foreach ($config as $section)
 				{
-					foreach ($section['elements'] as $element)
+					foreach ($section['elements'] ?? [] as $element)
 					{
 						$data[$cacheKey][] = $element['name'];
 					}

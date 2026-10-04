@@ -10,6 +10,8 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\Date;
+use Bitrix\Bitrix24\Public\Enum\VibePlus\MonetizationModel;
+use Bitrix\Bitrix24\Public\Service\VibePlus\MonetizationModelProvider;
 use Bitrix\Rest\AppTable;
 use Bitrix\Rest\Engine\Access;
 use Bitrix\Bitrix24\Feature;
@@ -22,15 +24,6 @@ if(!defined('REST_MP_CATEGORIES_CACHE_TTL'))
 class Client
 {
 	const CATEGORIES_CACHE_TTL = REST_MP_CATEGORIES_CACHE_TTL;
-	private const SUBSCRIPTION_REGION = [
-		'ru',
-		'ua',
-		'by',
-	];
-	private const SUBSCRIPTION_DEFAULT_START_TIME = [
-		'ua' => 1625090400,
-		'by' => 1660514400,
-	];
 
 	protected static $buyLinkList = array(
 		'bitrix24' => '/settings/order/make.php?limit=#NUM#&module=#CODE#',
@@ -632,27 +625,14 @@ class Client
 		return $status === 'T';
 	}
 
-	private static function checkSubscriptionAccessStart($region): bool
-	{
-		$canStart = true;
-		if (!empty(static::SUBSCRIPTION_DEFAULT_START_TIME[$region]))
-		{
-			$time = Option::get(
-				'rest',
-				'subscription_region_start_time_' . $region,
-				static::SUBSCRIPTION_DEFAULT_START_TIME[$region]
-			);
-			$canStart =  $time < time();
-		}
-
-		return $canStart && in_array($region, static::SUBSCRIPTION_REGION, true);
-	}
-
-	public static function isSubscriptionAccess()
+	public static function isSubscriptionAccess(): bool
 	{
 		if (ModuleManager::isModuleInstalled('bitrix24') && Loader::includeModule('bitrix24'))
 		{
-			$result = static::checkSubscriptionAccessStart(\CBitrix24::getLicensePrefix());
+			$result =
+				((new MonetizationModelProvider())->get() === MonetizationModel::SUBSCRIPTION)
+				|| in_array(Application::getInstance()->getLicense()->getRegion() ?? '', ['ru', 'by'])
+			;
 		}
 		else
 		{

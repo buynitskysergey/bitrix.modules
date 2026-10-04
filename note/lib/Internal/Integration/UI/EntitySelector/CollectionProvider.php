@@ -11,13 +11,15 @@ use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Model\CollectionTable;
+use Bitrix\Note\Internal\Service\License\LicenseService;
 use Bitrix\UI\EntitySelector\BaseProvider;
 use Bitrix\UI\EntitySelector\Dialog;
 use Bitrix\UI\EntitySelector\Item;
 use Bitrix\UI\EntitySelector\SearchQuery;
 use Bitrix\UI\EntitySelector\Tab;
 
-final class CollectionProvider extends BaseProvider
+// Not final: unit tests subclass to override the LicenseService seam.
+class CollectionProvider extends BaseProvider
 {
 	public const ENTITY_ID = 'note-collection';
 
@@ -35,6 +37,12 @@ final class CollectionProvider extends BaseProvider
 
 	public function isAvailable(): bool
 	{
+		// Tariff/tool gate before ACL: same denial as an ACL failure.
+		if ($this->createLicenseService()->isAccessBlocked())
+		{
+			return false;
+		}
+
 		$userId = (int)CurrentUser::get()->getId();
 		if ($userId <= 0)
 		{
@@ -44,6 +52,11 @@ final class CollectionProvider extends BaseProvider
 		// Gate the global selector behind the Notes tool ACL — a user without note_access
 		// must not enumerate collection names through the entity-selector.
 		return AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_ACCESS);
+	}
+
+	protected function createLicenseService(): LicenseService
+	{
+		return new LicenseService();
 	}
 
 	public function getItems(array $ids): array

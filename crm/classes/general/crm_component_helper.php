@@ -962,7 +962,7 @@ class CCrmComponentHelper
 		$receivers = [];
 		if (\CCrmOwnerType::IsDefined($entityTypeId) && $entityId > 0)
 		{
-			$repo = \Bitrix\Crm\MessageSender\Channel\ChannelRepository::create(
+			$repo = \Bitrix\Crm\MessageSender\Channel\ChannelRepository::createWithPermissions(
 				new \Bitrix\Crm\ItemIdentifier($entityTypeId, $entityId),
 			);
 

@@ -136,6 +136,8 @@ class Mailbox extends RestController
 			$dto->email = $sender['email'];
 			$dto->name = $sender['name'];
 			$dto->sender = $sender['sender'];
+			$dto->senderId = $sender['senderId'];
+			$dto->mailboxId = $sender['mailboxId'];
 
 			$collection->add($dto);
 		}

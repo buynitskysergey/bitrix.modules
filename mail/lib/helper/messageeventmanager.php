@@ -89,24 +89,26 @@ class MessageEventManager
 
 	private function checkForNeedClearCache(int $mailboxId, string $dirMd5, array $messages): bool
 	{
-		$startInternalDate = MessageInternalDateHandler::getStartInternalDateForDir($mailboxId, dirMd5: $dirMd5);
-
-		if (!is_null($startInternalDate))
+		$cache = MessageInternalDateHandler::getCachedStartInternalDateForDir($mailboxId, $dirMd5);
+		if ($cache === null || $cache->value === null)
 		{
-			/**
-			 * @var array<array<string, mixed>> $messages
-			 */
-			foreach ($messages as $message)
+			return false;
+		}
+
+		/**
+		 * @var array<array<string, mixed>> $messages
+		 */
+		foreach ($messages as $message)
+		{
+			// Non-strict (<=) on purpose: the letter leaves this folder, so removing a row equal to the
+			// minimum does move it. Reverse of the update path ({@see MailMessageUidTable::onAfterUpdate}),
+			// where the letter stays and only a strictly earlier one lowers the minimum.
+			if (
+				MessageInternalDateHandler::isCountableMessageRow($message)
+				&& $message['INTERNALDATE'] <= $cache->value
+			)
 			{
-				if (
-					isset($message['IS_OLD']) &&
-					!in_array($message['IS_OLD'], MailMessageUidTable::EXCLUDED_COUNTER_STATUSES) &&
-					isset($message['INTERNALDATE']) &&
-					$message['INTERNALDATE'] <= $startInternalDate
-				)
-				{
-					return true;
-				}
+				return true;
 			}
 		}
 

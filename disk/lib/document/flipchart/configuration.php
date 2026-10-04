@@ -2,7 +2,12 @@
 
 namespace Bitrix\Disk\Document\Flipchart;
 
+use Bitrix\Main\Web\Uri;
 use Bitrix\Disk\Controller\Integration\Flipchart;
+use Bitrix\Disk\Document\Flipchart\DualMode\ConfigurationException;
+use Bitrix\Disk\Document\Flipchart\DualMode\PilotProjectList;
+use Bitrix\Disk\Document\Flipchart\DualMode\ServiceAddress;
+use Bitrix\Disk\Document\Flipchart\DualMode\ServiceProfile;
 use Bitrix\Disk\Driver;
 use Bitrix\Main\Config;
 use Bitrix\Main\Config\Option;
@@ -12,6 +17,8 @@ use Bitrix\Main\Web\Json;
 
 class Configuration
 {
+	private const JWT_SECRET_OPTION = 'flipchart.jwt_secret';
+
 	private static $localValues = null;
 
 	private static function loadLocalValues(): void
@@ -59,18 +66,50 @@ class Configuration
 		return Option::get('disk', 'flipchart.client_token_header_lookup', $default);
 	}
 
-	public static function getApiHost(): string
+	public static function getApiHost(ServiceProfile $profile = ServiceProfile::Old): string
 	{
+		if ($profile === ServiceProfile::New)
+		{
+			return self::getNewServiceValue('new_service_api_host', 'flipchart.new_service.api_host');
+		}
+
 		$default = self::getFromSettings('api_host', 'https://flip-backend');
 
 		return Option::get('disk', 'flipchart.api_host', $default);
 	}
 
+	/**
+	 * When no secret is configured, one is generated once and persisted into the
+	 * "disk.flipchart.jwt_secret" option, which then becomes the source of truth and
+	 * takes priority over getFromSettings (php_interface/disk-boards.php, .settings.php).
+	 * A custom secret must therefore be set before the first call, or the option itself changed.
+	 * In proxy mode the secret is not materialized: signing and verification go through cloud
+	 * registration, so the HS256 secret is unused and an empty string is returned as-is.
+	 */
 	public static function getJwtSecret(): string
 	{
-		$default = self::getFromSettings('jwt_secret', 'secret_token');
+		$default = self::getFromSettings('jwt_secret');
+		$secret = (string)Option::get('disk', self::JWT_SECRET_OPTION, (string)$default);
+		if ($secret === '' && !self::isUsingDocumentProxy())
+		{
+			return self::generatePersistentJwtSecret();
+		}
 
-		return Option::get('disk', 'flipchart.jwt_secret', $default);
+		return $secret;
+	}
+
+	private static function generatePersistentJwtSecret(): string
+	{
+		$existing = (string)Option::get('disk', self::JWT_SECRET_OPTION, '');
+		if ($existing !== '')
+		{
+			return $existing;
+		}
+
+		$generated = sha1(random_bytes(32));
+		Option::set('disk', self::JWT_SECRET_OPTION, $generated);
+
+		return $generated;
 	}
 
 	public static function getJwtTtl(): int
@@ -80,8 +119,13 @@ class Configuration
 		return (int)Option::get('disk', 'flipchart.jwt_ttl', $default);
 	}
 
-	public static function getAppUrl(): string
+	public static function getAppUrl(ServiceProfile $profile = ServiceProfile::Old): string
 	{
+		if ($profile === ServiceProfile::New)
+		{
+			return self::getNewServiceValue('new_service_app_url', 'flipchart.new_service.app_url');
+		}
+
 		$default = self::getFromSettings('app_url', 'https://flip-backend/app');
 
 		return Option::get('disk', 'flipchart.app_url', $default);
@@ -171,6 +215,22 @@ class Configuration
 		return (string)Option::get('disk', 'flipchart.default_language', $default);
 	}
 
+	/**
+	 * SDK derives the expected message origin from this url, so an unusable value must stop the editor
+	 * instead of opening the channel without an origin check.
+	 */
+	public static function isValidAppUrl(mixed $appUrl): bool
+	{
+		if (!is_string($appUrl) || $appUrl === '')
+		{
+			return false;
+		}
+
+		$uri = new Uri($appUrl);
+
+		return in_array($uri->getScheme(), ['http', 'https'], true) && $uri->getHost() !== '';
+	}
+
 	public static function isForceHttpForDocumentUrl(): bool
 	{
 		$default = self::getFromSettings('force_http_for_document_url', 'N');
@@ -183,6 +243,11 @@ class Configuration
 		$default = self::getFromSettings('reload_board_after_inactivity', 'Y');
 
 		return Option::get('disk', 'flipchart.reload_board_after_inactivity', $default) === 'Y';
+	}
+
+	public static function isTasksEnabled(): bool
+	{
+		return Option::get('disk', 'flipchart.tasks_enabled', 'N') === 'Y';
 	}
 
 	/**
@@ -256,5 +321,44 @@ class Configuration
 		Option::delete('disk', [
 			'name' => 'disk_boards_b24_serverHost',
 		]);
+	}
+
+	/**
+	 * Address of the new service instance.
+	 *
+	 * The flat api_host / app_url keys belong to the old instance and are deliberately unreachable
+	 * from this profile: reusing them would route the new profile back to the old instance.
+	 *
+	 * The grammar is checked on read as well as on write: an option written by hand never passed
+	 * through PilotProjectService, and both readers of this value are sinks that trust it.
+	 */
+	private static function getNewServiceValue(string $localKey, string $optionName): string
+	{
+		$default = (string)self::getFromSettings($localKey, '');
+		$value = ServiceAddress::normalize((string)Option::get('disk', $optionName, $default));
+
+		if ($value === '')
+		{
+			throw new ConfigurationException("Board service address {$optionName} is not configured");
+		}
+
+		if (!ServiceAddress::isValid($value))
+		{
+			throw new ConfigurationException(
+				"Board service address {$optionName} is not an address of the form http(s)://host[:port][/path]",
+			);
+		}
+
+		return $value;
+	}
+
+	public static function getRawPilotProjects(): string
+	{
+		return (string)Option::get('disk', 'flipchart.new_service_group_ids', '');
+	}
+
+	public static function getPilotProjects(): PilotProjectList
+	{
+		return PilotProjectList::fromRaw(self::getRawPilotProjects());
 	}
 }

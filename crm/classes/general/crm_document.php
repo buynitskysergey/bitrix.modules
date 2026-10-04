@@ -2988,6 +2988,13 @@ class CCrmDocument
 
 	public static function getStarterModuleSettings(array $complexDocumentType): ?Crm\Integration\BizProc\Starter\CrmModuleSettings
 	{
+		// The class declares itself only on a bizproc that carries Starter\ModuleSettings; without this check
+		// the guard of its file would only move the fatal from the include to the call.
+		if (!class_exists(Crm\Integration\BizProc\Starter\CrmModuleSettings::class))
+		{
+			return null;
+		}
+
 		return new Crm\Integration\BizProc\Starter\CrmModuleSettings($complexDocumentType);
 	}
 }

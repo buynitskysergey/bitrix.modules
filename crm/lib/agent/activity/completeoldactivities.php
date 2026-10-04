@@ -4,6 +4,7 @@ namespace Bitrix\Crm\Agent\Activity;
 
 use Bitrix\Crm\ActivityTable;
 use Bitrix\Crm\Agent\AgentBase;
+use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Type\DateTime;
 
@@ -55,14 +56,23 @@ class CompleteOldActivities extends AgentBase
 			return;
 		}
 
-		$responsibleIds = $this->getResponsibleIds($activitiesIds);
+		$initiators = $this->getInitiatorIds($activitiesIds);
+
 		foreach ($activitiesIds as $activityId)
 		{
+			$effectiveInitiator = $initiators[$activityId] ?? 0;
+
+			// Background completion runs under whatever hit-user happens to trigger
+			// the cron. CURRENT_USER carries the activity's responsible (or author)
+			// as the history author (via EDITOR_ID stamping and the event-row
+			// fallback), so downstream records are attributed to that user — not to
+			// the user who happens to run the agent. When both are 0, the author
+			// falls back to the system user — never to the hit-user.
 			\CCrmActivity::Complete($activityId, true, [
 				'REGISTER_SONET_EVENT' => false,
 				'SKIP_ASSOCIATED_ENTITY' => true,
 				'SKIP_CALENDAR_EVENT' => true,
-				'CURRENT_USER' => $responsibleIds[$activityId] ?? 0,
+				'CURRENT_USER' => $effectiveInitiator,
 			]);
 		}
 	}
@@ -94,7 +104,13 @@ class CompleteOldActivities extends AgentBase
 		;
 	}
 
-	private function getResponsibleIds(array $activitiesIds): array
+	/**
+	 * Returns activityId => effective initiator user id.
+	 * Prefer RESPONSIBLE_ID; fall back to AUTHOR_ID when responsible is missing or zero.
+	 * If both are missing, the value is 0 — the history author then resolves to the
+	 * system user, never to the cron hit-user.
+	 */
+	private function getInitiatorIds(array $activitiesIds): array
 	{
 		$result = [];
 		if (empty($activitiesIds))
@@ -104,13 +120,15 @@ class CompleteOldActivities extends AgentBase
 
 		$activities = ActivityTable::query()
 			->whereIn('ID', $activitiesIds)
-			->setSelect(['ID', 'RESPONSIBLE_ID'])
+			->setSelect(['ID', 'RESPONSIBLE_ID', 'AUTHOR_ID'])
 			->fetchCollection()
 		;
 
 		foreach ($activities as $activity)
 		{
-			$result[$activity->getId()] = $activity->getResponsibleId();
+			$responsible = (int)$activity->getResponsibleId();
+			$author = (int)$activity->getAuthorId();
+			$result[$activity->getId()] = $responsible > 0 ? $responsible : $author;
 		}
 
 		return $result;

@@ -33,6 +33,8 @@ class MailMessage
 	public string $subject;
 	public int $date;
 	public bool $isRead = false;
+	public bool $isFavorite = false;
+	public bool $isFavoriteAllowed = false;
 	public int $ownerTypeId = 0;
 	public int $ownerId = 0;
 	public int $crmBindId = 0;

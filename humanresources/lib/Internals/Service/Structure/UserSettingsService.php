@@ -32,6 +32,7 @@ class UserSettingsService
 			->addFilter(
 				new NodeMemberFilter(
 					entityIdFilter: EntityIdFilter::fromEntityId($userId),
+					withVirtualUsers: true,
 				),
 			)
 			->getAll()

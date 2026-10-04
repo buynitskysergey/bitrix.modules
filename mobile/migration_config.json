@@ -1,0 +1,14 @@
+{
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/images": "images",
+        "install/js": "js",
+        "install/mobileapp": "mobileapp",
+        "install/services": "services",
+        "install/templates": "templates",
+        "install/tools": "tools"
+    },
+    "publicDirectoriesMapping": {
+        "public": ""
+    }
+}

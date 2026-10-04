@@ -5,6 +5,7 @@ namespace Bitrix\Rest\Internals;
 use Bitrix\Main\Application;
 use Bitrix\Main\DB\SqlQueryException;
 use Bitrix\Rest\Internal\Model\AppFreeWhitelistTable;
+use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Rest\AppTable;
@@ -65,5 +66,6 @@ class FreeAppTable extends AppFreeWhitelistTable
 
 		$connection->commitTransaction();
 		self::cleanCache();
+		LicenseScannerStateInvalidator::reset();
 	}
 }

@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Ads\Form;
 
 use Bitrix\Crm\Ads\Internals\AdsFormLinkTable;
+use Bitrix\Crm\Integration\Bitrix24\Product;
 use Bitrix\Crm\Tracking\Channel;
 use Bitrix\Crm\Tracking\Channel\FbLeadAds;
 use Bitrix\Crm\Tracking\Channel\VkLeadAds;
@@ -150,6 +151,13 @@ class WebHookFormFillHandler
 
 	private function processItem(string $serviceType, Payload\LeadItem $externalFormFillItem, string $originId): void
 	{
+		if ($serviceType === Service::TYPE_VKONTAKTE && !Product::isVkAvailable())
+		{
+			$this->addError('Processing VKontakte leads is not available in the current portal region.');
+
+			return;
+		}
+
 		$linkDb =
 			AdsFormLinkTable::query()
 				->setSelect(['WEBFORM_ID'])

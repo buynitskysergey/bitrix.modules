@@ -3,11 +3,13 @@
 namespace Bitrix\Crm\Controller\Mail;
 
 use Bitrix\Crm\Activity\Mail\MailMessageChainProvider;
+use Bitrix\Bitrix24;
 use Bitrix\Crm\Activity\Mail\SanitizedDescriptionCache;
 use Bitrix\Crm\Integration\BizProc\Starter\CrmStarter;
 use Bitrix\Crm\Integration\BizProc\Starter\Dto\DocumentDto;
 use Bitrix\Crm\Integration\BizProc\Starter\Dto\RunDataDto;
 use Bitrix\Crm\Integration\Mail\Client;
+use Bitrix\Crm\Integration\Mail\LargeAttachment\SendPreparation;
 use Bitrix\Crm\Integration\Mail\MessageSender;
 use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
@@ -23,6 +25,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 use Bitrix\Mail\Helper;
+use Bitrix\Mail\Integration\AI\Settings as MailAiSettings;
 use Bitrix\Main\Config;
 use Bitrix\Main\Mail;
 use Bitrix\UI\FileUploader\Uploader;
@@ -30,6 +33,7 @@ use Bitrix\Mobile\UI;
 use Bitrix\Main\Engine\Response\Redirect;
 use Bitrix\Main\HttpResponse;
 use Bitrix\Mail\Helper\DownloadResponse;
+use Bitrix\Mail\Public\Service\RecipientLimitService;
 
 class Message extends Controller
 {
@@ -54,6 +58,32 @@ class Message extends Controller
 	];
 
 	protected $errorCollection = [];
+
+	/**
+	 * @return array{total: int, perField: int}
+	 */
+	private function getRecipientLimits(): array
+	{
+		if (class_exists(RecipientLimitService::class))
+		{
+			return RecipientLimitService::getRecipientLimits();
+		}
+
+		$perFieldLimit = -1;
+
+		if (
+			Loader::includeModule('bitrix24')
+			&& (!Bitrix24\Feature::isFeatureEnabled('mail_mailbox_sync') || \CBitrix24::IsDemoLicense())
+		)
+		{
+			$perFieldLimit = 1;
+		}
+
+		return [
+			'total' => 10,
+			'perField' => $perFieldLimit,
+		];
+	}
 
 	/**
 	 * Controller actions configuration
@@ -417,7 +447,8 @@ class Message extends Controller
 			}
 		}
 
-		$emailsLimitToSendMessage = Helper\LicenseManager::getEmailsLimitToSendMessage();
+		$recipientLimits = $this->getRecipientLimits();
+		$emailsLimitToSendMessage = $recipientLimits['perField'];
 
 		if($emailsLimitToSendMessage !== -1 && ($countTo > $emailsLimitToSendMessage || $countCc > $emailsLimitToSendMessage || $countBcc > $emailsLimitToSendMessage))
 		{
@@ -425,9 +456,15 @@ class Message extends Controller
 			return false;
 		}
 
-		if (count($commData) > 10)
+		if (count($commData) > $recipientLimits['total'])
 		{
-			$this->addError(new Error(Loc::getMessage('CRM_MAIL_CONTROLLER_MESSAGE_TO_MANY_RECIPIENTS')));
+			$this->addError(new Error(Loc::getMessage(
+				'CRM_MAIL_CONTROLLER_MESSAGE_TO_MANY_RECIPIENTS',
+				[
+					'#COUNT#' => $recipientLimits['total'],
+					'10' => $recipientLimits['total'],
+				],
+			)));
 			return false;
 		}
 
@@ -651,6 +688,17 @@ class Message extends Controller
 		$ownerTypeID = !empty($ownerTypeName) ? \CCrmOwnerType::resolveId($ownerTypeName) : 0;
 		$ownerID = isset($data['ownerId']) ? intval($data['ownerId']) : 0;
 
+		// The draft is stored on the entity the form resolved for it, which the client reports separately:
+		// the owner below is recalculated from the bindings and may move to another entity, where the
+		// draft is not found. A client that sends no draft context keeps the draft on the owner it posted.
+		$draftEntityTypeID = isset($data['draftEntityTypeId']) ? (int)$data['draftEntityTypeId'] : 0;
+		$draftEntityID = isset($data['draftEntityId']) ? (int)$data['draftEntityId'] : 0;
+		if ($draftEntityTypeID <= 0 || $draftEntityID <= 0)
+		{
+			$draftEntityTypeID = $ownerTypeID;
+			$draftEntityID = $ownerID;
+		}
+
 		$bindData = $data['bindings'] ?? [];
 		if (!empty($data['docs']) && is_array($data['docs']))
 		{
@@ -782,6 +830,8 @@ class Message extends Controller
 		$from  = '';
 		$reply = '';
 		$rawCc = $cc;
+		$senderId = array_key_exists('senderId', $data) ? (int)$data['senderId'] : null;
+		$mailboxId = array_key_exists('mailboxId', $data) ? (int)$data['mailboxId'] : null;
 
 		if (isset($data['from']))
 			$from = trim(strval($data['from']));
@@ -822,12 +872,38 @@ class Message extends Controller
 				return false;
 			}
 
+			$mailboxHelper = null;
 			if (\CModule::includeModule('mail'))
 			{
-				/**
-				 * @todo Explicitly enter the ID. This will increase the productivity of selection.
-				 */
-				$mailboxHelper = \Bitrix\Mail\Helper\Mailbox::findBy(null, $fromEmail);
+				if ($mailboxId !== null)
+				{
+					$selectedSender = MessageSender::findAvailableMailbox($mailboxId, $fromEmail, (int)$userID);
+					if ($selectedSender === null)
+					{
+						$this->addError(new Error(Loc::getMessage('CRM_MAIL_CONTROLLER_MESSAGE_EMAIL_PERMISSION_DENIED_FROM_FIELD')));
+
+						return false;
+					}
+					else
+					{
+						$mailboxHelper = \Bitrix\Mail\Helper\Mailbox::createInstance($mailboxId, false);
+					}
+				}
+				elseif ($senderId !== null)
+				{
+					$selectedSender = MessageSender::findAvailableSender($senderId, $fromEmail, (int)$userID);
+					if (!empty($selectedSender['mailboxId']))
+					{
+						$mailboxHelper = \Bitrix\Mail\Helper\Mailbox::createInstance(
+							(int)$selectedSender['mailboxId'],
+							false,
+						);
+					}
+				}
+				else
+				{
+					$mailboxHelper = \Bitrix\Mail\Helper\Mailbox::findBy(null, $fromEmail);
+				}
 
 				if (!empty($mailboxHelper))
 				{
@@ -951,6 +1027,65 @@ class Message extends Controller
 		$storageTypeID = \CCrmActivityStorageType::Disk;
 		$arFields['STORAGE_TYPE_ID'] = $storageTypeID;
 		$fileTokens = isset($data['fileTokens']) && is_array($data['fileTokens']) ? $data['fileTokens'] : [];
+		$largeAttachmentContracts = isset($data['__largeAttachments']) && is_array($data['__largeAttachments'])
+			? $data['__largeAttachments']
+			: []
+		;
+		$largeAttachmentFileIds = $this->getLargeAttachmentFileIds($largeAttachmentContracts);
+		$largeAttachmentMaxFileCount = SendPreparation::getMaxFileCount();
+		if ($largeAttachmentMaxFileCount === null)
+		{
+			$largeAttachmentFileIds = [];
+		}
+		elseif (count($largeAttachmentFileIds) > $largeAttachmentMaxFileCount)
+		{
+			$this->addError(new Error(
+				'Large attachment send contract is invalid.',
+				SendPreparation::ERROR_INVALID_SEND_CONTRACT,
+			));
+
+			return false;
+		}
+		$allowedLargeAttachmentFileIds = \Bitrix\Crm\Integration\StorageManager::filterFiles(
+			$largeAttachmentFileIds,
+			$storageTypeID,
+			$userID,
+		);
+		$largeAttachmentResult = $this->prepareLargeAttachmentsForSend(
+			(int)$userID,
+			$largeAttachmentContracts,
+			$allowedLargeAttachmentFileIds,
+			$messageHtml,
+			[],
+		);
+		if (!$largeAttachmentResult->isSuccess())
+		{
+			$this->addErrors($largeAttachmentResult->getErrors());
+
+			return false;
+		}
+		$confirmedLargeAttachmentStorageElementIds =
+			(array)($largeAttachmentResult->getData()[SendPreparation::CONFIRMED_FILE_IDS] ?? [])
+		;
+		$confirmedLargeAttachmentBFileIdsByStorageElementId = $this->getBFileIdsByStorageElementIds(
+			$confirmedLargeAttachmentStorageElementIds,
+		);
+		if (
+			count($confirmedLargeAttachmentBFileIdsByStorageElementId)
+			!== count(array_unique($confirmedLargeAttachmentStorageElementIds))
+		)
+		{
+			$this->addError(new Error(
+				'Large attachment validator returned unavailable files.',
+				SendPreparation::ERROR_INVALID_SEND_RESULT,
+			));
+
+			return false;
+		}
+		$confirmedLargeAttachmentBFileIds = array_fill_keys(
+			array_values($confirmedLargeAttachmentBFileIdsByStorageElementId),
+			true,
+		);
 
 		$currentFilesIds = array_values(
 			array_unique(
@@ -964,6 +1099,10 @@ class Message extends Controller
 				)
 			)
 		);
+		$currentFilesIds = array_values(array_filter(
+			$currentFilesIds,
+			static fn(int $fileId): bool => !isset($confirmedLargeAttachmentBFileIds[$fileId]),
+		));
 
 		$pendingFilesIds = array_values(
 			array_unique(
@@ -985,6 +1124,51 @@ class Message extends Controller
 			])
 		);
 
+		// The client reports a restored attachment by its Disk object id, which is not a BFile id and
+		// cannot pass the gate below. The files the draft owns are taken from the draft itself instead,
+		// as the mailmobile send does, so no client token decides which draft file is attached.
+		$draftAttachments = \Bitrix\Crm\Integration\Mail\Draft::getOwnedAttachments(
+			(int)$userID,
+			$data['draftId'] ?? null,
+			$draftEntityTypeID,
+			$draftEntityID,
+			$data['draftRevision'] ?? null,
+			$data['draftClientId'] ?? null,
+		);
+		$draftFileIds = [];
+		$draftTokenIds = [];
+		$draftSourceFileIds = [];
+		$draftObjectIdsByFileId = [];
+		foreach ($draftAttachments as $draftAttachment)
+		{
+			['fileId' => $fileId, 'sourceFileId' => $sourceFileId, 'objectId' => $objectId] = $draftAttachment;
+			$draftTokenIds[] = $fileId;
+			$draftTokenIds[] = $sourceFileId;
+			$draftTokenIds[] = $objectId;
+			if ($sourceFileId > 0)
+			{
+				$draftSourceFileIds[$sourceFileId] = true;
+			}
+			if (
+				isset($confirmedLargeAttachmentBFileIds[$fileId])
+				|| isset($confirmedLargeAttachmentBFileIds[$sourceFileId])
+			)
+			{
+				// The file goes out as a link, so it must not be attached on top of that.
+				continue;
+			}
+
+			$draftFileIds[] = $fileId;
+			if ($objectId > 0)
+			{
+				$draftObjectIdsByFileId[$fileId] = $objectId;
+			}
+		}
+
+		// The draft already carries these files, so a token naming the copy, the file it was copied from
+		// or its Disk object must not copy the same attachment a second time.
+		$currentFilesIds = array_values(array_diff($currentFilesIds, $draftTokenIds));
+
 		if(count($currentFilesIds))
 		{
 			$currentFilesIds = $this->checkMessageBFileIds(
@@ -994,9 +1178,14 @@ class Message extends Controller
 			);
 		}
 
+		$currentFilesIds = array_values(array_unique(array_merge($currentFilesIds, $draftFileIds)));
+
 		$pendingFiles = $fileController->getPendingFiles($pendingFilesIds);
 
 		$currentStorageElementIds = [];
+		// The body of a restored draft points at the Disk object of the draft copy, not at the element
+		// the activity gets, so the inline links of those files are rewritten by their own id.
+		$attachToFileIds = [];
 		foreach ($currentFilesIds as $id)
 		{
 			$copyFileId = \CFile::CloneFile($id);
@@ -1008,6 +1197,10 @@ class Message extends Controller
 				if ($diskFileId)
 				{
 					$currentStorageElementIds[] = $diskFileId;
+					if (isset($draftObjectIdsByFileId[$id]))
+					{
+						$attachToFileIds[$diskFileId] = $draftObjectIdsByFileId[$id];
+					}
 				}
 			}
 		}
@@ -1015,6 +1208,20 @@ class Message extends Controller
 		$newStorageElementIds = [];
 		foreach ($pendingFiles as $pendingFile)
 		{
+			if (isset($confirmedLargeAttachmentBFileIds[$pendingFile->getFileId()]))
+			{
+				$pendingFile->remove();
+
+				continue;
+			}
+
+			if (isset($draftSourceFileIds[$pendingFile->getFileId()]))
+			{
+				// The last autosave of the compose form already copied this upload into the draft, and
+				// that copy is attached above. The pending file itself expires with its upload session.
+				continue;
+			}
+
 			$fileData = \CFile::getFileArray($pendingFile->getFileId());
 
 			if ($fileData)
@@ -1039,13 +1246,15 @@ class Message extends Controller
 
 		$arFields['STORAGE_ELEMENT_IDS'] = array_filter(array_unique(array_merge($currentStorageElementIds, $newStorageElementIds)));
 
-		$totalSize = 0;
-
 		$arRawFiles = array();
 		foreach ($arFields['STORAGE_ELEMENT_IDS'] as $item)
 		{
 			$arRawFiles[$item] = \Bitrix\Crm\Integration\StorageManager::makeFileArray($item, $storageTypeID);
+		}
 
+		$totalSize = 0;
+		foreach ($arFields['STORAGE_ELEMENT_IDS'] as $item)
+		{
 			$totalSize += $arRawFiles[$item]['size'];
 
 			if (\CCrmContentType::Html == $contentType)
@@ -1056,7 +1265,7 @@ class Message extends Controller
 				);
 
 				$description = preg_replace(
-					sprintf('/(https?:\/\/)?bxacid:n?%u/i', $item),
+					sprintf('/(https?:\/\/)?bxacid:n?%u/i', $attachToFileIds[$item] ?? $item),
 					htmlspecialcharsbx($fileInfo['VIEW_URL']),
 					$description
 				);
@@ -1073,8 +1282,20 @@ class Message extends Controller
 			return false;
 		}
 
+		$emailMeta = array(
+			'__email' => $fromEmail,
+			'from'    => $from,
+			'replyTo' => $reply,
+			'to'      => join(', ', $to),
+			'cc'      => join(', ', $rawCc),
+			'bcc'     => join(', ', $bcc),
+		);
+
 		if ($isNew)
 		{
+			// the EmailSent trigger fires inside the add, so the addresses must already be in these fields
+			$arFields['SETTINGS'] = array('EMAIL_META' => $emailMeta);
+
 			if(!($ID = \CCrmActivity::Add($arFields, false, false, array('REGISTER_SONET_EVENT' => true))))
 			{
 				$this->addError(new Error(\CCrmActivity::GetLastErrorMessage()));
@@ -1108,14 +1329,7 @@ class Message extends Controller
 					'Message-Id' => $messageId,
 					'Reply-To'   => $reply ?: $fromEmail,
 				),
-				'EMAIL_META' => array(
-					'__email' => $fromEmail,
-					'from'    => $from,
-					'replyTo' => $reply,
-					'to'      => join(', ', $to),
-					'cc'      => join(', ', $rawCc),
-					'bcc'     => join(', ', $bcc),
-				),
+				'EMAIL_META' => $emailMeta,
 			),
 		), false, false, array('REGISTER_SONET_EVENT' => true));
 
@@ -1155,6 +1369,7 @@ class Message extends Controller
 			return false;
 		}
 
+		$transportResult = null;
 		$sendResult = MessageSender::send(
 			[
 				'subject'       => $subject,
@@ -1166,6 +1381,7 @@ class Message extends Controller
 				'fromEncoded'   => $fromEncoded,
 				'reply'         => $reply,
 				'rawFiles'      => $arRawFiles,
+				'attachToFileIds' => $attachToFileIds,
 				'urn'           => $urn,
 				'injectUrn'     => !empty($injectUrn),
 				'hostname'      => $hostname,
@@ -1174,10 +1390,33 @@ class Message extends Controller
 			],
 			(string)Loc::getMessage('CRM_MAIL_CONTROLLER_MESSAGE_DEFAULT_SUBJECT', ['#DATE#'=> $now]),
 			$mailboxHelper,
+			$transportResult,
+			$senderId,
+			(int)$userID,
 		);
 
 		if (!$sendResult)
 		{
+			$controlledTransportError = MessageSender::getControlledTransportError($transportResult);
+			if ($controlledTransportError !== null)
+			{
+				if ($this->shouldRollbackActivityAfterTransportFailure($isNew, $controlledTransportError))
+				{
+					\CCrmActivity::delete(
+						$ID,
+						false,
+						false,
+						[
+							'CURRENT_USER' => (int)$userID,
+							'RECYCLE_BIN_FORCE_USER_ID' => (int)$userID,
+						],
+					);
+				}
+				$this->addError($controlledTransportError);
+
+				return false;
+			}
+
 			if ($isNew)
 			{
 				if (\CModule::includeModule('bitrix24'))
@@ -1208,6 +1447,15 @@ class Message extends Controller
 			$this->addErrors($arErrors);
 			return false;
 		}
+
+		\Bitrix\Crm\Integration\Mail\Draft::completeAfterSuccessfulSend(
+			userId: (int)$userID,
+			draftId: $data['draftId'] ?? null,
+			crmEntityTypeId: $draftEntityTypeID,
+			crmEntityId: $draftEntityID,
+			expectedRevision: $data['draftRevision'] ?? null,
+			expectedClientId: $data['draftClientId'] ?? null,
+		);
 
 		addEventToStatFile('crm', 'send_email_message', $_REQUEST['context'], trim(trim($messageId), '<>'));
 
@@ -1306,6 +1554,84 @@ class Message extends Controller
 		);
 
 		return ['ACTIVITY' => $jsonFields];
+	}
+
+	private function shouldRollbackActivityAfterTransportFailure(bool $isNew, ?Error $error): bool
+	{
+		return $isNew && $error !== null;
+	}
+
+	/**
+	 * @param array<int, array{fileIds?: mixed}> $contracts
+	 *
+	 * @return int[]
+	 */
+	protected function getLargeAttachmentFileIds(array $contracts): array
+	{
+		$fileIds = [];
+		foreach ($contracts as $contract)
+		{
+			if (!is_array($contract) || !is_array($contract['fileIds'] ?? null))
+			{
+				continue;
+			}
+
+			foreach ($contract['fileIds'] as $fileId)
+			{
+				if (
+					(is_int($fileId) || is_string($fileId))
+					&& preg_match('/^[0-9]+$/D', (string)$fileId) === 1
+					&& (int)$fileId > 0
+				)
+				{
+					$fileIds[(int)$fileId] = true;
+				}
+			}
+		}
+
+		return array_keys($fileIds);
+	}
+
+	protected function createLargeAttachmentSendPreparation(): SendPreparation
+	{
+		return new SendPreparation();
+	}
+
+	/**
+	 * @param int[] $storageElementIds
+	 *
+	 * @return array<int, int>
+	 */
+	protected function getBFileIdsByStorageElementIds(array $storageElementIds): array
+	{
+		$bFileIds = [];
+		foreach (File::loadBatchById($storageElementIds) as $file)
+		{
+			if ($file instanceof File && $file->getFileId() > 0)
+			{
+				$bFileIds[(int)$file->getId()] = (int)$file->getFileId();
+			}
+		}
+
+		return $bFileIds;
+	}
+
+	/**
+	 * @param array<int, array{token?: mixed, fileIds?: mixed}> $contracts
+	 * @param mixed[] $allowedFileIds
+	 */
+	protected function prepareLargeAttachmentsForSend(
+		int $userId,
+		array $contracts,
+		array $allowedFileIds,
+		string $messageBody,
+		array $files,
+	): \Bitrix\Main\Result
+	{
+		return $this
+			->createLargeAttachmentSendPreparation()
+			->prepare($userId, $contracts, $allowedFileIds, $messageBody, $files)
+		;
 	}
 
 	/**
@@ -1466,6 +1792,11 @@ class Message extends Controller
 		{
 			$recipients['senders'] = \Bitrix\Crm\Activity\Mail\Message::getSenderList();
 		}
+
+		$recipients['subjectGenerationAvailable'] = MailAiSettings::instance()
+			->isMailCrmSubjectCopilotEnabledInGlobalSettings()
+		;
+		$recipients['recipientLimits'] = $this->getRecipientLimits();
 
 		return $recipients;
 	}
@@ -1895,12 +2226,17 @@ class Message extends Controller
 
 		$mailMessageChainProvider = new MailMessageChainProvider();
 
+		$rawDescription = (string)($activity['DESCRIPTION'] ?? '');
+		$preparedDescriptionHtml = Email::getDescriptionHtmlByActivityFields($activity);
 		$descriptionHtml = $mailMessageChainProvider->replaceAttachmentPlaceholders(
-			Email::getDescriptionHtmlByActivityFields($activity),
+			$preparedDescriptionHtml,
 			$mailMessageChainProvider->getAttachmentsWithMessageId($id, false, false)['FILES'],
 		);
 
-		(new SanitizedDescriptionCache())->set($id, $descriptionHtml);
+		if (trim($rawDescription) === '' || trim($descriptionHtml) !== '')
+		{
+			(new SanitizedDescriptionCache())->set($id, $descriptionHtml);
+		}
 		$quote = Email::getMessageQuote($activity, $descriptionHtml, true, true);
 
 		return [

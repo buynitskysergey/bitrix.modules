@@ -131,6 +131,43 @@ class DocumentFileService
 		));
 	}
 
+	/**
+	 * Batch sibling of getValidatedNoteFile: one CFile::GetList for the whole set instead of a
+	 * per-file GetFileArray. Returns the raw b_file rows (FILE_SIZE / ORIGINAL_NAME included) keyed
+	 * by id, keeping only note-owned files.
+	 *
+	 * @param int[] $fileIds
+	 * @return array<int, array<string, mixed>>
+	 */
+	public function getValidatedNoteFilesMap(array $fileIds): array
+	{
+		$normalizedFileIds = IdNormalizer::normalize($fileIds);
+		if (empty($normalizedFileIds))
+		{
+			return [];
+		}
+
+		$map = [];
+		$rows = \CFile::GetList(arFilter: ['@ID' => $normalizedFileIds]);
+		while ($row = $rows->Fetch())
+		{
+			if (!is_array($row))
+			{
+				continue;
+			}
+
+			$fileId = (int)($row['ID'] ?? 0);
+			if ($fileId <= 0 || !$this->isNoteFileData($row))
+			{
+				continue;
+			}
+
+			$map[$fileId] = $row;
+		}
+
+		return $map;
+	}
+
 	public function isNoteOwnedFile(int $fileId): bool
 	{
 		return $this->getValidatedNoteFile($fileId) !== null;

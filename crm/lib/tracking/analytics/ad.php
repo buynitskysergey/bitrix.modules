@@ -9,6 +9,7 @@ namespace Bitrix\Crm\Tracking\Analytics;
 
 use Bitrix\Main;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Crm\Integration\Bitrix24\Product;
 use Bitrix\Crm\Tracking;
 use Bitrix\Seo;
 
@@ -275,6 +276,14 @@ class Ad
 			return $defaultResult;
 		}
 
+		if (
+			in_array($this->code, [Tracking\Source\Base::Vk, Tracking\Source\Base::Vkads], true)
+			&& !Product::isVkAvailable()
+		)
+		{
+			return $defaultResult;
+		}
+
 		if ($this->account->hasAccounts())
 		{
 			if (!$this->accountId)
@@ -353,6 +362,16 @@ class Ad
 	 */
 	public function getExpensesReport(Main\Type\Date $dateFrom = null, Main\Type\Date $dateTo = null)
 	{
+		if (
+			in_array($this->code, [Tracking\Source\Base::Vk, Tracking\Source\Base::Vkads], true)
+			&& !Product::isVkAvailable()
+		)
+		{
+			return (new Main\Result())->addError(
+				new Main\Error('VKontakte integration is not available in the current portal region.')
+			);
+		}
+
 		$checkResult = $this->checkDetalizationSupporting();
 		if ($checkResult)
 		{

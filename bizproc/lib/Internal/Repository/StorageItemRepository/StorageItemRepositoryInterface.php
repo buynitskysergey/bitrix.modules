@@ -3,12 +3,13 @@
 namespace Bitrix\Bizproc\Internal\Repository\StorageItemRepository;
 
 use Bitrix\Bizproc\Internal\Entity;
+use Bitrix\Bizproc\Internal\Entity\DataView\DataView;
 use Bitrix\Bizproc\Internal\Exception\StorageItem\CreateStorageItemException;
 use Bitrix\Bizproc\Internal\Exception\StorageItem\DeleteStorageItemException;
+use Bitrix\Bizproc\Internal\Service\DataView\Dto\CombineRow;
 use Bitrix\Main\ORM\Data\AddResult;
 use Bitrix\Main\ORM\Data\UpdateResult;
 use Bitrix\Main\Provider\Params\FilterInterface;
-use Bitrix\Main\Type\DateTime;
 
 interface StorageItemRepositoryInterface
 {
@@ -80,17 +81,16 @@ interface StorageItemRepositoryInterface
 	public function getCount(int $storageTypeId, array $filter = []): int;
 
 	/**
-	 * @param DateTime $createdTime
-	 * @param ?int $limit
-	 * @return array
+	 * Counts rows of several storage types at once, so callers listing many storages
+	 * do not fall back to a COUNT query per storage type.
+	 *
+	 * @param int[] $storageTypeIds
+	 * @return array<int, int> row count by storage type id; requested types missing rows return 0
+	 * @throws \Bitrix\Main\ArgumentException
+	 * @throws \Bitrix\Main\ObjectPropertyException
+	 * @throws \Bitrix\Main\SystemException
 	 */
-	public function findOldStorageItemIds(DateTime $createdTime, ?int $limit = null): array;
-
-	/**
-	 * @param ?int $limit
-	 * @return array
-	 */
-	public function findOldestStorageItemIds(?int $limit = null): array;
+	public function getCountsByStorageTypeIds(array $storageTypeIds): array;
 
 	/**
 	 * @param array $ids
@@ -98,4 +98,9 @@ interface StorageItemRepositoryInterface
 	 * @throws \Bitrix\Main\ArgumentException
 	 */
 	public function deleteByIds(array $ids): void;
+
+	/**
+	 * @param CombineRow[] $computedRows
+	 */
+	public function replaceDataViewItems(DataView $view, array $computedRows, int $actorId): void;
 }

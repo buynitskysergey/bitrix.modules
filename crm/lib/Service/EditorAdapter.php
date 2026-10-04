@@ -2146,6 +2146,46 @@ class EditorAdapter
 	}
 
 	/**
+	 * Tells whether the client data from editor introduces a new (not yet created) client.
+	 * A new client is a company or contact without a positive id.
+	 *
+	 * @param string $clientJson - data from editor.
+	 * @return bool
+	 */
+	public function hasNewClientInData(string $clientJson): bool
+	{
+		try
+		{
+			$clientData = \Bitrix\Main\Web\Json::decode($clientJson);
+		}
+		catch (\Bitrix\Main\ArgumentException $e)
+		{
+			return false;
+		}
+		if (!is_array($clientData))
+		{
+			return false;
+		}
+
+		$companyData = $clientData['COMPANY_DATA'][0] ?? [];
+		if ($companyData && (int)($companyData['id'] ?? 0) <= 0)
+		{
+			return true;
+		}
+
+		$contactData = array_values((array)($clientData['CONTACT_DATA'] ?? []));
+		foreach ($contactData as $contact)
+		{
+			if (is_array($contact) && (int)($contact['id'] ?? 0) <= 0)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Parses $json with data from Client field from editor, saves data about company and contacts from it.
 	 * Return information about new field values, processed entities and requisiteBindings.
 	 *
@@ -2155,6 +2195,7 @@ class EditorAdapter
 	public function getClientDataFromEmbeddedEditor(string $json): Result
 	{
 		$processedEntities = [];
+		$createdEntities = [];
 
 		$resultData = [];
 		/** @var array $clientData */
@@ -2176,6 +2217,7 @@ class EditorAdapter
 		$resultData[Item::FIELD_NAME_COMPANY_ID] = 0;
 		if ($companyData)
 		{
+			$isNewCompany = (int)($companyData['id'] ?? 0) <= 0;
 			$entityResult = $this->saveClientEntity(CCrmOwnerType::Company, $companyData);
 			$entityResultData = $entityResult->getData();
 			$companyId = (int)($entityResultData['id'] ?? 0);
@@ -2183,6 +2225,14 @@ class EditorAdapter
 			{
 				$resultData[Item::FIELD_NAME_COMPANY_ID] = $companyId;
 				$processedEntities[] = new ItemIdentifier(CCrmOwnerType::Company, $companyId);
+				if ($isNewCompany)
+				{
+					$createdEntities[] = $this->buildCreatedClientEntityRecord(
+						CCrmOwnerType::Company,
+						$companyId,
+						0,
+					);
+				}
 
 				$requisiteBinding = $this->extractRequisiteBinding(
 					$companyData,
@@ -2201,11 +2251,20 @@ class EditorAdapter
 		{
 			foreach ($contactData as $contactIndex => &$contact)
 			{
+				$isNewContact = (int)($contact['id'] ?? 0) <= 0;
 				$entityResult = $this->saveClientEntity(CCrmOwnerType::Contact, $contact);
 				$entityResultData = $entityResult->getData();
 				$contactId = (int)($entityResultData['id'] ?? 0);
 				if ($contactId > 0)
 				{
+					if ($isNewContact)
+					{
+						$createdEntities[] = $this->buildCreatedClientEntityRecord(
+							CCrmOwnerType::Contact,
+							$contactId,
+							$contactIndex,
+						);
+					}
 					if ($contactIndex === 0 && $requisiteBinding === null)
 					{
 						$requisiteBinding = $this->extractRequisiteBinding(
@@ -2228,9 +2287,31 @@ class EditorAdapter
 
 		$resultData[Item::FIELD_NAME_CONTACTS] = $contactIds;
 		$resultData['processedEntities'] = $processedEntities;
+		$resultData['createdEntities'] = $createdEntities;
 		$resultData['requisiteBinding'] = $requisiteBinding;
 
 		return (new Result())->setData($resultData);
+	}
+
+	/**
+	 * Builds a CREATED_CLIENT_ENTITIES record describing a client created during this submit. The
+	 * source field name and the original index (position within COMPANY_DATA / CONTACT_DATA) let the
+	 * front reuse the identity on the exact control and search box that produced it, avoiding both a
+	 * cross-control mix-up (client vs my company) and a wrong-box assignment on resubmit.
+	 *
+	 * @param int $entityTypeId
+	 * @param int $entityId
+	 * @param int $index - 0-based position within its entity type data in the client field payload.
+	 * @return array
+	 */
+	private function buildCreatedClientEntityRecord(int $entityTypeId, int $entityId, int $index): array
+	{
+		return [
+			'ENTITY_TYPE_ID' => $entityTypeId,
+			'ENTITY_ID' => $entityId,
+			'FIELD_NAME' => static::FIELD_CLIENT,
+			'INDEX' => $index,
+		];
 	}
 
 	protected function saveClientEntity(int $entityTypeId, array $data, bool $checkPermissions = true): Result

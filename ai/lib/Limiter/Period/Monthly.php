@@ -3,7 +3,6 @@
 namespace Bitrix\AI\Limiter\Period;
 
 use Bitrix\AI\Context;
-use Bitrix\AI\Integration\Baas\BaasTokenService;
 use Bitrix\AI\Limiter\Plan;
 use Bitrix\AI\Model\UsageTable;
 use Bitrix\Main\Config\Option;
@@ -60,6 +59,11 @@ class Monthly implements IPeriod
 	 * @inheritDoc
 	 */
 	public function getMaximumUsage(): int
+	{
+		return $this->getPlanMaximumUsage() ?? 0;
+	}
+
+	protected function getPlanMaximumUsage(): ?int
 	{
 		return Plan::createByB24()?->getMaxUsage();
 	}

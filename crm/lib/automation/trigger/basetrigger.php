@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Automation\Trigger;
 
 use Bitrix\Bizproc\Activity\Enum\ActivityColorIndex;
+use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Starter\Enum\Scenario;
 use Bitrix\Bizproc\Starter\Starter;
 use Bitrix\Crm\Automation\Factory;
@@ -17,6 +18,13 @@ if (!Main\Loader::includeModule('bizproc'))
 	return;
 }
 
+/**
+ * Base of the bridged CRM triggers: the classes the crmautomationtrigger bridge exposes as designer
+ * nodes and classical automation runs as triggers.
+ *
+ * Every node owns the fields it exposes, so the designer never offers a field the workflow would
+ * always receive empty, and the date/time carries a name that says which moment of that node it is.
+ */
 class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 {
 	use TriggerBindingDocumentsTrait;
@@ -47,8 +55,7 @@ class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 				static::areDynamicTypesSupported()
 				&& !is_null($factory)
 				&& $factory->isAutomationEnabled()
-				&& $factory->isStagesEnabled()
-			;
+				&& $factory->isStagesEnabled();
 		}
 
 		return in_array($entityTypeId, $supported, true);
@@ -59,7 +66,7 @@ class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 		return true;
 	}
 
-	public static function execute(array $bindings, array $inputData = null, bool $useEntitySearch = true)
+	public static function execute(array $bindings, ?array $inputData = null, bool $useEntitySearch = true)
 	{
 		$triggersSent = false;
 		$triggersApplied = false;
@@ -73,8 +80,8 @@ class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 					(int)$binding['OWNER_ID'],
 					static::getCode(),
 					static::areDynamicTypesSupported(),
-					$useEntitySearch
-				)
+					$useEntitySearch,
+				),
 			);
 
 			foreach ($bindingDocuments as $document)
@@ -111,7 +118,71 @@ class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 		return $this->inputData;
 	}
 
-	protected static function sendTrigger(array $document, array $inputData = null)
+	/**
+	 * Bridged initiator resolution: the standard INPUT_DATA key. Event::userId is always 0 for
+	 * bridged triggers, so the actor can only come from INPUT_DATA (dispatcher enrichment). A node
+	 * whose dispatcher names the actor under a key of its own overrides this.
+	 */
+	protected function resolveEventInitiatorUserId(): ?int
+	{
+		$userId = (int)($this->getInputData('initiatorUserId') ?? 0);
+
+		return $userId > 0 ? $userId : null;
+	}
+
+	/**
+	 * RETURN descriptor of the event initiator, for a node whose event names an actor.
+	 */
+	protected static function getEventInitiatorProperty(): array
+	{
+		Main\Localization\Loc::loadMessages(__FILE__);
+
+		return [
+			'Id' => static::EVENT_INITIATOR_ID,
+			'Name' => Main\Localization\Loc::getMessage('CRM_AUTOMATION_TRIGGER_EVENT_PACKAGE_INITIATOR') ?? '',
+			'Type' => FieldType::USER,
+			'Default' => null,
+		];
+	}
+
+	/**
+	 * RETURN descriptor of the event date/time. The name belongs to the node: it has to say which
+	 * moment of that particular event the field carries.
+	 */
+	protected static function getEventDateTimeProperty(string $name): array
+	{
+		return [
+			'Id' => static::EVENT_DATE_TIME_ID,
+			'Name' => $name,
+			'Type' => FieldType::DATETIME,
+			'Default' => null,
+		];
+	}
+
+	/**
+	 * RETURN value of the event initiator. An actor the input data does not name becomes a typed empty
+	 * value (null for a user field).
+	 */
+	protected function buildEventInitiatorValue(): ?string
+	{
+		$userId = $this->resolveEventInitiatorUserId();
+
+		return $userId > 0 ? 'user_' . $userId : null;
+	}
+
+	/**
+	 * Event date/time: the moment the trigger is executed, as a string in the culture format.
+	 *
+	 * The RETURN values are merged into the workflow start parameters, stored as gzcompress(Json::encode(...)):
+	 * a DateTime object comes back from that channel as an empty array, so only a scalar survives. The format
+	 * must stay in the culture format.
+	 */
+	protected static function buildEventDateTimeValue(): string
+	{
+		return (new Main\Type\DateTime())->format(Main\Type\DateTime::getFormat());
+	}
+
+	protected static function sendTrigger(array $document, ?array $inputData = null)
 	{
 		[$entityTypeId, $entityId] = $document;
 		if (!Factory::isAutomationRunnable($entityTypeId))
@@ -137,7 +208,7 @@ class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 						'INPUT_DATA' => $inputData,
 						'TARGET' => $automationTarget,
 						'TRIGGER_CLASS' => $trigger::class,
-					]
+					],
 				)
 				->start()
 			;
@@ -205,9 +276,17 @@ class BaseTrigger extends \Bitrix\Bizproc\Automation\Trigger\BaseTrigger
 			Factory::onFieldsChanged(
 				$target->getEntityTypeId(),
 				$target->getEntityId(),
-				[$target->getEntityTypeId() === \CCrmOwnerType::Lead ? 'STATUS_ID' : 'STAGE_ID']
+				[$target->getEntityTypeId() === \CCrmOwnerType::Lead ? 'STATUS_ID' : 'STAGE_ID'],
 			);
-			Factory::runOnStatusChanged($target->getEntityTypeId(), $target->getEntityId());
+			// $executeBy is the user the trigger applies the status on behalf of
+			// (CBPHelper::ExtractUsers with $bFirst=true returns a single int user id or
+			// null). Forward it as the automation initiator so a stage robot attributes
+			// history to them; null keeps the previous System behavior.
+			Factory::runOnStatusChanged(
+				$target->getEntityTypeId(),
+				$target->getEntityId(),
+				is_int($executeBy) ? $executeBy : null
+			);
 		}
 
 		return true;

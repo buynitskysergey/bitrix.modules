@@ -64,10 +64,7 @@ class ActivityMarkStatistics extends DataSource
 
 		list($providerId, $providerTypeId) = $this->getActivityProviderInfo();
 
-		if($name === '')
-		{
-			$name = 'TOTAL';
-		}
+		$name = $this->sanitizeSelectName($name, 'TOTAL');
 
 		$permissionSql = '';
 		if($this->enablePermissionCheck)
@@ -402,6 +399,10 @@ class ActivityMarkStatistics extends DataSource
 		);
 	}
 
+	protected function getAllowedSelectNames()
+	{
+		return array('TOTAL', 'NONE_QTY', 'NEGATIVE_QTY', 'POSITIVE_QTY');
+	}
 	/**
 	 * @return void
 	 */

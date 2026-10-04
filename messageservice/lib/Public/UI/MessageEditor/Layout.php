@@ -16,6 +16,8 @@ final class Layout implements \JsonSerializable
 	private bool $isMessageLengthCounterShown = true;
 	private bool $isToSelectorShown = true;
 	private bool $isChannelSelectorShown = true;
+	private bool $isCustomTemplateSelectorShown = false;
+	private bool $isCustomTemplateCreateInSelectorShown = false;
 	private bool $isMessageTextReadOnly = false;
 	private string $padding = 'var(--ui-space-inset-lg)';
 	private ?string $paddingLeft = null;
@@ -143,6 +145,30 @@ final class Layout implements \JsonSerializable
 		return $this;
 	}
 
+	public function isCustomTemplateSelectorShown(): bool
+	{
+		return $this->isCustomTemplateSelectorShown;
+	}
+
+	public function setCustomTemplateSelectorShown(bool $isCustomTemplateSelectorShown): self
+	{
+		$this->isCustomTemplateSelectorShown = $isCustomTemplateSelectorShown;
+
+		return $this;
+	}
+
+	public function isCustomTemplateCreateInSelectorShown(): bool
+	{
+		return $this->isCustomTemplateCreateInSelectorShown;
+	}
+
+	public function setCustomTemplateCreateInSelectorShown(bool $isCustomTemplateCreateInSelectorShown): self
+	{
+		$this->isCustomTemplateCreateInSelectorShown = $isCustomTemplateCreateInSelectorShown;
+
+		return $this;
+	}
+
 	public function isMessageTextReadOnly(): bool
 	{
 		return $this->isMessageTextReadOnly;
@@ -228,6 +254,8 @@ final class Layout implements \JsonSerializable
 			'isMessageLengthCounterShown' => $this->isMessageLengthCounterShown(),
 			'isToSelectorShown' => $this->isToSelectorShown(),
 			'isChannelSelectorShown' => $this->isChannelSelectorShown(),
+			'isCustomTemplateSelectorShown' => $this->isCustomTemplateSelectorShown(),
+			'isCustomTemplateCreateInSelectorShown' => $this->isCustomTemplateCreateInSelectorShown(),
 			'isMessageTextReadOnly' => $this->isMessageTextReadOnly(),
 			'padding' => $this->getPadding(),
 			'paddingTop' => $this->getPaddingTop(),

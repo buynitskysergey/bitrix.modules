@@ -19,6 +19,7 @@ class AiAgentsDataProvider extends DataProvider
 	{
 		return [
 			new RestartAction($this->getSettings()),
+			new UpgradeAction($this->getSettings()),
 			new EditAction($this->getSettings()),
 			new DeleteAction($this->getSettings()),
 		];

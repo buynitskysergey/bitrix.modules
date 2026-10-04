@@ -1,15 +1,23 @@
-<?php declare(strict_types=1);
+<?php
+
+declare(strict_types=1);
 
 namespace Bitrix\AI\Limiter;
 
+use Bitrix\AI\Facade\Bitrix24;
 use Bitrix\AI\Facade\Portal;
 use Bitrix\AI\Integration\Baas\BaasTokenService;
 use Bitrix\AI\Integration\Baas\NotServiceException;
 use Bitrix\AI\Limiter\Enums\ErrorLimit;
 use Bitrix\AI\Limiter\Enums\TypeLimit;
+use Bitrix\AI\Limiter\Exception\SharedMonthlyPoolLimitExceededException;
+use Bitrix\AI\Limiter\Policy\LimitPolicyMode;
 use Bitrix\AI\Limiter\Repository\BaasPackageRepository;
 use Bitrix\AI\Limiter\Repository\CounterRepository;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Type\Date;
+use RuntimeException;
+use Throwable;
 
 /**
  *  Service for control limits in ai
@@ -18,10 +26,17 @@ class LimitControlService
 {
 	protected const DEFAULT_COST = 1;
 	protected const FREE_COST = 0;
+	private const SHARED_MONTHLY_POOL_CONSUMPTION_ID = 'ai:shared_monthly_pool';
 
 	protected BaasTokenService $baasTokenService;
 	protected CounterRepository $counterRepository;
 	protected BaasPackageRepository $baasPackageRepository;
+	private ?SharedMonthlyPoolService $sharedMonthlyPoolService;
+
+	public function __construct(?SharedMonthlyPoolService $sharedMonthlyPoolService = null)
+	{
+		$this->sharedMonthlyPoolService = $sharedMonthlyPoolService;
+	}
 
 	public function commitRequest(ReserveRequest $reservedRequest): string
 	{
@@ -47,6 +62,38 @@ class LimitControlService
 			return $this->consumeBaasLimits($reservedRequest->getCost());
 		}
 
+		if ($reservedRequest->getTypeLimit() === TypeLimit::SHARED_MONTHLY_POOL)
+		{
+			$limit = Bitrix24::getMonthlyPoolLimit();
+			try
+			{
+				$consumed = $limit !== null
+					&& $this->getSharedMonthlyPoolService()->tryConsumeSharedMonthly(
+						$reservedRequest->getLimiter()->getUserId(),
+						$reservedRequest->getCost(),
+						$limit,
+					);
+			}
+			catch (Throwable $exception)
+			{
+				throw new RuntimeException('Unable to consume the shared monthly AI pool.', 0, $exception);
+			}
+
+			if (!$consumed)
+			{
+				$reservedRequest
+					->setErrorLimit(ErrorLimit::PROMO_LIMIT)
+					->setPromoLimitCode('Monthly')
+				;
+
+				throw new SharedMonthlyPoolLimitExceededException(
+					'The shared monthly AI pool limit is exceeded.',
+				);
+			}
+
+			return self::SHARED_MONTHLY_POOL_CONSUMPTION_ID;
+		}
+
 		return '';
 	}
 
@@ -59,6 +106,19 @@ class LimitControlService
 		if ($cost === self::FREE_COST)
 		{
 			return $reserveRequest;
+		}
+		if (Bitrix24::isNewLimitPolicyActive())
+		{
+			$mode = Bitrix24::getLimitPolicyMode();
+			if ($mode === LimitPolicyMode::MonthlyPool)
+			{
+				return $this->getReserveRequestInSharedMonthlyPool($limiter, $cost);
+			}
+
+			if (in_array($mode, [LimitPolicyMode::Unlimited, LimitPolicyMode::DailyOnly], true))
+			{
+				return $this->getReserveRequestInPromoLimit($reserveRequest, ErrorLimit::PROMO_LIMIT);
+			}
 		}
 
 		if (!$this->isAvailableBaas())
@@ -97,7 +157,11 @@ class LimitControlService
 			return;
 		}
 
-		if (!empty($consumptionId))
+		if ($consumptionId === self::SHARED_MONTHLY_POOL_CONSUMPTION_ID)
+		{
+			$this->getSharedMonthlyPoolService()->releaseSharedMonthly($limiter->getUserId(), $cost);
+		}
+		elseif (!empty($consumptionId))
 		{
 			try
 			{
@@ -106,7 +170,7 @@ class LimitControlService
 				{
 					AddMessage2Log(
 						'AI_LIMIT_CONTROL: Error in rollbackConsumption '
-						. implode(' ', $result->getErrorMessages())
+						. implode(' ', $result->getErrorMessages()),
 					);
 				}
 			}
@@ -144,8 +208,9 @@ class LimitControlService
 		if ($timestamp === false)
 		{
 			AddMessage2Log(
-				'AI_LIMIT_CONTROL: In last request - ' . var_export($lastDateInfo['VALUE'], true)
+				'AI_LIMIT_CONTROL: In last request - ' . var_export($lastDateInfo['VALUE'], true),
 			);
+
 			return null;
 		}
 
@@ -154,7 +219,7 @@ class LimitControlService
 
 	protected function getReserveRequestInPromoWhenNotBaasRequests(
 		ReserveRequest $reserveRequest,
-		Date $dateExpired
+		Date $dateExpired,
 	): ReserveRequest
 	{
 		$limitType = (Portal::isMarketAvailable()) ? ErrorLimit::BAAS_RATE_LIMIT : ErrorLimit::BAAS_LIMIT;
@@ -178,6 +243,7 @@ class LimitControlService
 	protected function getTimestampFirstDayOnNextMonths(Date $date): bool|int
 	{
 		$dataString = date('Y-m-d', $date->getTimestamp());
+
 		return (new \DateTime($dataString))
 			->modify('first day of next month')
 			->getTimestamp()
@@ -200,7 +266,7 @@ class LimitControlService
 		if (!$result->isSuccess())
 		{
 			AddMessage2Log(
-				'AI_LIMIT_CONTROL: BAAS_consume ' . implode(', ', $result->getErrorMessages())
+				'AI_LIMIT_CONTROL: BAAS_consume ' . implode(', ', $result->getErrorMessages()),
 			);
 		}
 
@@ -220,7 +286,7 @@ class LimitControlService
 
 	protected function getReserveRequestInPromoLimit(
 		ReserveRequest $reserveRequest,
-		ErrorLimit $errorLimit
+		ErrorLimit $errorLimit,
 	): ReserveRequest
 	{
 		$promoLimitCode = '';
@@ -232,6 +298,24 @@ class LimitControlService
 		return $reserveRequest
 			->setErrorLimit($errorLimit)
 			->setPromoLimitCode($promoLimitCode)
+		;
+	}
+
+	private function getReserveRequestInSharedMonthlyPool(Usage $limiter, int $cost): ReserveRequest
+	{
+		$reserveRequest = new ReserveRequest(TypeLimit::SHARED_MONTHLY_POOL, $limiter, $cost);
+		$limit = Bitrix24::getMonthlyPoolLimit();
+		if (
+			$limit !== null
+			&& $this->getSharedMonthlyPoolService()->canConsumeSharedMonthly($limiter->getUserId(), $cost, $limit)
+		)
+		{
+			return $reserveRequest;
+		}
+
+		return $reserveRequest
+			->setErrorLimit(ErrorLimit::PROMO_LIMIT)
+			->setPromoLimitCode('Monthly')
 		;
 	}
 
@@ -278,5 +362,12 @@ class LimitControlService
 		}
 
 		return $this->baasPackageRepository;
+	}
+
+	protected function getSharedMonthlyPoolService(): SharedMonthlyPoolService
+	{
+		return $this->sharedMonthlyPoolService ??= ServiceLocator::getInstance()->get(
+			SharedMonthlyPoolService::class,
+		);
 	}
 }

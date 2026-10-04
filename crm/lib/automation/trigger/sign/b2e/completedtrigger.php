@@ -5,10 +5,14 @@ namespace Bitrix\Crm\Automation\Trigger\Sign\B2e;
 use Bitrix\Bizproc\Activity\Enum\ActivityColorIndex;
 use Bitrix\Bizproc\Activity\Enum\ActivityGroup;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Sign\Integration\CRM\Model\EventData;
 use Bitrix\Ui\Public\Enum\IconSet\Outline;
 
 final class CompletedTrigger extends AbstractB2eDocumentTrigger
 {
+	protected const EVENT_INITIATOR_ID = 'Initiator';
+	protected const EVENT_DATE_TIME_ID = 'EventDateTime';
+
 	private const SELECT_ID = 'result_type';
 	private const TYPE_ON_DONE = 'TYPE_ON_DONE';
 	private const OPTION_VALUE_DEFAULT = 0;
@@ -28,6 +32,54 @@ final class CompletedTrigger extends AbstractB2eDocumentTrigger
 	public static function getDescription(): string
 	{
 		return Loc::getMessage('CRM_AUTOMATION_TRIGGER_B2E_COMPLETED_DESCRIPTION') ?? '';
+	}
+
+	/**
+	 * Completion and cancellation both name the user who acted, and that user already travels with the
+	 * event in the released sign, so the initiator needs no version check here.
+	 */
+	public static function getReturnProperties(): array
+	{
+		return array_merge(
+			[
+				static::getEventInitiatorProperty(),
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_B2E_COMPLETED_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getSignReturnProperties()
+		);
+	}
+
+	public function getReturnValues(): ?array
+	{
+		return array_merge(parent::getReturnValues() ?? [], [
+			static::EVENT_INITIATOR_ID => $this->buildEventInitiatorValue(),
+			static::EVENT_DATE_TIME_ID => static::buildEventDateTimeValue(),
+		]);
+	}
+
+	protected static function getSignReturnFieldIds(): array
+	{
+		return [
+			self::RETURN_SIGN_DOCUMENT_ID,
+			self::RETURN_SIGN_MEMBER_ROLE,
+			self::RETURN_SIGN_INITIATED_BY_TYPE,
+			self::RETURN_SIGN_EVENT_TYPE,
+			self::RETURN_SIGNER_USER,
+			self::RETURN_SIGNER_NAME,
+		];
+	}
+
+	protected static function getSignEventTypes(): array
+	{
+		return [
+			EventData::TYPE_ON_DONE,
+			EventData::TYPE_ON_STOPPED,
+			EventData::TYPE_ON_CANCELED_BY_RESPONSIBILITY_PERSON,
+			EventData::TYPE_ON_CANCELED_BY_REVIEWER,
+			EventData::TYPE_ON_CANCELED_BY_EDITOR,
+		];
 	}
 
 	public function checkApplyRules(array $trigger): bool

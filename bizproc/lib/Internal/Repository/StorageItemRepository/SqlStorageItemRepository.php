@@ -18,7 +18,6 @@ use Bitrix\Main\ORM\Data\UpdateResult;
 use Bitrix\Main\Provider\Params\FilterInterface;
 use Bitrix\Bizproc\Internal\Service\StorageField\FieldCodeService;
 use Bitrix\Bizproc\Internal\Model\EO_StorageRecord;
-use Bitrix\Main\Type\DateTime;
 
 class SqlStorageItemRepository implements StorageItemRepositoryInterface
 {
@@ -72,20 +71,29 @@ class SqlStorageItemRepository implements StorageItemRepositoryInterface
 		return (int) $result['CNT'];
 	}
 
-	public function findOldStorageItemIds(DateTime $createdTime, ?int $limit = null): array
+	public function getCountsByStorageTypeIds(array $storageTypeIds): array
 	{
-		$result = StorageRecordTable::getList([
-			'filter' => ['<CREATED_TIME' => $createdTime],
-			'select' => ['ID'],
-			'limit' => $limit,
-		]);
-		$ids = [];
-		while ($row = $result->fetch())
+		$ids = array_map('intval', $storageTypeIds);
+		$ids = array_values(array_unique(array_filter($ids, static fn(int $id) => $id > 0)));
+		if (!$ids)
 		{
-			$ids[] = (int)$row['ID'];
+			return [];
 		}
 
-		return $ids;
+		$counts = array_fill_keys($ids, 0);
+		$result = StorageRecordTable::query()
+			->setSelect(['STORAGE_ID', new \Bitrix\Main\ORM\Fields\ExpressionField('CNT', 'COUNT(1)')])
+			->whereIn('STORAGE_ID', $ids)
+			->setGroup(['STORAGE_ID'])
+			->exec()
+		;
+
+		while ($row = $result->fetch())
+		{
+			$counts[(int)$row['STORAGE_ID']] = (int)$row['CNT'];
+		}
+
+		return $counts;
 	}
 
 	public function exists(int $id): bool

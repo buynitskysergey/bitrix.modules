@@ -2,17 +2,14 @@
 
 namespace Bitrix\Crm\Activity\Provider;
 
-use Bitrix\Crm\Activity\Analytics\Dictionary;
 use Bitrix\Crm\Integration\AI\Dto\RepeatSale\FillRepeatSaleTipsPayload;
 use Bitrix\Crm\Integration\AI\EventHandler;
-use Bitrix\Crm\Integration\Analytics\Builder\Activity\CompleteActivityEvent;
 use Bitrix\Crm\RepeatSale\Segment\Controller\RepeatSaleSegmentController;
 use Bitrix\Crm\RepeatSale\Segment\SegmentItem;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
 use CCrmActivityDirection;
-use CCrmOwnerType;
 
 Loc::loadMessages(__FILE__);
 
@@ -95,20 +92,8 @@ final class RepeatSale extends Base
 		array $params = null
 	): void
 	{
-		$prevIsCompleted = ($oldFields['COMPLETED'] ?? '') === 'Y';
-		$curIsCompleted = ($newFields['COMPLETED'] ?? '')  === 'Y';
-		$isCompleted = !$prevIsCompleted && $curIsCompleted;
-		if ($isCompleted)
-		{
-			CompleteActivityEvent::createDefault(CCrmOwnerType::Deal) // @todo: extent entity type ID in future
-				->setType(Dictionary::REPEAT_SALE_TYPE)
-				->setElement(Dictionary::REPEAT_SALE_ELEMENT_SYS)
-				->setStatus( \Bitrix\Crm\Integration\Analytics\Dictionary::STATUS_SUCCESS)
-				->setP5('segment', str_replace('_', '-', self::getSegmentCodeByActivity($id)))
-				->buildEvent()
-				->send()
-			;
-		}
+		// The repeat sale outcome (won/lose) is emitted from a single point:
+		// RepeatSaleLogController::updateStageSemanticId() (rs-close-queue-item event).
 	}
 
 	public static function createDescriptionFromPayload(

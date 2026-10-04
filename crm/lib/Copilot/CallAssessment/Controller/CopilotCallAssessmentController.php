@@ -16,6 +16,7 @@ use Bitrix\Crm\ItemIdentifier;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Context;
 use Bitrix\Crm\Traits\Singleton;
+use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Data\AddResult;
@@ -37,7 +38,23 @@ final class CopilotCallAssessmentController
 		'AVAILABILITY_DATA.END_POINT',
 		'AVAILABILITY_DATA.WEEKDAY_TYPE',
 	];
-	
+
+	private const DISTINCT_BORDERS_CACHE_TTL = 86400;
+	private const BORDER_MIN = 0;
+	private const BORDER_MAX = 100;
+
+	public function updateDescription(int $assessmentId, string $description): Result
+	{
+		if ($assessmentId <= 0)
+		{
+			return (new Result())->addError(new Error('Invalid assessment id'));
+		}
+
+		return CopilotCallAssessmentTable::update($assessmentId, [
+			'DESCRIPTION' => $description,
+		]);
+	}
+
 	public function add(CallAssessmentItem $callAssessmentItem): AddResult
 	{
 		$result = CopilotCallAssessmentTable::add($this->getFields($callAssessmentItem));
@@ -46,19 +63,19 @@ final class CopilotCallAssessmentController
 			$modifyClientResult = $this->modifyClientTypeIds(
 				$result->getId(),
 				$callAssessmentItem->getClientTypeIds(),
-				false
+				false,
 			);
 			if (!$modifyClientResult->isSuccess())
 			{
 				$result->addErrors($modifyClientResult->getErrors());
 			}
 
-			
+
 			$modifyAvailabilityResult = $this->modifyAvailability(
 				$result->getId(),
 				$callAssessmentItem->getAvailabilityType(),
 				$callAssessmentItem->getAvailabilityData(),
-				false
+				false,
 			);
 			if (!$modifyAvailabilityResult->isSuccess())
 			{
@@ -77,7 +94,7 @@ final class CopilotCallAssessmentController
 		{
 			$modifyClientResult = $this->modifyClientTypeIds(
 				$id,
-				$callAssessmentItem->getClientTypeIds()
+				$callAssessmentItem->getClientTypeIds(),
 			);
 			if (!$modifyClientResult->isSuccess())
 			{
@@ -87,7 +104,7 @@ final class CopilotCallAssessmentController
 			$modifyAvailabilityResult = $this->modifyAvailability(
 				$id,
 				$callAssessmentItem->getAvailabilityType(),
-				$callAssessmentItem->getAvailabilityData()
+				$callAssessmentItem->getAvailabilityData(),
 			);
 			if (!$modifyAvailabilityResult->isSuccess())
 			{
@@ -110,7 +127,7 @@ final class CopilotCallAssessmentController
 	public function getList(array $params = []): Collection
 	{
 		$select = $params['select'] ?? self::DEFAULT_SELECT;
-		$filter = $params['filter'] ?? [];
+		$filter = $this->excludeGeneratingFromFilter($params['filter'] ?? []);
 		$order = $params['order'] ?? [
 			'ID' => 'DESC',
 		];
@@ -134,7 +151,7 @@ final class CopilotCallAssessmentController
 		{
 			return null;
 		}
-		
+
 		return CopilotCallAssessmentTable::query()
 			->setSelect(self::DEFAULT_SELECT)
 			->setFilter(['=ID' => $id])
@@ -145,7 +162,20 @@ final class CopilotCallAssessmentController
 
 	public function getTotalCount(array $filter = []): int
 	{
-		return CopilotCallAssessmentTable::query()->setFilter($filter)->queryCountTotal();
+		return CopilotCallAssessmentTable::query()
+			->setFilter($this->excludeGeneratingFromFilter($filter))
+			->queryCountTotal()
+		;
+	}
+
+	private function excludeGeneratingFromFilter(array $filter): array
+	{
+		if (!array_key_exists('=STATUS', $filter) && !array_key_exists('STATUS', $filter))
+		{
+			$filter['!=STATUS'] = CallAssessmentItem::STATUS_GENERATING_FROM_DIALOG;
+		}
+
+		return $filter;
 	}
 
 	public function delete(int $id): ?Result
@@ -154,21 +184,22 @@ final class CopilotCallAssessmentController
 		{
 			return null;
 		}
-		
+
 		if ($this->hasAssessmentCalls($id))
 		{
 			return (new Result())->addError(
 				new Error(
 					Loc::getMessage(
 						'COPILOT_CALL_ASSESSMENT_CONTROLLER_HAS_ASSESSMENTED_CALLS',
-						['#COPILOT_NAME#' => AIManager::getCopilotName()]
-					)
-				)
+						['#COPILOT_NAME#' => AIManager::getCopilotName()],
+					),
+				),
 			);
 		}
 
 		CopilotCallAssessmentClientTypeController::getInstance()->deleteByAssessmentId($id);
 		CopilotCallAssessmentAvailabilityController::getInstance()->deleteByAssessmentId($id);
+		CopilotCallAssessmentCriteriaController::getInstance()->deleteByAssessmentId($id);
 
 		// clean jobs if needed
 		QueueTable::deleteByItem(
@@ -177,7 +208,7 @@ final class CopilotCallAssessmentController
 
 		return CopilotCallAssessmentTable::delete($id);
 	}
-	
+
 	public function getCurrentAvailableAssessmentFilter(): array
 	{
 		if (!Feature::enabled(Feature\CopilotCallAssessmentAvailability::class))
@@ -186,14 +217,96 @@ final class CopilotCallAssessmentController
 		}
 
 		$assessmentIds = CopilotCallAssessmentAvailabilityController::getInstance()->getCurrentAvailableAssessmentIds();
+		// Every caller reads an empty filter as "no restriction", so nothing available right now must still
+		// leave the always active settings as the only choice instead of opening up the scheduled ones.
+		if (empty($assessmentIds))
+		{
+			return ['=AVAILABILITY_TYPE' => AvailabilityType::ALWAYS_ACTIVE->value];
+		}
 
-		return empty($assessmentIds)
-			? []
-			: [
-				'LOGIC' => 'OR',
-				'=AVAILABILITY_TYPE' => AvailabilityType::ALWAYS_ACTIVE->value,
-				'@ID' => $assessmentIds,
-			];
+		return [
+			'LOGIC' => 'OR',
+			'=AVAILABILITY_TYPE' => AvailabilityType::ALWAYS_ACTIVE->value,
+			'@ID' => $assessmentIds,
+		];
+	}
+
+	public function syncBordersToAll(?int $lowBorder, ?int $highBorder): void
+	{
+		$validLowBorder = $this->validateBorder($lowBorder, CallAssessmentItem::LOW_BORDER_DEFAULT);
+		$validHighBorder = $this->validateBorder($highBorder, CallAssessmentItem::HIGH_BORDER_DEFAULT);
+
+		foreach ($this->getDistinctBorders() as $border)
+		{
+			if (
+				(int)$border['LOW_BORDER'] !== $validLowBorder
+				|| (int)$border['HIGH_BORDER'] !== $validHighBorder
+			)
+			{
+				$this->applyBordersToAll($validLowBorder, $validHighBorder);
+
+				return;
+			}
+		}
+	}
+
+	/**
+	 * @return array{lowBorder: int, highBorder: int}|null
+	 */
+	public function getMasterBorders(): ?array
+	{
+		$row = CopilotCallAssessmentTable::query()
+			->setSelect(['LOW_BORDER', 'HIGH_BORDER'])
+			->setLimit(1)
+			->setCacheTtl(self::DISTINCT_BORDERS_CACHE_TTL)
+			->fetch()
+		;
+
+		if (!$row)
+		{
+			return null;
+		}
+
+		return [
+			'lowBorder' => (int)$row['LOW_BORDER'],
+			'highBorder' => (int)$row['HIGH_BORDER'],
+		];
+	}
+
+	private function validateBorder(?int $value, int $default): int
+	{
+		if ($value === null || $value < self::BORDER_MIN || $value > self::BORDER_MAX)
+		{
+			return $default;
+		}
+
+		return $value;
+	}
+
+	/**
+	 * @return array<int, array{LOW_BORDER: int, HIGH_BORDER: int}>
+	 */
+	private function getDistinctBorders(): array
+	{
+		return CopilotCallAssessmentTable::query()
+			->setSelect(['LOW_BORDER', 'HIGH_BORDER'])
+			->addGroup('LOW_BORDER')
+			->addGroup('HIGH_BORDER')
+			->setCacheTtl(self::DISTINCT_BORDERS_CACHE_TTL)
+			->fetchAll()
+		;
+	}
+
+	private function applyBordersToAll(int $lowBorder, int $highBorder): void
+	{
+		Application::getConnection()->queryExecute(sprintf(
+			'UPDATE %s SET LOW_BORDER = %d, HIGH_BORDER = %d',
+			CopilotCallAssessmentTable::getTableName(),
+			$lowBorder,
+			$highBorder,
+		));
+
+		CopilotCallAssessmentTable::cleanCache();
 	}
 
 	/*
@@ -246,12 +359,14 @@ final class CopilotCallAssessmentController
 	{
 		return [
 			'TITLE' => $callAssessmentItem->getTitle(),
+			'DESCRIPTION' => $callAssessmentItem->getDescription(),
 			'PROMPT' => $callAssessmentItem->getPrompt(),
 			'GIST' => $callAssessmentItem->getGist(),
 			'CALL_TYPE' => $callAssessmentItem->getCallTypeId(),
 			'AUTO_CHECK_TYPE' => $callAssessmentItem->getAutoCheckTypeId(),
 			'IS_ENABLED' => $callAssessmentItem->isEnabled(),
 			'IS_DEFAULT' => $callAssessmentItem->isDefault(),
+			'IS_AI_IMPROVEMENT_ENABLED' => $callAssessmentItem->isAiImprovementEnabled(),
 			'JOB_ID' => $callAssessmentItem->getJobId(),
 			'STATUS' => $callAssessmentItem->getStatus(),
 			'CODE' => $callAssessmentItem->getCode(),
@@ -288,14 +403,14 @@ final class CopilotCallAssessmentController
 		int $assessmentId,
 		string $availabilityType,
 		array $availabilityData,
-		bool $deleteOldRecords = true
+		bool $deleteOldRecords = true,
 	): Result
 	{
 		if (!Feature::enabled(Feature\CopilotCallAssessmentAvailability::class))
 		{
 			return new Result();
 		}
-		
+
 		$controller = CopilotCallAssessmentAvailabilityController::getInstance();
 
 		if ($deleteOldRecords)

@@ -1,12 +1,11 @@
 <?php
 
-use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\Session\Session;
 use Bitrix\Currency;
 use Bitrix\Sale;
 use Bitrix\Sale\DiscountCouponsManager;
+use Bitrix\Main\Web\Uri;
 
 class CAllSaleBasket
 {
@@ -267,7 +266,7 @@ class CAllSaleBasket
 							"EMAIL" => $mail,
 							"USER_NAME" => $sendName,
 							"NAME" => $arCallback["NAME"],
-							"PAGE_URL" => CHTTP::URN2URI($arCallback["DETAIL_PAGE_URL"]),
+							"PAGE_URL" => (string)(new Uri($arCallback["DETAIL_PAGE_URL"]))->toAbsolute(),
 							"SALE_EMAIL" => COption::GetOptionString("sale", "order_email", "order@".$_SERVER["SERVER_NAME"]),
 						);
 

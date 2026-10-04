@@ -8,6 +8,8 @@ use Bitrix\DocumentGenerator\Engine\CheckPermissions;
 use Bitrix\DocumentGenerator\Integration\Bitrix24Manager;
 use Bitrix\DocumentGenerator\Model\FileTable;
 use Bitrix\DocumentGenerator\UserPermissions;
+use Bitrix\Main\Engine\ActionFilter\Scope;
+use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\UI\Uploader\Uploader;
 
@@ -17,6 +19,14 @@ class File extends Base
 
 	protected $uploader;
 
+	protected function getDefaultPreFilters(): array
+	{
+		$preFilters = parent::getDefaultPreFilters();
+		$preFilters[] = new Scope(Scope::AJAX);
+
+		return $preFilters;
+	}
+
 	/**
 	 * @return array
 	 */
@@ -25,8 +35,13 @@ class File extends Base
 		$configureActions = parent::configureActions();
 		$configureActions['upload'] = [
 			'+prefilters' => [
-				new CheckPermissions(UserPermissions::ENTITY_TEMPLATES)
-			]
+				new CheckPermissions(UserPermissions::ENTITY_TEMPLATES),
+			],
+		];
+		$configureActions['delete'] = [
+			'+prefilters' => [
+				new CheckPermissions(UserPermissions::ENTITY_TEMPLATES),
+			],
 		];
 
 		return $configureActions;
@@ -41,11 +56,26 @@ class File extends Base
 	}
 
 	/**
-	 * @param $fileId
+	 * @param int $fileId
 	 * @throws \Exception
 	 */
-	public function deleteAction($fileId)
+	public function deleteAction(int $fileId)
 	{
+		$file = $fileId > 0
+			? FileTable::query()
+				->setSelect(['ID'])
+				->where('ID', $fileId)
+				->setLimit(1)
+				->fetch()
+			: false
+		;
+		if (!$file || FileTable::isReferenced($fileId))
+		{
+			$this->addError(new Error('Access denied', Base::ERROR_ACCESS_DENIED));
+
+			return;
+		}
+
 		$result = FileTable::delete($fileId);
 		if(!$result->isSuccess())
 		{

@@ -66,6 +66,10 @@ class UserFieldHistory
 		}
 
 		(new FieldDataProvider($entityTypeID))->invalidateFieldDataCache();
+		if (CCrmOwnerType::IsDefined($entityTypeID))
+		{
+			\Bitrix\Crm\V2\Internal\Integration\Rest\V3\CacheManager::cleanAll();
+		}
 	}
 	protected static function load()
 	{

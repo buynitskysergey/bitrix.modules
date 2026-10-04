@@ -2,14 +2,22 @@
 
 namespace Bitrix\Crm\Copilot\AiQualityAssessment\Entity;
 
+use Bitrix\Crm\ActivityTable;
+use Bitrix\Crm\Copilot\AiCallSummary\Entity\AiCallSummaryTable;
+use Bitrix\Crm\Copilot\CallAssessment\Summary\SituationsWatcher;
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Application;
 use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\ORM\Data\DataManager;
+use Bitrix\Main\ORM\Event;
 use Bitrix\Main\ORM\Fields\BooleanField;
 use Bitrix\Main\ORM\Fields\IntegerField;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Fields\StringField;
+use Bitrix\Main\ORM\Fields\TextField;
+use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\Result;
 
 /**
@@ -94,6 +102,24 @@ final class AiQualityAssessmentTable extends DataManager
 				->configureRequired()
 				->configureDefaultValue(0)
 			,
+			(new TextField('CRITERIA_DATA'))
+				->configureDefaultValue('')
+				->configureLong()
+			,
+			(new Reference(
+				'ACTIVITY',
+				ActivityTable::class,
+				Join::on('this.ACTIVITY_ID', 'ref.ID'),
+			))
+				->configureJoinType('LEFT')
+			,
+			(new Reference(
+				'SUMMARY',
+				AiCallSummaryTable::class,
+				Join::on('this.ACTIVITY_ID', 'ref.ACTIVITY_ID'),
+			))
+				->configureJoinType('LEFT')
+			,
 		];
 	}
 
@@ -102,6 +128,36 @@ final class AiQualityAssessmentTable extends DataManager
 		return [
 			self::ACTIVITY_TYPE_CALL,
 		];
+	}
+
+	public static function onAfterAdd(Event $event): void
+	{
+		if (!AIManager::isCallScoringV2Enabled())
+		{
+			return;
+		}
+
+		Application::getInstance()->addBackgroundJob(
+			static fn() => self::runSituationsWatcher($event),
+		);
+	}
+
+	public static function runSituationsWatcher(Event $event): void
+	{
+		try
+		{
+			SituationsWatcher::getInstance()->onAfterAdd($event);
+		}
+		catch (\Throwable $e)
+		{
+			AIManager::logger()->error(
+				'{date}: {class}: SituationsWatcher failed: {message}',
+				[
+					'class' => self::class,
+					'message' => $e->getMessage(),
+				],
+			);
+		}
 	}
 
 	public static function deleteByJobIds(array $jobIds): Result

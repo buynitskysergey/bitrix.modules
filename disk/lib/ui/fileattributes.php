@@ -11,12 +11,14 @@ use Bitrix\Disk\Internal\Service\HtmlViewerPolicy;
 use Bitrix\Disk\TypeFile;
 use Bitrix\Disk\UI\Viewer\Renderer\Html;
 use Bitrix\Disk\UI\Viewer\Renderer\Markdown;
+use Bitrix\Disk\UI\Viewer\Renderer\Tiff;
 use Bitrix\Disk\Uf\Integration\DiskUploaderController;
 use Bitrix\Disk\Version;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\UI\Extension;
 use Bitrix\Main\UI\Viewer\ItemAttributes;
 use Bitrix\Main\UI\Viewer\Renderer;
+use Bitrix\Main\Web\Uri;
 use \Bitrix\Disk;
 use \Bitrix\Disk\Internal\Service\Document;
 
@@ -28,8 +30,10 @@ final class FileAttributes extends ItemAttributes
 	public const ATTRIBUTE_SEPARATE_ITEM = 'data-viewer-separate-item';
 	public const ATTRIBUTE_UNIFIED_LINK = 'data-unified-link';
 	public const ATTRIBUTE_MARKDOWN_URL = 'data-markdown-url';
+	public const ATTRIBUTE_TIFF_PREVIEW_URL = 'data-tiff-preview-url';
 
 	public const JS_TYPE_CLASS_MARKDOWN = 'BX.Disk.Viewer.MarkdownItem';
+	public const JS_TYPE_CLASS_TIFF = 'BX.Disk.Viewer.TiffItem';
 
 	public const JS_TYPE = 'cloud-document';
 
@@ -45,6 +49,8 @@ final class FileAttributes extends ItemAttributes
 	private bool $needSetUnifiedLink = false;
 	private array $unifiedLinkOptions = [];
 	private bool $useUnifiedEditLink = false;
+	private ?string $tiffPreviewUrlOverride = null;
+	private array $tiffPreviewUrlParams = [];
 
 	public static function tryBuildByFileId($fileId, $sourceUri, ?File $file = null, ?Version $version = null): self
 	{
@@ -158,6 +164,65 @@ final class FileAttributes extends ItemAttributes
 		$this->setAttribute(self::ATTRIBUTE_MARKDOWN_URL, $markdownUrl);
 	}
 
+	private function setTiffPreviewUrl(): void
+	{
+		if ($this->getViewerType() !== Tiff::getJsType())
+		{
+			return;
+		}
+
+		$urlManager = Driver::getInstance()->getUrlManager();
+		$attachedObjectId = (int)$this->getAttribute(self::ATTRIBUTE_ATTACHED_OBJECT_ID);
+		$versionId = (int)$this->getAttribute(self::ATTRIBUTE_VERSION_ID);
+
+		if ($this->tiffPreviewUrlOverride !== null)
+		{
+			$previewUrl = $this->tiffPreviewUrlOverride;
+		}
+		elseif ($attachedObjectId > 0)
+		{
+			$previewUrl = $urlManager->getUrlForShowTiffPreviewAttached($attachedObjectId);
+		}
+		elseif ($versionId > 0)
+		{
+			$previewUrl = $urlManager->getUrlForShowTiffPreviewVersion($versionId);
+		}
+		else
+		{
+			$file = $this->getFileObject();
+			$fileId = $file?->getId() ?? (int)$this->getAttribute(self::ATTRIBUTE_OBJECT_ID);
+			if ($fileId <= 0)
+			{
+				return;
+			}
+
+			$previewUrl = $urlManager->getUrlForShowTiffPreviewByFileId($fileId);
+		}
+
+		if (!empty($this->tiffPreviewUrlParams))
+		{
+			$previewUri = new Uri($previewUrl);
+			$previewUri->addParams($this->tiffPreviewUrlParams);
+			$previewUrl = (string)$previewUri;
+		}
+
+		$this->setAttribute(self::ATTRIBUTE_TIFF_PREVIEW_URL, $previewUrl);
+	}
+
+	public function setTiffPreviewUrlOverride(string $previewUrl): self
+	{
+		$this->tiffPreviewUrlOverride = $previewUrl;
+
+		return $this;
+	}
+
+	public function setTiffPreviewUrlParams(array $params): self
+	{
+		$this->tiffPreviewUrlParams = $params;
+
+		return $this;
+	}
+
 	/**
 	 * @param array{
 	 *      absolute?: bool,
@@ -268,6 +333,23 @@ final class FileAttributes extends ItemAttributes
 			$this->setUnifiedLinkViewer();
 		}
 
+		if ($this->getViewerType() === Tiff::getJsType())
+		{
+			$this
+				->setAttribute('data-viewer-type-class', self::JS_TYPE_CLASS_TIFF)
+				->setExtension('disk.viewer.tiff-item')
+			;
+
+			if (!empty($this->fileData['ORIGINAL_NAME']))
+			{
+				$this->setTitle($this->fileData['ORIGINAL_NAME']);
+			}
+
+			Extension::load('disk.viewer.tiff-item');
+		}
+
+		$this->setMkvSources();
+
 		if (self::isSetViewDocumentInClouds() && Document\DocumentViewPolicy::isAllowedUseClouds($this->fileData['CONTENT_TYPE']))
 		{
 			$documentHandler = Document\DocumentViewPolicy::getDefaultHandlerForView();
@@ -296,6 +378,32 @@ final class FileAttributes extends ItemAttributes
 				Extension::load('disk.viewer.document-item');
 			}
 		}
+	}
+
+	private function setMkvSources(): void
+	{
+		$file = $this->getFileObject();
+		if (
+			$file === null
+			|| $this->getViewerType() !== Renderer\Video::getJsType()
+			|| !self::isMkvFile($this->fileData)
+			|| !$file->getView()->getId()
+		)
+		{
+			return;
+		}
+
+		$urlManager = Driver::getInstance()->getUrlManager();
+		$this->setSources([
+			[
+				'src' => $urlManager->getUrlForShowView($file),
+				'type' => 'video/mp4',
+			],
+			[
+				'src' => $urlManager->getUrlForShowFile($file),
+				'type' => TypeFile::getMimeTypeByFilename($file->getName()),
+			],
+		]);
 	}
 
 	private function setUnifiedLinkViewer(): void
@@ -351,15 +459,29 @@ final class FileAttributes extends ItemAttributes
 	protected static function isFakeFileData(array $fileData): bool
 	{
 		return
-			($fileData['ID'] === -1) && ($fileData['CONTENT_TYPE'] === 'application/octet-stream')
-		;
+			($fileData['ID'] === -1) && ($fileData['CONTENT_TYPE'] === 'application/octet-stream');
 	}
 
 	protected static function refineType($type, $fileArray)
 	{
-		if (static::isFakeFileData($fileArray))
+		if (self::isFakeFileData($fileArray))
 		{
 			return $type;
+		}
+
+		if (self::isAdditionalViewerFormat($fileArray) && !Configuration::isEnabledFileViewerFormats())
+		{
+			return Renderer\Stub::getJsType();
+		}
+
+		if (self::isTiffFile($fileArray))
+		{
+			return Tiff::getJsType();
+		}
+
+		if (self::isWavFile($fileArray))
+		{
+			return Renderer\Audio::getJsType();
 		}
 
 		$fileObject = $fileArray[self::KEY_FILE_OBJECT] ?? null;
@@ -387,9 +509,9 @@ final class FileAttributes extends ItemAttributes
 		}
 
 		if (
-			$type === Renderer\Stub::getJsType() &&
-			!empty($fileArray['ORIGINAL_NAME']) &&
-			TypeFile::isImage($fileArray['ORIGINAL_NAME'])
+			$type === Renderer\Stub::getJsType()
+			&& !empty($fileArray['ORIGINAL_NAME'])
+			&& TypeFile::isImage($fileArray['ORIGINAL_NAME'])
 		)
 		{
 			$type = Renderer\Image::getJsType();
@@ -443,8 +565,7 @@ final class FileAttributes extends ItemAttributes
 	{
 		return !empty($fileData['CONTENT_TYPE'])
 			&& $fileData['CONTENT_TYPE'] === 'application/octet-stream'
-			&& GetFileExtension($fileData['ORIGINAL_NAME'] ?? '') === 'board'
-		;
+			&& GetFileExtension($fileData['ORIGINAL_NAME'] ?? '') === 'board';
 	}
 
 	protected static function isMarkdownFile(File $file): bool
@@ -454,11 +575,38 @@ final class FileAttributes extends ItemAttributes
 		return in_array($extension, ['md', 'markdown'], true);
 	}
 
+	private static function isTiffFile(array $fileData): bool
+	{
+		$extension = mb_strtolower(GetFileExtension((string)($fileData['ORIGINAL_NAME'] ?? '')));
+
+		return in_array($extension, ['tif', 'tiff'], true);
+	}
+
+	private static function isWavFile(array $fileData): bool
+	{
+		$contentType = (string)($fileData['CONTENT_TYPE'] ?? '');
+		$extension = mb_strtolower(GetFileExtension((string)($fileData['ORIGINAL_NAME'] ?? '')));
+
+		return $extension === 'wav' || in_array($contentType, ['audio/wav', 'audio/x-wav'], true);
+	}
+
+	private static function isMkvFile(array $fileData): bool
+	{
+		$extension = mb_strtolower(GetFileExtension((string)($fileData['ORIGINAL_NAME'] ?? '')));
+
+		return $extension === 'mkv';
+	}
+
+	private static function isAdditionalViewerFormat(array $fileData): bool
+	{
+		return self::isTiffFile($fileData) || self::isWavFile($fileData) || self::isMkvFile($fileData);
+	}
+
 	protected static function isSetViewDocumentInClouds()
 	{
 		$documentHandler = Document\DocumentViewPolicy::getDefaultHandlerForView();
 
-		return !($documentHandler instanceof BitrixHandler);
+		return !$documentHandler instanceof BitrixHandler;
 	}
 
 	public function __toString()
@@ -471,6 +619,7 @@ final class FileAttributes extends ItemAttributes
 
 		$this->setUnifiedLink();
 		$this->setMarkdownUrl();
+		$this->setTiffPreviewUrl();
 
 		return parent::__toString();
 	}
@@ -479,6 +628,7 @@ final class FileAttributes extends ItemAttributes
 	{
 		$this->setUnifiedLink();
 		$this->setMarkdownUrl();
+		$this->setTiffPreviewUrl();
 
 		return parent::toDataSet();
 	}
@@ -487,6 +637,7 @@ final class FileAttributes extends ItemAttributes
 	{
 		$this->setUnifiedLink();
 		$this->setMarkdownUrl();
+		$this->setTiffPreviewUrl();
 
 		return parent::toVueBind();
 	}

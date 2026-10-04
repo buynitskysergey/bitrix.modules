@@ -30,16 +30,28 @@ class OpenLineAnswerTrigger extends OpenLineTrigger
 		return parent::setInputData($data);
 	}
 
+	/**
+	 * The operator who answered is already exposed as a chat field of its own, so the node names no
+	 * initiator.
+	 */
 	public static function getReturnProperties(): array
 	{
-		return [
+		return array_merge(
 			[
-				'Id' => 'OpenLineAnswerTimeSec',
-				'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_OPENLINE_ANSWER_RETURN_ANSWER_TIME'),
-				'Type' => 'int',
-				'Default' => null,
+				static::getEventDateTimeProperty(
+					Loc::getMessage('CRM_AUTOMATION_TRIGGER_OPENLINE_ANSWER_EVENT_DATE_TIME') ?? ''
+				),
+			],
+			static::getOpenLineReturnProperties(),
+			[
+				[
+					'Id' => 'OpenLineAnswerTimeSec',
+					'Name' => Loc::getMessage('CRM_AUTOMATION_TRIGGER_OPENLINE_ANSWER_RETURN_ANSWER_TIME'),
+					'Type' => 'int',
+					'Default' => null,
+				]
 			]
-		];
+		);
 	}
 
 	public static function getDescription(): string

@@ -87,10 +87,9 @@ class ScheduleRunnerService
 		}
 
 		$message = new ScheduledTriggerMessage(
-			scheduleId: $schedule->getId(),
 			templateId: $schedule->getTemplateId(),
 			triggerName: $schedule->getTriggerName(),
-			scheduledAt: $scheduledAt->format(DateTime::getFormat()),
+			scheduledAt: $scheduledAt->format(DATE_ATOM),
 		);
 
 		try

@@ -13,6 +13,7 @@ use Bitrix\Main\HttpApplication;
 use Bitrix\Main\Mail\Context;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Mail\Sender;
+use Bitrix\Main\Mail\Sender\Identity;
 use Bitrix\Main\Mail\SenderSendCounter;
 use PHPMailer\PHPMailer\PHPMailer;
 use Bitrix\Main\Diag\FileLogger;
@@ -31,6 +32,11 @@ class Mailer extends PHPMailer
 	private const HEADER_BCC_REGEX = '/^\s*bcc:(?<emails>.+)/im';
 
 	private $configuration;
+
+	/**
+	 * Identity of the sender the message is sent on behalf of, used to read the limit of its record.
+	 */
+	private ?Identity $senderIdentity = null;
 
 	protected function getActualConfiguration(Context $context): array
 	{
@@ -62,6 +68,7 @@ class Mailer extends PHPMailer
 	public function prepareConfiguration(Context $context): bool
 	{
 		$this->configuration = $this->getActualConfiguration($context);
+		$this->senderIdentity = $context->getSenderIdentity();
 
 		$this->SMTPDebug = $this->configuration['debug'] ?? false;
 
@@ -367,22 +374,21 @@ class Mailer extends PHPMailer
 		$from = self::parseAddresses($this->From)[0]['address'];
 		$count = count($this->getAllRecipientAddresses());
 
-		$emailCounter = new SenderSendCounter();
-		$emailDailyLimit = Sender::getEmailLimit($from);
-		if($emailDailyLimit
-			&& ($emailCounter->get($from) + $count) > $emailDailyLimit)
+		$emailDailyLimit = Sender::getEmailLimit($from, $this->senderIdentity);
+		if (!$emailDailyLimit)
 		{
-			//daily limit exceeded
-			return false;
+			return true;
 		}
 
-		return true;
+		$emailCounter = new SenderSendCounter();
+
+		return ($emailCounter->get($from) + $count) <= $emailDailyLimit;
 	}
 
 	private function increaseLimit()
 	{
 		$from = self::parseAddresses($this->From)[0]['address'];
-		$emailDailyLimit = Sender::getEmailLimit($from);
+		$emailDailyLimit = Sender::getEmailLimit($from, $this->senderIdentity);
 
 		if (!$emailDailyLimit)
 		{

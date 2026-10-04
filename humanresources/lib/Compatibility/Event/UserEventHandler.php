@@ -123,6 +123,7 @@ class UserEventHandler
 			entityIdFilter: EntityIdFilter::fromEntityId($userId),
 			entityType: MemberEntityType::USER,
 			active: null,
+			withVirtualUsers: true,
 		);
 		$currentLinks = (new NodeMemberDataBuilder())
 			->setFilter($nodeMemberFilter)

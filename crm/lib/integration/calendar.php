@@ -8,6 +8,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\UI\Extension;
 use CCalendarSect;
+use Bitrix\Main\Web\Uri;
 
 class Calendar
 {
@@ -311,11 +312,11 @@ class Calendar
 		}
 		elseif ((int)$filterSelectId > 0 && ($filterSelectType === 'date' || $filterSelectType === 'datetime'))
 		{
-			$url = \CHTTP::urlAddParams($url, array($filterSelectName => '#DATE_FROM#'));
+			$url = str_replace('__DATE_FROM__', '#DATE_FROM#', (string)(new Uri($url))->addParams(array($filterSelectName => '__DATE_FROM__')));
 		}
 		elseif($filterSelectId == 'CLOSEDATE' || $filterSelectId === 'BEGINDATE')
 		{
-			$url = \CHTTP::urlAddParams($url, array($filterSelectId => '#DATE_FROM#'));
+			$url = str_replace('__DATE_FROM__', '#DATE_FROM#', (string)(new Uri($url))->addParams(array($filterSelectId => '__DATE_FROM__')));
 		}
 
 		return $url;
@@ -417,6 +418,78 @@ class Calendar
 		}
 
 		return self::$calendarEvents[$id] ?? null;
+	}
+
+	public static function getUserIdsByAttendeesEntityList(array $entityList): array
+	{
+		if (empty($entityList) || !Loader::includeModule('calendar'))
+		{
+			return [];
+		}
+
+		$calendarEntityList = [];
+		$seenEntityKeys = [];
+		$userIds = [];
+		foreach ($entityList as $entity)
+		{
+			if (
+				!is_array($entity)
+				|| !isset($entity['entityId'], $entity['id'])
+				|| !is_string($entity['entityId'])
+				|| $entity['entityId'] === ''
+				|| !is_scalar($entity['id'])
+			)
+			{
+				continue;
+			}
+
+			if ($entity['entityId'] === 'meta-user' && (string)$entity['id'] === 'all-users')
+			{
+				continue;
+			}
+
+			$entityKey = $entity['entityId'] . "\0" . (string)$entity['id'];
+			if (isset($seenEntityKeys[$entityKey]))
+			{
+				continue;
+			}
+			$seenEntityKeys[$entityKey] = true;
+
+			if ($entity['entityId'] === 'user')
+			{
+				$userId = is_int($entity['id'])
+					|| (is_string($entity['id']) && preg_match('/^[0-9]+$/D', $entity['id']) === 1)
+					? (int)$entity['id']
+					: 0;
+				if ($userId > 0)
+				{
+					$userIds[$userId] = $userId;
+				}
+
+				continue;
+			}
+
+			$calendarEntityList[] = [
+				'entityId' => $entity['entityId'],
+				'id' => $entity['id'],
+			];
+		}
+
+		if (empty($calendarEntityList))
+		{
+			return array_values($userIds);
+		}
+
+		foreach (\Bitrix\Calendar\Util::getUsersByEntityList($calendarEntityList) as $userId)
+		{
+			$userId = (int)$userId;
+			if ($userId > 0)
+			{
+				$userIds[$userId] = $userId;
+			}
+		}
+
+		return array_values($userIds);
 	}
 
 	public static function getUserTimeZone(int $userId, bool $getDefault = true): ?string

@@ -164,7 +164,7 @@ class WorkflowStateTable extends ORM\Data\DataManager
 	{
 		$connection = Main\Application::getConnection();
 		$sqlHelper = $connection->getSqlHelper();
-		$table = $sqlHelper->forSql(static::getTableName());
+		$table = $sqlHelper->quote(static::getTableName());
 
 		$zombieDocId = $sqlHelper->forSql(static::ZOMBIE_DOCUMENT_ID[2]);
 		$zombieEntity = $sqlHelper->forSql(static::ZOMBIE_DOCUMENT_ID[1]);

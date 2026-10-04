@@ -54,6 +54,11 @@ final class ProjectReadService
 		];
 	}
 
+	public function getDefaultNotificationCatalog(): array
+	{
+		return $this->projectProvider->getNotificationCatalogDefaults()->toArray();
+	}
+
 	public function getEditSettings(int $projectId): array
 	{
 		$project = $this->projectProvider->getById($projectId);
@@ -80,6 +85,7 @@ final class ProjectReadService
 			'dateStart' => (int)($projectData['dates']['startTs'] ?? 0),
 			'dateFinish' => (int)($projectData['dates']['finishTs'] ?? 0),
 			'tags' => $this->extractTagNames($projectData['tags'] ?? []),
+			'notifications' => $projectData['notificationCatalog'] ?? null,
 			...$this->projectChatSettingsService->getSettings($projectId),
 			...$this->mapPermissionsToLegacySettings($projectData['permissions'] ?? []),
 		];
@@ -352,7 +358,16 @@ final class ProjectReadService
 
 		foreach ($tags as $tag)
 		{
-			$name = is_array($tag) ? (string)($tag['name'] ?? '') : '';
+			$name = '';
+			if (is_array($tag))
+			{
+				$name = (string)($tag['name'] ?? '');
+			}
+			elseif (is_scalar($tag))
+			{
+				$name = (string)$tag;
+			}
+
 			if ($name !== '')
 			{
 				$result[] = $name;

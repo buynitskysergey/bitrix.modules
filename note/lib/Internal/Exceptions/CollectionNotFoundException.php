@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Internal\Exceptions;
 
-final class CollectionNotFoundException extends \RuntimeException
+use Bitrix\Note\Public\Exceptions\ObjectUnavailableInterface;
+
+final class CollectionNotFoundException extends \RuntimeException implements ObjectUnavailableInterface
 {
 }

@@ -44,6 +44,8 @@ class OrmRepository extends Repository
 {
 	protected string $dataClass;
 
+	private bool $deferredMode = false;
+
 	/**
 	 * @param string $dtoClass
 	 * @throws ReflectionException
@@ -66,6 +68,13 @@ class OrmRepository extends Repository
 		}
 
 		$this->dataClass = $attributes[0]->newInstance()->entity;
+	}
+
+	public function setDeferredMode(bool $value): static
+	{
+		$this->deferredMode = $value;
+
+		return $this;
 	}
 
 	/**
@@ -166,8 +175,11 @@ class OrmRepository extends Repository
 		}
 		else
 		{
-			// hard limit
-			$query->setLimit(PaginationStructure::DEFAULT_LIMIT);
+			// hard limit — skipped in deferred mode to allow returning all records
+			if (!$this->deferredMode)
+			{
+				$query->setLimit(PaginationStructure::DEFAULT_LIMIT);
+			}
 		}
 
 		return $query;
@@ -219,6 +231,7 @@ class OrmRepository extends Repository
 					$value = self::coerceOrmValueToEnum($propertyType, $value, $dtoProperty);
 				}
 			}
+
 			$dto->{$dtoProperty} = $value;
 		}
 
@@ -229,7 +242,11 @@ class OrmRepository extends Repository
 	{
 		if ($select === null)
 		{
-			return ['*'];
+			$select = SelectStructure::create(
+				SelectStructure::getScalarFieldNames($this->dtoClass),
+				$this->dtoClass,
+				new ListRequest($this->dtoClass),
+			);
 		}
 
 		$ormFields = [];

@@ -6,6 +6,7 @@ namespace Bitrix\Mobile\Auth;
 
 use Bitrix\Call\Settings;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Guest\Auth\AuthenticationService;
 use Bitrix\Im\V2\Guest\Auth\AuthError;
 use Bitrix\Im\V2\Guest\Auth\AuthorizationService;
 use Bitrix\Im\V2\Guest\Auth\InviteCode;
@@ -16,7 +17,9 @@ use Bitrix\Im\V2\SharingLink\GuestChatLink;
 use Bitrix\Im\V2\SharingLink\SharingLinkFactory;
 use Bitrix\Intranet\Enum\UserRole;
 use Bitrix\Intranet\Service\MobileAppSettings;
+use Bitrix\Main\Application;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ModuleManager;
@@ -38,6 +41,9 @@ use Bitrix\Pull\Config;
  */
 final class GuestCheckout
 {
+	/** Native token channel: the client keeps the guest token in its own account storage, not only in the cookie. */
+	private const HEADER_GUEST_TOKEN = 'X-Im-Guest-Token';
+
 	private const SERVICE_MOBILE_APP_SETTINGS = 'intranet.option.mobile_app';
 	private const COMPONENT_COMMUNICATION = 'communication';
 	private const COMPONENT_BACKGROUND = 'background';
@@ -53,7 +59,7 @@ final class GuestCheckout
 		$isSessionGuest = $this->user->IsAuthorized()
 			&& $this->user->GetParam('EXTERNAL_AUTH_ID') === UserRole::IM_GUEST->value;
 
-		$guestToken = Token::createFromRequest();
+		$guestToken = $this->resolveGuestToken();
 
 		// A guest already in the requested chat short-circuits joinByCode (whose addUserToChat
 		// re-bumps Recent on every checkout). Cross-chat falls through to joinByCode.
@@ -63,9 +69,64 @@ final class GuestCheckout
 		$isSessionGuestMember = $sessionGuestLink instanceof GuestChatLink
 			&& Chat::getInstance($sessionGuestLink->getChatId())->getRelationByUserId((int)$this->user->GetID()) !== null;
 
-		return $isSessionGuestMember
-			? $this->handleWarmStart($guestCode, $guestToken)
-			: $this->handleJoin($guestCode, $guestName, $guestToken);
+		if ($isSessionGuestMember)
+		{
+			return $this->handleWarmStart($guestCode, $guestToken);
+		}
+
+		// The app replays the stored guest_code on every start, so a guest whose session is already over
+		// would silently re-join: as the same guest while the token still resolves, as a brand-new one
+		// once it doesn't (joinByCode drops a stale token and registers a newcomer). Answer with the
+		// session-invalid contract instead — the native client drops the account and shows the auth screen.
+		if ($this->isEndedGuestSession($guestToken))
+		{
+			return $this->failureResponse(
+				sessionInvalid: true,
+				errors: [new Error('Guest session is over', AuthError::GUEST_SESSION_TERMINATED)],
+			);
+		}
+
+		return $this->handleJoin($guestCode, $guestName, $guestToken);
+	}
+
+	/**
+	 * Cookie first, then the native header. Ending a guest session clears the cookie, and on iOS the
+	 * webview really drops it — without the header the next cold start would carry no identity at all
+	 * and look like a newcomer following a live link.
+	 */
+	private function resolveGuestToken(): ?Token
+	{
+		$cookieToken = Token::createFromRequest();
+		if ($cookieToken !== null)
+		{
+			return $cookieToken;
+		}
+
+		$headerToken = Application::getInstance()->getContext()->getRequest()->getHeader(self::HEADER_GUEST_TOKEN);
+
+		return is_string($headerToken) && Token::isValid($headerToken) ? new Token($headerToken) : null;
+	}
+
+	/**
+	 * Whether the presented token belongs to a guest whose session is over: unknown or deactivated
+	 * (kicked, cleaned up), or still active but left without a single live link plus membership (left the
+	 * chat themselves, link revoked). A guest who still holds access elsewhere is not affected — the
+	 * cross-chat join keeps working. No token means no identity to invalidate: a plain newcomer.
+	 */
+	private function isEndedGuestSession(?Token $token): bool
+	{
+		if ($token === null || $this->isAuthorizedNonGuest())
+		{
+			return false;
+		}
+
+		$guestId = AuthenticationService::getInstance()->findUserByToken($token);
+		if ($guestId === null)
+		{
+			return true;
+		}
+
+		return !GuestService::getInstance()->hasValidGuestAccess($guestId);
 	}
 
 	/**
@@ -162,8 +223,12 @@ final class GuestCheckout
 	}
 
 	/**
-	 * Invalid current session → terminate it and have the native drop the account; otherwise a
+	 * Invalid current session → invalidate it and have the native drop the account; otherwise a
 	 * plain error that keeps the session.
+	 *
+	 * Invalidation must not go through \CUser::Logout(): it raises main:OnAfterUserLogout, and on the
+	 * cloud its bitrix24 subscriber answers with LocalRedirect to OAuth, which kills the request before
+	 * this JSON — including guestSessionInvalid — reaches the client.
 	 *
 	 * @param \Bitrix\Main\Error[] $errors
 	 */
@@ -171,7 +236,7 @@ final class GuestCheckout
 	{
 		if ($sessionInvalid)
 		{
-			AuthorizationService::getInstance()->terminate();
+			AuthorizationService::getInstance()->invalidateCurrentGuestSession();
 
 			return $this->buildError($errors, guestSessionInvalid: true);
 		}

@@ -17,6 +17,7 @@ use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\DocumentFileCleanupService;
 use Bitrix\Note\Internal\Service\DocumentFileService;
+use Bitrix\Note\Internal\Service\File\FileReachabilityService;
 use Bitrix\Note\Internal\Util\IdNormalizer;
 use Bitrix\Note\Internal\Service\NoteFileUrlService;
 
@@ -411,25 +412,56 @@ class FileController extends Controller
 			return null;
 		}
 
-		$cleanupResult = (new DocumentFileCleanupService())->cleanupByDocumentAndFileIds($documentId, $normalizedFileIds);
-		$cleanupData = $cleanupResult->getData();
-		$successFileIds = array_values(array_unique(array_filter(
-			array_map(static fn($id): int => (int)$id, (array)($cleanupData['successFileIds'] ?? [])),
-			static fn(int $id): bool => $id > 0,
-		)));
-		$failedFileIds = array_values(array_unique(array_filter(
-			array_map(static fn($id): int => (int)$id, (array)($cleanupData['failedFileIds'] ?? [])),
-			static fn(int $id): bool => $id > 0,
-		)));
+		$linkedFileIds = array_map(
+			static fn(array $link): int => (int)$link['FILE_ID'],
+			(new DocumentFileLinkRepository())->getByDocumentAndFileIds($documentId, $normalizedFileIds),
+		);
+		// Requested ids that aren't even linked to this document — same "failed" outcome the
+		// previous cleanupByDocumentAndFileIds reported for them.
+		$successFileIds = [];
+		$failedFileIds = array_values(array_diff($normalizedFileIds, $linkedFileIds));
 
-		if (!$cleanupResult->isSuccess())
+		if (!empty($linkedFileIds))
 		{
-			$failedFileIds = array_values(array_unique(array_merge($failedFileIds, $normalizedFileIds)));
+			// [P4.T4, invariant N2] Only fileIds unreachable by any surviving version may be
+			// physically removed. A still-reachable file keeps both its link row and its CFile —
+			// the client already dropped the token from the live content, which is all "unlink"
+			// means for it; the link row remains the reachability floor for its versions.
+			$unreachableFileIds = array_values(array_intersect(
+				$linkedFileIds,
+				(new FileReachabilityService())->getUnreachableFileIds($documentId),
+			));
+			$reachableFileIds = array_values(array_diff($linkedFileIds, $unreachableFileIds));
+			$successFileIds = array_merge($successFileIds, $reachableFileIds);
+
+			if (!empty($unreachableFileIds))
+			{
+				$cleanupResult = (new DocumentFileCleanupService())->cleanupUnreachableFiles($documentId, $unreachableFileIds);
+				$cleanupData = $cleanupResult->getData();
+				$successFileIds = array_merge($successFileIds, array_map(
+					static fn($id): int => (int)$id,
+					(array)($cleanupData['successFileIds'] ?? []),
+				));
+				$failedFileIds = array_merge($failedFileIds, array_map(
+					static fn($id): int => (int)$id,
+					(array)($cleanupData['failedFileIds'] ?? []),
+				));
+
+				if (!$cleanupResult->isSuccess())
+				{
+					$failedFileIds = array_merge($failedFileIds, $unreachableFileIds);
+				}
+			}
 		}
 
+		$normalizeIds = static fn(array $ids): array => array_values(array_unique(array_filter(
+			$ids,
+			static fn(int $id): bool => $id > 0,
+		)));
+
 		return [
-			'successIds' => $successFileIds,
-			'failedIds' => $failedFileIds,
+			'successIds' => $normalizeIds($successFileIds),
+			'failedIds' => $normalizeIds($failedFileIds),
 		];
 	}
 

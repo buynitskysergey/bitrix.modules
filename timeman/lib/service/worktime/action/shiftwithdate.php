@@ -18,7 +18,7 @@ class ShiftWithDate
 	/** @var \DateTime */
 	private $dateTimeEnd;
 
-	public function __construct(Shift $shift, Schedule $schedule, \DateTime $dateTimeStart)
+	public function __construct(Shift $shift, Schedule $schedule, \DateTime $dateTimeStart, ?int $userId = null)
 	{
 		$this->shift = $shift;
 		$this->schedule = $schedule;
@@ -28,8 +28,39 @@ class ShiftWithDate
 		}
 		$this->dateTimeStart = clone $dateTimeStart;
 		TimeHelper::getInstance()->setTimeFromSeconds($this->dateTimeStart, $this->shift->getWorkTimeStart());
-		$this->dateTimeEnd = clone $this->dateTimeStart;
-		$this->dateTimeEnd->add(new \DateInterval('PT' . $this->shift->getDuration() . 'S'));
+		$this->dateTimeEnd = $this->buildDateTimeEnd($userId);
+	}
+
+	/**
+	 * End of the shift as the WORK_TIME_END wall-time on the shift's calendar date, NOT dateTimeStart plus
+	 * getDuration() elapsed seconds (the two diverge across a DST transition inside the shift, which would
+	 * shift the auto-close/violation stop by an hour).
+	 *
+	 * With a userId the absolute instant is resolved date-aware in the employee's real IANA zone via
+	 * Shift::buildUtcEndByUserId() and then presented in the same zone as dateTimeStart, so every consumer
+	 * reading getDateTimeEnd()->getTimestamp() gets the DST-correct instant while the observable wall-time is
+	 * preserved for the common (non-DST) case. Without a userId (no user context) the end is the WORK_TIME_END
+	 * wall-time in the zone dateTimeStart already carries; in a fixed-offset zone that is identical to the
+	 * legacy start + duration, so no behaviour changes where the real zone is unknown.
+	 */
+	private function buildDateTimeEnd(?int $userId): \DateTime
+	{
+		$dateTimeEnd = clone $this->dateTimeStart;
+		if ($userId !== null)
+		{
+			$dateTimeEnd->setTimestamp(
+				$this->shift->buildUtcEndByUserId($userId, $this->dateTimeStart)->getTimestamp()
+			);
+			return $dateTimeEnd;
+		}
+
+		if ($this->shift->getWorkTimeEnd() <= $this->shift->getWorkTimeStart())
+		{
+			$dateTimeEnd->add(new \DateInterval('P1D'));
+		}
+		TimeHelper::getInstance()->setTimeFromSeconds($dateTimeEnd, $this->shift->getWorkTimeEnd());
+
+		return $dateTimeEnd;
 	}
 
 	public function isEligibleToStart(\DateTime $userDateTime)

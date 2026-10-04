@@ -23,10 +23,11 @@ class EmbeddingUninstaller
 		App $app,
 		string $placement,
 		?string $handler = null,
-		?int $userId = null,
+		?int $targetUserId = null,
+		int $userId = 0,
 	): int
 	{
-		return $this->uninstallLegacy($app, $placement, $handler, $userId);
+		return $this->uninstallLegacy($app, $userId, $placement, $handler, $targetUserId);
 	}
 
 	/**
@@ -35,23 +36,24 @@ class EmbeddingUninstaller
 	 */
 	private function uninstallLegacy(
 		App $app,
+		int $userId,
 		string $placement,
 		?string $handler = null,
-		?int $userId = null,
+		?int $targetUserId = null,
 	): int
 	{
 		$server = new CRestServer([]);
 		$reflectedServer = new ReflectionClass($server);
 
 		$this->setServerServiceDescription($server, $reflectedServer);
-		$this->setServerAuthData($server, $reflectedServer, $app->getScope());
+		$this->setServerAuthData($server, $reflectedServer, $app->getScope(), $userId);
 		$this->setServerClientId($server, $reflectedServer, $app->getClientId());
 
 		$params = array_filter(
 			[
 				'PLACEMENT' => $placement,
 				'HANDLER' => $handler,
-				'USER_ID' => $userId,
+				'USER_ID' => $targetUserId,
 			],
 			static fn(mixed $item): bool => $item !== null,
 		);

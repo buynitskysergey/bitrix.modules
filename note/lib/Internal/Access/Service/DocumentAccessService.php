@@ -6,18 +6,24 @@ namespace Bitrix\Note\Internal\Access\Service;
 
 use Bitrix\Main\Access\AccessCode;
 use Bitrix\Main\Application;
-use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Main\UserAccessTable;
 use Bitrix\Note\Internal\Access\PortalAdmin;
+use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Entity\RecycleBin\RecycleBinRecord;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\DocumentAccessTable;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Model\EventTable;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
+use Bitrix\Note\Infrastructure\Agent\Access\SubtreeAclReconcileScheduler;
+use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
+use Bitrix\Note\Internal\Service\History\EventLogService;
 
 final class DocumentAccessService
 {
@@ -28,9 +34,34 @@ final class DocumentAccessService
 	public const LEVEL_CODE_VIEW = 'view';
 	public const LEVEL_CODE_EDIT = 'edit';
 
+	// Single source of truth for "no inheritance source" on an ACL row (b_note_document_access.SOURCE_DOCUMENT_ID).
+	public const SOURCE_NONE = 0;
+
+	// Grant scope for future read/write contracts: this document only vs. this document and its subtree.
+	public const SCOPE_DOCUMENT = 'document';
+	public const SCOPE_SUBTREE = 'subtree';
+
 	private const ALLOWED_LEVELS = [self::LEVEL_NONE, self::LEVEL_VIEW, self::LEVEL_EDIT];
 
+	// [EVENT-01] Single pull command for both cascade delivery paths (collection + personal channel).
+	private const COMMAND_ACCESS_CASCADE = PushNotificationService::COMMAND_ACCESS_CASCADE;
+
+	// Bounds the personal-channel fan-out when a subtree grant targets a huge group/department.
+	private const MAX_PERSONAL_RECIPIENTS = 5000;
+
+	// Bounds the per-code membership expansion used for deny arithmetic. Held in memory as a
+	// code => users map, so unlike the merged expansion it cannot stop at the recipient cap; without
+	// its own bound a department code next to a deny would read the whole portal's memberships. Set
+	// well above MAX_PERSONAL_RECIPIENTS because one user may appear under several codes.
+	private const MAX_CODE_EXPANSION_ROWS = 20000;
+
+	private const ERROR_INVALID_SCOPE_LEVEL = 'NOTE_ACCESS_INVALID_SCOPE_LEVEL';
+	private const ERROR_SUBTREE_DISABLED = 'NOTE_ACCESS_SUBTREE_DISABLED';
+
 	private static ?array $userHasAnyGrantCache = null;
+
+	/** @var array<int, bool> request-scoped IS_MAIN cache, keyed by documentId */
+	private static array $isMainDocumentCache = [];
 
 	public static function normalizeLevel(string|int|null $level): int
 	{
@@ -77,33 +108,66 @@ final class DocumentAccessService
 		], static fn($code) => is_string($code) && $code !== '' && $code !== '*')));
 
 		$query = DocumentAccessTable::query()
-			->setSelect(['LEVEL'])
+			->setSelect(['LEVEL', 'SOURCE_DOCUMENT_ID'])
 			->where('DOCUMENT_ID', $documentId)
 			->whereIn('SUBJECT_CODE', $codes)
 			->exec()
 		;
 
-		$personalLevel = null;
-		$personalDeny = false;
+		$rows = [];
 		while ($row = $query->fetch())
 		{
-			$level = (int)$row['LEVEL'];
-			if ($level === self::LEVEL_NONE)
+			$rows[] = ['level' => (int)$row['LEVEL'], 'source' => (int)$row['SOURCE_DOCUMENT_ID']];
+		}
+
+		return self::reduceDocumentLevel($rows);
+	}
+
+	/**
+	 * [ALG-01] Aggregates one subject's ACL rows on a single document into its document-level.
+	 * Single source of truth for the formula — shared by getDocumentLevel() and
+	 * batchGetEffectiveLevels().
+	 *
+	 * Rows split into explicit (SOURCE_DOCUMENT_ID == SOURCE_NONE) and inherited (source != 0).
+	 * An explicit deny (LEVEL_NONE) collapses ONLY the explicit contribution to 0; inheritance is
+	 * hard — inheritedLevel enters the result as a separate max branch and a local explicit none
+	 * cannot revoke it. With no inherited rows, documentLevel == explicitLevel (prior semantics).
+	 *
+	 * @param array<int, array{level: int, source: int}> $rows
+	 */
+	public static function reduceDocumentLevel(array $rows): int
+	{
+		$explicitLevel = self::LEVEL_NONE;
+		$explicitDeny = false;
+		$inheritedLevel = self::LEVEL_NONE;
+
+		foreach ($rows as $row)
+		{
+			$level = (int)$row['level'];
+			if ((int)$row['source'] === self::SOURCE_NONE)
 			{
-				$personalDeny = true;
+				if ($level === self::LEVEL_NONE)
+				{
+					$explicitDeny = true;
+				}
+				else
+				{
+					$explicitLevel = max($explicitLevel, $level);
+				}
 			}
 			else
 			{
-				$personalLevel = max($personalLevel ?? self::LEVEL_NONE, $level);
+				// Inherited rows never carry a deny by construction; LEVEL_NONE would just add 0.
+				$inheritedLevel = max($inheritedLevel, $level);
 			}
 		}
 
-		if ($personalDeny)
+		if ($explicitDeny)
 		{
-			return self::LEVEL_NONE;
+			$explicitLevel = self::LEVEL_NONE;
 		}
 
-		return $personalLevel ?? self::LEVEL_NONE;
+		return max($explicitLevel, $inheritedLevel);
 	}
 
 	public static function getEffectiveLevel(int $documentId, int $collectionId, int $userId, array $accessCodes): int
@@ -196,7 +260,7 @@ final class DocumentAccessService
 			'canEditCollection' => $levels['collection'] >= CollectionAccessService::LEVEL_MANAGE,
 			'canManagePermissions' => $levels['collection'] >= CollectionAccessService::LEVEL_MODERATE,
 			'canView' => $effective >= self::LEVEL_VIEW,
-			'canEdit' => !$isArchived && $effective >= self::LEVEL_EDIT,
+			'canEdit' => !$isArchived && self::allowsWrite($documentId, $levels),
 			'sharedAccess' => $levels['collection'] < CollectionAccessService::LEVEL_VIEW,
 		];
 	}
@@ -221,10 +285,73 @@ final class DocumentAccessService
 		}
 
 		$accessCodes = self::getCurrentUserAccessCodes($userId);
+		$levels = self::getAccessLevels($documentId, $collectionId, $userId, $accessCodes);
 
-		return self::getEffectiveLevel($documentId, $collectionId, $userId, $accessCodes) >= $requiredLevel;
+		if ($requiredLevel >= self::LEVEL_EDIT)
+		{
+			return self::allowsWrite($documentId, $levels);
+		}
+
+		return max($levels['collection'], $levels['document']) >= $requiredLevel;
 	}
 
+	/**
+	 * Write access to a document. Ordinary documents go by the effective level
+	 * (max of the collection and document grants); a collection's main document — the
+	 * knowledge base description — is writable only by a knowledge base administrator,
+	 * i.e. MODERATE on the collection. Readers with EDIT (and document-level grants,
+	 * which the description never has anyway) only view it.
+	 *
+	 * @param array{collection: int, document: int} $levels
+	 */
+	private static function allowsWrite(int $documentId, array $levels): bool
+	{
+		if (self::isMainDocument($documentId))
+		{
+			return $levels['collection'] >= CollectionAccessService::LEVEL_MODERATE;
+		}
+
+		return max($levels['collection'], $levels['document']) >= self::LEVEL_EDIT;
+	}
+
+	/**
+	 * Costs one PK lookup per document per request; the answer never changes within a hit.
+	 */
+	private static function isMainDocument(int $documentId): bool
+	{
+		if ($documentId <= 0)
+		{
+			return false;
+		}
+
+		if (array_key_exists($documentId, self::$isMainDocumentCache))
+		{
+			return self::$isMainDocumentCache[$documentId];
+		}
+
+		$row = DocumentTable::query()
+			->setSelect(['ID'])
+			->where('ID', $documentId)
+			->where('IS_MAIN', DocumentTable::IS_MAIN_YES)
+			->setLimit(1)
+			->fetch()
+		;
+
+		return self::$isMainDocumentCache[$documentId] = ($row !== false);
+	}
+
+	/**
+	 * [P3.T1 / API-01] Source-aware full replacement of a document's manageable ACL.
+	 *
+	 * The incoming list is the complete desired state of the two MUTABLE row kinds on this
+	 * document — ordinary explicit grants (scope 'document', SOURCE_NONE) and subtree markers
+	 * (scope 'subtree', SOURCE == documentId). Derived rows inherited from an ancestor
+	 * (SOURCE == ancestor id) are read-only and are NEVER touched here: the full-replace deletes
+	 * only SOURCE_NONE rows, so editing a descendant's own permissions cannot revoke the access an
+	 * active ancestor source pushed down onto it.
+	 *
+	 * @param array<int, array{subjectCode: string, level: string|int, scope?: string}> $permissions
+	 */
 	public static function replaceDocumentPermissions(
 		int $documentId,
 		array $permissions,
@@ -240,62 +367,124 @@ final class DocumentAccessService
 			return $result;
 		}
 
-		$hadAclBefore = self::hasAnyAclRow($documentId);
-		$prepared = [];
-
+		// Desired end-state, split by scope. documentGrants → SOURCE_NONE rows (level may be NONE =
+		// explicit deny); subtreeGrants → markers (positive level only).
+		$documentGrants = [];
+		$subtreeGrants = [];
 		foreach ($permissions as $permission)
 		{
 			$subjectCode = (string)($permission['subjectCode'] ?? '');
 			$level = self::normalizeLevel($permission['level'] ?? self::LEVEL_NONE);
+			$scope = self::normalizeScope($permission['scope'] ?? self::SCOPE_DOCUMENT);
 
 			if ($subjectCode === '*' || !AccessCode::isValid($subjectCode))
 			{
 				continue;
 			}
 
-			$prepared[$subjectCode] = [
-				'DOCUMENT_ID' => $documentId,
-				'SUBJECT_CODE' => $subjectCode,
-				'LEVEL' => $level,
-				'CREATED_BY' => $actorId,
-			];
+			if ($scope === self::SCOPE_SUBTREE)
+			{
+				if ($level === self::LEVEL_NONE)
+				{
+					// "none + subtree" is not a subtree-wide deny — inheritance carries access, not
+					// its absence — so the combination is rejected rather than silently downgraded.
+					$result->addError(new \Bitrix\Main\Error(
+						'Subtree scope requires a positive level',
+						self::ERROR_INVALID_SCOPE_LEVEL,
+					));
+
+					return $result;
+				}
+				$subtreeGrants[$subjectCode] = $level;
+			}
+			else
+			{
+				$documentGrants[$subjectCode] = $level;
+			}
 		}
+
+		// A subject may not hold a marker and an ordinary explicit row simultaneously; the subtree
+		// scope wins if a malformed payload lists the same subject twice.
+		foreach (array_keys($subtreeGrants) as $subjectCode)
+		{
+			unset($documentGrants[$subjectCode]);
+		}
+
+		$oldExplicit = self::fetchGrantsBySource($documentId, self::SOURCE_NONE);
+		$oldMarkers = self::fetchGrantsBySource($documentId, $documentId);
+
+		// Creating a NEW subtree grant (a marker where the subject had none) is gated by the flag.
+		// Keeping, re-levelling or revoking an existing marker stays always-on.
+		if (!empty($subtreeGrants) && !Configuration::isSubtreeInheritanceEnabled())
+		{
+			foreach ($subtreeGrants as $subjectCode => $level)
+			{
+				if (!isset($oldMarkers[$subjectCode]))
+				{
+					$result->addError(new \Bitrix\Main\Error(
+						'Subtree inheritance is not available',
+						self::ERROR_SUBTREE_DISABLED,
+					));
+
+					return $result;
+				}
+			}
+		}
+
+		ksort($documentGrants);
+		ksort($subtreeGrants);
+		$explicitChanged = $oldExplicit !== $documentGrants;
+		$markersChanged = $oldMarkers !== $subtreeGrants;
+		$grantsChanged = $explicitChanged || $markersChanged;
+
+		$affectedSubjects = self::collectAffectedSubjects($oldExplicit, $documentGrants, $oldMarkers, $subtreeGrants);
+
+		$hadAclBefore = self::hasAnyAclRow($documentId);
+		$hasAclAfter = !empty($documentGrants) || !empty($subtreeGrants);
+		$collectionId = (int)(self::resolveDocumentCollectionId($documentId) ?? 0);
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
 		$committed = false;
+		$affectedDocumentIds = [$documentId];
 		try
 		{
-			$deleteResult = self::deleteByDocumentId($documentId);
-			if (!$deleteResult->isSuccess())
+			// Replace ordinary explicit rows only (also sweeps the legacy '*' policy row, SOURCE_NONE).
+			DocumentAccessTable::deleteByFilter([
+				'=DOCUMENT_ID' => $documentId,
+				'=SOURCE_DOCUMENT_ID' => self::SOURCE_NONE,
+			]);
+			if (!empty($documentGrants))
 			{
-				$result->addErrors($deleteResult->getErrors());
-				$connection->rollbackTransaction();
-
-				return $result;
+				self::insertExplicitRows($documentId, $documentGrants, $actorId);
 			}
 
-			if (!empty($prepared))
+			// Markers alone decide what this source pushes down, so an unchanged marker set means an
+			// unchanged target: convergeMarkers writes nothing and reconcile walks the whole subtree
+			// only to find no diff. An explicit-only save (the common case on a document that also
+			// shares its subtree) must not pay for that walk.
+			if ($markersChanged)
 			{
-				$sqlHelper = $connection->getSqlHelper();
-				$values = [];
-				foreach ($prepared as $row)
-				{
-					$values[] = sprintf(
-						"(%s, %d, '%s', %d, %d)",
-						$sqlHelper->convertToDbDateTime(new \Bitrix\Main\Type\DateTime()),
-						$documentId,
-						$sqlHelper->forSql((string)$row['SUBJECT_CODE']),
-						(int)$row['LEVEL'],
-						(int)$row['CREATED_BY'],
-					);
-				}
+				self::convergeMarkers($connection, $documentId, $subtreeGrants, $actorId);
 
-				$connection->queryExecute(
-					'INSERT INTO b_note_document_access'
-					. ' (CREATED_AT, DOCUMENT_ID, SUBJECT_CODE, LEVEL, CREATED_BY) VALUES '
-					. implode(', ', $values)
-				);
+				if ($collectionId > 0)
+				{
+					// A subtree grant to a huge audience can exceed the sync widen threshold; the queue
+					// sink hands that widen to the durable agent (P4.T6). Narrowing stays synchronous.
+					$descendantIds = (new SubtreeAclReconciler(null, new SubtreeAclReconcileScheduler()))
+						->reconcile($documentId, $collectionId);
+					foreach ($descendantIds as $descId)
+					{
+						$affectedDocumentIds[] = (int)$descId;
+					}
+				}
+			}
+
+			// Fires only when the manageable grant set actually changed — an idempotent re-save must
+			// not add a history event.
+			if ($grantsChanged && Configuration::isActivityEnabled())
+			{
+				(new EventLogService())->record(EventTable::SCOPE_DOCUMENT, $documentId, 'access_changed', $actorId);
 			}
 
 			$connection->commitTransaction();
@@ -311,15 +500,502 @@ final class DocumentAccessService
 
 		if ($committed)
 		{
-			$hasAclAfter = $prepared !== [];
 			if ($hadAclBefore || $hasAclAfter)
 			{
-				// Skip emission only when both sides are empty (nothing changed, no subscribers cared).
+				// Root editor refetches its own capabilities (EVENT contract unchanged by EVENT-01).
 				self::dispatchDocumentCapabilities($documentId, $pushService);
+			}
+
+			if ($grantsChanged && $collectionId > 0)
+			{
+				self::dispatchAccessCascade(
+					$collectionId,
+					array_values(array_unique($affectedDocumentIds)),
+					array_keys($affectedSubjects),
+					$pushService,
+				);
 			}
 		}
 
 		return $result;
+	}
+
+	private static function normalizeScope(string|null $scope): string
+	{
+		return mb_strtolower(trim((string)$scope)) === self::SCOPE_SUBTREE
+			? self::SCOPE_SUBTREE
+			: self::SCOPE_DOCUMENT;
+	}
+
+	/**
+	 * @return array<string, int> subjectCode => level for rows of the given source (excludes '*'),
+	 *                             sorted by key for order-independent diffing
+	 */
+	private static function fetchGrantsBySource(int $documentId, int $source): array
+	{
+		$rows = DocumentAccessTable::query()
+			->setSelect(['SUBJECT_CODE', 'LEVEL'])
+			->where('DOCUMENT_ID', $documentId)
+			->where('SOURCE_DOCUMENT_ID', $source)
+			->where('SUBJECT_CODE', '!=', '*')
+			->fetchAll();
+
+		$map = [];
+		foreach ($rows as $row)
+		{
+			$map[(string)$row['SUBJECT_CODE']] = (int)$row['LEVEL'];
+		}
+		ksort($map);
+
+		return $map;
+	}
+
+	private static function insertExplicitRows(int $documentId, array $grants, int $actorId): void
+	{
+		$now = new DateTime();
+		$rows = [];
+		foreach ($grants as $subjectCode => $level)
+		{
+			$rows[] = [
+				'CREATED_AT' => $now,
+				'DOCUMENT_ID' => $documentId,
+				'SUBJECT_CODE' => (string)$subjectCode,
+				'LEVEL' => (int)$level,
+				'SOURCE_DOCUMENT_ID' => self::SOURCE_NONE,
+				'CREATED_BY' => $actorId,
+			];
+		}
+
+		DocumentAccessTable::addMulti($rows, true);
+	}
+
+	/**
+	 * [ALG-03] Converge subtree markers on the root to the desired set: drop markers whose subject
+	 * left the set, UPSERT the rest (cross-DB, LEVEL-only on conflict).
+	 *
+	 * @param array<string, int> $newMarkers subjectCode => level
+	 */
+	private static function convergeMarkers($connection, int $documentId, array $newMarkers, int $actorId): void
+	{
+		// The '*' marker is never produced by this path ('*' is rejected upstream), but both the
+		// empty and the non-empty converge must treat it the same way — never sweep it.
+		$staleFilter = [
+			'=DOCUMENT_ID' => $documentId,
+			'=SOURCE_DOCUMENT_ID' => $documentId,
+			'!=SUBJECT_CODE' => '*',
+		];
+		if (!empty($newMarkers))
+		{
+			$staleFilter['!@SUBJECT_CODE'] = array_keys($newMarkers);
+		}
+		DocumentAccessTable::deleteByFilter($staleFilter);
+
+		if (empty($newMarkers))
+		{
+			return;
+		}
+
+		$sqlHelper = $connection->getSqlHelper();
+		$now = new DateTime();
+		$rows = [];
+		foreach ($newMarkers as $subjectCode => $level)
+		{
+			$rows[] = [
+				'DOCUMENT_ID' => $documentId,
+				'SUBJECT_CODE' => (string)$subjectCode,
+				'LEVEL' => (int)$level,
+				'SOURCE_DOCUMENT_ID' => $documentId,
+				'CREATED_BY' => $actorId,
+				'CREATED_AT' => $now,
+			];
+		}
+
+		$sql = $sqlHelper->prepareMergeValues(
+			DocumentAccessTable::getTableName(),
+			['DOCUMENT_ID', 'SUBJECT_CODE', 'SOURCE_DOCUMENT_ID'],
+			$rows,
+			['LEVEL'],
+		);
+		if ($sql !== '')
+		{
+			$connection->queryExecute($sql);
+		}
+	}
+
+	/**
+	 * Subjects whose grant changed across explicit and marker rows — a safe superset for the
+	 * personal-channel fan-out (over-notifying only triggers a harmless refetch on the client).
+	 *
+	 * @param array<string, int> $oldExplicit
+	 * @param array<string, int> $newExplicit
+	 * @param array<string, int> $oldMarkers
+	 * @param array<string, int> $newMarkers
+	 * @return array<string, true>
+	 */
+	private static function collectAffectedSubjects(
+		array $oldExplicit,
+		array $newExplicit,
+		array $oldMarkers,
+		array $newMarkers
+	): array
+	{
+		$affected = [];
+		foreach (array_keys($oldExplicit + $newExplicit) as $subjectCode)
+		{
+			if (($oldExplicit[$subjectCode] ?? null) !== ($newExplicit[$subjectCode] ?? null))
+			{
+				$affected[$subjectCode] = true;
+			}
+		}
+		foreach (array_keys($oldMarkers + $newMarkers) as $subjectCode)
+		{
+			if (($oldMarkers[$subjectCode] ?? null) !== ($newMarkers[$subjectCode] ?? null))
+			{
+				$affected[$subjectCode] = true;
+			}
+		}
+
+		return $affected;
+	}
+
+	/**
+	 * [EVENT-01] Publish the cascade pull after commit over two paths:
+	 *   1. collection channel — reaches viewers already subscribed to NOTE_COLLECTION_{cid};
+	 *   2. personal channel of every affected recipient — a subtree grantee has no collection access
+	 *      (not subscribed to the collection tag) and would otherwise miss the change on first grant
+	 *      and on revoke.
+	 *
+	 * @param int[] $affectedDocumentIds
+	 * @param string[] $affectedSubjectCodes
+	 */
+	private static function dispatchAccessCascade(
+		int $collectionId,
+		array $affectedDocumentIds,
+		array $affectedSubjectCodes,
+		?PushNotificationService $pushService
+	): void
+	{
+		if (!Configuration::isAccessCascadeBroadcastEnabled())
+		{
+			return;
+		}
+
+		$push = $pushService ?? new PushNotificationService();
+
+		// Path 1: collection cascade (threshold-aware payload handled inside emitDocumentCascade).
+		$push->emitDocumentCascade($collectionId, $affectedDocumentIds, self::COMMAND_ACCESS_CASCADE);
+
+		// Path 2: personal channel per affected recipient.
+		$userIds = self::resolveSubjectUserIds($affectedSubjectCodes);
+		if (empty($userIds))
+		{
+			return;
+		}
+
+		$requestRefetch = count($affectedDocumentIds) > PushNotificationService::REALTIME_BATCH_THRESHOLD;
+		$personalPayload = $requestRefetch
+			? ['collectionId' => $collectionId, 'requestRefetch' => true]
+			: ['collectionId' => $collectionId, 'documentIds' => array_values(array_map('intval', $affectedDocumentIds))];
+
+		$push->dispatchAfterCommit(static function () use ($push, $userIds, $personalPayload): void {
+			$push->sendToUserChannels($userIds, self::COMMAND_ACCESS_CASCADE, $personalPayload);
+		});
+	}
+
+	/**
+	 * [P4.T6] Cascade pull for rows the background reconciler materialised. A widen past the sync
+	 * threshold has no request behind it, so without this the grantee keeps seeing a partial subtree
+	 * until a full reload: the rows arrive, but nobody tells the open client. Emitted per agent tick,
+	 * not per chunk, so a huge source converges visibly without a push storm.
+	 *
+	 * @param int[] $documentIds
+	 * @param string[] $subjectCodes
+	 */
+	public static function notifyMaterialisedSubtree(
+		int $collectionId,
+		array $documentIds,
+		array $subjectCodes,
+		?PushNotificationService $pushService = null
+	): void
+	{
+		if ($collectionId <= 0 || empty($documentIds) || empty($subjectCodes))
+		{
+			return;
+		}
+
+		self::dispatchAccessCascade($collectionId, $documentIds, $subjectCodes, $pushService);
+	}
+
+	/**
+	 * Reverse-resolves subject access codes to concrete user ids for the personal push path.
+	 * Direct `U{id}` codes resolve locally; group/department/other provider codes are expanded to
+	 * their members through the materialised user-access relations table (b_user_access). There is
+	 * no ready-made reverse helper in the module — buildUserAccessCodes only goes user → codes.
+	 *
+	 * @param string[] $subjectCodes
+	 * @return int[] distinct user ids (bounded by MAX_PERSONAL_RECIPIENTS)
+	 */
+	private static function resolveSubjectUserIds(array $subjectCodes): array
+	{
+		$codes = array_values(array_unique(array_filter(
+			$subjectCodes,
+			static fn($code) => is_string($code) && $code !== '' && $code !== '*',
+		)));
+		if (empty($codes))
+		{
+			return [];
+		}
+
+		$userIds = [];
+		$lookupCodes = [];
+		foreach ($codes as $code)
+		{
+			if (preg_match('/^U(\d+)$/', $code, $matches) === 1)
+			{
+				$uid = (int)$matches[1];
+				if ($uid <= 0)
+				{
+					continue;
+				}
+
+				$userIds[$uid] = true;
+				if (count($userIds) >= self::MAX_PERSONAL_RECIPIENTS)
+				{
+					return array_keys($userIds);
+				}
+			}
+			else
+			{
+				$lookupCodes[] = $code;
+			}
+		}
+
+		foreach (array_chunk($lookupCodes, 500) as $chunk)
+		{
+			$remaining = self::MAX_PERSONAL_RECIPIENTS - count($userIds);
+			if ($remaining <= 0)
+			{
+				break;
+			}
+
+			// The cap has to bound the QUERY, not the loop over its result: a single department code
+			// covers the whole portal, and fetchAll() would materialise all of it before the cap
+			// discarded the tail. LIMIT counts rows, not new users, so a chunk that mostly repeats
+			// already-seen users can stop below the cap — acceptable, since being at the cap already
+			// means the audience is truncated.
+			$rows = UserAccessTable::query()
+				->setSelect(['USER_ID'])
+				->whereIn('ACCESS_CODE', $chunk)
+				->setDistinct()
+				->setLimit($remaining)
+				->exec()
+			;
+			while ($row = $rows->fetch())
+			{
+				$uid = (int)$row['USER_ID'];
+				if ($uid > 0)
+				{
+					$userIds[$uid] = true;
+				}
+			}
+		}
+
+		return array_keys($userIds);
+	}
+
+	/**
+	 * Users whose EFFECTIVE document-level access is above none on at least one of the given
+	 * documents. This is the audience of the "Shared with me" tree: they see these documents
+	 * without collection access, so tree changes must reach them through their personal pull
+	 * channel (the collection channel is closed to them, and subscribing them to it would leak
+	 * titles of documents they may not see).
+	 *
+	 * "Effective" is what {@see reduceDocumentLevel} computes, and it is NOT the same as "holds a
+	 * positive row": an explicit deny (LEVEL_NONE, SOURCE_NONE) zeroes the WHOLE explicit
+	 * contribution of whoever it covers, so a user reached by a group grant and denied personally
+	 * has no access at all — while the group's row stays positive and would pull them into the
+	 * audience together with the document title (documentCreate/documentUpdate/documentRestore
+	 * carry it). Inheritance is hard and a deny cannot touch it, so a derived row always keeps its
+	 * holder in, denied or not.
+	 *
+	 * @param int[] $documentIds
+	 * @return int[] distinct user ids
+	 */
+	public static function resolveGranteeUserIds(array $documentIds): array
+	{
+		$ids = array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $documentIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		// Codes that grant unconditionally — every derived row, plus (below) the explicit rows of
+		// documents carrying no deny at all. That is the overwhelmingly common case and it stays one
+		// bulk expansion, exactly as before.
+		$plainCodes = [];
+		/** @var array<int, array<string, true>> $explicitByDocument */
+		$explicitByDocument = [];
+		/** @var array<int, array<string, true>> $denyByDocument */
+		$denyByDocument = [];
+
+		foreach (array_chunk($ids, 500) as $chunk)
+		{
+			$rows = DocumentAccessTable::query()
+				->setSelect(['DOCUMENT_ID', 'SUBJECT_CODE', 'LEVEL', 'SOURCE_DOCUMENT_ID'])
+				->whereIn('DOCUMENT_ID', $chunk)
+				->exec()
+			;
+			while ($row = $rows->fetch())
+			{
+				$code = (string)($row['SUBJECT_CODE'] ?? '');
+				if ($code === '')
+				{
+					continue;
+				}
+
+				$level = (int)$row['LEVEL'];
+				if ((int)$row['SOURCE_DOCUMENT_ID'] !== self::SOURCE_NONE)
+				{
+					if ($level > self::LEVEL_NONE)
+					{
+						$plainCodes[$code] = true;
+					}
+
+					continue;
+				}
+
+				$documentId = (int)$row['DOCUMENT_ID'];
+				if ($level > self::LEVEL_NONE)
+				{
+					$explicitByDocument[$documentId][$code] = true;
+				}
+				else
+				{
+					$denyByDocument[$documentId][$code] = true;
+				}
+			}
+		}
+
+		foreach ($explicitByDocument as $documentId => $codes)
+		{
+			if (!isset($denyByDocument[$documentId]))
+			{
+				$plainCodes += $codes;
+				unset($explicitByDocument[$documentId]);
+			}
+		}
+
+		$userIds = array_fill_keys(self::resolveSubjectUserIds(array_keys($plainCodes)), true);
+		if (empty($explicitByDocument))
+		{
+			return array_keys($userIds);
+		}
+
+		// Only documents that actually carry a deny get here, so the per-document set arithmetic runs
+		// over a handful of them. Each code is expanded once and reused across those documents; the
+		// memory this holds is of the same order as the audience it produces.
+		// Deny codes go in FIRST: the expansion is row-bounded, and truncating it must never make a
+		// denied user look allowed. Dropping the tail of a positive code only costs that user a live
+		// update (their client catches up on the next load); dropping a deny would push to someone the
+		// document is explicitly closed to.
+		$codesToExpand = [];
+		foreach ($denyByDocument as $documentId => $codes)
+		{
+			if (isset($explicitByDocument[$documentId]))
+			{
+				$codesToExpand += $codes;
+			}
+		}
+		foreach ($explicitByDocument as $codes)
+		{
+			$codesToExpand += $codes;
+		}
+		$usersByCode = self::expandCodesToUsers(array_keys($codesToExpand));
+
+		foreach ($explicitByDocument as $documentId => $codes)
+		{
+			$denied = [];
+			foreach (array_keys($denyByDocument[$documentId]) as $code)
+			{
+				$denied += $usersByCode[$code] ?? [];
+			}
+
+			foreach (array_keys($codes) as $code)
+			{
+				foreach (array_keys($usersByCode[$code] ?? []) as $userId)
+				{
+					if (!isset($denied[$userId]))
+					{
+						$userIds[$userId] = true;
+					}
+				}
+			}
+		}
+
+		if (count($userIds) > self::MAX_PERSONAL_RECIPIENTS)
+		{
+			$userIds = array_slice($userIds, 0, self::MAX_PERSONAL_RECIPIENTS, true);
+		}
+
+		return array_keys($userIds);
+	}
+
+	/**
+	 * Expands access codes to their members, KEEPING the code → users mapping — unlike
+	 * {@see resolveSubjectUserIds}, which only needs the union and can merge the codes before
+	 * querying. Needed where a user's membership has to be weighed against a deny on the same
+	 * document, which the merged form can no longer tell apart.
+	 *
+	 * @param string[] $codes
+	 * @return array<string, array<int, true>>
+	 */
+	private static function expandCodesToUsers(array $codes): array
+	{
+		$byCode = [];
+		$lookupCodes = [];
+		foreach ($codes as $code)
+		{
+			if (preg_match('/^U(\d+)$/', $code, $matches) === 1)
+			{
+				$userId = (int)$matches[1];
+				$byCode[$code] = $userId > 0 ? [$userId => true] : [];
+			}
+			else
+			{
+				$byCode[$code] = [];
+				$lookupCodes[] = $code;
+			}
+		}
+
+		$budget = self::MAX_CODE_EXPANSION_ROWS;
+		foreach (array_chunk($lookupCodes, 500) as $chunk)
+		{
+			if ($budget <= 0)
+			{
+				break;
+			}
+
+			$rows = UserAccessTable::query()
+				->setSelect(['ACCESS_CODE', 'USER_ID'])
+				->whereIn('ACCESS_CODE', $chunk)
+				->setLimit($budget)
+				->exec()
+			;
+			while ($row = $rows->fetch())
+			{
+				$budget--;
+				$userId = (int)$row['USER_ID'];
+				if ($userId > 0)
+				{
+					$byCode[(string)$row['ACCESS_CODE']][$userId] = true;
+				}
+			}
+		}
+
+		return $byCode;
 	}
 
 	private static function hasAnyAclRow(int $documentId): bool
@@ -342,7 +1018,7 @@ final class DocumentAccessService
 
 	private static function dispatchDocumentCapabilities(int $documentId, ?PushNotificationService $pushService): void
 	{
-		if (Option::get('note', 'phase4_broadcast_enabled', 'Y') !== 'Y')
+		if (!Configuration::isAccessCascadeBroadcastEnabled())
 		{
 			return;
 		}
@@ -357,6 +1033,17 @@ final class DocumentAccessService
 		});
 	}
 
+	/**
+	 * [API-02] One entry per ACL row (excluding the legacy '*' policy row). Scope/source read
+	 * straight from SOURCE_DOCUMENT_ID — there is no separate scope store:
+	 *   - source = SOURCE_NONE   → explicit grant on this document (scope 'document', mutable).
+	 *   - source = $documentId   → subtree-scope marker on this document itself (scope 'subtree',
+	 *                              mutable — this is where the grant originates).
+	 *   - source = ancestor id   → derived inherited row (inherited=true, sourceDocumentId set,
+	 *                              immutable — the frontend renders it read-only).
+	 *
+	 * @return array<int, array{subjectCode: string, level: string, scope: string, inherited: bool, sourceDocumentId: int|null}>
+	 */
 	public static function getDocumentPermissions(int $documentId): array
 	{
 		if ($documentId <= 0)
@@ -365,18 +1052,72 @@ final class DocumentAccessService
 		}
 
 		$accessItems = DocumentAccessTable::getList([
-			'select' => ['SUBJECT_CODE', 'LEVEL'],
+			'select' => ['SUBJECT_CODE', 'LEVEL', 'SOURCE_DOCUMENT_ID'],
 			'filter' => [
 				'=DOCUMENT_ID' => $documentId,
 				'!=SUBJECT_CODE' => '*',
 			],
-			'order' => ['SUBJECT_CODE' => 'ASC'],
+			'order' => ['SUBJECT_CODE' => 'ASC', 'SOURCE_DOCUMENT_ID' => 'ASC'],
 		])->fetchCollection();
 
-		return array_map(static fn($item): array => [
-			'subjectCode' => (string)$item->getSubjectCode(),
-			'level' => self::levelToCode((int)$item->getLevel()),
-		], $accessItems->getAll());
+		$rows = $accessItems->getAll();
+
+		// An inherited grant cannot be edited here — only on its source document. Naming that source
+		// is what makes the read-only tag actionable: without it a moderator sees a person they cannot
+		// remove and no hint where to go. Safe to expose: derived rows are only ever materialised
+		// within one collection, and reading permissions already requires MODERATE on it.
+		$sourceIds = [];
+		foreach ($rows as $item)
+		{
+			$source = (int)$item->getSourceDocumentId();
+			if ($source !== self::SOURCE_NONE && $source !== $documentId)
+			{
+				$sourceIds[$source] = true;
+			}
+		}
+		$sourceTitles = self::resolveDocumentTitles(array_keys($sourceIds));
+
+		return array_map(static function ($item) use ($documentId, $sourceTitles): array {
+			$source = (int)$item->getSourceDocumentId();
+			$inherited = $source !== self::SOURCE_NONE && $source !== $documentId;
+
+			return [
+				'subjectCode' => (string)$item->getSubjectCode(),
+				'level' => self::levelToCode((int)$item->getLevel()),
+				'scope' => $source === $documentId ? self::SCOPE_SUBTREE : self::SCOPE_DOCUMENT,
+				'inherited' => $inherited,
+				'sourceDocumentId' => $inherited ? $source : null,
+				'sourceDocumentTitle' => $inherited ? ($sourceTitles[$source] ?? '') : null,
+			];
+		}, $rows);
+	}
+
+	/**
+	 * @param int[] $documentIds
+	 * @return array<int, string> documentId => title
+	 */
+	private static function resolveDocumentTitles(array $documentIds): array
+	{
+		if (empty($documentIds))
+		{
+			return [];
+		}
+
+		$titles = [];
+		foreach (array_chunk($documentIds, 500) as $chunk)
+		{
+			$rows = DocumentTable::query()
+				->setSelect(['ID', 'TITLE'])
+				->whereIn('ID', $chunk)
+				->fetchAll()
+			;
+			foreach ($rows as $row)
+			{
+				$titles[(int)$row['ID']] = (string)($row['TITLE'] ?? '');
+			}
+		}
+
+		return $titles;
 	}
 
 	/**
@@ -413,6 +1154,16 @@ final class DocumentAccessService
 			return [];
 		}
 
+		// Portal admins have full access to every document; grant the top level so any
+		// requiredLevel check (VIEW..MODERATE) passes. This is the only caller path that
+		// does not short-circuit admin before calling — the bulk aggregator relies on it;
+		// every other caller (EntitySelector, mention/notification resolvers) already
+		// returns early for admins and never reaches this branch.
+		if ($userId > 0 && self::isPortalAdmin($userId))
+		{
+			return array_fill_keys($documentIds, CollectionAccessService::LEVEL_MODERATE);
+		}
+
 		$codes = array_values(array_unique(array_filter([
 			...$accessCodes,
 			$userId > 0 ? ('U' . $userId) : null,
@@ -422,38 +1173,26 @@ final class DocumentAccessService
 		if (!empty($codes))
 		{
 			$query = DocumentAccessTable::query()
-				->setSelect(['DOCUMENT_ID', 'LEVEL'])
+				->setSelect(['DOCUMENT_ID', 'LEVEL', 'SOURCE_DOCUMENT_ID'])
 				->whereIn('DOCUMENT_ID', $documentIds)
 				->whereIn('SUBJECT_CODE', $codes)
 				->exec()
 			;
 
-			$personal = [];
-			$deny = [];
+			$rowsByDoc = [];
 			while ($row = $query->fetch())
 			{
 				$docId = (int)$row['DOCUMENT_ID'];
-				$level = (int)$row['LEVEL'];
-				if ($level === self::LEVEL_NONE)
-				{
-					$deny[$docId] = true;
-				}
-				else
-				{
-					$personal[$docId] = max($personal[$docId] ?? self::LEVEL_NONE, $level);
-				}
+				$rowsByDoc[$docId][] = [
+					'level' => (int)$row['LEVEL'],
+					'source' => (int)$row['SOURCE_DOCUMENT_ID'],
+				];
 			}
 
+			// Reuse the ALG-01 reducer so the batch path stays byte-for-byte identical to getDocumentLevel().
 			foreach ($documentIds as $docId)
 			{
-				if (!empty($deny[$docId]))
-				{
-					$documentLevels[$docId] = self::LEVEL_NONE;
-				}
-				else
-				{
-					$documentLevels[$docId] = $personal[$docId] ?? self::LEVEL_NONE;
-				}
+				$documentLevels[$docId] = self::reduceDocumentLevel($rowsByDoc[$docId] ?? []);
 			}
 		}
 
@@ -597,45 +1336,30 @@ final class DocumentAccessService
 			}
 		}
 
-		$connection = Application::getConnection();
-		$sqlHelper = $connection->getSqlHelper();
-
-		$quotedPersonal = implode(', ', array_map(
-			static fn(string $code): string => "'" . $sqlHelper->forSql($code) . "'",
-			$codesPersonal,
-		));
-
-		$whereParts = [
-			"d.IS_ARCHIVED = 'N'",
-			"EXISTS (SELECT 1 FROM b_note_document_access da_pos"
-				. " WHERE da_pos.DOCUMENT_ID = d.ID"
-				. " AND da_pos.SUBJECT_CODE IN ({$quotedPersonal})"
-				. " AND da_pos.LEVEL >= " . self::LEVEL_VIEW . ")",
-			"NOT EXISTS (SELECT 1 FROM b_note_document_access da_neg"
-				. " WHERE da_neg.DOCUMENT_ID = d.ID"
-				. " AND da_neg.SUBJECT_CODE IN ({$quotedPersonal})"
-				. " AND da_neg.LEVEL = " . self::LEVEL_NONE . ")",
-		];
+		$query = DocumentTable::query()
+			->setSelect(['ID'])
+			->where('IS_ARCHIVED', 'N')
+			// Trashed documents belong to the recycle bin locus, not to this listing — the same
+			// exclusion the archive listing and the accessible tree apply.
+			->whereNull('RECYCLE_BIN.ID')
+			->where(self::buildDocumentGrantFilter('ID', $codesPersonal))
+			->addOrder('ID', 'DESC')
+			->setLimit($limit + 1)
+		;
 
 		if (!empty($accessibleCollectionIds))
 		{
-			$ids = implode(', ', array_map(static fn($id): int => (int)$id, $accessibleCollectionIds));
-			$whereParts[] = "d.COLLECTION_ID NOT IN ({$ids})";
+			$query->whereNotIn('COLLECTION_ID', $accessibleCollectionIds);
 		}
 
 		$afterId = isset($afterCursor['id']) ? (int)$afterCursor['id'] : 0;
 		if ($afterId > 0)
 		{
-			$whereParts[] = "d.ID < {$afterId}";
+			$query->where('ID', '<', $afterId);
 		}
 
-		$where = implode(' AND ', $whereParts);
-		$fetchLimit = $limit + 1;
-
-		$sql = "SELECT d.ID FROM b_note_document d WHERE {$where} ORDER BY d.ID DESC LIMIT {$fetchLimit}";
-
-		$result = $connection->query($sql);
 		$ids = [];
+		$result = $query->exec();
 		while ($row = $result->fetch())
 		{
 			$ids[] = (int)$row['ID'];
@@ -649,6 +1373,159 @@ final class DocumentAccessService
 		}
 
 		return ['ids' => $ids, 'nextCursor' => $nextCursor];
+	}
+
+	/**
+	 * [ALG-02] Visibility predicate for a document reached through document-level grants, as an ORM
+	 * condition tree — the single source of truth for every query that asks it (/shared/ listing,
+	 * archive listing, search filter). Keeping one builder is not cosmetic: a second copy could drift
+	 * and make one surface show what another hides.
+	 *
+	 *   inherited positive (source != 0, VIEW+)  OR  (explicit positive (source = 0, VIEW+) AND NOT explicit deny (source = 0, NONE))
+	 *
+	 * The OR-structure is load-bearing, not a conjunction: an inherited positive grant must win even
+	 * when a local explicit none exists (inheritance is hard per ADR), so the deny sub-query
+	 * constrains ONLY the explicit branch. Agrees with {@see reduceDocumentLevel()} on the
+	 * "at least VIEW?" question, which is all a listing needs.
+	 *
+	 * @param string $documentField document-id field of the OUTER query ('ID' on documents,
+	 *                              'DOCUMENT_ID' on the search index)
+	 * @param string[] $codesPersonal access codes without '*' (a '*' row is a collection policy,
+	 *                                never a document grant)
+	 */
+	public static function buildDocumentGrantFilter(string $documentField, array $codesPersonal): ConditionTree
+	{
+		return Query::filter()->logic('or')
+			->whereIn(
+				$documentField,
+				DocumentAccessTable::query()
+					->setSelect(['DOCUMENT_ID'])
+					->whereIn('SUBJECT_CODE', $codesPersonal)
+					->where('SOURCE_DOCUMENT_ID', '!=', self::SOURCE_NONE)
+					->where('LEVEL', '>=', self::LEVEL_VIEW),
+			)
+			->where(
+				Query::filter()
+					->whereIn(
+						$documentField,
+						DocumentAccessTable::query()
+							->setSelect(['DOCUMENT_ID'])
+							->whereIn('SUBJECT_CODE', $codesPersonal)
+							->where('SOURCE_DOCUMENT_ID', self::SOURCE_NONE)
+							->where('LEVEL', '>=', self::LEVEL_VIEW),
+					)
+					->whereNotIn(
+						$documentField,
+						DocumentAccessTable::query()
+							->setSelect(['DOCUMENT_ID'])
+							->whereIn('SUBJECT_CODE', $codesPersonal)
+							->where('SOURCE_DOCUMENT_ID', self::SOURCE_NONE)
+							->where('LEVEL', self::LEVEL_NONE),
+					),
+			)
+		;
+	}
+
+	/**
+	 * [ALG-05] Full visibility predicate of a LISTING: the document-grant core above OR the
+	 * collection-VIEW branch. This is what list queries put in their WHERE instead of fetching a
+	 * window and dropping rows in PHP afterwards; the caller supplies the two field names of its
+	 * own query, so the same builder serves backlinks (SOURCE_ID / SOURCE.COLLECTION_ID) and
+	 * favorites (DOCUMENT.ID / DOCUMENT.COLLECTION_ID over a joined document).
+	 *
+	 * Collection visibility stays a flat id list resolved in PHP by
+	 * {@see CollectionAccessService::getAllUserLevels()} — it already folds the '*' policy and the
+	 * max(personal, policy) rule, and re-expressing that in SQL would be the second copy this
+	 * builder exists to prevent.
+	 *
+	 * FAIL-CLOSED, and not incidentally: ConditionTree::whereIn() SKIPS the condition entirely when
+	 * given an empty array, so calling the core with no personal codes would silently drop the
+	 * SUBJECT_CODE restriction inside its sub-queries and turn the predicate into "anything anyone
+	 * was ever granted". Both branches are therefore added only when they have input, and a
+	 * predicate with no branches at all must be false rather than empty — an empty ConditionTree
+	 * means "no conditions", i.e. everything. The PHP path this replaces behaves the same way
+	 * ({@see batchGetEffectiveLevels()} yields no levels without codes).
+	 *
+	 * Portal admins are NOT handled here: the caller skips the predicate for them, because what an
+	 * admin may see is a per-surface decision (backlinks and favorites show everything, /shared/
+	 * shows nothing).
+	 *
+	 * @param string $documentField document-id field of the OUTER query
+	 * @param string $collectionField collection-id field of the OUTER query
+	 * @param string[] $codesPersonal access codes without '*'
+	 * @param int[] $accessibleCollectionIds collections the user holds VIEW+ on
+	 */
+	public static function buildListVisibilityFilter(
+		string $documentField,
+		string $collectionField,
+		array $codesPersonal,
+		array $accessibleCollectionIds,
+	): ConditionTree
+	{
+		$filter = Query::filter()->logic('or');
+		$hasBranch = false;
+
+		if (!empty($codesPersonal))
+		{
+			$filter->where(self::buildDocumentGrantFilter($documentField, $codesPersonal));
+			$hasBranch = true;
+		}
+
+		if (!empty($accessibleCollectionIds))
+		{
+			$filter->whereIn($collectionField, $accessibleCollectionIds);
+			$hasBranch = true;
+		}
+
+		if (!$hasBranch)
+		{
+			// Deliberately unsatisfiable: ids are always positive, so this yields an empty page for
+			// a user with neither codes nor collections. NULL (a LEFT JOIN miss) compares false too.
+			return Query::filter()->where($documentField, '<', 0);
+		}
+
+		return $filter;
+	}
+
+	/**
+	 * Access codes minus '*': a '*' row is a collection policy, never a document grant. Feeds the
+	 * $codesPersonal argument above.
+	 *
+	 * @param array<int, string> $accessCodes
+	 * @return array<int, string>
+	 */
+	public static function personalCodes(array $accessCodes): array
+	{
+		return array_values(array_filter(
+			$accessCodes,
+			static fn($code): bool => is_string($code) && $code !== '' && $code !== '*',
+		));
+	}
+
+	/**
+	 * Collections of the given level map the user may read. Feeds the $accessibleCollectionIds
+	 * argument above.
+	 *
+	 * Lives next to the predicate rather than in each caller: the VIEW threshold is what decides
+	 * whether a whole knowledge base shows up in a list, and two copies of it would eventually be
+	 * raised in one place only.
+	 *
+	 * @param array<int|string, int|string> $collectionLevels collectionId => effective level, as
+	 *        {@see CollectionAccessService::getAllUserLevels()} returns under 'effective'
+	 * @return int[]
+	 */
+	public static function accessibleCollectionIds(array $collectionLevels): array
+	{
+		$ids = [];
+		foreach ($collectionLevels as $collectionId => $level)
+		{
+			if ((int)$level >= CollectionAccessService::LEVEL_VIEW)
+			{
+				$ids[] = (int)$collectionId;
+			}
+		}
+
+		return $ids;
 	}
 
 	/**
@@ -705,23 +1582,7 @@ final class DocumentAccessService
 			}
 			if (!empty($codesPersonal))
 			{
-				$documentGrantFilter = Query::filter()
-					->whereIn(
-						'ID',
-						DocumentAccessTable::query()
-							->setSelect(['DOCUMENT_ID'])
-							->whereIn('SUBJECT_CODE', $codesPersonal)
-							->where('LEVEL', '>=', self::LEVEL_VIEW),
-					)
-					->whereNotIn(
-						'ID',
-						DocumentAccessTable::query()
-							->setSelect(['DOCUMENT_ID'])
-							->whereIn('SUBJECT_CODE', $codesPersonal)
-							->where('LEVEL', self::LEVEL_NONE),
-					)
-				;
-				$accessFilter->where($documentGrantFilter);
+				$accessFilter->where(self::buildDocumentGrantFilter('ID', $codesPersonal));
 			}
 			$query->where($accessFilter);
 		}

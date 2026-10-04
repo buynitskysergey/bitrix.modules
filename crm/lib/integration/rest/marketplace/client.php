@@ -25,6 +25,11 @@ final class Client
 		return $this->isAvailable && Marketplace\Client::isSubscriptionAvailable();
 	}
 
+	public function isSubscriptionUsed(): bool
+	{
+		return $this->isAvailable && Marketplace\Client::isSubscriptionUsed();
+	}
+
 	public function getDaysLeft(): ?int
 	{
 		$finalDate = $this->getSubscriptionFinalDate();

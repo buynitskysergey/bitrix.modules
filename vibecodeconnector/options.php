@@ -12,12 +12,14 @@ use Bitrix\Vibecodeconnector\Internal\Exception\RegistrationFailedException;
 use Bitrix\Vibecodeconnector\Internal\Repository\Pairing\PairingRepository;
 use Bitrix\Vibecodeconnector\Internal\Service\Bot\BotService;
 use Bitrix\Vibecodeconnector\Internal\Service\Catalog\OpenApp\OpenAppSettings;
+use Bitrix\Vibecodeconnector\Internal\Service\Diagnostic\CloudSharedKeyLog;
 use Bitrix\Vibecodeconnector\Internal\Service\Diagnostic\IncomingJwtLog;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\BaseEndpointProvider;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\CloudEndpointProvider;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\EndpointUrlGuard;
 use Bitrix\Vibecodeconnector\Internal\Service\PublicKey\CloudKeySourceSettings;
-use Bitrix\Vibecodeconnector\Internal\Service\PublicKey\CloudSharedKeyRefresher;
+use Bitrix\Vibecodeconnector\Internal\Service\PublicKey\CloudSharedKeyProvisioner;
+use Bitrix\Vibecodeconnector\Internal\Service\PublicKey\CloudSharedKeyStore;
 use Bitrix\Vibecodeconnector\Internal\Service\PublicKey\PairingKeyRefresher;
 use Bitrix\Vibecodeconnector\Internal\Service\PublicKey\PublicKeySource;
 use Bitrix\Vibecodeconnector\Internal\Service\Registration\PairingSettings;
@@ -62,7 +64,7 @@ $permissionSourcePolicy = ServiceLocator::getInstance()->get(PermissionSourcePol
 $openAppSettings = ServiceLocator::getInstance()->get(OpenAppSettings::class);
 $pairingKeyRefresher = ServiceLocator::getInstance()->get(PairingKeyRefresher::class);
 $pairingSettings = ServiceLocator::getInstance()->get(PairingSettings::class);
-$cloudSharedKeyRefresher = ServiceLocator::getInstance()->get(CloudSharedKeyRefresher::class);
+$cloudSharedKeyProvisioner = ServiceLocator::getInstance()->get(CloudSharedKeyProvisioner::class);
 $cloudKeySourceSettings = ServiceLocator::getInstance()->get(CloudKeySourceSettings::class);
 $pairingRepository = ServiceLocator::getInstance()->get(PairingRepository::class);
 $botService = ServiceLocator::getInstance()->get(BotService::class);
@@ -96,6 +98,7 @@ $refreshSuccess = false;
 $refreshError = null;
 $cloudSharedRefreshSuccess = false;
 $cloudSharedRefreshError = null;
+$baseUrlError = null;
 $pairingSourceSwitched = false;
 
 if (
@@ -111,17 +114,21 @@ if (
 		$newBaseUrl = trim((string)$request->getPost('endpoint_base_url'));
 		$oldBaseUrl = $baseEndpointProvider->getBaseUrl();
 
-		$pairingUrls = array_map(
-			static fn($p) => rtrim($p->endpointUrl, '/'),
-			$registrationService->listPairings(),
-		);
 		$baseUrlChanged = false;
-		if ($newBaseUrl !== '' && in_array(rtrim($newBaseUrl, '/'), $pairingUrls, true))
+		// The address is always typed by hand: the list on the page only fills the field,
+		// so the only gate here is that the address itself is valid. Clearing the field is
+		// a change too, and the guard must reject it instead of the page ignoring it.
+		if (rtrim($newBaseUrl, '/') !== rtrim($oldBaseUrl, '/'))
 		{
-			if ($newBaseUrl !== $oldBaseUrl)
+			try
 			{
+				$service(EndpointUrlGuard::class)->assertValid($newBaseUrl);
 				$baseEndpointProvider->setBaseUrl($newBaseUrl);
 				$baseUrlChanged = true;
+			}
+			catch (InvalidEndpointUrlException $e)
+			{
+				$baseUrlError = $e->getMessage();
 			}
 		}
 
@@ -144,18 +151,22 @@ if (
 		require_once $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/admin/group_rights.php';
 		ob_end_clean();
 
-		$backUrl = (string)$request->get('back_url_settings');
-		if ($backUrl !== '')
+		// A rejected address must stay on the page: a redirect would drop the message.
+		if ($baseUrlError === null)
 		{
-			LocalRedirect($backUrl);
-		}
+			$backUrl = (string)$request->get('back_url_settings');
+			if ($backUrl !== '')
+			{
+				LocalRedirect($backUrl);
+			}
 
-		LocalRedirect(
-			$APPLICATION->GetCurPage()
-			. '?mid=' . urlencode($module_id)
-			. '&lang=' . urlencode(LANGUAGE_ID)
-			. '&' . $tabControl->ActiveTabParam()
-		);
+			LocalRedirect(
+				$APPLICATION->GetCurPage()
+				. '?mid=' . urlencode($module_id)
+				. '&lang=' . urlencode(LANGUAGE_ID)
+				. '&' . $tabControl->ActiveTabParam()
+			);
+		}
 	}
 	elseif ($action === 'Register')
 	{
@@ -275,7 +286,7 @@ if (
 	{
 		try
 		{
-			$cloudSharedKeyRefresher->refresh();
+			$cloudSharedKeyProvisioner->provisionManually($service(CloudSharedKeyStore::class)->get());
 			$cloudSharedRefreshSuccess = true;
 		}
 		catch (PublicKeyFetchFailedException $e)
@@ -318,7 +329,7 @@ if (
 
 			try
 			{
-				$cloudSharedKeyRefresher->refresh();
+				$cloudSharedKeyProvisioner->provisionManually($service(CloudSharedKeyStore::class)->get());
 				$cloudSharedRefreshSuccess = true;
 			}
 			catch (PublicKeyFetchFailedException $e)
@@ -350,8 +361,50 @@ $isEnabled = $availabilityService->isEnabled();
 $isOpenAppInIframeEnabled = $openAppSettings->isOpenInIframeEnabled();
 $isRegistered = $registrationService->isRegistered();
 $isCloudSharedConfigured = $registrationService->isCloudSharedConfigured();
+$isCloudSharedAvailable = $registrationService->isCloudSharedAvailable();
+$cloudSharedKeyFetchedAt = $service(CloudSharedKeyStore::class)->getFetchedAt();
+$isCloudSharedKeyStored = $service(CloudSharedKeyStore::class)->get() !== '';
 $pairings = $registrationService->listPairings();
 $ttlHint = $pairingSettings->getMaxTtlSeconds();
+
+// Known addresses offered for the active connection field: pairings, the cloud key source and the known
+// Vibecode servers. The field itself stays hand-editable, the list only fills it.
+$knownEndpoints = [];
+$addKnownEndpoint = static function (string $url, string $phraseId) use (&$knownEndpoints): void {
+	$url = rtrim(trim($url), '/');
+	if ($url === '' || isset($knownEndpoints[$url]))
+	{
+		return;
+	}
+
+	$knownEndpoints[$url] = Loc::getMessage($phraseId, ['#URL#' => $url]);
+};
+
+foreach ($pairings as $pairingHint)
+{
+	$hintUrl = rtrim(trim($pairingHint->endpointUrl), '/');
+	if ($hintUrl === '' || isset($knownEndpoints[$hintUrl]))
+	{
+		continue;
+	}
+
+	$knownEndpoints[$hintUrl] = $pairingHint->iss === ''
+		? $hintUrl
+		: Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_PAIRING', [
+			'#URL#' => $hintUrl,
+			'#ISS#' => $pairingHint->iss,
+		]);
+}
+
+if (IsModuleInstalled('bitrix24'))
+{
+	$addKnownEndpoint($cloudSharedUrl, 'VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_CLOUD');
+}
+
+foreach ($baseEndpointProvider->getAvailableUrls() as $availableUrl)
+{
+	$addKnownEndpoint($availableUrl, 'VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_DEFAULT');
+}
 $showDiagnosticLinks = Loader::includeModule('rest');
 
 $registerUrlDefault = (string)$request->getPost('register_endpoint_url');
@@ -360,11 +413,14 @@ if ($registerUrlDefault === '')
 	$registerUrlDefault = $baseEndpointProvider->getDefaultUrl();
 }
 
-$incomingLogUrl = '/bitrix/admin/event_log.php'
+$eventLogUrl = static fn (string $auditTypeId): string => '/bitrix/admin/event_log.php'
 	. '?lang=' . urlencode(LANGUAGE_ID)
 	. '&set_filter=Y'
 	. '&find_module_id=' . urlencode('vibecodeconnector')
-	. '&find_audit_type_id=' . urlencode(IncomingJwtLog::AUDIT_TYPE_ID);
+	. '&find_audit_type_id=' . urlencode($auditTypeId);
+
+$incomingLogUrl = $eventLogUrl(IncomingJwtLog::AUDIT_TYPE_ID);
+$cloudSharedKeyLogUrl = $eventLogUrl(CloudSharedKeyLog::AUDIT_TYPE_ID);
 ?>
 <form id="vbcc-options-form" method="post" action="<?= $APPLICATION->GetCurPage() ?>?mid=<?= urlencode($module_id) ?>&amp;lang=<?= LANGUAGE_ID ?>">
 <?= bitrix_sessid_post() ?>
@@ -388,6 +444,9 @@ $incomingLogUrl = '/bitrix/admin/event_log.php'
 	<?php endif; ?>
 	<?php if ($refreshError !== null): ?>
 	<tr><td colspan="2"><?CAdminMessage::ShowMessage(['TYPE' => 'ERROR', 'MESSAGE' => Loc::getMessage('VIBECODECONNECTOR_OPT_REFRESH_ERROR', ['#MESSAGE#' => htmlspecialcharsbx($refreshError)])])?></td></tr>
+	<?php endif; ?>
+	<?php if ($baseUrlError !== null): ?>
+	<tr><td colspan="2"><?CAdminMessage::ShowMessage(['TYPE' => 'ERROR', 'MESSAGE' => Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_ERROR', ['#MESSAGE#' => htmlspecialcharsbx($baseUrlError)])])?></td></tr>
 	<?php endif; ?>
 	<?php if ($cloudSharedRefreshSuccess): ?>
 	<tr><td colspan="2"><?CAdminMessage::ShowMessage(['TYPE' => 'OK', 'MESSAGE' => Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_REFRESH_SUCCESS')])?></td></tr>
@@ -449,30 +508,39 @@ $incomingLogUrl = '/bitrix/admin/event_log.php'
 	<tr>
 		<td><label for="vibecodeconnector_endpoint"><?= Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION') ?>:</label></td>
 		<td>
-			<?php $endpointSelectDisabled = $moduleAccess < 'W' || empty($pairings); ?>
-			<select
-				id="vibecodeconnector_endpoint"
-				name="endpoint_base_url"
-				<?= $endpointSelectDisabled ? 'disabled' : '' ?>
-				style="min-width: 60%;"
+			<input type="text" id="vibecodeconnector_endpoint" name="endpoint_base_url"
+				value="<?= htmlspecialcharsbx($endpointBaseUrl) ?>"
+				placeholder="<?= htmlspecialcharsbx($baseEndpointProvider->getDefaultUrl()) ?>"
+				<?= $moduleAccess >= 'W' ? '' : 'disabled' ?>
+				style="width:60%;"
 			>
-				<?php if (empty($pairings)): ?>
-					<option value=""><?= htmlspecialcharsbx(Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_EMPTY')) ?></option>
-				<?php else: ?>
-					<?php foreach ($pairings as $pairingOption): ?>
-						<?php $endpointValue = rtrim($pairingOption->endpointUrl, '/'); ?>
+			<?php if ($knownEndpoints !== []): ?>
+				<br>
+				<label for="vibecodeconnector_endpoint_known"><?= Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN') ?>:</label>
+				<select
+					id="vibecodeconnector_endpoint_known"
+					<?= $moduleAccess >= 'W' ? '' : 'disabled' ?>
+					style="min-width: 40%;"
+				>
+					<?php foreach ($knownEndpoints as $knownUrl => $knownLabel): ?>
 						<option
-							value="<?= htmlspecialcharsbx($endpointValue) ?>"
-							<?= rtrim($endpointBaseUrl, '/') === $endpointValue ? 'selected' : '' ?>
+							value="<?= htmlspecialcharsbx((string)$knownUrl) ?>"
+							<?= rtrim($endpointBaseUrl, '/') === (string)$knownUrl ? 'selected' : '' ?>
 						>
-							<?= htmlspecialcharsbx($pairingOption->endpointUrl) ?>
-							<?php if ($pairingOption->iss !== ''): ?>
-								(<?= htmlspecialcharsbx($pairingOption->iss) ?>)
-							<?php endif; ?>
+							<?= htmlspecialcharsbx($knownLabel) ?>
 						</option>
 					<?php endforeach; ?>
-				<?php endif; ?>
-			</select>
+				</select>
+				<button type="button" id="vibecodeconnector_endpoint_known_apply"
+					<?= $moduleAccess >= 'W' ? '' : 'disabled' ?>
+					onclick="
+						document.getElementById('vibecodeconnector_endpoint').value =
+							document.getElementById('vibecodeconnector_endpoint_known').value;
+						document.getElementById('vibecodeconnector_endpoint').focus();
+					">
+					<?= Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_INSERT') ?>
+				</button>
+			<?php endif; ?>
 			<br>
 			<small><?= Loc::getMessage('VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_HINT') ?></small>
 		</td>
@@ -502,7 +570,7 @@ $incomingLogUrl = '/bitrix/admin/event_log.php'
 	</tr>
 	<tr>
 		<td width="20%">
-			<label for="vibecodeconnector_cloud_shared_url"><?= Loc::getMessage('VIBECODECONNECTOR_OPT_PAIRINGS_ADD_URL') ?>:</label>
+			<label for="vibecodeconnector_cloud_shared_url"><?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_URL') ?>:</label>
 		</td>
 		<td>
 			<input type="text" id="vibecodeconnector_cloud_shared_url" name="cloud_shared_endpoint_url"
@@ -529,6 +597,24 @@ $incomingLogUrl = '/bitrix/admin/event_log.php'
 			<button type="submit" id="vibecodeconnector_cloud_shared_url_save_btn" name="action" value="SaveAndRefreshCloudSharedKey" style="display:none;" <?= $moduleAccess >= 'W' ? '' : 'disabled' ?>>
 				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_PUBLIC_KEY_SAVE_AND_REFRESH') ?>
 			</button>
+		</td>
+	</tr>
+	<tr>
+		<td width="20%">
+			<?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_KEY_FETCHED_AT') ?>:
+		</td>
+		<td>
+			<?php
+			// The date is stamped only when the portal fetches the key itself; a key delivered by
+			// an update lands in the option directly and has no mark.
+			echo match (true) {
+				$cloudSharedKeyFetchedAt > 0 => Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_KEY_FETCHED', [
+					'#DATE#' => htmlspecialcharsbx(ConvertTimeStamp($cloudSharedKeyFetchedAt, 'FULL')),
+				]),
+				$isCloudSharedKeyStored => Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_KEY_DELIVERED'),
+				default => Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_KEY_NOT_FETCHED'),
+			};
+			?>
 		</td>
 	</tr>
 	<?php if ($showPublicKeySource): ?>
@@ -564,9 +650,14 @@ $incomingLogUrl = '/bitrix/admin/event_log.php'
 	<?php endif;?>
 	<tr>
 		<td colspan="2">
-			<?=BeginNote()?><?=($isCloudSharedConfigured ?
-				Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_ACTIVE_HINT')
-				: Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_NOT_CONFIGURED_HINT'))?>
+			<?php
+			$cloudSharedHint = match (true) {
+				!$isCloudSharedAvailable => 'VIBECODECONNECTOR_OPT_CLOUD_SHARED_NOT_APPLICABLE_HINT',
+				$isCloudSharedConfigured => 'VIBECODECONNECTOR_OPT_CLOUD_SHARED_ACTIVE_HINT',
+				default => 'VIBECODECONNECTOR_OPT_CLOUD_SHARED_NOT_CONFIGURED_HINT',
+			};
+			?>
+			<?=BeginNote()?><?= Loc::getMessage($cloudSharedHint) ?>
 				<br><br>
 				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_AVAILABLE_SERVERS') ?>
 				<?php foreach ($baseEndpointProvider->getAvailableUrls() as $availableUrl): ?>
@@ -777,6 +868,10 @@ function vbccPairingSwitchSource(iss, source)
 			&nbsp;|&nbsp;
 			<a href="<?= htmlspecialcharsbx($incomingLogUrl) ?>" target="_blank">
 				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_INCOMING_LOG_LINK') ?>
+			</a>
+			&nbsp;|&nbsp;
+			<a href="<?= htmlspecialcharsbx($cloudSharedKeyLogUrl) ?>" target="_blank">
+				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_KEY_LOG_LINK') ?>
 			</a>
 		</td>
 	</tr>

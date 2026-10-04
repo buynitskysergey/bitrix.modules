@@ -2,6 +2,7 @@
 
 namespace Bitrix\Crm\Copilot\CallAssessment\Enum;
 
+use Bitrix\Crm\Integration\AI\AIManager;
 use Bitrix\Main\Localization\Loc;
 
 enum ClientType: int
@@ -10,8 +11,9 @@ enum ClientType: int
 	case IN_WORK = 2;
 	case REPEATED_APPROACH = 3;
 	case RETURN_CUSTOMER = 4;
+	case ANY = 10;
 
-	public static function fromName(string $name): string
+	public static function fromName(string $name): int
 	{
 		foreach (self::cases() as $status)
 		{
@@ -26,27 +28,35 @@ enum ClientType: int
 
 	public static function getTitle(int $value): ?string
 	{
+		if ($value === self::ANY->value)
+		{
+			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_ANY');
+		}
+
+		$isCallScoringV2 = AIManager::isCallScoringV2Enabled();
+
 		if ($value === self::NEW->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_NEW');
+			$code = 'CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_NEW';
 		}
-
-		if ($value === self::IN_WORK->value)
+		elseif ($value === self::IN_WORK->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_IN_WORK');
+			$code = 'CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_IN_WORK';
 		}
-
-		if ($value === self::REPEATED_APPROACH->value)
+		elseif ($value === self::REPEATED_APPROACH->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_REPEATED_APPROACH');
+			$code = 'CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_REPEATED_APPROACH';
 		}
-
-		if ($value === self::RETURN_CUSTOMER->value)
+		elseif ($value === self::RETURN_CUSTOMER->value)
 		{
-			return Loc::getMessage('CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_RETURN_CUSTOMER');
+			$code = 'CRM_COPILOT_CALL_ASSESSMENT_CLIENT_TYPE_RETURN_CUSTOMER';
+		}
+		else
+		{
+			return null;
 		}
 
-		return null;
+		return Loc::getMessage($isCallScoringV2 ? $code . '_MSGVER_1' : $code);
 	}
 
 	public static function getTitleList(array $values): array
@@ -72,5 +82,17 @@ enum ClientType: int
 		$titles = self::getTitleList($values);
 
 		return implode($separator, $titles);
+	}
+
+	public static function toArray(): array
+	{
+		return array_column(
+			array_map(
+				static fn($case) => ['value' => $case->value, 'title' => $case->getTitle($case->value)],
+				self::cases(),
+			),
+			'title',
+			'value',
+		);
 	}
 }

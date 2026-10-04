@@ -27,9 +27,11 @@ final class ConfigValidator
 
 		foreach ($config->flows as $flow)
 		{
-			$this->validateTrigger($flow->trigger, $flow->triggerProps, $flow->name);
+			// Reserved keys are cut out by FlowConfig, so triggerProps hold activity properties only.
+			$this->validateActivityProperties($flow->trigger, $flow->triggerProps, "{$flow->name} (trigger)");
 
-			foreach ($flow->steps as $step)
+			// The trigger output leads either into one chain of steps or into fanout branches.
+			foreach (self::collectSteps(array_merge($flow->steps, ...$flow->fanout)) as $step)
 			{
 				$this->validateStep($step, $flow->name);
 			}
@@ -38,35 +40,67 @@ final class ConfigValidator
 		return $this->warnings;
 	}
 
-	private function validateTrigger(string $triggerType, array $props, string $flowName): void
+	/**
+	 * Every step of the flow, whatever construct it lies in: an activity is checked the same way wherever
+	 * its step is written, and a flow described by 'fanout' has no steps of its own at the top level.
+	 *
+	 * @param StepConfig[] $steps
+	 * @return StepConfig[]
+	 */
+	private static function collectSteps(array $steps): array
 	{
-		$filteredProps = array_diff_key($props, ['_id' => true]);
-		$this->validateActivityProperties($triggerType, $filteredProps, "{$flowName} (trigger)");
+		$collected = [];
+
+		foreach ($steps as $step)
+		{
+			// A reference creates no node and carries no properties: the node it points at is declared,
+			// and checked, where it stands.
+			if ($step->refId !== null)
+			{
+				continue;
+			}
+
+			$collected[] = $step;
+			foreach (self::chainsOf($step) as $chain)
+			{
+				$collected = array_merge($collected, self::collectSteps($chain));
+			}
+		}
+
+		return $collected;
+	}
+
+	/**
+	 * The chains of steps a step opens: the branches of a condition, the body of a composite step, one
+	 * branch per output port ('branches') or several ('fanout'), and the nodes 'attachments' bind to the
+	 * aux ports. A construct nests chains but never itself, so the walk is finite.
+	 *
+	 * @return StepConfig[][]
+	 */
+	private static function chainsOf(StepConfig $step): array
+	{
+		return [
+			$step->trueBranch,
+			$step->falseBranch,
+			$step->childSteps,
+			...array_values($step->branches),
+			...array_merge([], ...array_values($step->fanout)),
+			...array_values($step->attachments),
+		];
 	}
 
 	private function validateStep(StepConfig $step, string $flowName): void
 	{
 		if ($step->isCondition)
 		{
-			foreach ($step->trueBranch as $child)
-			{
-				$this->validateStep($child, $flowName);
-			}
-			foreach ($step->falseBranch as $child)
-			{
-				$this->validateStep($child, $flowName);
-			}
-
+			// Only the branches of a condition carry activity properties: its own body is 'conditions',
+			// and ConditionConfig parses it.
 			return;
 		}
 
 		if ($step->isComposite)
 		{
 			$this->validateActivityProperties($step->type, $step->props, $flowName);
-			foreach ($step->childSteps as $child)
-			{
-				$this->validateStep($child, $flowName);
-			}
 
 			return;
 		}

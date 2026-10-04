@@ -120,4 +120,16 @@ final class ImportOperationResult extends Result
 	{
 		return $this->errorPackList;
 	}
+
+	public function toArray(): array
+	{
+		return [
+			'successImportCount' => $this->getSuccessImportCount(),
+			'failImportCount' => $this->getFailImportCount(),
+			'duplicateImportCount' => $this->getDuplicateImportCount(),
+			'currentLine' => $this->getCurrentLine(),
+			'progressedBytes' => $this->getProgressedBytes(),
+			'isFinished' => $this->isFinished(),
+		];
+	}
 }

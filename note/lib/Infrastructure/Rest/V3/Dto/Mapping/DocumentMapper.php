@@ -39,6 +39,7 @@ class DocumentMapper extends Mapper
 		$dto->updatedBy = $view->updatedBy;
 		$dto->createdAt = $view->createdAt;
 		$dto->updatedAt = $view->updatedAt;
+		$dto->contentUpdatedAt = $view->contentUpdatedAt;
 
 		return $dto;
 	}

@@ -10,6 +10,8 @@ namespace Bitrix\Rest\OAuth;
 
 
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Loader;
 use Bitrix\Rest\Application;
 use Bitrix\Rest\AppTable;
 use Bitrix\Rest\AuthStorageInterface;
@@ -17,6 +19,7 @@ use Bitrix\Rest\Engine\Access;
 use Bitrix\Rest\Engine\Access\HoldEntity;
 use Bitrix\Rest\Event\Session;
 use Bitrix\Rest\Internal\Access\UserAccessChecker;
+use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Main\SystemException;
 use Throwable;
@@ -93,6 +96,7 @@ class Auth
 
 				if (!$error)
 				{
+					$upsellUserId = (int)($tokenInfo['user_id'] ?? 0);
 					try
 					{
 						Access::ensureIsAvailable($tokenInfo['client_id']);
@@ -111,14 +115,30 @@ class Auth
 						)
 					)
 					{
-						$tokenInfo = [
-							'error' => 'ACCESS_DENIED',
-							'error_description' => 'REST is available only on commercial plans.',
-						];
-						if ($accessException instanceof Throwable)
+						if ($accessException instanceof FeatureNotAvailableOnCurrentPlanExceptionInterface)
 						{
-							$tokenInfo['exception'] = $accessException;
+							$tokenInfo = [
+								'error' => FeatureNotAvailableOnCurrentPlanExceptionInterface::ERROR_CODE,
+								'error_description' => $accessException->getMessage(),
+								'error_status' => \CRestServer::STATUS_FORBIDDEN,
+								'exception' => $accessException,
+							];
 						}
+						else
+						{
+							$tokenInfo = [
+								'error' => 'ACCESS_DENIED',
+								'error_description' => 'REST is available only on commercial plans.',
+							];
+							if ($accessException instanceof Throwable)
+							{
+								$tokenInfo['exception'] = $accessException;
+							}
+						}
+						$tokenInfo = static::appendVibePlusUpsellProjection(
+							$tokenInfo,
+							userId: $upsellUserId,
+						);
 						$error = true;
 					}
 				}
@@ -203,6 +223,48 @@ class Auth
 		}
 
 		return null;
+	}
+
+	private static function appendVibePlusUpsellProjection(
+		array $tokenInfo,
+		?\Closure $projectionResolver = null,
+		int $userId = 0,
+	): array
+	{
+		try
+		{
+			if ($projectionResolver === null)
+			{
+				if (!Loader::includeModule('bitrix24'))
+				{
+					return $tokenInfo;
+				}
+
+				$serviceLocator = ServiceLocator::getInstance();
+				if (!$serviceLocator->has(\Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class))
+				{
+					return $tokenInfo;
+				}
+
+				$projectionResolver = static fn(int $resolvedUserId) => $serviceLocator
+					->get(\Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class)
+					->getProjectionForUser($resolvedUserId)
+				;
+			}
+
+			$projection = $projectionResolver($userId);
+		}
+		catch (\Throwable)
+		{
+			return $tokenInfo;
+		}
+
+		if (!$projection instanceof \Bitrix\Bitrix24\Public\ValueObject\VibePlusUpsellProjection)
+		{
+			return $tokenInfo;
+		}
+
+		return array_replace($tokenInfo, $projection->toArray());
 	}
 
 	public static function getAuthKey(array $query)

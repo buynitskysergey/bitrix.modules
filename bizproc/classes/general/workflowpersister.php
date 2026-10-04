@@ -1,5 +1,6 @@
 <?php
 
+use Bitrix\Bizproc;
 use Bitrix\Main;
 
 /**
@@ -197,7 +198,7 @@ class CBPWorkflowPersister
 			return $this->RestoreFromSerializedForm($state, $ro);
 		}
 
-		throw new Exception("WorkflowNotFound");
+		throw new Bizproc\Exception\EmptyWorkflowInstanceException('WorkflowNotFound');
 	}
 
 	protected function restoreFromSerializedForm($buffer, $ro)
@@ -210,7 +211,7 @@ class CBPWorkflowPersister
 
 		if ($buffer == '')
 		{
-			throw new Exception("EmptyWorkflowInstance");
+			throw new Bizproc\Exception\EmptyWorkflowInstanceException('EmptyWorkflowInstance');
 		}
 
 		/** @var CBPCompositeActivity $activity */
@@ -266,8 +267,24 @@ class CBPWorkflowPersister
 		{
 			$buffer = $this->GetSerializedForm($rootActivity);
 		}
+		elseif ($this->isLastValuesCapturable($rootActivity))
+		{
+			// the last point where the runtime tree is still alive: insertWorkflow deletes the instance
+			(new Bizproc\Internal\Service\LastValues\CaptureService())->capture($rootActivity, (int)$workflowStatus);
+		}
 
 		$this->InsertWorkflow($rootActivity->GetWorkflowInstanceId(), $buffer, $workflowStatus, $bUnlocked, $creationData);
+	}
+
+	/**
+	 * Only a run the template really went through to its own end carries the last values of that template.
+	 * An abandoned run is a run of a document being deleted: its status is substituted above to close the
+	 * instance, but nothing has finished. A debug run goes by the same template as the production one and
+	 * would overwrite its values with the ones the developer was stepping through.
+	 */
+	private function isLastValuesCapturable(CBPActivity $rootActivity): bool
+	{
+		return !$rootActivity->workflow->isAbandoned() && !$rootActivity->workflow->isDebug();
 	}
 
 	protected function getSerializedForm(CBPActivity $rootActivity)

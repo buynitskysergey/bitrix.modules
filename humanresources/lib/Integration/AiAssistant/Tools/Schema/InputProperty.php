@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\HumanResources\Integration\AiAssistant\Tools\Schema;
 
+use Bitrix\HumanResources\Access\Permission\PermissionDictionary;
+use Bitrix\HumanResources\Access\Permission\PermissionVariablesDictionary;
 use Bitrix\HumanResources\Type\NodeEntityType;
 use Bitrix\HumanResources\Type\NodeMemberRole;
 use Bitrix\HumanResources\Type\NodeSettingsAuthorityType;
@@ -11,6 +13,48 @@ use Bitrix\HumanResources\Type\NodeSettingsType;
 
 class InputProperty
 {
+	/**
+	 * Shared input schema for the accessRights argument of role write tools (create/update).
+	 */
+	public static function accessRights(): array
+	{
+		return [
+			'type' => 'array',
+			'minItems' => 1,
+			'description' => 'Non-empty list of permission areas to grant (full replacement set). For team '
+				. 'permissions pass one entry per axis (a team-axis value 9/19 and/or a department-axis value '
+				. '10/20), or a single 30 for all, or 0 for none. To revoke all rights pass an explicit area '
+				. '0 for each permission; an empty list is rejected (use hr_delete_role to remove the role).',
+			'items' => [
+				'type' => 'object',
+				'properties' => [
+					'permissionId' => [
+						'type' => 'string',
+						'description' => 'Permission id (string) from the full snapshot returned by hr_role_permissions. '
+							. 'hr_user_permissions is diagnostic and must not be used as a role replacement snapshot.',
+					],
+					'area' => [
+						'type' => 'integer',
+						'enum' => [
+							PermissionVariablesDictionary::VARIABLE_NONE,
+							PermissionDictionary::VALUE_YES,
+							PermissionVariablesDictionary::VARIABLE_SELF_TEAMS,
+							PermissionVariablesDictionary::VARIABLE_SELF_DEPARTMENTS,
+							PermissionVariablesDictionary::VARIABLE_SELF_TEAMS_SUB_TEAMS,
+							PermissionVariablesDictionary::VARIABLE_SELF_DEPARTMENTS_SUB_DEPARTMENTS,
+							PermissionVariablesDictionary::VARIABLE_ALL,
+						],
+						'description' => 'Scope value: 0=None, 9=own teams, 10=own departments, '
+							. '19=own and sub-teams, 20=own and sub-departments, 30=all. '
+							. 'For toggler permissions (e.g. manage access rights, fire employee) use 1=yes / 0=no.',
+					],
+				],
+				'additionalProperties' => false,
+				'required' => ['permissionId', 'area'],
+			],
+		];
+	}
+
 	public static function nodeId(string $description = 'Node identifier'): array
 	{
 		return [

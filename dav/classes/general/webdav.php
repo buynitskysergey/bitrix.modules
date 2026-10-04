@@ -70,28 +70,35 @@ abstract class CDavWebDav
 
 		$response->AddHeader("X-Dav-Powered-By: ".$this->davPoweredBy);
 
-		// skip auth check for OPTIONS requests on "/" - http://pear.php.net/bugs/bug.php?id=5363
-		if (($request->GetParameter('REQUEST_METHOD') !== 'OPTIONS' || (/*($this instanceof CDavGroupDav) && */($request->GetPath() !== "/"))) && !$this->CheckAuthWrapper())
+		// OPTIONS is capability discovery (RFC 4918 §9.1). For the direct WebDAV drive
+		// (CDavWebDavServer) the response is fully static - no path resolution, no
+		// resource data - so it is safe unauthenticated; requiring auth here re-prompts
+		// Windows credentials on an already-mounted drive when Office/Word sends its
+		// discovery OPTIONS (Mantis 133939). GroupDAV/CalDAV keep the narrow legacy
+		// exemption (OPTIONS on "/" only): their OPTIONS response varies by account
+		// existence. Real methods always authenticate.
+		$skipAuthForOptions =
+			$request->GetParameter('REQUEST_METHOD') === 'OPTIONS'
+			&& ($this instanceof CDavWebDavServer || $request->GetPath() === "/")
+		;
+		if (!$skipAuthForOptions && !$this->CheckAuthWrapper())
 		{
 			$response->SetHttpStatus('401 Unauthorized');
-			$response->AddHeader('WWW-Authenticate: Basic realm="'.$this->davPoweredBy.'"');
 
-			if (
-				$this instanceof CDavWebDavServer
-				&& CDav::isDigestEnabled()
-				&& COption::GetOptionString("main", "use_digest_auth", "N") === "Y"
-			)
+			if ($this instanceof CDavWebDavServer)
 			{
-				// On first try we found that we don't know user digest hash. Let ask only Basic auth first.
-				if(\Bitrix\Main\Application::getInstance()->getKernelSession()["BX_HTTP_DIGEST_ABSENT"] !== true)
+				// WebDAV drive: deterministic Basic (+Digest when enabled) via shared builder.
+				foreach (CDav::buildWwwAuthenticateHeaders($this->davPoweredBy) as $header)
 				{
-					$response->AddHeader('WWW-Authenticate: Digest realm="'
-						. $this->davPoweredBy
-						. '", nonce="'
-						. uniqid('', true)
-						. '"');
+					$response->AddHeader($header);
 				}
 			}
+			else
+			{
+				// GroupDav/CalDAV stays Basic-only.
+				$response->AddHeader('WWW-Authenticate: Basic realm="'.$this->davPoweredBy.'"');
+			}
+
 			$response->Render();
 
 			return;
@@ -332,6 +339,40 @@ abstract class CDavWebDav
 		}
 
 		return $arUri;
+	}
+
+	/**
+	 * Extract the lock token from an "If:" header for LOCK refresh.
+	 *
+	 * Handles both tagged ("If: <uri> (<token>)") and untagged ("If: (<token>)") forms
+	 * via the existing parser. Conditions are stored as "<opaquelocktoken:...>" (optionally
+	 * prefixed with "!"); the returned token drops the angle brackets so it equals the
+	 * b_dav_locks.ID value ("opaquelocktoken:UUID"). Falls back to the legacy untagged
+	 * slicing to keep current Windows clients working if parsing yields no token.
+	 */
+	private function extractLockTokenFromIf($httpIf)
+	{
+		$arUri = $this->ParceIfHeaderConditions($httpIf);
+		if (is_array($arUri))
+		{
+			foreach ($arUri as $arConditions)
+			{
+				foreach ($arConditions as $condition)
+				{
+					// A "!"-prefixed condition is a negated "Not <token>": it must not refresh the lock.
+					if (mb_substr($condition, 0, 1) === "!")
+					{
+						continue;
+					}
+					if (preg_match('/^<(opaquelocktoken:[^>]+)>$/i', $condition, $matches))
+					{
+						return $matches[1];
+					}
+				}
+			}
+		}
+
+		return mb_substr($httpIf, 2, -2);
 	}
 
 	/**
@@ -1013,7 +1054,13 @@ abstract class CDavWebDav
 			{
 				if ($this->request->GetParameter("HTTP_IF") === null || !mb_strstr($this->request->GetParameter("HTTP_IF"), $lock["ID"]))
 				{
-					if (!$exclusiveOnly || ($lock["LOCK_SCOPE"] !== "shared"))
+					// Owner-fallback: never block a user by their own (possibly unclosed) lock.
+					// Cross-user locks still block; matches only on the reliable numeric LOCK_USER_ID.
+					$principal = $this->request->GetPrincipal();
+					$currentUserId = $principal ? (int)$principal->Id() : null;
+					$ownerFallback = ($currentUserId !== null && $currentUserId > 0 && (int)($lock["LOCK_USER_ID"] ?? 0) === $currentUserId);
+
+					if (!$ownerFallback && (!$exclusiveOnly || ($lock["LOCK_SCOPE"] !== "shared")))
 					{
 						return false;
 					}
@@ -1271,7 +1318,7 @@ abstract class CDavWebDav
 				return;
 			}
 
-			$locktoken = mb_substr($httpIf, 2, -2);
+			$locktoken = $this->extractLockTokenFromIf($httpIf);
 			$updateLock = true;
 			$owner = "id:".$request->GetPrincipal()->Id();
 			$scope = "exclusive";

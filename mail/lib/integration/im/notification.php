@@ -743,6 +743,46 @@ class Notification
 		]);
 	}
 
+	public static function notifyUserAboutMailboxMigration(
+		int $toUserId,
+		int $mailboxId,
+		string $mailboxEmail,
+		string $status,
+	): void
+	{
+		if (!Main\Loader::includeModule('im'))
+		{
+			return;
+		}
+
+		$tag = 'MAIL|MIGRATION|' . $mailboxId . '|' . $status;
+
+		$phrase = match ($status)
+		{
+			'done' => 'MAIL_NOTIFY_MIGRATION_DONE',
+			'cancelled' => 'MAIL_NOTIFY_MIGRATION_CANCELLED',
+			default => 'MAIL_NOTIFY_MIGRATION_STARTED',
+		};
+		$safeEmail = htmlspecialcharsbx($mailboxEmail);
+		$message = static fn (?string $languageId = null) => Loc::getMessage(
+			$phrase,
+			['#EMAIL#' => $safeEmail],
+			$languageId,
+		) ?: Loc::getMessage('MAIL_NOTIFY_NEW_MESSAGE_TITLE', [], $languageId);
+
+		\CIMNotify::Add([
+			'TO_USER_ID' => $toUserId,
+			'NOTIFY_TYPE' => IM_NOTIFY_SYSTEM,
+			'NOTIFY_MODULE' => 'mail',
+			'NOTIFY_TAG' => $tag,
+			'NOTIFY_MESSAGE' => $message,
+			'PARAMS' => [
+				'COMPONENT_ID' => 'MailEntity',
+				'COMPONENT_PARAMS' => ['SUBJECT' => $message],
+			],
+		]);
+	}
+
 	public static function dispatchOrphanedMailboxAutoDisconnectNotifications(
 		int $mailboxId,
 		string $mailboxEmail,

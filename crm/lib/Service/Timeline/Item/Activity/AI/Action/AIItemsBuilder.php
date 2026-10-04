@@ -18,6 +18,7 @@ final class AIItemsBuilder
 	private int $activityId;
 	private AssociatedEntityModel $model;
 	private Context $context;
+	private int $rootActivityId = 0;
 
 	/**
 	 * @var AIAction[]
@@ -45,6 +46,13 @@ final class AIItemsBuilder
 		return new self($activityId, $context, $model);
 	}
 
+	public function withRootActivityId(int $rootActivityId): self
+	{
+		$this->rootActivityId = $rootActivityId > 0 ? $rootActivityId : 0;
+
+		return $this;
+	}
+
 	/**
 	 * Adds action by scenario name.
 	 *
@@ -58,7 +66,8 @@ final class AIItemsBuilder
 			$scenario,
 			$this->activityId,
 			$this->context,
-			$this->model
+			$this->model,
+			$this->rootActivityId,
 		);
 		if ($action)
 		{

@@ -18,6 +18,9 @@ final readonly class ChildrenLoader
 	}
 
 	/**
+	 * Expands one folder: its children are listed over a live connection, exactly as an
+	 * ordinary connection of a mailbox lists what the user unfolds.
+	 *
 	 * @return Result Result data on success: ['items' => DirectoryItem[]]
 	 */
 	public function load(int $mailboxId, string $dirMd5): Result

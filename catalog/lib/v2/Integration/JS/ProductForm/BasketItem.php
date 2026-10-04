@@ -61,6 +61,7 @@ class BasketItem
 			'discount' => 0,
 			'taxId' => 0,
 			'taxIncluded' => 'N',
+			'taxSum' => 0,
 			'additionalFields' => [],
 			'properties' => [],
 			'weight' => 0,
@@ -123,7 +124,16 @@ class BasketItem
 
 	private function getSum(): float
 	{
-		return (float)$this->getField('priceExclusive') * (float)$this->getField('quantity');
+		// The "result" column (итог) is the gross line total the buyer pays.
+		// `price` is the gross (with-tax) unit price shown to the user, so it is the
+		// right coordinate for both taxIncluded modes. `priceExclusive` cannot be used
+		// here: for taxIncluded='N' it holds the netto unit price (see
+		// salescenter.app::fillVat / VatRate::prepareTaxPrices), which would render the
+		// row total without VAT (100 instead of 122 for a 100 + 22% item). For every
+		// other producer price == priceExclusive, so this stays a no-op there and keeps
+		// the per-row total consistent with the aggregate totals, the refresh path and
+		// the front-end calculator, which all use the gross price.
+		return (float)$this->getField('price') * (float)$this->getField('quantity');
 	}
 
 	private function getDetailUrl(): string
@@ -529,6 +539,13 @@ class BasketItem
 	public function setTaxRate(?float $value): self
 	{
 		$this->fields['taxRate'] = $value;
+
+		return $this;
+	}
+
+	public function setTaxSum(float $value): self
+	{
+		$this->fields['taxSum'] = $value;
 
 		return $this;
 	}

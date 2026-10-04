@@ -38,7 +38,7 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && $_POST["action"] <> '' && check_bitrix_
 			break;
 		case "applyFilter":
 			$filterCode = $_POST["filterCode"];
-			if (!empty($filter))
+			if (!empty($filterCode))
 				$curOption["currentFilter"] = $filterCode;
 			elseif(isset($curOption["currentFilter"]))
 				unset($curOption["currentFilter"]);

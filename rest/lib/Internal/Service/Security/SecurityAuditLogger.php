@@ -28,6 +28,12 @@ final class SecurityAuditLogger
 	public const AUDIT_USER_AUTHORIZE = 'USER_AUTHORIZE';
 	public const AUDIT_USER_REGISTER = 'USER_REGISTER';
 
+	public const OUTCOME_SUCCESS = 'success';
+	// The operation failed and nothing of the change reached the storage.
+	public const OUTCOME_FAILURE = 'failure';
+	// The operation failed, but the storage may already hold a part of the change.
+	public const OUTCOME_PARTIAL_FAILURE = 'partialFailure';
+
 	public function logUserAuthorized(
 		int $userId,
 		string $applicationType,
@@ -94,6 +100,8 @@ final class SecurityAuditLogger
 		array $previousScopes,
 		array $newScopes,
 		?string $title = null,
+		string $outcome = self::OUTCOME_SUCCESS,
+		WebhookType $webhookType = WebhookType::User,
 	): void
 	{
 		$this->log(
@@ -105,6 +113,8 @@ final class SecurityAuditLogger
 				'previousScopes' => $previousScopes,
 				'newScopes' => $newScopes,
 				'title' => $title,
+				'outcome' => $outcome,
+				'webhookType' => $webhookType->name,
 			],
 		);
 	}
@@ -114,6 +124,8 @@ final class SecurityAuditLogger
 		int $webhookId,
 		int $ownerUserId,
 		array $scopes,
+		string $outcome = self::OUTCOME_SUCCESS,
+		WebhookType $webhookType = WebhookType::User,
 	): void
 	{
 		$this->log(
@@ -123,6 +135,8 @@ final class SecurityAuditLogger
 				'actingUserId' => $actingUserId,
 				'ownerUserId' => $ownerUserId,
 				'scopes' => $scopes,
+				'outcome' => $outcome,
+				'webhookType' => $webhookType->name,
 			],
 		);
 	}

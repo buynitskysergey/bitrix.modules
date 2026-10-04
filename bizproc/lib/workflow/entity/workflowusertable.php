@@ -32,6 +32,7 @@ use Bitrix\Bizproc\Integration\Push\WorkflowPush;
 class WorkflowUserTable extends DataManager
 {
 	use \Bitrix\Main\ORM\Data\Internal\MergeTrait;
+	use \Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
 
 	public const WORKFLOW_STATUS_ACTIVE = 0;
 	public const WORKFLOW_STATUS_COMPLETED = 1;
@@ -358,16 +359,7 @@ class WorkflowUserTable extends DataManager
 			return;
 		}
 
-		$connection = Application::getConnection();
-		$sqlHelper = $connection->getSqlHelper();
-		$tableName = $sqlHelper->forSql(static::getTableName());
-		$sqlQuery = sprintf(
-			'DELETE from %s WHERE WORKFLOW_ID IN(%s)',
-			$tableName,
-			implode(',', array_map(fn($id) => "'{$id}'", $stateIds))
-		);
-
-		$connection->queryExecute($sqlQuery);
+		static::deleteByFilter(['@WORKFLOW_ID' => $stateIds]);
 	}
 
 	public static function convertUserProcesses(int $userId): void
