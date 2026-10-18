@@ -4,26 +4,27 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Rest\V3\Controller;
 
-use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\IO;
+use Bitrix\Main\SystemException;
+use Bitrix\Note\Infrastructure\Rest\V3\Access\DocumentIntent;
+use Bitrix\Note\Infrastructure\Rest\V3\Access\DocumentStateResolver;
 use Bitrix\Note\Infrastructure\Rest\V3\Controller\ActionFilter\NoteRestAccess;
 use Bitrix\Note\Infrastructure\Rest\V3\Dto\FileItemDto;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\FileTooLargeException;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\FileTypeNotAllowedException;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\AddFileRequest;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\GetFileRequest;
-use Bitrix\Note\Internal\Exceptions\AccessDeniedException as DomainAccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\FileTooLargeException as DomainFileTooLargeException;
 use Bitrix\Note\Internal\Exceptions\FileTypeNotAllowedException as DomainFileTypeNotAllowedException;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\DocumentFileService;
-use Bitrix\Note\Public\Provider\DocumentProvider;
-use Bitrix\Note\Public\Service\AccessService;
+use Bitrix\Rest\V3\Attribute\Description;
 use Bitrix\Rest\V3\Attribute\DtoType;
+use Bitrix\Rest\V3\Attribute\Idempotent;
+use Bitrix\Rest\V3\Attribute\Title;
 use Bitrix\Rest\V3\Controller\RestController;
-use Bitrix\Rest\V3\Exception\AccessDeniedException;
 use Bitrix\Rest\V3\Exception\EntityNotFoundException;
 use Bitrix\Rest\V3\Exception\Validation\RequestValidationException;
 use Bitrix\Main\Error;
@@ -32,6 +33,10 @@ use Bitrix\Rest\V3\Interaction\Response\GetResponse;
 #[DtoType(FileItemDto::class)]
 class File extends RestController
 {
+	use CurrentUserAware;
+
+	private ?DocumentStateResolver $stateResolver = null;
+
 	protected function getDefaultPreFilters(): array
 	{
 		return [
@@ -40,22 +45,23 @@ class File extends RestController
 		];
 	}
 
+	#[Idempotent]
+	#[Title('Attach a file to a document')]
+	#[Description(
+		'Uploads a file and links it to a document. The content is passed as base64. The answer '
+		. 'carries `assetMarkdown` - the fragment to paste into the document text so that the file '
+		. 'shows up in it; an image becomes a picture, anything else becomes a link. Attaching is a '
+		. 'write on the document, so an archived or trashed one is out of reach.'
+	)]
 	public function addAction(AddFileRequest $request): GetResponse
 	{
-		$ownership = (new DocumentProvider())->getOwnershipInfo($request->documentId);
-		if ($ownership === null)
-		{
-			throw new EntityNotFoundException($request->documentId);
-		}
-
-		try
-		{
-			AccessService::assertCanEditDocument($request->documentId, $ownership['collectionId']);
-		}
-		catch (DomainAccessDeniedException)
-		{
-			throw new AccessDeniedException();
-		}
+		// Attaching a file is a write on the document, so an archived or trashed one is out of reach -
+		// the same rule the document methods answer by.
+		$this->getStateResolver()->resolve(
+			$request->documentId,
+			$this->getCurrentUserId(),
+			DocumentIntent::Write,
+		);
 
 		$binary = base64_decode($request->fileContent, strict: true);
 		if ($binary === false || $binary === '')
@@ -96,14 +102,25 @@ class File extends RestController
 		$fileId = (int)\CFile::SaveFile($fileArray, 'note/editor');
 		if ($fileId <= 0)
 		{
-			throw new RequestValidationException([new Error('failed to persist file', 'fileContent')]);
+			// The request was fine and the storage was not: answering "invalid input" would send the
+			// caller looking for a mistake in their own payload.
+			throw new SystemException('Failed to persist the file');
 		}
 
-		(new DocumentFileLinkRepository())->link(
+		// A file nobody attached is a file nobody can reach: `file.get` answers about it through the link
+		// and would report the id we have just returned as missing. Better to fail the call than to hand
+		// back an item that leads nowhere.
+		$link = (new DocumentFileLinkRepository())->link(
 			$request->documentId,
 			$fileId,
 			$this->getCurrentUserId(),
 		);
+		if (!$link->isSuccess())
+		{
+			\CFile::Delete($fileId);
+
+			throw new SystemException('Failed to attach the file to the document');
+		}
 
 		// Analytics size unit is megabytes with 2 decimals — same formula as the bk path
 		// (EditorUploaderController::onUploadComplete). Best-effort: core swallows failures.
@@ -113,18 +130,22 @@ class File extends RestController
 		return new GetResponse($this->buildFileDto($fileId, $request->documentId));
 	}
 
+	#[Title('One attached file by its id')]
+	#[Description(
+		'Reads the record of a file attached to a document: its name, size, type and the markdown '
+		. 'fragment that embeds it. The binary itself is not returned. Both the file id and the '
+		. 'document it hangs on are required - a file that belongs to another document is answered as '
+		. 'a missing one.'
+	)]
 	public function getAction(GetFileRequest $request): GetResponse
 	{
-		$ownership = (new DocumentProvider())->getOwnershipInfo($request->documentId);
-		if ($ownership === null)
-		{
-			throw new EntityNotFoundException($request->documentId);
-		}
-
-		if (!AccessService::canViewDocument($request->documentId, $ownership['collectionId']))
-		{
-			throw new EntityNotFoundException($request->documentId);
-		}
+		// Reading a file follows the document: an archived or trashed document the caller may open is
+		// still readable, one they may not see answers as missing.
+		$this->getStateResolver()->resolve(
+			$request->documentId,
+			$this->getCurrentUserId(),
+			DocumentIntent::Read,
+		);
 
 		if (!(new DocumentFileLinkRepository())->isLinked($request->documentId, $request->id))
 		{
@@ -197,8 +218,9 @@ class File extends RestController
 		return 'file';
 	}
 
-	private function getCurrentUserId(): int
+
+	private function getStateResolver(): DocumentStateResolver
 	{
-		return (int)CurrentUser::get()->getId();
+		return $this->stateResolver ??= new DocumentStateResolver();
 	}
 }

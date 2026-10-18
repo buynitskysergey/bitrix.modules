@@ -151,7 +151,7 @@ class CollaborationSyncController extends Controller
 			return null;
 		}
 
-		// [API-02] Additive fields; an older client ignores them. patchId lets the sender advance its
+		// Additive fields; an older client ignores them. patchId lets the sender advance its
 		// applied cursor (it never receives its own patch over pull); compactSuggested flags a journal
 		// that has grown past the server backstop.
 		$data = $result->getData();
@@ -160,13 +160,13 @@ class CollaborationSyncController extends Controller
 			'success' => true,
 			'compactSuggested' => (bool)($data['compactSuggested'] ?? false),
 			'patchId' => (int)($data['patchId'] ?? 0),
-			// [EVENT-01] Without the predecessor the sender has nothing to check its own write against:
+			// Without the predecessor the sender has nothing to check its own write against:
 			// it never receives its own patch over pull, so it would take the new id for proof that
 			// nothing was missed. Having seen 8, missed somebody's 9 and saved 10, it would then report
 			// cursor 10 for a text that lacks 9 — and no client could correct the projection afterwards,
 			// since the forward-only guard refuses an equal cursor. Same field as in the pull payload.
 			'prevPatchId' => (int)($data['prevPatchId'] ?? 0),
-			// [EVENT-01] The id below which the journal of this document is empty. Only a zero prevPatchId
+			// The id below which the journal of this document is empty. Only a zero prevPatchId
 			// makes it matter, and only then is it filled: without it the sender reads "nothing precedes
 			// me" as "everything below was compacted away", advances its cursor over patches it never
 			// applied, and its next compaction writes that hole in as the settled state. Same field as in
@@ -214,7 +214,7 @@ class CollaborationSyncController extends Controller
 	}
 
 	/**
-	 * [API-01] Cheap projection refresh separate from compaction: writes the fresh markdown, content
+	 * Cheap projection refresh separate from compaction: writes the fresh markdown, content
 	 * date and cursor without touching the patch log, versions, events or analytics. A read-only client
 	 * (no EDIT level) is denied; archive/recycle-bin block it the same way they block compactAction.
 	 */
@@ -233,9 +233,16 @@ class CollaborationSyncController extends Controller
 
 		try
 		{
-			// No actor is passed: materialization refreshes the projection without claiming authorship -
-			// UPDATED_BY stays with whoever last made a recorded change (see MaterializeDocumentCommand).
-			$result = (new MaterializeDocumentCommand($documentId, $markdown, $uptoId))->run();
+			// The actor claims no authorship — UPDATED_BY stays with whoever last made a recorded change
+			// (see MaterializeDocumentCommand). It travels for the Disk attachment sync alone: the caller
+			// is the person editing, and attaching a file to the document is checked against their rights
+			// on that file.
+			$result = (new MaterializeDocumentCommand(
+				$documentId,
+				$markdown,
+				$uptoId,
+				(int)$this->getCurrentUser()->getId(),
+			))->run();
 		}
 		catch (SystemException $e)
 		{
@@ -253,7 +260,7 @@ class CollaborationSyncController extends Controller
 
 		$applied = (bool)($data['applied'] ?? false);
 
-		// [API-01] `success` stays for the bundles already running in browsers, which read only it.
+		// `success` stays for the bundles already running in browsers, which read only it.
 		$response = [
 			'success' => true,
 			// applied=false → the forward-only guard refused this cursor, nothing was stored. The client
@@ -365,7 +372,7 @@ class CollaborationSyncController extends Controller
 			return null;
 		}
 
-		// [P3.T2] `join` is the only awareness message guaranteed to reach the server
+		// `join` is the only awareness message guaranteed to reach the server
 		// (heartbeat/cursor/etc. go client-to-client over BX.PULL) — track the view here.
 		// Not gated by Configuration::isActivityEnabled() (SDD F2): the hook stays cheap
 		// and keeps the view counter live even while the activity UI is switched off.

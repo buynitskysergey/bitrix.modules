@@ -2,6 +2,7 @@
 
 namespace Bitrix\Intranet\Site\FirstPage;
 
+use Bitrix\Intranet\Internal\Service\Portal\PortalFirstPageUrlNormalizer;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
@@ -25,7 +26,9 @@ class IntranetFirstPage implements FirstPage
 
 		if (empty($firstPagePath))
 		{
-			$firstPagePath = $this->getPortalFirstPage();
+			$firstPagePath = (new PortalFirstPageUrlNormalizer())
+				->normalize($this->getPortalFirstPage())
+			;
 		}
 
 		if (

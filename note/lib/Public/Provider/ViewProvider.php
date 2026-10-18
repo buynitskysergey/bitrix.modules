@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Service\History\AuthorResolver;
 use Bitrix\Note\Internal\Service\User\IdentityColor;
 
 /**
- * [P3.T3 / API-06] "Who viewed the document" — list + unique counter. Right is
+ * "Who viewed the document" - list + unique counter. Right is
  * plain LEVEL_VIEW, no role matrix (unlike the activity feed, MTX-01 does not
  * apply here): every viewer sees every other viewer.
  */

@@ -1839,6 +1839,41 @@ class MemberRepository
 		return $this->extractItemCollectionFromModelCollection($models, $loadEntityNames);
 	}
 
+	/**
+	 * Returns ids of documents the given members belong to. Unlike listByUids() it does not
+	 * hydrate member items, so no user and CRM lookups are made.
+	 *
+	 * @param array<string> $memberUids
+	 * @return list<int>
+	 */
+	public function listDocumentIdsByMemberUids(array $memberUids): array
+	{
+		if (empty($memberUids))
+		{
+			return [];
+		}
+
+		$rows = Internal\MemberTable::query()
+			->setSelect(['DOCUMENT_ID'])
+			->whereIn('UID', $memberUids)
+			->setDistinct()
+			->fetchAll()
+		;
+
+		return $this->extractDocumentIds($rows);
+	}
+
+	/**
+	 * @param list<array<string, mixed>> $rows
+	 * @return list<int>
+	 */
+	private function extractDocumentIds(array $rows): array
+	{
+		$documentIds = array_map('intval', array_column($rows, 'DOCUMENT_ID'));
+
+		return array_values(array_filter($documentIds));
+	}
+
 	public function getById(int $id): ?Item\Member
 	{
 		$memberEntity = Internal\MemberTable::query()
@@ -3261,6 +3296,49 @@ class MemberRepository
 		}
 
 		return Internal\MemberTable::updateMulti($ids, ['REMINDER_TYPE' => $reminderType->toInt()]);
+	}
+
+	/**
+	 * Reminder frequency is set for a whole role at once, so it is read back by role. The first set
+	 * type of a role wins: members created later with the default must not mask it, and a role with
+	 * no frequency set is absent from the result.
+	 *
+	 * @see MemberRepository::updateMembersReminderTypeByRole
+	 *
+	 * @return array<string, ReminderType>
+	 */
+	public function listReminderTypesByDocumentIdIndexedByRole(int $documentId): array
+	{
+		// grouped in the database: a document of a synced department holds thousands of members, and
+		// every one of them carries the frequency of its role
+		$rows = Internal\MemberTable::query()
+			->setSelect([
+				'ROLE',
+				'REMINDER_TYPE',
+				new Main\Entity\ExpressionField('FIRST_MEMBER_ID', 'MIN(%s)', 'ID'),
+			])
+			->where('DOCUMENT_ID', $documentId)
+			->whereNotNull('ROLE')
+			->whereNot('REMINDER_TYPE', ReminderType::NONE->toInt())
+			->setGroup(['ROLE', 'REMINDER_TYPE'])
+			->setOrder(['FIRST_MEMBER_ID' => 'ASC'])
+			->fetchAll()
+		;
+
+		$reminderTypes = [];
+		foreach ($rows as $row)
+		{
+			$role = Role::tryFromInt((int)$row['ROLE']);
+			$reminderType = ReminderType::tryFromInt((int)$row['REMINDER_TYPE']);
+			if ($role === null || $reminderType === null)
+			{
+				continue;
+			}
+
+			$reminderTypes[$role] ??= $reminderType;
+		}
+
+		return $reminderTypes;
 	}
 
 	public function getByDocumentAndEntityType(int $id, string $entityType): ?Item\Member

@@ -81,6 +81,24 @@ class TypeRegistry
 		));
 	}
 
+	/**
+	 * @return Type[]
+	 */
+	public function getTypesByExtendedTypes(array $extendedTypes): array
+	{
+		$types = [];
+
+		foreach ($extendedTypes as $extendedType)
+		{
+			foreach ($this->getAllByExtendedType($extendedType) as $type)
+			{
+				$types[] = $type;
+			}
+		}
+
+		return $types;
+	}
+
 	public function getByLiteralAndEntity(string $literal, ?string $entityType): Type
 	{
 		return $this->tryGetByLiteralAndEntity($literal, $entityType) ?? $this->getFallback($literal, $entityType);

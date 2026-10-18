@@ -38,6 +38,9 @@ class HcmLink extends IRestService
 {
 	public const MODULE_ID = 'humanresources';
 	public const SCOPE = 'humanresources.hcmlink';
+	private const FIELD_CODE_ALIASES = [
+		'РасчетныйЛисток' => 'РасчётныйЛисток',
+	];
 
 	public const LIMIT = 100;
 	public const LIMIT_MAX = 1000;
@@ -197,12 +200,8 @@ class HcmLink extends IRestService
 			if ($savedCompany !== null)
 			{
 				$company->id = $savedCompany->id;
-				$company = $companyRepository->update($company);
 			}
-			else
-			{
-				$company = $companyRepository->add($company);
-			}
+			$company = $companyRepository->save($company);
 
 			$fieldIdsForDelete = array_map(
 				fn() => true,
@@ -761,6 +760,7 @@ class HcmLink extends IRestService
 			foreach ($data as $i => $fieldValue)
 			{
 				$fieldCode = $fieldValue['field'] ?? '';
+				$fieldCode = self::FIELD_CODE_ALIASES[$fieldCode] ?? $fieldCode;
 				$field = $fieldRepository->getByUnique($company->id, $fieldCode);
 				if (is_null($field))
 				{
@@ -804,9 +804,17 @@ class HcmLink extends IRestService
 				}
 
 				$uniqueId = $employee->id;
+				$jobSlotId = $job?->settingsData?->documentIdByEmployeeId[$employee->id] ?? null;
 				if ($isPinRequest || $isSalaryVacationRequest)
 				{
-					$uniqueId = $job?->settingsData?->documentIdByEmployeeId[$employee->id] ?? null;
+					// Results of these jobs are isolated per job and are accepted only into its slot.
+					$uniqueId = $jobSlotId;
+				}
+				elseif ($field->entityType === FieldEntityType::DOCUMENT && $jobSlotId !== null)
+				{
+					// A DOCUMENT field belongs to the requesting document, not to the employee:
+					// sign puts the signer id into the slot and reads the value back by it.
+					$uniqueId = $jobSlotId;
 				}
 
 				if (!$uniqueId)

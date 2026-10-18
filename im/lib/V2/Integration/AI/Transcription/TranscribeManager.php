@@ -53,7 +53,10 @@ final class TranscribeManager
 		$this->messageId = $messageId;
 	}
 
-	public function transcribeFile(LaunchType $launchType = LaunchType::Auto): TranscribeResult
+	public function transcribeFile(
+		LaunchType $launchType = LaunchType::Auto,
+		array $additionalContextParams = []
+	): TranscribeResult
 	{
 		$result = new TranscribeResult($this->createErrorFileItem());
 
@@ -90,7 +93,7 @@ final class TranscribeManager
 			Application::getConnection()->unlock($this->getLockName());
 		}
 
-		$result = $this->sendAiQuery($launchType);
+		$result = $this->sendAiQuery($launchType, $additionalContextParams);
 
 		if ($result->isSuccess())
 		{
@@ -229,7 +232,7 @@ final class TranscribeManager
 		return TranscribeQueueManager::getInstance()->inQueue($this->fileId, $this->chatId);
 	}
 
-	protected function sendAiQuery(LaunchType $launchType): TranscribeResult
+	protected function sendAiQuery(LaunchType $launchType, array $additionalContextParams): TranscribeResult
 	{
 		$result = new TranscribeResult($this->createErrorFileItem());
 
@@ -240,6 +243,8 @@ final class TranscribeManager
 			'messageId' => $this->messageId,
 			'launchType' => $launchType->value,
 		];
+
+		$contextParams = array_merge($contextParams, $additionalContextParams);
 
 		$fileId = $this->fileId;
 		$file = \CFile::GetFileArray($fileId);
@@ -286,6 +291,11 @@ final class TranscribeManager
 				})
 				->completionsInQueue()
 			;
+
+			if ($result->isSuccess())
+			{
+				$result->setNewJobQueued(true);
+			}
 		}
 
 		return $result;
@@ -293,13 +303,23 @@ final class TranscribeManager
 
 	protected function getEngine(Context $context): ?Engine
 	{
-		$engineName = (new Manager())->getItem(Restriction::SETTING_TRANSCRIPTION_PROVIDER)?->getValue();
-		if (empty($engineName))
+		// the provider name is portal-wide, but building Tuning\Manager fires onTuningLoad
+		// across modules - memoize it for the hit, the multiselect flow calls this in a loop.
+		// only a successfully resolved name is cached: an empty provider must not stick for
+		// the rest of the process (it can be configured between calls)
+		static $engineName = null;
+		if ($engineName === null)
 		{
-			return null;
+			$resolvedName = (string)((new Manager())->getItem(Restriction::SETTING_TRANSCRIPTION_PROVIDER)?->getValue() ?? '');
+			if ($resolvedName === '')
+			{
+				return null;
+			}
+
+			$engineName = $resolvedName;
 		}
 
-		return Engine::getByCode((string)$engineName, $context);
+		return Engine::getByCode($engineName, $context);
 	}
 
 	protected function sendTranscribeEvent(

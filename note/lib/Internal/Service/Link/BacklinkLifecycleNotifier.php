@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\Link;
 
 /**
- * [D1] One semantic entry point: "the lifecycle of these source documents changed — refresh the
- * backlinks of every document they point at". Archive, trash and restore all change what a backlink
- * popover reads off a source through its join (its visibility), so their commands call this right
- * after the state change is applied.
+ * [D1] One semantic entry point for document metadata and lifecycle changes. It refreshes both
+ * directions of every indexed link: backlink readers of this source and open documents that contain
+ * a mention of this document as their target.
  *
  * Kept apart from {@see \Bitrix\Note\Internal\Service\DomainEventPublisher} on purpose: that class is
  * the external boundary for note's domain events, and hanging an internal link-index side effect off
@@ -35,10 +34,17 @@ final class BacklinkLifecycleNotifier
 			return;
 		}
 
-		// Best-effort: a refresh must never fail a mutation that already committed.
 		try
 		{
 			$this->linkIndexService->notifySourceMetadataChangedForMany($sourceIds);
+		}
+		catch (\Throwable)
+		{
+		}
+
+		try
+		{
+			$this->linkIndexService->notifyMentionTargetsChanged($sourceIds);
 		}
 		catch (\Throwable)
 		{

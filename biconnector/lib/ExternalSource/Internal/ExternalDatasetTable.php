@@ -6,6 +6,7 @@ use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\ORM\EntityError;
 use Bitrix\Main\ORM\Event;
 use Bitrix\Main\ORM\EventResult;
+use Bitrix\Main\ORM\Fields\BooleanField;
 use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\StringField;
@@ -29,6 +30,9 @@ use Bitrix\Main\Type\DateTime;
  * <li> CREATED_BY_ID int mandatory
  * <li> UPDATED_BY_ID int optional
  * <li> EXTERNAL_ID int optional
+ * <li> CSV_DELIMITER string(10) optional
+ * <li> CSV_ENCODING string(50) optional
+ * <li> CSV_HAS_HEADERS bool optional
  * </ul>
  *
  * @package Bitrix\BIConnector\ExternalSource\Internal
@@ -171,6 +175,33 @@ class ExternalDatasetTable extends DataManager
 				'EXTERNAL_ID',
 				[
 					'title' => Loc::getMessage('EXTERNAL_DATASET_SETTINGS_ENTITY_EXTERNAL_ID_FIELD'),
+				]
+			),
+			new StringField(
+				'CSV_DELIMITER',
+				[
+					'validation' => fn() => [
+						new LengthValidator(null, 10),
+						new Validator\DelimiterValidator(),
+					],
+					'title' => Loc::getMessage('EXTERNAL_DATASET_ENTITY_CSV_DELIMITER_FIELD'),
+				]
+			),
+			new StringField(
+				'CSV_ENCODING',
+				[
+					'validation' => fn() => [
+						new LengthValidator(null, 50),
+						new Validator\EncodingValidator(),
+					],
+					'title' => Loc::getMessage('EXTERNAL_DATASET_ENTITY_CSV_ENCODING_FIELD'),
+				]
+			),
+			new BooleanField(
+				'CSV_HAS_HEADERS',
+				[
+					'values' => ['N', 'Y'],
+					'title' => Loc::getMessage('EXTERNAL_DATASET_ENTITY_CSV_HAS_HEADERS_FIELD'),
 				]
 			),
 		];

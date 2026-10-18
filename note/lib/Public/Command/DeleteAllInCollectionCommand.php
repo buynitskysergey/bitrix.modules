@@ -19,7 +19,7 @@ use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P2.T5 / API-07] "Select all": soft-delete (move to recycle
+ * "Select all": soft-delete (move to recycle
  * bin) every live document of a collection. The affected set is computed server-side over the
  * whole collection structure (getLiveCollectionDocumentIds), not from loaded rows. The whole
  * subtree goes, so no re-hang is needed. The collection entity itself is never touched.

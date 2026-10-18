@@ -49,6 +49,9 @@ use Bitrix\Sign\Type\Document\Version;
 class DocumentService
 {
 	private const DOCUMENT_NAME_LENGTH_LIMIT = 100;
+	public const ERROR_CODE_DOCUMENT_IN_FINAL_STATUS = 'DOCUMENT_IN_FINAL_STATUS';
+	public const ERROR_CODE_DOCUMENT_NOT_INITIATED_BY_COMPANY = 'DOCUMENT_NOT_INITIATED_BY_COMPANY';
+	public const ERROR_CODE_DOCUMENT_NOT_B2E = 'DOCUMENT_NOT_B2E';
 
 	private DocumentRepository $documentRepository;
 	private BlankRepository $blankRepository;
@@ -572,6 +575,205 @@ class DocumentService
 		return $this->providerCodeService->updateProviderCode($document, $providerCode);
 	}
 
+	/**
+	 * Saves the message attached to the invitation to sign on a single document; a whole batch of one
+	 * send goes through modifyInviteMessageForDocuments(). Outside of these two the attribute is only
+	 * written by the operations that create the document.
+	 *
+	 * The status is checked twice, and both checks are needed: the guard below refuses with the error
+	 * code of the reason, while the write itself repeats the status condition in its `WHERE` clause.
+	 * Without the second check the document read before the write and the document written to are not
+	 * the same state — `ConfigureDocument` of a neighbouring document of the batch runs in parallel and
+	 * moves this one to `ready`, and the text would land on a document whose invitations are already
+	 * being formed.
+	 *
+	 * @param string|null $message null, an empty string or whitespace only clears the previously saved message
+	 */
+	public function modifyInviteMessage(Item\Document $document, ?string $message): Main\Result
+	{
+		$validationResult = (new Validation\ValidateInviteMessage($message))->launch();
+		if (!$validationResult->isSuccess())
+		{
+			return $validationResult;
+		}
+
+		$guardResult = $this->checkInviteMessageCanBeStored($document);
+		if (!$guardResult->isSuccess())
+		{
+			return $guardResult;
+		}
+
+		$result = new Main\Result();
+		if (!$document->id)
+		{
+			return $result->addError(new Main\Error('Document not found'));
+		}
+
+		$normalizedMessage = self::normalizeInviteMessage($message);
+		if (!$this->documentRepository->updateInviteMessageIfEditable($document->id, $normalizedMessage))
+		{
+			return $result->addError($this->createInviteMessageStatusError());
+		}
+
+		$document->inviteMessage = $normalizedMessage;
+
+		return $result;
+	}
+
+	/**
+	 * Saves one message on every document of a send batch. The batch of the group wizard carries a
+	 * single text, so the whole batch is written by one conditional statement instead of one statement
+	 * per document: the statement runs inside the transaction of the caller and every statement saved
+	 * there is lock time saved on documents the wizard is about to configure.
+	 *
+	 * The guards of the single write run over the whole batch before that statement, so a refused
+	 * document gives its own error code and nothing is written. The statement itself takes either all
+	 * the documents or none of them: a document whose status changed after the guard is refused by the
+	 * status condition of the write, and then the batch has to be taken back — that is the business of
+	 * the caller, which owns the transaction.
+	 *
+	 * @param string|null $message null, an empty string or whitespace only clears the previously saved message
+	 */
+	public function modifyInviteMessageForDocuments(Item\DocumentCollection $documents, ?string $message): Main\Result
+	{
+		$validationResult = (new Validation\ValidateInviteMessage($message))->launch();
+		if (!$validationResult->isSuccess())
+		{
+			return $validationResult;
+		}
+
+		$guardResult = $this->checkInviteMessageCanBeStoredForDocuments($documents);
+		if (!$guardResult->isSuccess())
+		{
+			return $guardResult;
+		}
+
+		$result = new Main\Result();
+		$documentIds = [];
+		foreach ($documents as $document)
+		{
+			if (!$document->id)
+			{
+				return $result->addError(new Main\Error('Document not found'));
+			}
+
+			$documentIds[] = $document->id;
+		}
+
+		if ($documentIds === [])
+		{
+			return $result;
+		}
+
+		$normalizedMessage = self::normalizeInviteMessage($message);
+		if (!$this->documentRepository->updateInviteMessageForEditableDocuments($documentIds, $normalizedMessage))
+		{
+			return $result->addError($this->createInviteMessageStatusError());
+		}
+
+		foreach ($documents as $document)
+		{
+			$document->inviteMessage = $normalizedMessage;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * The same guards over a whole batch: one rejected document rejects the batch, and its own error
+	 * code says why. The batch entry point calls this before it opens its transaction — a refusal
+	 * costs no transaction — and the batch write repeats the check, so the guards cannot be skipped.
+	 */
+	public function checkInviteMessageCanBeStoredForDocuments(Item\DocumentCollection $documents): Main\Result
+	{
+		foreach ($documents as $document)
+		{
+			$guardResult = $this->checkInviteMessageCanBeStored($document);
+			if (!$guardResult->isSuccess())
+			{
+				return $guardResult;
+			}
+		}
+
+		return new Main\Result();
+	}
+
+	private function createInviteMessageStatusError(): Main\Error
+	{
+		return new Main\Error(
+			Loc::getMessage('SIGN_SERVICE_DOCUMENT_INVITE_MESSAGE_DOCUMENT_IN_FINAL_STATUS'),
+			self::ERROR_CODE_DOCUMENT_IN_FINAL_STATUS,
+		);
+	}
+
+	/**
+	 * Every reason to refuse the write in one place: the batch entry point checks the whole batch
+	 * before its first write and has to refuse for the same reasons and with the same error codes.
+	 *
+	 * Only a B2E invitation sent by the company carries the message: HrBotMessageService passes the
+	 * text on to the employee signer and no other invitation reads it. Both conditions are required
+	 * explicitly, so a document that carries neither sign is refused instead of storing a value that
+	 * would be silently undeliverable. The client hides the field in the same cases.
+	 *
+	 * The status window is narrower than the one of canBeChanged(): the text is read when the
+	 * invitation is formed, and that happens on the callback of a document already sent, so `ready` is
+	 * too late to change it. A batch of a group wizard makes it visible — configure walks the batch
+	 * document by document, so a write allowed in `ready` would give the invitations of one send
+	 * different versions of the same message.
+	 */
+	public function checkInviteMessageCanBeStored(Item\Document $document): Main\Result
+	{
+		$result = new Main\Result();
+
+		if (!Type\DocumentScenario::isB2eScenarioByDocument($document))
+		{
+			return $result->addError(new Main\Error(
+				Loc::getMessage('SIGN_SERVICE_DOCUMENT_INVITE_MESSAGE_DOCUMENT_NOT_B2E'),
+				self::ERROR_CODE_DOCUMENT_NOT_B2E,
+			));
+		}
+
+		if ($document->initiatedByType !== InitiatedByType::COMPANY)
+		{
+			return $result->addError(new Main\Error(
+				Loc::getMessage('SIGN_SERVICE_DOCUMENT_INVITE_MESSAGE_NOT_INITIATED_BY_COMPANY'),
+				self::ERROR_CODE_DOCUMENT_NOT_INITIATED_BY_COMPANY,
+			));
+		}
+
+		if (!Type\DocumentStatus::isEditableByDocument($document))
+		{
+			return $result->addError(new Main\Error(
+				Loc::getMessage('SIGN_SERVICE_DOCUMENT_INVITE_MESSAGE_DOCUMENT_IN_FINAL_STATUS'),
+				self::ERROR_CODE_DOCUMENT_IN_FINAL_STATUS,
+			));
+		}
+
+		return $result;
+	}
+
+	/**
+	 * A message made of whitespace only means no message. Without this the three delivery channels
+	 * disagree on the same value: the invitation body gets a block with a blank line under its title,
+	 * the mobile card gets an empty gap, and the web card shows nothing because it trims on render.
+	 * Every entry point that stores the attribute normalizes through here.
+	 */
+	public static function normalizeInviteMessage(?string $message): ?string
+	{
+		if ($message === null)
+		{
+			return null;
+		}
+
+		// The character class the browser trims by, so the value the client counts and the value the
+		// server stores stay the same; on broken UTF-8 the pattern returns null and the ASCII trim of
+		// the fallback still keeps a blank message out of the delivery channels.
+		$trimmed = preg_replace('~^[\s\pZ\x{FEFF}]+|[\s\pZ\x{FEFF}]+$~u', '', $message);
+		$message = trim($trimmed ?? $message);
+
+		return $message === '' ? null : $message;
+	}
+
 	public function update(Item\Document $document): Main\Result
 	{
 		return $this->documentRepository->update($document);
@@ -994,7 +1196,7 @@ class DocumentService
 			if (empty($file->content->data))
 			{
 				return (new Main\Result())->addError(
-					new Main\Error(Loc::getMessage('SIGN_SERVICE_DOCUMENT_FILE_EMPTY')),
+					new Main\Error(Loc::getMessage('SIGN_SERVICE_DOCUMENT_FILE_EMPTY'), 'FILE_EMPTY'),
 				);
 			}
 
@@ -1228,9 +1430,12 @@ class DocumentService
 			$result->addError(new Main\Error(Loc::getMessage('SIGN_SERVICE_DOCUMENT_NOT_FOUND')));
 		}
 
+		$blankId = $blankId ?: $document?->blankId;
 		try
 		{
-			$blank = $this->blankRepository->getById($blankId ? : $document->blankId);
+			// A missing document leaves no blank id to look up: reading it off the document would
+			// turn a reported error into a TypeError of the caller.
+			$blank = $blankId === null ? null : $this->blankRepository->getById($blankId);
 		}
 		catch (Main\ObjectPropertyException|Main\ArgumentException|Main\SystemException $e)
 		{

@@ -11,7 +11,7 @@ use Bitrix\Main\Web\Uri;
 class FirstPage
 {
 	use Singleton;
-	private const FIRST_PAGE_LINK_CACHE = 'FIRST_PAGE_LINK_V2';
+	private const FIRST_PAGE_LINK_CACHE = 'FIRST_PAGE_LINK_V3';
 	private const FIRST_PAGE_LINK_CACHE_DIR = 'intranet/first_page';
 	private Cache $cache;
 

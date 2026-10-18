@@ -114,9 +114,9 @@ class UserCountersCollector
 	{
 		$overflowedChatIds = $this->counterOverflowService->getOverflowedChatIdsByUserId(
 			$userId,
-			$this->getLimit(),
+			$this->getChatsLimit(),
 		);
-		$limit = $this->getLimit() - count($overflowedChatIds);
+		$limit = $this->getChatsLimit() - count($overflowedChatIds);
 		$query = MessageUnreadTable::query()
 			->setSelect([
 				'COUNT' => new ExpressionField('COUNT', 'COUNT(*)'),
@@ -283,7 +283,11 @@ class UserCountersCollector
 		return $this->recentConfigManager->getBaseRecentSections($type->getExtendedType(false));
 	}
 
-	private function getLimit(): int
+	/**
+	 * Maximum number of chats whose message counters are collected (the most recently active ones);
+	 * counters of chats beyond this cap are not represented in UserCounters.
+	 */
+	public function getChatsLimit(): int
 	{
 		return (int)Option::get('im', 'counter_chats_limit', self::LIMIT);
 	}

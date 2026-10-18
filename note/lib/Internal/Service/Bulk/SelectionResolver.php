@@ -8,7 +8,7 @@ use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P1.T1] Expands a bulk selection of root document ids
+ * Expands a bulk selection of root document ids
  * into the full set of affected documents, deduplicated across overlapping subtrees.
  *
  * This is the single point where the selection-size cap is enforced — getSubtreeIds

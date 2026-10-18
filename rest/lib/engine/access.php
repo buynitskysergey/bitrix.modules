@@ -10,10 +10,11 @@ use Bitrix\Main\ModuleManager;
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Web\Json;
 use Bitrix\Rest\AppTable;
-use Bitrix\Rest\Infrastructure\Market\MarketSubscription;
-use Bitrix\Rest\Internal\Exception\Payment\MarketSubscriptionRequiredException;
-use Bitrix\Rest\Internal\Exception\Payment\RestUnavailableException;
-use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanException;
+use Bitrix\Rest\Internal\Service\Admission\APAuthAdmissionGate;
+use Bitrix\Rest\Internal\Service\Admission\OAuthAdmissionGate;
+use Bitrix\Rest\Internal\Service\Admission\PortalAdmissionGate;
+use Bitrix\Rest\Internal\Service\Admission\Strategy\OAuth\MarketSubscriptionStrategy as OAuthMarketSubscriptionStrategy;
+use Bitrix\Rest\Internal\Service\Admission\Strategy\Portal\MarketSubscriptionStrategy as PortalMarketSubscriptionStrategy;
 use Bitrix\Rest\Marketplace\Client;
 use Bitrix\Rest\Marketplace\Immune;
 use Bitrix\Rest\Service\ServiceContainer;
@@ -45,8 +46,6 @@ class Access
 	private const OPTION_HOLD_CHECK_COUNT_APP = '~hold_check_count_app';
 	private const DEFAULT_AVAILABLE_COUNT = -1;
 	private const DEFAULT_AVAILABLE_COUNT_DEMO = 10;
-	private const SYSTEM_METHODS = ['crm.automation.trigger'];
-	private const ALWAYS_AVAILABLE_METHODS = ['rest.portal.license.get'];
 	private const MARKETPLACE_APP_STATUSES = [
 		AppTable::STATUS_FREE,
 		AppTable::STATUS_PAID,
@@ -55,7 +54,6 @@ class Access
 		AppTable::STATUS_SUBSCRIPTION,
 	];
 
-	private static $appDeniedException = [];
 	private static $availableAppCount = [];
 
 	/**
@@ -111,90 +109,9 @@ class Access
 
 	public static function ensureIsAvailable($app = ''): void
 	{
-		if (!static::isActiveRules())
-		{
-			return;
-		}
-
-		if (static::isRequestedMethodAlwaysAvailable())
-		{
-			return;
-		}
-
-		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
-		$tariffAvailability = $tariffAccessService->getRestAccessAvailability();
-		if ($tariffAvailability === false && $app !== '')
-		{
-			$appInfo = AppTable::getByClientId($app);
-			$isPublishedApplication = is_array($appInfo) && $appInfo['STATUS'] !== AppTable::STATUS_LOCAL;
-			$tariffAvailability = $tariffAccessService->getUserRestAvailability(
-				$isPublishedApplication,
-				$tariffAvailability,
-			);
-		}
-		if ($tariffAvailability === true)
-		{
-			return;
-		}
-		if ($tariffAvailability === false)
-		{
-			throw new FeatureNotAvailableOnCurrentPlanException();
-		}
-
-		if (!array_key_exists($app, static::$appDeniedException))
-		{
-			static::$appDeniedException[$app] = false;
-
-			if (Client::isSubscriptionAvailable())
-			{
-				static::$appDeniedException[$app] = null;
-			}
-			else
-			{
-				$isFeatureEnabled = !ModuleManager::isModuleInstalled('bitrix24')
-					|| $tariffAccessService->isRestAccessAvailableByTariffFeatures();
-
-				if (
-					!MarketSubscription::createByDefault()->isRequiredSubscriptionModelStarted()
-					&& $isFeatureEnabled
-				)
-				{
-					static::$appDeniedException[$app] = null;
-				}
-				elseif ($app !== '')
-				{
-					if (in_array($app, Immune::getList(), true))
-					{
-						static::$appDeniedException[$app] = null;
-					}
-					elseif ($appInfo = AppTable::getByClientId($app))
-					{
-						if ($appInfo['CODE'] && in_array($appInfo['CODE'], Immune::getList(), true))
-						{
-							static::$appDeniedException[$app] = null;
-						}
-						elseif ($appInfo['STATUS'] === AppTable::STATUS_FREE && $isFeatureEnabled)
-						{
-							static::$appDeniedException[$app] = null;
-						}
-					}
-				}
-
-				if (static::$appDeniedException[$app] === false)
-				{
-					static::$appDeniedException[$app] = $isFeatureEnabled
-						? MarketSubscriptionRequiredException::class
-						: RestUnavailableException::class;
-				}
-			}
-		}
-
-		/** @var null|class-string<MarketSubscriptionRequiredException|RestUnavailableException> $exceptionClass */
-		$exceptionClass = static::$appDeniedException[$app] ?? null;
-		if ($exceptionClass !== null)
-		{
-			throw new $exceptionClass();
-		}
+		$app = (string)$app;
+		$gate = $app === '' ? new PortalAdmissionGate() : new OAuthAdmissionGate($app);
+		$gate->ensureAdmitted();
 	}
 
 	public static function canInstallApp(array $installAppData): bool
@@ -205,6 +122,36 @@ class Access
 			return false;
 		}
 
+		return static::canInstallMarketApplication(
+			$appCode,
+			static::isAllowFreeApp($installAppData),
+		);
+	}
+
+	public static function canInstallAppById(int $appId, bool $force = false): bool
+	{
+		$appInfo = AppTable::getByClientId($appId);
+		$appCode = $appInfo['CODE'] ?? null;
+		if (!is_string($appCode) || $appCode === '')
+		{
+			return false;
+		}
+
+		return static::canInstallMarketApplication(
+			$appCode,
+			static::isAllowFreeApp([
+				'FREE' => ($appInfo['STATUS'] ?? null) === AppTable::STATUS_FREE ? 'Y' : 'N',
+			]),
+			$force,
+		);
+	}
+
+	private static function canInstallMarketApplication(
+		string $appCode,
+		bool $isFreeApplicationAllowed,
+		bool $force = false,
+	): bool
+	{
 		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
 		$marketApplicationLimit = $tariffAccessService->getMarketApplicationLimit();
 		if ($marketApplicationLimit !== null)
@@ -212,8 +159,8 @@ class Access
 			return $tariffAccessService->canInstallMarketApplication(
 				$marketApplicationLimit,
 				true,
-				static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode),
-				static::isAllowFreeApp($installAppData),
+				static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode, $force),
+				$isFreeApplicationAllowed,
 			);
 		}
 
@@ -222,8 +169,8 @@ class Access
 		return $tariffAccessService->canInstallMarketApplication(
 			$marketApplicationLimit,
 			$isApplicationAvailable,
-			$isApplicationAvailable && static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode),
-			static::isAllowFreeApp($installAppData),
+			$isApplicationAvailable && static::isAvailableCount(static::ENTITY_TYPE_APP, $appCode, $force),
+			$isFreeApplicationAllowed,
 		);
 	}
 
@@ -250,66 +197,7 @@ class Access
 
 	public static function ensureIsAvailableAPAuthByPasswordId(int $passwordId): void
 	{
-		if (!ModuleManager::isModuleInstalled('bitrix24'))
-		{
-			return;
-		}
-
-		if (static::isRequestedMethodAlwaysAvailable())
-		{
-			return;
-		}
-
-		$tariffAccessService = ServiceContainer::getInstance()->getVibePlusTariffAccessService();
-		$tariffAvailability = $tariffAccessService->getRestAccessAvailability();
-		if ($tariffAvailability === true)
-		{
-			return;
-		}
-		if ($tariffAvailability === false)
-		{
-			$restServer = \CRestServer::instance();
-			$method = $restServer ? $restServer->getMethod() : null;
-			$isSystemPassword = ServiceContainer::getInstance()
-				->getAPAuthPasswordService()
-				->isSystemPasswordById($passwordId)
-			;
-			$tariffAccessService->ensureAPAuthAvailable(
-				$isSystemPassword,
-				$method,
-				static::SYSTEM_METHODS,
-				$tariffAvailability,
-			);
-
-			return;
-		}
-
-		if (Client::isSubscriptionAvailable())
-		{
-			return;
-		}
-
-		$isFeatureEnabled = $tariffAccessService->isRestAccessAvailableByTariffFeatures();
-		if ($isFeatureEnabled && !MarketSubscription::createByDefault()->isRequiredSubscriptionModelStarted())
-		{
-			return;
-		}
-
-		if (
-			$isFeatureEnabled
-			&& ServiceContainer::getInstance()->getAPAuthPasswordService()->isSystemPasswordById($passwordId)
-			&& (!\CRestServer::instance() || in_array(\CRestServer::instance()?->getMethod(), static::SYSTEM_METHODS, true))
-		)
-		{
-			return;
-		}
-
-		if (!$isFeatureEnabled)
-		{
-			throw new RestUnavailableException();
-		}
-
-		throw new MarketSubscriptionRequiredException();
+		(new APAuthAdmissionGate($passwordId))->ensureAdmitted();
 	}
 
 	/**
@@ -945,18 +833,10 @@ class Access
 	 */
 	public static function reset() : bool
 	{
-		static::$appDeniedException = [];
+		OAuthMarketSubscriptionStrategy::resetCache();
+		PortalMarketSubscriptionStrategy::resetCache();
 		static::$availableAppCount = [];
 
 		return true;
-	}
-
-	private static function isRequestedMethodAlwaysAvailable(): bool
-	{
-		return in_array(
-			\CRestServer::instance()?->getMethod() ?? null,
-			static::ALWAYS_AVAILABLE_METHODS,
-			true,
-		);
 	}
 }

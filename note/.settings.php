@@ -16,6 +16,7 @@ return [
 			'documentation' => [
 				'methods' => [
 					'note.collection.list' => \Bitrix\Note\Infrastructure\Rest\V3\Documentation\CollectionListMethodProvider::class,
+					'note.document.get' => \Bitrix\Note\Infrastructure\Rest\V3\Documentation\DocumentGetMethodProvider::class,
 					'note.document.search.list' => \Bitrix\Note\Infrastructure\Rest\V3\Documentation\DocumentSearchListMethodProvider::class,
 					'note.document.tree.list' => \Bitrix\Note\Infrastructure\Rest\V3\Documentation\DocumentTreeListMethodProvider::class,
 				],
@@ -53,6 +54,13 @@ return [
 					'provider' => [
 						'moduleId' => 'note',
 						'className' => '\\Bitrix\\Note\\Internal\\Integration\\UI\\EntitySelector\\DocumentProvider',
+					],
+				],
+				[
+					'entityId' => 'note-disk-folder',
+					'provider' => [
+						'moduleId' => 'note',
+						'className' => '\\Bitrix\\Note\\Internal\\Integration\\UI\\EntitySelector\\DiskFolderProvider',
 					],
 				],
 			],

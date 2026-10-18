@@ -72,6 +72,7 @@ final class GetChartDataTool extends BaseBiTool
 				'dashboardId' => [
 					'type' => 'integer',
 					'description' => 'Dashboard ID from the list_dashboards tool result.',
+					'minimum' => 1,
 				],
 				'chartIds' => [
 					'type' => 'array',
@@ -81,6 +82,7 @@ final class GetChartDataTool extends BaseBiTool
 						. 'single request, so prefer batching over multiple calls.',
 					'items' => [
 						'type' => 'integer',
+						'minimum' => 1,
 					],
 					'minItems' => 1,
 					'maxItems' => self::MAX_CHARTS_PER_CALL,
@@ -112,6 +114,7 @@ final class GetChartDataTool extends BaseBiTool
 							],
 						],
 						'required' => ['name', 'value'],
+						'additionalProperties' => false,
 					],
 				],
 				'urlParams' => [

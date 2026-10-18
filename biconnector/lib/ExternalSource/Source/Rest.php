@@ -9,9 +9,9 @@ use Bitrix\BIConnector\ExternalSource\Internal\ExternalSourceRestConnector;
 use Bitrix\BIConnector\ExternalSource\Internal\ExternalSourceRestTable;
 use Bitrix\BIConnector\ExternalSource\Internal\ExternalSourceSettingsCollection;
 use Bitrix\BIConnector\Services;
+use Bitrix\BIConnector\Superset\Error\UserFacingError;
 use Bitrix\BIConnector\Superset\Logger\Logger;
 use Bitrix\Main\ArgumentException;
-use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
@@ -99,7 +99,8 @@ class Rest extends Base
 
 		if (!$this->connector?->getUrlCheck())
 		{
-			$result->addError(new Error(Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_EMPTY_CHECK_URL') ?? ''));
+			$errorMessage = Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_EMPTY_CHECK_URL');
+			$result->addError(new UserFacingError($errorMessage));
 
 			return $result;
 		}
@@ -123,7 +124,7 @@ class Rest extends Base
 		}
 		catch (SystemException $e)
 		{
-			$result->addError(new Error($e->getMessage()));
+			$result->addError(new UserFacingError($e->getMessage()));
 		}
 
 		return $result;
@@ -144,7 +145,8 @@ class Rest extends Base
 		$result = new Result();
 		if (!$this->source?->getConnector()?->getUrlTableList())
 		{
-			$result->addError(new Error(Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_EMPTY_DATA_URL') ?? ''));
+			$errorMessage = Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_EMPTY_DATA_URL');
+			$result->addError(new UserFacingError($errorMessage));
 
 			return $result;
 		}
@@ -162,14 +164,16 @@ class Rest extends Base
 			$tableList = $this->decode($resultQuery);
 			if ($tableList === null || !self::checkTableList($tableList))
 			{
-				$result->addError(new Error(Loc::getMessage('BICONNECTOR_REST_EMPTY_TABLE_LIST_ERROR') ?? ''));
+				$errorMessage = Loc::getMessage('BICONNECTOR_REST_EMPTY_TABLE_LIST_ERROR');
+				$result->addError(new UserFacingError($errorMessage));
 
 				return $result;
 			}
 		}
 		catch (SystemException)
 		{
-			$result->addError(new Error(Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_404_ERROR') ?? ''));
+			$errorMessage = Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_404_ERROR');
+			$result->addError(new UserFacingError($errorMessage));
 
 			return $result;
 		}
@@ -348,7 +352,10 @@ class Rest extends Base
 
 		if (!$responseResult->isSuccess())
 		{
-			throw new SystemException($responseResult->getError()?->getMessage() ?? 'Unknown error');
+			throw new SystemException(
+				$responseResult->getError()?->getMessage()
+				?? Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_CANT_CONNECT')
+			);
 		}
 
 		return $answer;
@@ -371,14 +378,16 @@ class Rest extends Base
 
 		if (!$answer)
 		{
-			$result->addError(new Error(Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_CANT_CONNECT') ?? ''));
+			$errorMessage = Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_CANT_CONNECT');
+			$result->addError(new UserFacingError($errorMessage));
 
 			return $result;
 		}
 
 		if ($client->getStatus() !== 200)
 		{
-			$result->addError(new Error(Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_404_ERROR') ?? ''));
+			$errorMessage = Loc::getMessage('BICONNECTOR_REST_CONNECTION_ERROR_404_ERROR');
+			$result->addError(new UserFacingError($errorMessage));
 
 			return $result;
 		}

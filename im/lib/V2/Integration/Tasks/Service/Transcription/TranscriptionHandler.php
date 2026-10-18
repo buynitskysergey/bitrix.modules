@@ -21,20 +21,20 @@ class TranscriptionHandler
 	{
 	}
 
-	public function handle(array $data, Message $message, string $transcribedText): bool
+	public function handle(array $data, Message $message, string $transcribedText, int $initiatorId): bool
 	{
 		$type = EntityType::tryFrom($data[self::TYPE_FIELD] ?? '');
 
 		return match ($type)
 		{
-			EntityType::Task => $this->processTask($data, $message, $transcribedText),
-			EntityType::Result => $this->processResult($data, $message),
-			EntityType::Unknown => $this->processUnknown($message),
-			default => $this->processError($message),
+			EntityType::Task => $this->processTask($data, $message, $transcribedText, $initiatorId),
+			EntityType::Result => $this->processResult($data, $message, $initiatorId),
+			EntityType::Unknown => $this->processUnknown($message, $initiatorId),
+			default => $this->processError($message, $initiatorId),
 		};
 	}
 
-	private function processTask(array $data, Message $message, string $transcribedText): bool
+	private function processTask(array $data, Message $message, string $transcribedText, int $initiatorId): bool
 	{
 		$taskData = $data[self::TASK_DATA_FIELD] ?? [];
 		if (!is_array($taskData))
@@ -42,12 +42,12 @@ class TranscriptionHandler
 			return false;
 		}
 
-		(new AutoTaskStatus($message, Status::TaskCreationStarted, true))->send();
+		(new AutoTaskStatus($message, $initiatorId, Status::TaskCreationStarted, true))->send();
 
-		return $this->taskHandler->handle($taskData, $message, $transcribedText);
+		return $this->taskHandler->handle($taskData, $message, $transcribedText, $initiatorId);
 	}
 
-	private function processResult(array $data, Message $message): bool
+	private function processResult(array $data, Message $message, int $initiatorId): bool
 	{
 		$resultData = $data[self::RESULT_DATA_FIELD] ?? '';
 		if (!is_string($resultData))
@@ -55,21 +55,21 @@ class TranscriptionHandler
 			return false;
 		}
 
-		(new AutoTaskStatus($message, Status::ResultCreationStarted, true))->send();
+		(new AutoTaskStatus($message, $initiatorId, Status::ResultCreationStarted, true))->send();
 
-		return $this->resultHandler->handle($resultData, $message);
+		return $this->resultHandler->handle($resultData, $message, $initiatorId);
 	}
 
-	private function processUnknown(Message $message): bool
+	private function processUnknown(Message $message, int $initiatorId): bool
 	{
-		(new AutoTaskStatus($message, Status::NotFound))->send();
+		(new AutoTaskStatus($message, $initiatorId, Status::NotFound))->send();
 
 		return true;
 	}
 
-	private function processError(Message $message): bool
+	private function processError(Message $message, int $initiatorId): bool
 	{
-		(new AutoTaskStatus($message, Status::NotFound))->send();
+		(new AutoTaskStatus($message, $initiatorId, Status::NotFound))->send();
 
 		return false;
 	}

@@ -338,9 +338,18 @@ class Recent
 				$skipTypes[] = \Bitrix\Im\V2\Chat::IM_TYPE_COLLAB;
 				$skipTypes[] = \Bitrix\Im\V2\Chat::IM_TYPE_OPEN_COLLAB;
 			}
-			if (!RecentConfigManager::EXTERNAL_CHAT_USE_DEFAULT_RECENT_SECTION)
+			$externalTypesInDefaultSection = RecentConfigManager::getInstance()->getExternalTypesInDefaultSection();
+			if ($externalTypesInDefaultSection === [])
 			{
 				$skipTypes[] = \Bitrix\Im\V2\Chat::IM_TYPE_EXTERNAL;
+			}
+			else
+			{
+				$ormParams['filter'][] = [
+					'LOGIC' => 'OR',
+					['!=ITEM_TYPE' => \Bitrix\Im\V2\Chat::IM_TYPE_EXTERNAL],
+					['@CHAT.ENTITY_TYPE' => $externalTypesInDefaultSection],
+				];
 			}
 			if (!empty($skipTypes))
 			{

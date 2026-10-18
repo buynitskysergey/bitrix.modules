@@ -105,6 +105,8 @@ class Imap extends Mail\Helper\Mailbox
 	/** @var int[] */
 	private array $lastCompletedUids = [];
 	private int $lastMessageClientErrorCount = 0;
+	private ?DeliveryBoundaryService $deliveryBoundaryService = null;
+	private ?DeliveryContext $deliveryContextOverride = null;
 
 	/**
 	 * The interval of uids each dir was found to hold, by the md5 of its path. Kept per object and
@@ -1126,6 +1128,9 @@ class Imap extends Mail\Helper\Mailbox
 			$list[$item['name']] = $item;
 		}
 
+		// The removal below must not trust what this process cached about the prepared generations earlier
+		GenerationScope::invalidateActivePointerCache((int)$this->mailbox['ID']);
+
 		$this->getDirsHelper()->syncDbDirs($list);
 
 		$lastCacheSession = $this->session;
@@ -1514,10 +1519,6 @@ class Imap extends Mail\Helper\Mailbox
 		$dir->stopSyncLock();
 
 		$this->lastSyncResult['newMessages'] += $result;
-		if (!$dir->isTrash() && !$dir->isSpam() && !$dir->isDraft() && !$dir->isOutcome())
-		{
-			$this->lastSyncResult['newMessagesNotify'] += $result;
-		}
 
 		return $result;
 	}
@@ -1673,6 +1674,14 @@ class Imap extends Mail\Helper\Mailbox
 			return $result;
 		}
 
+		$deliveryBoundary = $this->getDeliveryBoundaryService()->resolve(
+			(int)$dir->getId(),
+			$dir->getDirMd5(),
+			(int)$this->getGenerationContext()->generationId,
+			(int)$uidtoken,
+			fn () => $this->getServerMaximumUid($dir->getPath(), $meta),
+		);
+
 		$chunks = array_chunk($UIDs, 10);
 		$retryUids = $failOnLocalError
 			? $this->collectRetryUids($dir, (int)$uidtoken, $UIDs)
@@ -1794,16 +1803,40 @@ class Imap extends Mail\Helper\Mailbox
 				$hashesMap = [];
 				$isStorageFailure = false;
 				$clientErrorsBeforeMessage = count($this->client->getErrors());
-				$syncResult = $this->syncMessage(
-					$dir->getPath(),
+				$deliveryContext = $this->resolveMessageDeliveryContext(
 					$item,
+					$deliveryBoundary,
+					(int)$dir->getId(),
+					(int)$uidtoken,
+					(int)$item['UID'],
+					(bool)$isRecovered,
 					$hashesMap,
-					$ignoreSyncFrom,
-					$isOutgoing,
-					$isRecovered,
-					$failOnLocalError,
-					$failOnLocalError && isset($retryUids[(int)$item['UID']]),
-					$isStorageFailure,
+				);
+				$syncResult = $this->runWithDeliveryContext(
+					$deliveryContext,
+					function () use (
+						$dir,
+						$item,
+						&$hashesMap,
+						$ignoreSyncFrom,
+						$isOutgoing,
+						$isRecovered,
+						$failOnLocalError,
+						$retryUids,
+						&$isStorageFailure,
+					) {
+						return $this->syncMessage(
+							$dir->getPath(),
+							$item,
+							$hashesMap,
+							$ignoreSyncFrom,
+							$isOutgoing,
+							$isRecovered,
+							$failOnLocalError,
+							$failOnLocalError && isset($retryUids[(int)$item['UID']]),
+							$isStorageFailure,
+						);
+					},
 				);
 
 				if ($failOnLocalError)
@@ -1954,6 +1987,48 @@ class Imap extends Mail\Helper\Mailbox
 	}
 
 	/**
+	 * The error codes of the client that are about reaching the server at all - the connection,
+	 * the greeting, the login - and not about the command the server then refused.
+	 */
+	private const TRANSPORT_ERRORS = [
+		Mail\Imap::ERR_CONNECT,
+		Mail\Imap::ERR_REJECTED,
+		Mail\Imap::ERR_COMMUNICATE,
+		Mail\Imap::ERR_EMPTY_RESPONSE,
+		Mail\Imap::ERR_BAD_SERVER,
+		Mail\Imap::ERR_STARTTLS,
+		Mail\Imap::ERR_AUTH,
+		Mail\Imap::ERR_AUTH_MECH,
+		Mail\Imap::ERR_AUTH_OAUTH,
+	];
+
+	/**
+	 * Whether the client has reported that the server itself could not be reached, as opposed to
+	 * having answered a command with a refusal.
+	 *
+	 * The difference matters to every caller that walks a mailbox command by command: a server
+	 * that turns one command down leaves the rest of the walk meaningful, while a connection that
+	 * is gone makes every command behind it fail for a reason that has nothing to do with the
+	 * letters it names - and counting those as refused letters would end the walk successfully.
+	 *
+	 * The errors of the client accumulate for as long as the engine lives, so this answers "has
+	 * the connection been lost at any point", which is what a caller asking it right after a
+	 * failed command means: once the wire is gone, nothing after it succeeds either.
+	 */
+	public function hasLostTheConnection(): bool
+	{
+		foreach ($this->client->getErrors() as $error)
+		{
+			if (in_array((int)$error->getCode(), self::TRANSPORT_ERRORS, true))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * The previous {@see syncMessages()} gave the hit back because its time ran out, which
 	 * is a matter of pace and not a failure of the synchronization.
 	 */
@@ -2034,7 +2109,10 @@ class Imap extends Mail\Helper\Mailbox
 
 		$UIDsOnService = \Bitrix\Mail\Helper::getImapUIDsForSpecificDay($mailboxID, $dirPath, $internalDate);
 
-		return $this->syncMessages($mailboxID, $dirPath, $UIDsOnService);
+		return $this->runWithDeliveryContext(
+			DeliveryContext::backfill(),
+			fn () => $this->syncMessages($mailboxID, $dirPath, $UIDsOnService),
+		);
 	}
 
 	protected function syncDirInternal($dir)
@@ -2063,26 +2141,14 @@ class Imap extends Mail\Helper\Mailbox
 		);
 		// The upper UID is valid only for the UIDVALIDITY observed by the same SELECT.
 		$snapshotUidValidity = $historySyncRequired ? (int)$meta['uidvalidity'] : null;
-		$maximumUid = null;
-		if ($historySyncRequired && isset($meta['uidnext']))
-		{
-			$maximumUid = max(0, (int)$meta['uidnext'] - 1);
-		}
-		elseif ($historySyncRequired && (int)$meta['exists'] === 0)
-		{
-			$maximumUid = 0;
-		}
-		elseif ($historySyncRequired)
-		{
-			$lastMessage = $this->client->fetch(
-				false,
-				$dir->getPath(),
-				(string)$meta['exists'],
-				'(UID)',
-				$error,
-			);
-			$maximumUid = isset($lastMessage['UID']) ? (int)$lastMessage['UID'] : null;
-		}
+		$maximumUid = $historySyncRequired ? $this->getServerMaximumUid($dir->getPath(), $meta) : null;
+		$deliveryBoundary = $this->getDeliveryBoundaryService()->resolve(
+			(int)$dir->getId(),
+			$dir->getDirMd5(),
+			(int)$this->getGenerationContext()->generationId,
+			(int)$meta['uidvalidity'],
+			fn () => $maximumUid ?? $this->getServerMaximumUid($dir->getPath(), $meta),
+		);
 
 		$intervalSynchronizationAttempts = 0;
 
@@ -2194,10 +2260,34 @@ class Imap extends Mail\Helper\Mailbox
 					}
 				}
 
-				if ($this->syncMessage($dir->getPath(), $item, $hashesMap, false, $isOutgoing))
+				$deliveryContext = $this->resolveMessageDeliveryContext(
+					$item,
+					$deliveryBoundary,
+					(int)$dir->getId(),
+					(int)$meta['uidvalidity'],
+					(int)$item['UID'],
+					knownMessageIds: $hashesMap,
+				);
+
+				if ($this->runWithDeliveryContext(
+					$deliveryContext,
+					function () use ($dir, $item, &$hashesMap, $isOutgoing) {
+						return $this->syncMessage(
+							$dir->getPath(),
+							$item,
+							$hashesMap,
+							false,
+							$isOutgoing,
+						);
+					},
+				))
 				{
-					$this->lastSyncResult['newMessageId'] = end($hashesMap);
 					$messagesSynced++;
+					if ($deliveryContext->shouldNotify() && $this->isNotificationDir($dir))
+					{
+						$this->lastSyncResult['newMessageId'] = end($hashesMap);
+						$this->lastSyncResult['newMessagesNotify']++;
+					}
 
 					$numberLeftToFillTheBatch--;
 					if($numberLeftToFillTheBatch === 0 and Main\Loader::includeModule('pull'))
@@ -2243,6 +2333,109 @@ class Imap extends Mail\Helper\Mailbox
 		}
 
 		return $messagesSynced;
+	}
+
+	private function getServerMaximumUid(string $dirPath, array $meta): ?int
+	{
+		if (isset($meta['uidnext']))
+		{
+			return max(0, (int)$meta['uidnext'] - 1);
+		}
+
+		if ((int)($meta['exists'] ?? 0) === 0)
+		{
+			return 0;
+		}
+
+		$lastMessage = $this->client->fetch(
+			false,
+			$dirPath,
+			(string)$meta['exists'],
+			'(UID)',
+			$error,
+		);
+
+		return isset($lastMessage['UID']) ? (int)$lastMessage['UID'] : null;
+	}
+
+	private function getDeliveryBoundaryService(): DeliveryBoundaryService
+	{
+		return $this->deliveryBoundaryService ??= new DeliveryBoundaryService(
+			(int)$this->mailbox['ID'],
+			$this->getHistorySyncLogger(),
+		);
+	}
+
+	private function resolveDeliveryContext(
+		?DeliveryBoundary $boundary,
+		int $dirId,
+		int $uidValidity,
+		int $uid,
+		bool $isRecovered = false,
+	): DeliveryContext
+	{
+		if ($this->getGenerationContext()->isMigrationImport())
+		{
+			return DeliveryContext::migration();
+		}
+
+		if ($this->deliveryContextOverride !== null)
+		{
+			return $this->deliveryContextOverride;
+		}
+
+		if ($boundary !== null)
+		{
+			return $boundary->classify(
+				(int)$this->getGenerationContext()->generationId,
+				$uidValidity,
+				$uid,
+				$isRecovered,
+			);
+		}
+
+		return DeliveryContext::withoutBoundary(
+			$this->getDeliveryBoundaryService()->isDirectoryEnabled($dirId)
+				|| $this->getDeliveryBoundaryService()->isMailboxEnabled(),
+			$isRecovered,
+		);
+	}
+
+	private function resolveMessageDeliveryContext(
+		array $message,
+		?DeliveryBoundary $boundary,
+		int $dirId,
+		int $uidValidity,
+		int $uid,
+		bool $isRecovered = false,
+		array $knownMessageIds = [],
+	): DeliveryContext
+	{
+		return $this->resolveDeliveryContext($boundary, $dirId, $uidValidity, $uid, $isRecovered)->forKnownMessage(
+			!empty($message['__fields']['MESSAGE_ID'])
+			|| !is_null($message['__replaces'] ?? null)
+			|| !empty($knownMessageIds[$message['__fields']['HEADER_MD5'] ?? '']),
+		);
+	}
+
+	private function runWithDeliveryContext(DeliveryContext $context, callable $callback): mixed
+	{
+		$previous = $this->deliveryContextOverride;
+		$this->deliveryContextOverride = $context;
+
+		try
+		{
+			return $callback();
+		}
+		finally
+		{
+			$this->deliveryContextOverride = $previous;
+		}
+	}
+
+	private function isNotificationDir(Mail\Internals\Entity\MailboxDirectory $dir): bool
+	{
+		return !$dir->isTrash() && !$dir->isSpam() && !$dir->isDraft() && !$dir->isOutcome();
 	}
 
 	public function resyncDir($dirPath, $numberForResync = false)
@@ -3630,7 +3823,17 @@ class Imap extends Mail\Helper\Mailbox
 			}
 		}
 
+		$deliveryContext = $this->deliveryContextOverride ?? DeliveryContext::unknown();
 		$replaces = $message['__replaces'] ?? null;
+		if (!is_null($replaces))
+		{
+			$deliveryContext = DeliveryContext::repair();
+		}
+		elseif ($this->getGenerationContext()->isMigrationImport())
+		{
+			$deliveryContext = DeliveryContext::migration();
+		}
+		$deliveryContext ??= DeliveryContext::unknown();
 
 		$this->carryOverGenerationPair($message, $fields);
 
@@ -3791,6 +3994,8 @@ class Imap extends Mail\Helper\Mailbox
 					'excerpt' => $fields,
 					'external_id' => $retryExternalId,
 					'migration_import' => $isMigrationImport,
+					'delivery_origin' => $deliveryContext->getOrigin(),
+					'suppress_builtin_notifications' => !$deliveryContext->shouldNotify(),
 					MailMessageTable::FIELD_SANITIZE_ON_VIEW => $this->isSupportSanitizeOnView(),
 				],
 			);
@@ -5183,14 +5388,17 @@ class Imap extends Mail\Helper\Mailbox
 			return;
 		}
 
-		$pass = $this->syncMessagesPass(
-			$this->mailbox['ID'],
-			$dir->getPath(),
-			$remaining,
-			false,
-			false,
-			stopOnEmptyChunk: false,
-			failOnLocalError: true,
+		$pass = $this->runWithDeliveryContext(
+			DeliveryContext::backfill(),
+			fn () => $this->syncMessagesPass(
+				$this->mailbox['ID'],
+				$dir->getPath(),
+				$remaining,
+				false,
+				false,
+				stopOnEmptyChunk: false,
+				failOnLocalError: true,
+			),
 		);
 
 		/*

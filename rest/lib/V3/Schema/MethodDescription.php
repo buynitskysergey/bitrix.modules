@@ -17,6 +17,7 @@ class MethodDescription implements \Serializable
 		public readonly LocalizableMessage|string|null $description = null,
 		public readonly bool $isEnabled = true,
 		public readonly ?array $queryParams = null,
+		public readonly bool $isHidden = false,
 	) {
 	}
 
@@ -43,6 +44,7 @@ class MethodDescription implements \Serializable
 			'description' => $this->description,
 			'isEnabled' => $this->isEnabled,
 			'queryParams' => $this->queryParams,
+			'isHidden' => $this->isHidden,
 		];
 	}
 
@@ -58,5 +60,6 @@ class MethodDescription implements \Serializable
 		$this->description = $data['description'];
 		$this->isEnabled = $data['isEnabled'];
 		$this->queryParams = $data['queryParams'];
+		$this->isHidden = $data['isHidden'] ?? false;
 	}
 }

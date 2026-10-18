@@ -72,6 +72,7 @@ final class CreateIncomingWebhookCommandHandler extends AbstractCreateIncomingWe
 			scopes: $scopes,
 			attributes: $command->attributes,
 			comment: $command->comment,
+			dateExpire: $command->dateExpire,
 		);
 	}
 }

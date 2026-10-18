@@ -14,6 +14,7 @@ use Bitrix\Superset\Internal\HttpStatus;
 use Bitrix\Superset\Internal\Entities\OwnedEntityIds;
 use Bitrix\Superset\Internal\Dto;
 use Bitrix\Superset\Internal\Support\AbstractSupersetContext;
+use Bitrix\Superset\Internal\Support\InstanceUnavailableStatus;
 use Bitrix\Superset\Internal\Services\ImportExport\ArchiveRepacker;
 use Bitrix\Superset\Internal\Services\ImportExport\EntitiesImporter;
 
@@ -456,7 +457,11 @@ final class DashboardService extends AbstractSupersetContext
 			if (!$importDatasetResult->isSuccess())
 			{
 				return $this->createErrorResult(
-					'Import dataset: ' . implode("\n", $importDatasetResult->getErrorMessages())
+					'Import dataset: ' . implode("\n", $importDatasetResult->getErrorMessages()),
+					null,
+					InstanceUnavailableStatus::isReportedBy($importDatasetResult)
+						? HttpStatus::DEACTIVATED_INSTANCE
+						: null,
 				);
 			}
 
@@ -471,7 +476,11 @@ final class DashboardService extends AbstractSupersetContext
 			if (!$importChartResult->isSuccess())
 			{
 				return $this->createErrorResult(
-					'Import chart: ' . implode("\n", $importChartResult->getErrorMessages())
+					'Import chart: ' . implode("\n", $importChartResult->getErrorMessages()),
+					null,
+					InstanceUnavailableStatus::isReportedBy($importChartResult)
+						? HttpStatus::DEACTIVATED_INSTANCE
+						: null,
 				);
 			}
 
@@ -495,7 +504,11 @@ final class DashboardService extends AbstractSupersetContext
 		if (!$importDashboardResult->isSuccess())
 		{
 			return $this->createErrorResult(
-				'Import dashboard: ' . implode("\n", $importDashboardResult->getErrorMessages())
+				'Import dashboard: ' . implode("\n", $importDashboardResult->getErrorMessages()),
+				null,
+				InstanceUnavailableStatus::isReportedBy($importDashboardResult)
+					? HttpStatus::DEACTIVATED_INSTANCE
+					: null,
 			);
 		}
 

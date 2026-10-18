@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Favorite\FavoritePositionService;
 
 /**
- * [P3.T1 / API-03] Reorders one row of the caller's own favorites. $position is the ordinal of the
+ * Reorders one row of the caller's own favorites. $position is the ordinal of the
  * target insertion point (1 is the topmost row).
  *
  * Order is the only thing that changes, and FavoritePositionService::move() is already atomic on its
@@ -79,7 +79,7 @@ final class MoveFavoriteCommand extends AbstractCommand
 	}
 
 	/**
-	 * [EVENT-01] favoriteMove. Above REALTIME_BATCH_THRESHOLD the payload degrades to a refetch
+	 * favoriteMove. Above REALTIME_BATCH_THRESHOLD the payload degrades to a refetch
 	 * request instead of carrying the renumbered list - same rule as the other list events.
 	 *
 	 * @param array<int, array{id: int, position: int}> $affectedPositions

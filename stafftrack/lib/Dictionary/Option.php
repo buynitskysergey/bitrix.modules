@@ -17,4 +17,6 @@ enum Option: string
 	case CHECKIN_ONBOARDING_ENABLED = 'checkin_onboarding_enabled';
 	case CHECKIN_ONBOARDING_BANNER_COUNT = 'checkin_onboarding_banner_count';
 	case CHECKIN_ONBOARDING_BANNER_LAST_SHOWN_AT = 'checkin_onboarding_banner_last_shown_at';
+	case CHECKIN_ONBOARDING_EMPLOYEE_SHOWN = 'checkin_onboarding_employee_shown';
+	case CHECKIN_ONBOARDING_EMPLOYEE_AHA_RESUME = 'checkin_onboarding_employee_aha_resume';
 }

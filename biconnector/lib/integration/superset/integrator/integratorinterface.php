@@ -167,6 +167,11 @@ interface IntegratorInterface
 	public function getDashboardEmbeddedCredentials(int $dashboardId, array $rlsRules = [], int $expSeconds = 0): IntegratorResponse;
 
 	/**
+	 * @return IntegratorResponse<Dto\DashboardEmbeddedCredentials>
+	 */
+	public function getDemoEmbeddedCredentials(string $reportCode, string $lang): IntegratorResponse;
+
+	/**
 	 * Returns response with ID of copied dashboard on success request.
 	 * If response code is not OK - returns empty data.
 	 *
@@ -367,6 +372,40 @@ interface IntegratorInterface
 
 	// endregion
 
+	// region Table
+
+	/**
+	 * Returns response with the list of physical tables available in the BI database.
+	 *
+	 * @param string|null $schema Schema to filter tables by (defaults to bitrix24).
+	 * @return IntegratorResponse
+	 */
+	public function listTables(?string $schema = null): IntegratorResponse;
+
+	/**
+	 * Returns response with the columns/metadata of a physical table in the BI database.
+	 *
+	 * @param string $tableName Physical table name.
+	 * @param string|null $schema Schema of the table (defaults to bitrix24).
+	 * @return IntegratorResponse
+	 */
+	public function getTableMetadata(string $tableName, ?string $schema = null): IntegratorResponse;
+
+	// endregion
+
+	// region SQL Lab
+
+	/**
+	 * Executes a read-only SQL query through Superset SQL Lab and returns rows and columns.
+	 *
+	 * @param string $sql Raw SQL SELECT to execute against the BI database.
+	 * @param int|null $limit Optional row cap (queryLimit).
+	 * @return IntegratorResponse
+	 */
+	public function executeSql(string $sql, ?int $limit = null): IntegratorResponse;
+
+	// endregion
+
 	// region Dataset
 
 	/**
@@ -386,12 +425,60 @@ interface IntegratorInterface
 	public function getDatasetByName(string $name): IntegratorResponse;
 
 	/**
+	 * Returns response with the list of datasets in Superset.
+	 *
+	 * When $pageSize is given the call is bounded to a single Superset page and the
+	 * response carries `datasets` plus a `count` holding the total number of
+	 * matching datasets — use this for paginated reads so the request cost does not
+	 * grow with the number of datasets on the instance. Without $pageSize the full
+	 * list is walked and a flat array of datasets is returned (kept for the by-ids /
+	 * idempotency callers).
+	 *
+	 * @param int[] $ids Optional filter: only datasets with these ids.
+	 * @param int[] $neqIds Optional filter: exclude datasets with these ids.
+	 * @param int|null $page Zero-based page index (bounded mode).
+	 * @param int|null $pageSize Page size; presence switches on bounded mode.
+	 * @return IntegratorResponse
+	 */
+	public function listDatasets(
+		array $ids = [],
+		array $neqIds = [],
+		?int $page = null,
+		?int $pageSize = null
+	): IntegratorResponse;
+
+	/**
 	 * Adds dataset
 	 *
 	 * @param array $fields
 	 * @return IntegratorResponse
 	 */
 	public function createDataset(array $fields): IntegratorResponse;
+
+	/**
+	 * Creates a virtual dataset (SQL-backed view) in Superset based on a source table.
+	 *
+	 * @param string $datasetName Display name of the new dataset.
+	 * @param string $sourceTable Source physical table name in the BI database.
+	 * @param string[] $columns Columns to project from the source table.
+	 * @param string|null $sourceSchema Source table schema (defaults to bitrix24).
+	 * @return IntegratorResponse
+	 */
+	public function createVirtualDataset(
+		string $datasetName,
+		string $sourceTable,
+		array $columns,
+		?string $sourceSchema = null,
+	): IntegratorResponse;
+
+	/**
+	 * Creates a virtual dataset (SQL-backed view) in Superset from a raw SQL query.
+	 *
+	 * @param string $datasetName Display name of the new dataset.
+	 * @param string $sql Raw SQL SELECT used as the dataset source.
+	 * @return IntegratorResponse
+	 */
+	public function createDatasetFromSql(string $datasetName, string $sql): IntegratorResponse;
 
 	/**
 	 * Updates dataset
@@ -443,6 +530,68 @@ interface IntegratorInterface
 	 * @return IntegratorResponse
 	 */
 	public function initRequiredDataset(array $tables = []): IntegratorResponse;
+
+	// endregion
+
+	// region Chart
+
+	/**
+	 * Returns the list of charts in Superset.
+	 *
+	 * When $pageSize is given the call is bounded to a single Superset page and the
+	 * response `count` holds the total number of matching charts — use this for
+	 * paginated reads and name lookups so the request cost does not grow with the
+	 * number of charts on the instance. Without $pageSize the full list is walked
+	 * (kept for the by-ids usage-statistics caller).
+	 *
+	 * @param int[] $ids Optional filter: only charts with these ids.
+	 * @param string|null $nameFilter Optional filter: charts whose name contains this.
+	 * @param int|null $page Zero-based page index (bounded mode).
+	 * @param int|null $pageSize Page size; presence switches on bounded mode.
+	 * @return IntegratorResponse
+	 */
+	public function listCharts(
+		array $ids = [],
+		?string $nameFilter = null,
+		?int $page = null,
+		?int $pageSize = null
+	): IntegratorResponse;
+
+	/**
+	 * Returns chart config (slice_name, viz_type, datasource, params, etc.) by id.
+	 *
+	 * @param int $id
+	 * @return IntegratorResponse
+	 */
+	public function getChartById(int $id): IntegratorResponse;
+
+	/**
+	 * Creates a new chart.
+	 *
+	 * Payload matches Superset ChartPostSchema (slice_name, datasource_id, datasource_type,
+	 * viz_type, params (JSON string), query_context (JSON string), description, ...).
+	 *
+	 * @param array $payload
+	 * @return IntegratorResponse
+	 */
+	public function createChart(array $payload): IntegratorResponse;
+
+	/**
+	 * Updates an existing chart with the given fields.
+	 *
+	 * @param int $id
+	 * @param array $fields
+	 * @return IntegratorResponse
+	 */
+	public function updateChart(int $id, array $fields): IntegratorResponse;
+
+	/**
+	 * Deletes a chart by id.
+	 *
+	 * @param int $id
+	 * @return IntegratorResponse
+	 */
+	public function deleteChart(int $id): IntegratorResponse;
 
 	// endregion
 

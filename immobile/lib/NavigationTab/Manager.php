@@ -30,7 +30,9 @@ use Bitrix\Main\ModuleManager;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Query\Filter\Helper;
+use Bitrix\Im\V2\Chat\CopilotChat;
 use Bitrix\Im\V2\Integration\AI\EngineManager;
+use Bitrix\Im\V2\Integration\AI\GreetingProvider;
 use Bitrix\Im\V2\Integration\AI\SuggestProvider;
 
 class Manager
@@ -84,7 +86,8 @@ class Manager
 
 
 		$encodedParams = '';
-		try {
+		try
+		{
 			$encodedParams = json_encode($params);
 		}
 		catch (\Throwable $error)
@@ -235,6 +238,7 @@ class Manager
 			'openChannel' => new Tab\Channel($folder),
 			'collab'      => new Tab\Collab($folder),
 			'openlines'   => new Tab\OpenLines($this->context, $folder),
+			'vibecodeApp' => new Tab\VibecodeApp($folder),
 			default       => null,
 		};
 	}
@@ -394,6 +398,8 @@ class Manager
 				'AI_ASSISTANT' => $this->getAiAssistantStatusMessages(),
 				'NAVIGATION_TAB_TITLES' => $this->getNavigationTabTitles(),
 				'COPILOT_SUGGESTS' => $this->getCopilotSuggests(),
+				'COPILOT_GREETINGS' => $this->getCopilotGreetings(),
+				'COPILOT_GREETING_WEEK_HOLIDAYS' => $this->getCopilotGreetingWeekHolidays(),
 			],
 			'IS_CLOUD' => $isCloud,
 			'HAS_ACTIVE_CLOUD_STORAGE_BUCKET' => $hasActiveBucket,
@@ -405,8 +411,12 @@ class Manager
 			'IS_TASKS_RECENT_LIST_AVAILABLE' => Settings::isTasksRecentListAvailable(),
 			'IS_MARKET_AVAILABLE' => Settings::isMarketAvailable(),
 			'IS_VIBECODE_BUTTON_AVAILABLE' => Settings::isVibecodeButtonAvailable(),
+			'IS_VIBECODE_RECENT_ACTION_AVAILABLE' => Settings::isVibecodeRecentActionAvailable(),
+			'IS_VIBECODE_NEW_APPS_BADGE_AVAILABLE' => Settings::isVibecodeNewAppsBadgeAvailable(),
+			'IS_VIBECODE_APP_CHAT_SEND_PERMISSION_AVAILABLE' => Settings::isVibecodeAppChatSendPermissionAvailable(),
 			'IS_AUTO_TASKS_ENABLED' => Settings::isAutoTaskEnabled(),
 			'IS_AUTO_TASKS_UI_AVAILABLE' => Settings::isAutoTaskUIAvailable(),
+			'IS_VIDEO_NOTE_PLAYBACK_RATE_AVAILABLE' => Settings::isVideoNotePlaybackRateAvailable(),
 			'SMILE_LAST_UPDATE_DATE' => CSmile::getLastUpdate()->format(DateTimeInterface::ATOM),
 			'CAN_USE_TELEPHONY' => Loader::includeModule('voximplant') && \Bitrix\Voximplant\Security\Helper::canCurrentUserPerformCalls(),
 			'FIRST_TAB_ID' => $firstTabId,
@@ -433,7 +443,18 @@ class Manager
 			'COPILOT_AVAILABLE_ENGINES' => $this->getAvailableEngines(),
 			'COPILOT_BOT_NAME' => $this->getCopilotBotName(),
 			'COPILOT_AGENT_NAME' => $this->getCopilotAgentName(),
+			'COPILOT_FILE_UPLOAD_POLICY' => $this->getCopilotFileUploadPolicy(),
 		];
+	}
+
+	private function getCopilotFileUploadPolicy(): ?array
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return null;
+		}
+
+		return CopilotChat::getFileUploadPolicyPublicData();
 	}
 
 	private function getFolderCollection(): FolderCollection
@@ -581,7 +602,7 @@ class Manager
 
 	private function canUseAudioPanel(): bool
 	{
-		return Option::get('im', 'can_use_audio_panel', 'N') !== 'N';
+		return Mobile\Config\Feature::isEnabled(Mobile\Feature\AudioPlayerV2Feature::class);
 	}
 
 	private function getNavigationTabTitles(): array
@@ -616,6 +637,26 @@ class Manager
 		}
 
 		return SuggestProvider::getList();
+	}
+
+	private function getCopilotGreetings(): array
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return [];
+		}
+
+		return GreetingProvider::getList();
+	}
+
+	private function getCopilotGreetingWeekHolidays(): array
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return [];
+		}
+
+		return GreetingProvider::getWeekHolidays();
 	}
 
 	private function getCopilotData(): ?array

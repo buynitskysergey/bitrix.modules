@@ -10,18 +10,14 @@ use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\StringField;
+use Bitrix\Main\ORM\Fields\TextField;
 use Bitrix\Main\Type\DateTime;
 
 /**
  * Idempotency ledger of processed vibeoffice webhook deliveries (P5.T1, SQL-DELIVERY).
  *
- * Each incoming webhook carries an `X-VO-Delivery` id; the platform retries delivery
- * with the same id (api-reference §6.2). A row is inserted here keyed by `DELIVERY_ID`
- * with a UNIQUE constraint, so a duplicate insert fails and the webhook is acknowledged
- * with an early 2xx without re-processing.
- *
- * The table is additive and isolated from the OnlyOffice webhook path; old rows are
- * pruned by a background agent (TTL is not normative — see SQL-DELIVERY).
+ * Retries resume pending/staged/applied work; DONE may still need after-commit cleanup.
+ * Only historical DONE rows without HOST_DOC_KEY are subject to retention cleanup.
  *
  * DO NOT WRITE ANYTHING BELOW THIS
  *
@@ -38,7 +34,12 @@ use Bitrix\Main\Type\DateTime;
  */
 final class DeliveryTable extends DataManager
 {
-	/** Retention of processed-delivery rows (seconds) before background cleanup. */
+	public const STATUS_PENDING = 'pending';
+	public const STATUS_STAGED = 'staged';
+	public const STATUS_APPLIED = 'applied';
+	public const STATUS_DONE = 'done';
+
+	/** Retention of historical legacy DONE rows (seconds). */
 	private const TTL = 7 * 24 * 3600;
 
 	/** Rows removed per DELETE so the cleanup never locks the whole ledger with one big statement. */
@@ -53,15 +54,25 @@ final class DeliveryTable extends DataManager
 	{
 		return [
 			(new IntegerField('ID'))
+				->configureSize(8)
 				->configurePrimary()
 				->configureAutocomplete()
 			,
 			(new IntegerField('DELIVERY_ID'))
+				->configureSize(8)
 				->configureRequired()
 			,
 			(new StringField('EXTERNAL_HASH'))
 				->configureSize(128)
 			,
+			(new StringField('HOST_DOC_KEY'))->configureNullable()->configureSize(128),
+			(new StringField('STATUS'))->configureSize(24)->configureDefaultValue(self::STATUS_DONE),
+			(new IntegerField('SNAPSHOT_SEQ'))->configureSize(8)->configureNullable(),
+			(new IntegerField('RESULT_OBJECT_ID'))->configureNullable(),
+			(new IntegerField('RESULT_VERSION_ID'))->configureNullable(),
+			(new IntegerField('STAGED_FILE_ID'))->configureNullable(),
+			(new TextField('CLEANUP_FILE_IDS'))->configureNullable(),
+			(new IntegerField('NOTIFIED'))->configureDefaultValue(0),
 			(new StringField('EVENT'))
 				->configureRequired()
 				->configureSize(64)
@@ -88,25 +99,25 @@ final class DeliveryTable extends DataManager
 		return self::class . '::deleteOldDeliveriesAgent();';
 	}
 
-	public static function deleteOldDeliveries(): void
+	public static function deleteOldDeliveries(?DateTime $now = null): void
 	{
 		$connection = Application::getConnection();
 		$tableName = self::getTableName();
-		$ttlTime = $connection->getSqlHelper()->convertToDbDateTime(
-			DateTime::createFromTimestamp(time() - self::TTL)
-		);
+		$ttlTime = DateTime::createFromTimestamp(($now?->getTimestamp() ?? time()) - self::TTL);
 
 		// Delete in bounded batches (supported by both MySQL and PostgreSQL via SELECT ... LIMIT,
 		// unlike DELETE ... LIMIT which is MySQL-only) so a large backlog never blocks the ledger
 		// with one long-running DELETE. The PROCESSED_TIME index keeps each batch's scan cheap.
 		do
 		{
-			$ids = $connection->query("
-				SELECT ID
-				FROM {$tableName}
-				WHERE PROCESSED_TIME < {$ttlTime}
-				LIMIT " . self::DELETE_CHUNK_SIZE
-			)->fetchAll();
+			$ids = self::query()
+				->setSelect(['ID'])
+				->whereNull('HOST_DOC_KEY')
+				->where('STATUS', self::STATUS_DONE)
+				->where('PROCESSED_TIME', '<', $ttlTime)
+				->setLimit(self::DELETE_CHUNK_SIZE)
+				->fetchAll()
+			;
 
 			$ids = array_map('intval', array_column($ids, 'ID'));
 			if (!$ids)

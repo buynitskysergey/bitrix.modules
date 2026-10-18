@@ -248,6 +248,11 @@ class FullReportService
 		return $this->setDecision($reportId, $approverId, FullReportMark::POSITIVE);
 	}
 
+	public function disapprove(int $reportId, int $approverId): Result
+	{
+		return $this->setDecision($reportId, $approverId, FullReportMark::NEGATIVE);
+	}
+
 	public function reject(int $reportId, int $approverId): Result
 	{
 		return $this->setDecision($reportId, $approverId, FullReportMark::NEUTRAL);

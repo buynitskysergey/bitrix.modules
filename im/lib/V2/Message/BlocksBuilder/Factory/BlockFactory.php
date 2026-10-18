@@ -17,6 +17,7 @@ use Bitrix\Im\V2\Message\BlocksBuilder\Entity\Blocks\Title;
 use Bitrix\Im\V2\Message\BlocksBuilder\Entity\Blocks\UnorderedList;
 use Bitrix\Im\V2\Message\BlocksBuilder\Entity\BlockType;
 use Bitrix\Im\V2\Message\BlocksBuilder\Entity\Blocks\Card;
+use Bitrix\Im\V2\Message\BlocksBuilder\Entity\Blocks\FormBlock;
 
 class BlockFactory
 {
@@ -35,6 +36,7 @@ class BlockFactory
 			BlockType::AiAssistantSearch => AiAssistantSearch::create($blockData),
 			BlockType::Card => Card::create($blockData),
 			BlockType::Gallery => Gallery::create($blockData),
+			BlockType::Form => FormBlock::create($blockData),
 			default => null,
 		};
 	}
@@ -54,6 +56,7 @@ class BlockFactory
 			BlockType::AiAssistantSearch => AiAssistantSearch::getRequiredFields(),
 			BlockType::Card => Card::getRequiredFields(),
 			BlockType::Gallery => Gallery::getRequiredFields(),
+			BlockType::Form => FormBlock::getRequiredFields(),
 			default => [],
 		};
 	}

@@ -62,7 +62,7 @@ class CollaborationProvider
 
 		$presence = $this->resolveUserPresence($userId);
 
-		// [EVENT-01] Head first, list second - see loadPatches().
+		// Head first, list second - see loadPatches().
 		$lastPatchId = $this->updateRepository->getLastId($documentId);
 		$patches = $this->updateRepository->getByDocumentId($documentId);
 
@@ -106,7 +106,7 @@ class CollaborationProvider
 
 	public function loadForCollaboration(int $documentId, int $userId): array
 	{
-		// [EVENT-01] Journal first (head, then list - see loadPatches()), content snapshot last, and the
+		// Journal first (head, then list - see loadPatches()), content snapshot last, and the
 		// snapshot read uncached. Compaction persists YJS_STATE and drains the journal in one transaction:
 		// read the other way round, a client could get a pre-compaction snapshot next to a post-compaction
 		// journal and lose exactly the window that was folded away. In this order the snapshot is never
@@ -179,7 +179,7 @@ class CollaborationProvider
 
 	public function loadPatches(int $documentId): array
 	{
-		// [EVENT-01] The head is read BEFORE the list, never after. The two are separate queries, and a
+		// The head is read BEFORE the list, never after. The two are separate queries, and a
 		// patch inserted between them would land in lastPatchId while missing from patches - the client
 		// falls back to the server's lastPatchId when the list is empty, so it would advance its applied
 		// cursor over a patch it never saw, and the forward-only guard makes that irreversible. Read in

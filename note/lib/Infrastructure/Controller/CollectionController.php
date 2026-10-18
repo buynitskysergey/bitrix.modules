@@ -84,7 +84,7 @@ class CollectionController extends Controller
 		$this->registerSidebarPullWatches($items);
 
 		return [
-			// [TPL-01] Additive star flag: one batch read per page, never one read per row.
+			// Additive star flag: one batch read per page, never one read per row.
 			'items' => $this->attachFavoriteFlag($items),
 			'nextCursor' => $batch['nextCursor'],
 		];

@@ -115,6 +115,48 @@ class Imap
 		return $this->sessState;
 	}
 
+	/**
+	 * Returns the current timeout for reading an IMAP response.
+	 *
+	 * @return int
+	 */
+	public function getReadTimeout(): int
+	{
+		return (int)($this->options['timeout'] ?? B_MAIL_TIMEOUT);
+	}
+
+	/**
+	 * Runs an operation with a temporary timeout for reading an IMAP response.
+	 *
+	 * @param int $timeout Timeout in seconds.
+	 * @param \Closure(): mixed $callback
+	 * @return mixed
+	 */
+	public function withReadTimeout(int $timeout, \Closure $callback): mixed
+	{
+		$previousTimeout = $this->getReadTimeout();
+		$this->setReadTimeout($timeout);
+
+		try
+		{
+			return $callback();
+		}
+		finally
+		{
+			$this->setReadTimeout($previousTimeout);
+		}
+	}
+
+	protected function setReadTimeout(int $timeout): void
+	{
+		$this->options['timeout'] = max(0, $timeout);
+
+		if (isset($this->stream) && is_resource($this->stream))
+		{
+			stream_set_timeout($this->stream, $this->options['timeout']);
+		}
+	}
+
 	public function connect(&$error)
 	{
 		$error = null;
@@ -258,8 +300,11 @@ class Imap
 			{
 				$mech = 'oauth';
 			}
-			else if (false === $token)
+			else if (Helper\OAuth::parseMeta($this->options['password']))
 			{
+				// The password is OAuth metadata, so a missing token means the renewal failed -
+				// whatever shape the empty answer took. Falling through to PLAIN would report a
+				// missing mechanism and send diagnosis the wrong way.
 				$error = $this->errorMessage(array(Imap::ERR_AUTH, Imap::ERR_AUTH_OAUTH));
 				return false;
 			}
@@ -1399,6 +1444,48 @@ class Imap
 		}
 
 		return true;
+	}
+
+	/**
+	 * Creates one mailbox by its full name and reports the answer of the server as is.
+	 *
+	 * @param array{code: ?string, text: string}|null $refusal Filled when the server refused the
+	 *        command with a tagged NO or BAD; the code is the response code in brackets, if any.
+	 *        Null after a failure of the link, the authentication or an unparsed answer.
+	 */
+	public function createMailbox(string $mailbox, &$error, ?array &$refusal = null): bool
+	{
+		$error = null;
+		$refusal = null;
+
+		if (!$this->authenticate($error))
+		{
+			return false;
+		}
+
+		$response = $this->executeCommand(sprintf(
+			'CREATE "%s"',
+			static::escapeQuoted($this->encodeUtf7Imap($mailbox))
+		), $error);
+
+		if (!$error)
+		{
+			return true;
+		}
+
+		if ($error == Imap::ERR_COMMAND_REJECTED)
+		{
+			$refusal = [
+				'code' => preg_match('/^ (?: NO | BAD ) \x20 \[ ( [A-Z0-9-]+ ) [\]\x20] /ix', (string)$response, $matches)
+					? mb_strtoupper($matches[1])
+					: null,
+				'text' => (string)$response,
+			];
+		}
+
+		$error = $this->errorMessage(array($error), $response);
+
+		return false;
 	}
 
 	public function moveMails($ids, $folderFrom, $folderTo)

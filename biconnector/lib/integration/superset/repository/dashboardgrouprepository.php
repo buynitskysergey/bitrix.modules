@@ -362,9 +362,18 @@ final class DashboardGroupRepository extends DashboardRepository
 
 			$queryDashboard->setFilter($dashboardFilter);
 
-			//** The group query is unuseful by group id or tag id filtering **/
-			if (isset($ormParams['filter']['GROUPS.ID']) || isset($ormParams['filter']['TAGS.ID']))
+			$isScopeFilter = array_key_exists('=SCOPE.SCOPE_CODE', $ormParams['filter']);
+
+			//** The group query is unuseful by group id, tag id or scope filtering **/
+			if (isset($ormParams['filter']['GROUPS.ID']) || isset($ormParams['filter']['TAGS.ID']) || $isScopeFilter)
 			{
+				if ($isScopeFilter)
+				{
+					// SCOPE is a OneToMany relation: the =SCOPE.SCOPE_CODE join can duplicate dashboard rows.
+					// Replace the join with an ID IN (subquery) so pagination counts distinct dashboards.
+					$queryDashboard->disableDataDoubling();
+				}
+
 				if (!empty($ormParams['limit']) && (int)$ormParams['limit'] > 0)
 				{
 					$queryDashboard->setLimit((int)$ormParams['limit']);

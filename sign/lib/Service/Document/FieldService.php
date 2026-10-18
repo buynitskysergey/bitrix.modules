@@ -4,6 +4,7 @@ namespace Bitrix\Sign\Service\Document;
 
 use Bitrix\Sign\Result\Result;
 use Bitrix\Sign\Service;
+use Bitrix\Sign\Service\Providers\LegalInfoProvider;
 use Bitrix\Sign\Type\BlockCode;
 use Bitrix\Sign\Type\FieldType;
 use Bitrix\Sign\Service\Integration\Crm\FieldSelectorService;
@@ -122,6 +123,31 @@ class FieldService
 			FieldType::POSITION => FieldType::POSITION,
 			FieldType::DATE, FieldType::DATETIME => FieldType::DATE,
 			FieldType::LIST, FieldType::ENUMERATION => FieldType::LIST,
+			FieldType::DOUBLE => FieldType::DOUBLE,
+			FieldType::INTEGER => FieldType::INTEGER,
+			FieldType::ADDRESS => FieldType::ADDRESS,
+			default => FieldType::STRING,
+		};
+	}
+
+	/**
+	 * Semantic type of a profile field. The codes whose meaning the user field type does not carry
+	 * are declared by their owner, LegalInfoProvider::CONTRACT_FIELD_TYPES, next to the codes the
+	 * provider resolves on its own.
+	 */
+	public function resolveProfileFieldType(string $fieldName, string $userFieldType): string
+	{
+		return LegalInfoProvider::CONTRACT_FIELD_TYPES[$fieldName]
+			?? $this->convertUserFieldType($userFieldType)
+		;
+	}
+
+	public function convertCrmFieldType(string $crmFieldType): string
+	{
+		return match ($crmFieldType)
+		{
+			FieldType::DATE, FieldType::DATETIME => FieldType::DATE,
+			FieldType::LIST => FieldType::LIST,
 			FieldType::DOUBLE => FieldType::DOUBLE,
 			FieldType::INTEGER => FieldType::INTEGER,
 			FieldType::ADDRESS => FieldType::ADDRESS,

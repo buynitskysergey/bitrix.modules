@@ -19,7 +19,7 @@ class TypeFieldAssembler extends FieldAssembler
 
 			return <<<HTML
 				<span class="biconnector-grid-username-cell biconnector-grid-source-cell">
-					<span class="biconnector-grid-source-icon ui-icon" style="background-image: url(/bitrix/images/biconnector/database-connections/system.png);"></span>
+					<span class="biconnector-grid-source-icon ui-icon" style="background-image: url(/bitrix/images/biconnector/database-connections/system.svg);"></span>
 					<span class="biconnector-grid-username">{$typeText}</span>
 				</span>
 				HTML;

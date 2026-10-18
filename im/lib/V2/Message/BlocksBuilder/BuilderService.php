@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Im\V2\Message\BlocksBuilder;
 
+use Bitrix\Im\V2\Application\Features;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Message\BlocksBuilder\Entity\BlocksBuilder;
 use Bitrix\Im\V2\Message\BlocksBuilder\Entity\BlockType;
@@ -14,7 +15,7 @@ use Bitrix\Main\Localization\Loc;
 
 class BuilderService
 {
-	protected const MAX_JSON_LENGTH = 60000;
+	public const MAX_JSON_LENGTH = 60000;
 
 	public function __construct(
 		protected readonly BuilderFactory $builderFactory,
@@ -25,6 +26,11 @@ class BuilderService
 	public function create(array $builderData, Chat $chat): BuilderResult
 	{
 		$builderResult = new BuilderResult();
+
+		if ($this->hasFormBlock($builderData) && !Features::isMessageFormBlockAvailable())
+		{
+			return $builderResult->addError(new BuilderError(BuilderError::FORM_BLOCK_NOT_AVAILABLE));
+		}
 
 		$result = $this->validationService->validateNew($builderData, $chat);
 		if (!$result->isSuccess())
@@ -78,5 +84,24 @@ class BuilderService
 	public static function getPlaceholder(): string
 	{
 		return Loc::getMessage('IM_MESSAGE_BUILDER_PLACEHOLDER') ?? '';
+	}
+
+	private function hasFormBlock(array $builderData): bool
+	{
+		$elements = $builderData[Field::Elements->value] ?? null;
+		if (!is_array($elements))
+		{
+			return false;
+		}
+
+		foreach ($elements as $block)
+		{
+			if (is_array($block) && ($block[Field::Type->value] ?? '') === BlockType::Form->value)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 }

@@ -4402,6 +4402,26 @@ class CIMRestService extends IRestService
 			throw new Bitrix\Rest\RestException("List of files in not specified", "FILES_ERROR", CRestServer::STATUS_WRONG_REQUEST);
 		}
 
+		// Server-side file policy for copilot chats. Runs before any copy/side effect.
+		// A null policy means the feature flags are off: the policy acts as a kill-switch.
+		$copilotFileUploadPolicy = $targetChat instanceof \Bitrix\Im\V2\Chat\CopilotChat
+			? \Bitrix\Im\V2\Chat\CopilotChat::getFileUploadPolicyPublicData()
+			: null;
+		if ($copilotFileUploadPolicy !== null)
+		{
+			$copilotFileValidation = (new \Bitrix\Im\V2\Message\Send\CopilotFileValidator($copilotFileUploadPolicy))
+				->validate(array_map('intval', array_keys($files)));
+			if (!$copilotFileValidation->isSuccess())
+			{
+				$copilotFileError = $copilotFileValidation->getErrors()[0];
+				throw new Bitrix\Rest\RestException(
+					$copilotFileError->getMessage(),
+					$copilotFileError->getCode(),
+					CRestServer::STATUS_WRONG_REQUEST
+				);
+			}
+		}
+
 		if (isset($arParams['TEMPLATE_ID']) && !empty($arParams['TEMPLATE_ID']))
 		{
 			$arParams['TEMPLATE_ID'] = mb_substr((string)$arParams['TEMPLATE_ID'], 0, 255);
@@ -4420,6 +4440,7 @@ class CIMRestService extends IRestService
 			'AS_FILE' => $arParams['AS_FILE'] ?? 'N',
 			'WAIT_FULL_EXECUTION' => 'N',
 			'FILE_PARAMS' => $arParams['FILE_PARAMS'] ?? null,
+			'SENT_FROM_UI' => $server->getAuthType() === \Bitrix\Rest\SessionAuth\Auth::AUTH_TYPE,
 		];
 		if ($replyId > 0)
 		{

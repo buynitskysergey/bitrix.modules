@@ -9,10 +9,14 @@ use Bitrix\Main\Engine\ActionFilter\CloseSession;
 use Bitrix\Main\Engine\ActionFilter\Csrf;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\Contract\Controllerable;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\Response\BFile;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
+use Bitrix\Note\Internal\Configuration;
+use Bitrix\Note\Internal\Integration\Disk\DiskGateway;
+use Bitrix\Note\Internal\Service\File\DiskAttachmentResolver;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\DocumentFileCleanupService;
@@ -23,6 +27,16 @@ use Bitrix\Note\Internal\Service\NoteFileUrlService;
 
 class FileController extends Controller
 {
+	// Matches Disk's own ceiling for a signed picker config; a document has no reason to want more
+	// in a single pick.
+	private const DISK_PICKER_MAX_ITEMS = 100;
+
+	// Ceiling on one resolve request. Describing a Disk object is not cheap — storage, locks, preview
+	// — so the client's batch is bounded here rather than trusted. The editor splits a document into
+	// chunks well below this on its own, so the ceiling is a guard against a client that does not:
+	// anything past it is dropped from the answer, and a caller wanting the rest asks for the rest.
+	private const DISK_RESOLVE_MAX_ITEMS = 200;
+
 	protected function getDefaultPreFilters(): array
 	{
 		return array_merge(
@@ -70,6 +84,24 @@ class FileController extends Controller
 				],
 			],
 			'finalizeSnapshot' => [
+				'+prefilters' => [
+					new Csrf(),
+					new Authentication(),
+				],
+			],
+			'getDiskPickerConfig' => [
+				'+prefilters' => [
+					new Csrf(),
+					new Authentication(),
+				],
+			],
+			'resolveDiskAttachmentsBatch' => [
+				'+prefilters' => [
+					new Csrf(),
+					new Authentication(),
+				],
+			],
+			'attachDiskObjects' => [
 				'+prefilters' => [
 					new Csrf(),
 					new Authentication(),
@@ -423,7 +455,7 @@ class FileController extends Controller
 
 		if (!empty($linkedFileIds))
 		{
-			// [P4.T4, invariant N2] Only fileIds unreachable by any surviving version may be
+			// Only fileIds unreachable by any surviving version may be
 			// physically removed. A still-reachable file keeps both its link row and its CFile —
 			// the client already dropped the token from the live content, which is all "unlink"
 			// means for it; the link row remains the reachability floor for its versions.
@@ -462,6 +494,138 @@ class FileController extends Controller
 		return [
 			'successIds' => $normalizeIds($successFileIds),
 			'failedIds' => $normalizeIds($failedFileIds),
+		];
+	}
+
+	/**
+	 * [API-01] Signed config the editor needs to open Disk's file picker. The selection scope is set
+	 * here and signed, so the client can neither widen it nor forge one of its own.
+	 */
+	public function getDiskPickerConfigAction(int $documentId): ?array
+	{
+		if (!Configuration::isDiskAttachmentsEnabled())
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DISK_ERROR_DISABLED')));
+
+			return null;
+		}
+
+		$document = (new DocumentRepository())->getById($documentId);
+		if ($document === null)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DISK_ERROR_DOCUMENT')));
+
+			return null;
+		}
+
+		if (!$this->assertDocumentEditAccess($documentId, (int)$document->getCollectionId(), 'NOTE_FILE_CONTROLLER_DISK_ERROR_ACCESS'))
+		{
+			return null;
+		}
+
+		$signedConfig = (new DiskGateway())->buildPickerConfig(
+			(int)CurrentUser::get()->getId(),
+			self::DISK_PICKER_MAX_ITEMS,
+		);
+
+		if ($signedConfig === null)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DISK_ERROR_PICKER_CONFIG')));
+
+			return null;
+		}
+
+		return ['signedConfig' => $signedConfig];
+	}
+
+	/**
+	 * Attaches files just chosen in the picker to the document, before their tokens reach the stored
+	 * text.
+	 *
+	 * The attachment is what lets everyone who reads the document read the file: without it Disk asks
+	 * about the reader's own rights on somebody else's file and answers no. Waiting for the text to be
+	 * stored would leave the block unavailable to readers for as long as that takes, and would settle
+	 * the attachment on whoever's write happened to land first — a co-editor without rights on the file
+	 * included. Both are answered by attaching here: at the one moment when the person asking is the
+	 * person who chose the file, and their rights are the ones Disk should be checking.
+	 *
+	 * A file that ends up not being kept in the text is not a problem to solve here: the projection sync
+	 * drops an attachment the stored text does not mention
+	 * ({@see \Bitrix\Note\Internal\Service\File\DiskAttachmentSyncService}), so a
+	 * picked-then-undone file stops being attached on the next pass.
+	 *
+	 * Gated by the feature flag, like the picker config it follows: this is the picking path, and a
+	 * portal with the feature off must not attach anything new.
+	 */
+	public function attachDiskObjectsAction(int $documentId, array $objectIds): ?array
+	{
+		if (!Configuration::isDiskAttachmentsEnabled())
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DISK_ERROR_DISABLED')));
+
+			return null;
+		}
+
+		// The ids come back from the picker, whose own ceiling is DISK_PICKER_MAX_ITEMS; the slice is
+		// against a forged request, not against the picker.
+		$normalizedObjectIds = array_slice(IdNormalizer::normalize($objectIds), 0, self::DISK_PICKER_MAX_ITEMS);
+		if ($documentId <= 0 || $normalizedObjectIds === [])
+		{
+			return ['attached' => false];
+		}
+
+		$document = (new DocumentRepository())->getById($documentId);
+		if ($document === null)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DISK_ERROR_DOCUMENT')));
+
+			return null;
+		}
+
+		// Editing rights, not viewing: attaching a file to a document is part of writing it.
+		if (!$this->assertDocumentEditAccess($documentId, (int)$document->getCollectionId(), 'NOTE_FILE_CONTROLLER_DISK_ERROR_ACCESS'))
+		{
+			return null;
+		}
+
+		// Silent about the outcome per object on purpose: a file the actor cannot read is skipped by the
+		// gateway, and the resolve that follows this call is what tells the editor how each block stands.
+		(new DiskGateway())->attach($documentId, $normalizedObjectIds, (int)CurrentUser::get()->getId());
+
+		return ['attached' => true];
+	}
+
+	/**
+	 * [API-02] Attributes of the Disk attachments referenced by the document's content.
+	 *
+	 * Deliberately not gated by isDiskAttachmentsEnabled(): the flag governs picking a new file, and
+	 * switching it off must not blank out attachments already saved in documents.
+	 */
+	public function resolveDiskAttachmentsBatchAction(int $documentId, array $objectIds): ?array
+	{
+		if ($documentId <= 0 || empty($objectIds))
+		{
+			return ['items' => []];
+		}
+
+		$document = (new DocumentRepository())->getById($documentId);
+		if ($document === null)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DISK_ERROR_DOCUMENT')));
+
+			return null;
+		}
+
+		if (!$this->assertDocumentViewAccess($documentId, (int)$document->getCollectionId()))
+		{
+			return null;
+		}
+
+		return [
+			'items' => (new DiskAttachmentResolver())->resolve(
+				$documentId,
+				array_slice($objectIds, 0, self::DISK_RESOLVE_MAX_ITEMS),
+			),
 		];
 	}
 

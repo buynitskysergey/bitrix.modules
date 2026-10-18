@@ -48,12 +48,13 @@ final class RecycleBinCleanupAgent
 				static fn($record): int => (int)$record->getDocumentId(),
 				$records,
 			);
+			$preparedLinkChange = $hardDelete->prepareDelete($documentIds);
 
 			$connection = Application::getConnection();
 			$connection->startTransaction();
 			try
 			{
-				$cleanupPayload = $hardDelete->deleteByDocumentIds($documentIds);
+				$cleanupPayload = $hardDelete->deleteByDocumentIds($documentIds, $preparedLinkChange);
 				$connection->commitTransaction();
 			}
 			catch (\Throwable $e)

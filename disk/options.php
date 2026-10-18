@@ -162,6 +162,7 @@ $arAllOptions = array_filter(array(
 	array("disk_restriction_storage_size_enabled", GetMessage("DISK_ENABLE_RESTRICTION_STORAGE_SIZE_SUPPORT"), 'N', array("checkbox", "Y")),
 	array("disk_allow_use_external_link", GetMessage("DISK_ALLOW_USE_EXTERNAL_LINK"), 'Y', array("checkbox", "Y")),
 	array("disk_version_limit_per_file", GetMessage("DISK_VERSION_LIMIT_PER_FILE"), 0, Array("selectbox", array(0 => GetMessage('DISK_VERSION_LIMIT_PER_FILE_UNLIMITED'), 3  => 3, 10 => 10, 25  => 25, 50 => 50, 100 => 100, 500 => 500))),
+	array(Configuration::OPTION_SECONDS_TO_JOIN_VERSION, GetMessage("DISK_SECONDS_TO_JOIN_VERSION"), (int)ceil(Configuration::DEFAULT_SECONDS_TO_JOIN_VERSION / 60), Array("text", "20")),
 	GetMessage("DISK_SETTINGS_SECTION_HEAD_FILE_LOCK"),
 	array("disk_object_lock_enabled", GetMessage("DISK_ENABLE_OBJECT_LOCK_SUPPORT"), 'N', array("checkbox", "Y")),
 	//    Configuration::isEnabledObjectLock()? array("disk_auto_lock_on_object_edit", GetMessage("DISK_SETTINGS_AUTO_LOCK_ON_OBJECT_EDIT"), 'N', array("checkbox", "Y")) : null,
@@ -196,6 +197,8 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && ($_POST['Update'] || $_POST['Apply'] ||
 		{
 			COption::RemoveOption("disk", $key);
 		}
+
+		COption::RemoveOption("disk", Configuration::OPTION_SECONDS_TO_JOIN_VERSION);
 	}
 	else
 	{
@@ -219,6 +222,16 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && ($_POST['Update'] || $_POST['Apply'] ||
 				(new ChangeDefaultViewerServiceCommand($val))->run();
 
 				continue;
+			}
+			elseif ($name === Configuration::OPTION_SECONDS_TO_JOIN_VERSION)
+			{
+				$val = trim((string)$val);
+				if ($val === '' || preg_match('/^\d+$/', $val) !== 1)
+				{
+					$val = (int)ceil(Configuration::DEFAULT_SECONDS_TO_JOIN_VERSION / 60);
+				}
+
+				$val = (int)$val * 60;
 			}
 			COption::SetOptionString("disk", $name, $val, $arOption[1]);
 		}
@@ -263,21 +276,35 @@ HTML;
 		{
 			$val = $documentHandlersManager->getDefaultViewerServiceForView();
 		}
+		elseif ($arOption[0] === Configuration::OPTION_SECONDS_TO_JOIN_VERSION)
+		{
+			$secondsToJoinVersion = Configuration::getSecondsToJoinVersion();
+			$val = (int)ceil($secondsToJoinVersion / 60);
+		}
 		else
         {
 		    $val = COption::GetOptionString("disk", $arOption[0], $arOption[2]);
         }
 
 		$type = $arOption[3];
+		$optionLabel = $arOption[1];
+		if ($arOption[0] === Configuration::OPTION_SECONDS_TO_JOIN_VERSION)
+		{
+			$optionHint = GetMessage("DISK_SECONDS_TO_JOIN_VERSION_HINT");
+			if ($optionHint !== '')
+			{
+				$optionLabel .= ' <span data-hint="' . htmlspecialcharsbx($optionHint) . '"></span>';
+			}
+		}
 	?>
     <?if($type[0]=="heading"):?>
     <tr class="heading">
-        <td colspan="2"><?=$arOption[1]?></td>
+        <td colspan="2"><?=$optionLabel?></td>
     </tr>
     <?else:?>
 	<tr>
 		<td width="40%" nowrap <?if($type[0]=="textarea") echo 'class="adm-detail-valign-top"'?>>
-			<label for="<?echo htmlspecialcharsbx($arOption[0])?>"><?echo $arOption[1]?>:</label>
+			<label for="<?echo htmlspecialcharsbx($arOption[0])?>"><?echo $optionLabel?>:</label>
 		<td width="60%">
 			<?if($type[0]=="checkbox"):?>
 				<input type="checkbox" id="<?echo htmlspecialcharsbx($arOption[0])?>" name="<?echo htmlspecialcharsbx($arOption[0])?>" value="Y"<?if($val=="Y")echo" checked";?>>

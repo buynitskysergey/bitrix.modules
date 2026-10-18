@@ -1,0 +1,6 @@
+{
+    "defaultTableName": "b_stafftrack_shift",
+    "installDirectoriesMapping": {
+        "install/js": "js"
+    }
+}

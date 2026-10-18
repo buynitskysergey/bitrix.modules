@@ -8,7 +8,7 @@ use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P1.T2] Splits a resolved selection into documents the
+ * Splits a resolved selection into documents the
  * user may act on and documents skipped for lack of access, in a single batch pass.
  *
  * Portal-admin handling is inherited from the underlying Access services (their existing

@@ -35,6 +35,16 @@ class Chat
 		return Im\V2\Chat::getInstance($chatId);
 	}
 
+	public function muteChat(int $chatId, int $userId, bool $action): bool
+	{
+		if (!Loader::includeModule('im'))
+		{
+			return false;
+		}
+
+		return Im\Chat::mute($chatId, $action, $userId);
+	}
+
 	public static function onRegisterType(RegisterTypeEvent $event): EventResult
 	{
 		$parameters = [

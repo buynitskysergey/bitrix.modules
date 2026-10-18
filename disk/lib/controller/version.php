@@ -14,7 +14,6 @@ use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Response;
 use Bitrix\Main\HttpResponse;
-use Bitrix\Main\Localization\Loc;
 
 final class Version extends Engine\Controller
 {
@@ -118,11 +117,9 @@ final class Version extends Engine\Controller
 	{
 		$file = $version->getObject();
 		$securityContext = $file->getStorage()->getSecurityContext($this->getCurrentUser()->getId());
-		if (!$file->canDelete($securityContext) || !$file->canRestore($securityContext))
+		if (!$file->canManageVersions($securityContext))
 		{
-			$this->errorCollection[] = new Error(
-				Loc::getMessage("DISK_CHECK_READ_PERMISSION_ERROR_MESSAGE")
-			);
+			$this->addDeniedError();
 
 			return;
 		}

@@ -71,7 +71,11 @@ final class DocumentMentionResolver implements MentionEntityResolver
 			}
 			else
 			{
-				$result[$id] = ResolvedMention::unavailable(MentionType::Document->value, $id, 'no_access');
+				$result[$id] = ResolvedMention::unavailable(
+					type: MentionType::Document->value,
+					id: $id,
+					reason: 'no_access',
+				);
 			}
 		}
 

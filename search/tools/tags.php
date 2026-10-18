@@ -14,14 +14,14 @@ function tags_prepare($sText, $site_id = false)
 	foreach ($arTags as $tag)
 	{
 		$tag = trim($tag);
-		if ($tag <> '')
+		if ($tag !== '')
 		{
 			foreach ($arEvents as $arEvent)
 			{
 				$tag = ExecuteModuleEventEx($arEvent, [$tag]);
 			}
 
-			if ($tag <> '')
+			if ($tag !== '')
 			{
 				$arResult[$tag] = $tag;
 			}
@@ -56,8 +56,8 @@ function InputTags($sName='', $sValue='', $arSites=[], $sHTML='', $sId='')
 
 	$order = class_exists('cuseroptions') ? CUserOptions::GetOption('search_tags', 'order', 'CNT') : 'CNT';
 	return '<input style="width:90%;margin-right:4px;" name="' . htmlspecialcharsbx($sName) . '" id="' . htmlspecialcharsbx(
-		$sId) . '" type="text" autocomplete="off" value="' . htmlspecialcharsex($sValue) . '" onfocus="' . htmlspecialcharsbx(
-			'window.oObject[this.id] = new JsTc(this, ' . CUtil::PhpToJSObject($arSites) . ', "", ' . CUtil::PhpToJSObject($jsTcParams)
+		$sId) . '" type="text" autocomplete="off" value="' . htmlspecialcharsEx($sValue) . '" onfocus="' . htmlspecialcharsbx(
+			'window.oObject[this.id] = new JsTc(this, ' . \Bitrix\Main\Web\Json::encode($arSites) . ', "", ' . \Bitrix\Main\Web\Json::encode($jsTcParams)
 			. ');') . '" ' . $sHTML . '/><input type="checkbox" id="ck_' . $sId . '" name="ck_' . htmlspecialcharsbx($sName) . '" ' . (
 				$order == 'NAME' ? 'checked' : '') . ' title="' . GetMessage('SEARCH_TAGS_SORTING_TIP') . '">';
 }

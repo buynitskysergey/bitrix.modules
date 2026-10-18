@@ -1,0 +1,6 @@
+{
+    "defaultTableName": "b_location",
+    "installDirectoriesMapping": {
+        "install/js": "js"
+    }
+}

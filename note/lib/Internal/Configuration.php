@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal;
 
 use Bitrix\Main\Config\Option;
+use Bitrix\Note\Internal\Integration\Disk\DiskGateway;
 
 final class Configuration
 {
@@ -34,6 +35,28 @@ final class Configuration
 	public static function isAccessCascadeBroadcastEnabled(): bool
 	{
 		return Option::get('note', self::ACCESS_CASCADE_BROADCAST_OPTION, 'Y') === 'Y';
+	}
+
+	// Feature flags: whole-feature opt-ins. Default OFF, and unlike the UI-only ones below they take
+	// the work behind the interface with them — a surface hidden here does nothing while it is hidden.
+
+	public const NOTIFICATIONS_ENABLED_OPTION = 'notifications_enabled';
+
+	/**
+	 * Opt-in for subscription notifications: the bell of an article's activity line, the bell and the
+	 * "only notified" filter of the favorites block — and the delivery behind them, since
+	 * NotificationDrainAgent skips its tick while this is off. Default off, so a portal that never
+	 * set it sees no bell and mails nothing.
+	 *
+	 * The journal itself is not gated: events, versions and co-authors keep being written
+	 * (isActivityEnabled() governs those), which is what lets the feature be switched on without a
+	 * backfill. Subscription rows are never touched either — the drainer stops before it moves a
+	 * cursor, and turning the flag back on resumes from the events of the last day alone (its
+	 * freshness floor), not from the whole backlog.
+	 */
+	public static function isNotificationsEnabled(): bool
+	{
+		return Option::get('note', self::NOTIFICATIONS_ENABLED_OPTION, 'N') === 'Y';
 	}
 
 	// Feature flags: UI-only opt-ins. Default OFF, and they gate display only — the backend behind
@@ -101,7 +124,7 @@ final class Configuration
 	// switching one of these off is NOT display-only, unlike the block above.
 
 	public const SUBTREE_INHERITANCE_OPTION = 'subtree_inheritance_enabled';
-	public const NOTIFICATIONS_ENABLED_OPTION = 'notifications_enabled';
+	public const DISK_ATTACHMENTS_ENABLED_OPTION = 'disk_attachments_enabled';
 
 	/**
 	 * Gates the CREATION of new subtree grants (a marker where the subject had none) and the UI that
@@ -116,15 +139,22 @@ final class Configuration
 	}
 
 	/**
-	 * Gates the subscription bell (document activity-line, knowledge base header, favorites block of
-	 * the sidebar) together with the delivery behind it: with the flag off NotificationDrainAgent
-	 * skips its tick, so a subscription made earlier stops arriving instead of becoming impossible to
-	 * switch off. Subscription rows are never touched — turning the flag back on resumes delivery from
-	 * the events of the last day only (the drainer's freshness floor), not from the whole backlog.
+	 * Opt-in for attaching existing Disk files to a document. Default off, and it takes BOTH this
+	 * option and Disk's own universal file picker: without the picker there is no supported way to
+	 * pick a file, and we are not allowed to ship a substitute for it.
+	 *
+	 * Gates CREATION only — the picker action refuses, and the editor offers no Disk source. Documents
+	 * that already carry `[[disk ...]]` tokens keep resolving their attachments when the flag goes off,
+	 * otherwise switching it would blank out saved content.
 	 */
-	public static function isNotificationsEnabled(): bool
+	public static function isDiskAttachmentsEnabled(): bool
 	{
-		return Option::get('note', self::NOTIFICATIONS_ENABLED_OPTION, 'N') === 'Y';
+		if (Option::get('note', self::DISK_ATTACHMENTS_ENABLED_OPTION, 'N') !== 'Y')
+		{
+			return false;
+		}
+
+		return (new DiskGateway())->isUniversalFilePickerEnabled();
 	}
 
 	// Numeric settings: retention windows, agent tuning and one hard cap. Each getter clamps a
@@ -134,14 +164,10 @@ final class Configuration
 	public const RECYCLE_BIN_TTL_DEFAULT = 30;
 	public const VERSION_TTL_OPTION = 'version_ttl_days';
 	public const VERSION_TTL_DEFAULT = 90;
-	public const NOTIFY_INTERVAL_OPTION = 'notify_interval';
-	// 5 min: KB notifications aren't urgent, and a wider drain window collapses an active
-	// editing session into fewer pings before the im-side tag-collapse even kicks in.
-	public const NOTIFY_INTERVAL_DEFAULT = 300;
 	public const NOTIFY_BATCH_SIZE_OPTION = 'notify_batch_size';
 	public const NOTIFY_BATCH_SIZE_DEFAULT = 500;
 	public const BULK_SELECTION_LIMIT_OPTION = 'bulk_selection_limit';
-	// [FEAT-kb2-tree-bulk-archive / Q-1] Max documents a single bulk operation may touch
+	// Max documents a single bulk operation may touch
 	// after subtree expansion + dedup. Provisional value pending a product decision — the
 	// cap is enforced once, in SelectionResolver (getSubtreeIds itself has no cap).
 	public const BULK_SELECTION_LIMIT_DEFAULT = 1000;
@@ -172,20 +198,7 @@ final class Configuration
 	}
 
 	/**
-	 * [P7.T4 / ALG-03] Seconds between NotificationDrainAgent ticks — the natural
-	 * agent-window rung of the antiflood ladder (dedup batch + im tag collapse are
-	 * the other two).
-	 */
-	public static function getNotifyInterval(): int
-	{
-		$interval = (int)Option::get('note', self::NOTIFY_INTERVAL_OPTION, self::NOTIFY_INTERVAL_DEFAULT);
-
-		// Clamp misconfiguration: a 0/negative interval would break the agent schedule.
-		return $interval > 0 ? $interval : self::NOTIFY_INTERVAL_DEFAULT;
-	}
-
-	/**
-	 * [P7.T1] Max rows fetched per NotificationDrainAgent batch iteration.
+	 * Max rows fetched per NotificationDrainAgent batch iteration.
 	 */
 	public static function getNotifyBatchSize(): int
 	{
@@ -206,25 +219,12 @@ final class Configuration
 		return (int)Option::get('note', self::BULK_SELECTION_LIMIT_OPTION, self::BULK_SELECTION_LIMIT_DEFAULT);
 	}
 
-	// Runtime state, not a setting: an option is merely where it is kept. Nobody configures this
-	// value — the drainer writes it as it goes, which is why this is the only pair with a setter.
-
-	public const EVENT_NOTIFY_LAST_ID_OPTION = 'event_notify_last_id';
-
 	/**
-	 * [P7.T1 / ALG-03] Persistent keyset cursor of the notification drainer — the
-	 * last b_note_event.ID already fully delivered. Moved only after a whole batch
-	 * is delivered, never mid-batch. Initialized to the current MAX(ID) at install/
-	 * update time so enabling the drainer never floods subscribers with the
-	 * already-accumulated history (see install/index.php, dev/updates/current/updater.php).
+	 * Where the notification drainer keeps the persistent keyset cursor of its `changed` profile -
+	 * the last b_note_event.ID already fully delivered. Runtime state, not a setting: nobody
+	 * configures it, the drainer reads and writes the option directly (the option name belongs to
+	 * the drain profile in NotificationShippingPolicy), and no getter here would have a caller.
+	 * The name is a constant because NotificationShippingPolicy and the tests address the same row.
 	 */
-	public static function getEventNotifyLastId(): int
-	{
-		return (int)Option::get('note', self::EVENT_NOTIFY_LAST_ID_OPTION, 0);
-	}
-
-	public static function setEventNotifyLastId(int $id): void
-	{
-		Option::set('note', self::EVENT_NOTIFY_LAST_ID_OPTION, (string)$id);
-	}
+	public const EVENT_NOTIFY_LAST_ID_OPTION = 'event_notify_last_id';
 }

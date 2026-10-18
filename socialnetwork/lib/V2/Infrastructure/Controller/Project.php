@@ -349,12 +349,13 @@ class Project extends BaseController
 		ProjectProvider $projectProvider,
 	): ?array
 	{
-		$projectId = (
+		// Resolved the same way as the gate: for a group which is not a collab this holds its own id
+		$groupId = (
 			$project->id
-			?? Container::getInstance()->getProjectChatResolver()->getProjectIdByChatId((int)($project->chatId))
+			?? Container::getInstance()->getProjectChatResolver()->getGroupIdByChatId((int)($project->chatId))
 		);
 
-		if (!$projectId)
+		if (!$groupId)
 		{
 			return null;
 		}
@@ -362,7 +363,7 @@ class Project extends BaseController
 		$isCurrentUserModuleAdmin = CSocNetUser::isCurrentUserModuleAdmin();
 
 		return $projectProvider->getBaseFeature(
-			projectId: $projectId,
+			projectId: $groupId,
 			userId: $this->userId,
 			isCurrentUserModuleAdmin: $isCurrentUserModuleAdmin,
 		)?->toArray();
@@ -420,7 +421,7 @@ class Project extends BaseController
 	 * @ajaxAction socialnetwork.V2.Project.copy
 	 */
 	public function copyAction(
-		#[Permission\Read]
+		#[Permission\Copy]
 		Dto\Project\Project $sourceProject,
 		#[Permission\Create]
 		Dto\Project\Project $project,

@@ -3,10 +3,6 @@ IncludeModuleLangFile(__FILE__);
 
 class CSearchStemTable extends CSearchFullText
 {
-	public function connect($connectionIndex, $indexName = '')
-	{
-	}
-
 	public function truncate()
 	{
 		$DB = CDatabase::GetModuleConnection('search');
@@ -30,7 +26,7 @@ class CSearchStemTable extends CSearchFullText
 		if (!isset($arFields['SITE_ID']))
 		{
 			$dbSites = $DB->Query('SELECT * from b_search_content_site WHERE SEARCH_CONTENT_ID = ' . $ID);
-			while ($site = $dbSites->fetch())
+			while ($site = $dbSites->Fetch())
 			{
 				$arFields['SITE_ID'][$site['SITE_ID']] = $site['URL'];
 			}

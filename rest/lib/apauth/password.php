@@ -11,6 +11,7 @@ use Bitrix\Main\ORM;
 use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Integration\Rest\EventHandlers\PasswordEventHandler;
 use Bitrix\Rest\Internal\Model\IncomingWebhookAttributeTable;
+use Bitrix\Rest\Internal\Model\Trait\UpdateByFilterTrait;
 use Bitrix\Rest\Internal\Service\SystemUserService;
 use Bitrix\Rest\Preset\EventController;
 use Bitrix\Rest\Enum;
@@ -52,6 +53,7 @@ Loc::loadMessages(__FILE__);
 class PasswordTable extends ORM\Data\DataManager
 {
 	use DeleteByFilterTrait;
+	use UpdateByFilterTrait;
 
 	const ACTIVE = 'Y';
 	const INACTIVE = 'N';
@@ -113,6 +115,9 @@ class PasswordTable extends ORM\Data\DataManager
 			),
 			'LAST_IP' => array(
 				'data_type' => 'string',
+			),
+			'DATE_EXPIRE' => array(
+				'data_type' => 'date',
 			),
 		);
 	}

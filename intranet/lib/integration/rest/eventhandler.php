@@ -64,7 +64,7 @@ class EventHandler
 			$menuList = unserialize($option, ['allowed_classes' => false]);
 			foreach ($menuList as $key => $item)
 			{
-				if ((int)$item['PLACEMENT_ID'] > 0)
+				if ((int)($item['PLACEMENT_ID'] ?? 0) > 0)
 				{
 					$placementList[$item['PLACEMENT_ID']] = $key;
 				}
@@ -91,7 +91,7 @@ class EventHandler
 
 		foreach ($res->fetchCollection() as $handler)
 		{
-			if ($placementList[$handler->getId()])
+			if (!empty($placementList[$handler->getId()]))
 			{
 				unset($placementList[$handler->getId()]);
 				continue;

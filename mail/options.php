@@ -27,6 +27,16 @@ $arAllOptions = array(
 	array('sync_old_limit2', getMessage('MAIL_OPTIONS_SYNC_OLD_LIMIT'), 0, array('text', 2)),
 );
 
+if (\Bitrix\Main\ModuleManager::isModuleInstalled('bitrix24'))
+{
+	$arAllOptions[] = array(
+		\Bitrix\Mail\Helper\Config\Feature::UNLIMITED_MAIL_SYNC_PERIOD_OPTION,
+		getMessage('MAIL_OPTIONS_UNLIMITED_MAIL_SYNC_PERIOD'),
+		'N',
+		array('checkbox', 'Y'),
+	);
+}
+
 if($MOD_RIGHT>="W" && check_bitrix_sessid())
 {
 	if ($_SERVER['REQUEST_METHOD']=="GET" && $RestoreDefaults <> '')

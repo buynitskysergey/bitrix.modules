@@ -42,6 +42,7 @@ use Bitrix\Tasks\Internals\TaskTable;
 use Bitrix\Tasks\Scrum\Service\TaskService;
 use Bitrix\Tasks\Internals\UserOption;
 use Bitrix\Tasks\Manager;
+use Bitrix\Tasks\Rest\Controllers\Task\CrmItemGate;
 use Bitrix\Tasks\UI;
 use Bitrix\Tasks\Util\Restriction\Bitrix24Restriction\Limit\TaskLimit;
 use Bitrix\Tasks\Util\Type\DateTime;
@@ -227,11 +228,10 @@ final class Task extends Base
 
 			if (in_array('NEW_COMMENTS_COUNT', $params['select'], true))
 			{
-				$taskId = $task->getId();
-				$userId = $this->getCurrentUser()->getId();
-
-				$newComments = Counter::getInstance((int)$userId)->getCommentsCount([$taskId]);
-				$row['NEW_COMMENTS_COUNT'] = $newComments[$taskId];
+				$row['NEW_COMMENTS_COUNT'] = $this->getNewCommentsCount(
+					(int)$this->getCurrentUser()->getId(),
+					(int)$task->getId()
+				);
 			}
 
 			$action = $this->getAccessAction($task);
@@ -271,6 +271,20 @@ final class Task extends Base
 			// special case for mobile
 			return [];
 		}
+	}
+
+	private function getNewCommentsCount(int $userId, int $taskId): int
+	{
+		if (!Counter\Loader::isNarrowReadAllowed($userId))
+		{
+			// Counters are not trustworthy yet: the full path recounts them or answers zeros when the
+			// counter state is disabled by the zero limit.
+			return Counter::getInstance($userId)->getCommentsCount([$taskId])[$taskId];
+		}
+
+		$repository = Container::getInstance()->getCounterRepository();
+
+		return $repository->getCommentsCountByUserAndTasks($userId, [$taskId])[$taskId];
 	}
 
 	/**
@@ -568,6 +582,63 @@ final class Task extends Base
 		{
 			UserOption::delete($task->getId(), $this->getCurrentUser()->getId(), UserOption\Option::PINNED);
 			return $this->getAction($task);
+		}
+		catch (Exception $exception)
+		{
+			$this->addError(Error::createFromThrowable($exception));
+			return null;
+		}
+	}
+
+	/**
+	 * @restMethod tasks.task.bindCrmItem
+	 */
+	public function bindCrmItemAction(CTaskItem $task, string $crmItemId): ?array
+	{
+		if (!CRM\CrmInTasksFeature::isOn())
+		{
+			$this->addError(new Error(Main\Localization\Loc::getMessage('TASKS_ACTION_CRM_ITEM_ACCESS_DENIED'), 'ACCESS_DENIED'));
+			return null;
+		}
+
+		$taskId = $task->getId();
+		$userId = (int)$this->getCurrentUser()->getId();
+
+		if (!TaskAccessController::can($userId, ActionDictionary::ACTION_TASK_EDIT, $taskId))
+		{
+			$this->addError(new Error(Main\Localization\Loc::getMessage('TASKS_ACTION_CRM_ITEM_ACCESS_DENIED'), 'ACCESS_DENIED'));
+			return null;
+		}
+
+		if (!CrmItemGate::isConcreteItem($crmItemId))
+		{
+			$this->addError(CrmItemGate::getInvalidItemError());
+			return null;
+		}
+
+		$crmAccessService = Container::getInstance()->getCrmAccessService();
+		if (count($crmAccessService->filterCrmItemsWithAccess([$crmItemId], $userId)) !== 1)
+		{
+			$this->addError(new Error(Main\Localization\Loc::getMessage('TASKS_ACTION_CRM_ITEM_ACCESS_DENIED'), 'ACCESS_DENIED'));
+			return null;
+		}
+
+		try
+		{
+			$result = (new \Bitrix\Tasks\V2\Internal\Integration\CRM\Command\AddItemsCommand(
+				taskId: $taskId,
+				userId: $userId,
+				crmItemIds: [$crmItemId],
+				useConsistency: true,
+			))->run();
+
+			if (!$result->isSuccess())
+			{
+				$this->addErrors($result->getErrors());
+				return null;
+			}
+
+			return ['success' => true];
 		}
 		catch (Exception $exception)
 		{

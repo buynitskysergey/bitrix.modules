@@ -10,7 +10,6 @@ use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
-use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\FavoriteTable;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
@@ -20,7 +19,6 @@ use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Repository\SubscriptionRepository;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
 use Bitrix\Note\Internal\Service\User\SystemUser;
-use Bitrix\Note\Public\Provider\Dto\DocumentReadDto;
 
 final class DocumentProvider
 {
@@ -78,44 +76,6 @@ final class DocumentProvider
 			'createdBy' => (int)$document->getCreatedBy(),
 			'createdAt' => $document->getCreatedAt(),
 		];
-	}
-
-	public function getForRead(int $id): DocumentReadDto
-	{
-		// Meta only: markdown is fetched below via getRawMarkdown, so the heavy MARKDOWN/YJS_STATE blobs are skipped here.
-		$document = $this->documentRepository->getMetaById($id);
-		if ($document === null || $document->getIsArchived())
-		{
-			throw new DocumentNotFoundException();
-		}
-
-		$documentId = (int)$document->getId();
-		$collectionId = (int)$document->getCollectionId();
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $collectionId);
-		if (!$snapshot['canView'])
-		{
-			throw new DocumentNotFoundException();
-		}
-
-		$markdown = $this->documentRepository->getRawMarkdown($id) ?? '';
-
-		return new DocumentReadDto(
-			id: $documentId,
-			collectionId: $snapshot['sharedAccess'] ? null : $collectionId,
-			parentId: $document->getParentId() !== null ? (int)$document->getParentId() : null,
-			title: (string)$document->getTitle(),
-			markdown: $markdown,
-			position: (int)$document->getPosition(),
-			createdBy: (int)$document->getCreatedBy(),
-			updatedBy: (int)$document->getUpdatedBy(),
-			// REST-only read path: datetime is returned in UTC (ISO 8601 with Z).
-			createdAt: gmdate('Y-m-d\TH:i:s\Z', $document->getCreatedAt()->getTimestamp()),
-			updatedAt: gmdate('Y-m-d\TH:i:s\Z', $document->getUpdatedAt()->getTimestamp()),
-			// [DTO-01] Content build time, separate from updatedAt; null until the projection materializes.
-			contentUpdatedAt: $document->getContentUpdatedAt() !== null
-				? gmdate('Y-m-d\TH:i:s\Z', $document->getContentUpdatedAt()->getTimestamp())
-				: null,
-		);
 	}
 
 	/**
@@ -285,7 +245,7 @@ final class DocumentProvider
 				SubscriptionTable::SCOPE_COLLECTION,
 				$collectionId,
 			) !== null;
-			// [TPL-01] Star state of the knowledge base, alongside its bell state: under the "notifications
+			// Star state of the knowledge base, alongside its bell state: under the "notifications
 			// only on favorites" invariant the header bell is gated by one of the two.
 			$collectionMeta['isFavorite'] = (new FavoriteRepository())->findRow(
 				$userId,

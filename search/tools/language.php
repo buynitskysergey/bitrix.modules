@@ -1,25 +1,26 @@
 <?php
 class CSearchLanguage
 {
-	var $_abc = [];
-	var $_lang_id;
-	var $_lang_bigramm_cache;
-	var $_trigrams = [];
-	var $_has_bigramm_info = null;
-	var $_bigrams = null;
+	public $_abc = [];
+	public $_lang_id;
+	public $_lang_bigramm_cache;
+	public $_trigrams = [];
+	public $_has_bigramm_info = null;
+	public $_bigrams = null;
 
-	function __construct($lang_id)
+	public function __construct($lang_id)
 	{
 		$this->_lang_id = $lang_id;
 	}
 
 	//Function loads language class
-	static function GetLanguage($sLang)
+	public static function GetLanguage($sLang)
 	{
 		static $arLanguages = [];
 
 		if (!isset($arLanguages[$sLang]))
 		{
+			$strDirName = '';
 			$obLanguage = null;
 			$class_name = mb_strtolower('CSearchLanguage' . $sLang);
 			if (!class_exists($class_name))
@@ -31,30 +32,31 @@ class CSearchLanguage
 				{
 					$obLanguage = @include $strFileName;
 				}
+			}
 
-				if (!is_object($obLanguage))
+			if (!is_object($obLanguage))
+			{
+				if (!class_exists($class_name))
 				{
-					if (!class_exists($class_name))
+					//Then module class
+					$strDirName = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/search/tools/' . $sLang;
+					$strFileName = $strDirName . '/language.php';
+					if (file_exists($strFileName))
 					{
-						//Then module class
-						$strDirName = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/search/tools/' . $sLang;
-						$strFileName = $strDirName . '/language.php';
-						if (file_exists($strFileName))
+						if (\Bitrix\Main\Localization\Translation::allowConvertEncoding())
 						{
-							if (\Bitrix\Main\Localization\Translation::allowConvertEncoding())
-							{
-								\Bitrix\Main\Localization\StreamConverter::include($strFileName, $sLang);
-							}
-							else
-							{
-								@include $strFileName;
-							}
+							\Bitrix\Main\Localization\StreamConverter::include($strFileName, $sLang);
 						}
-						if (!class_exists($class_name))
+						else
 						{
-							$class_name = 'CSearchLanguage';
+							@include $strFileName;
 						}
 					}
+				}
+
+				if (!class_exists($class_name))
+				{
+					$class_name = 'CSearchLanguage';
 				}
 			}
 
@@ -62,6 +64,7 @@ class CSearchLanguage
 			{
 				$obLanguage = new $class_name($sLang);
 			}
+
 			$obLanguage->LoadTrigrams($strDirName);
 			$arStemInfo = stemming_init($sLang);
 			if (is_array($arStemInfo))
@@ -77,7 +80,7 @@ class CSearchLanguage
 	}
 
 	//Reads file with trigrams (combinations not allowed in the words)
-	function LoadTrigrams($dir_name)
+	public function LoadTrigrams($dir_name)
 	{
 		if (empty($this->_trigrams))
 		{
@@ -117,18 +120,18 @@ class CSearchLanguage
 		}
 	}
 
-	function HasTrigrams()
+	public function HasTrigrams()
 	{
 		return !empty($this->_trigrams);
 	}
 
 	//Check phrase against trigrams
-	function CheckTrigrams($arScanCodes)
+	public function CheckTrigrams($arScanCodes)
 	{
 		$result = 0;
 		$check = '';
 		$len = 0;
-		foreach ($arScanCodes as $i => $code)
+		foreach ($arScanCodes as $code)
 		{
 			if ($code === false) //new word starts here
 			{
@@ -164,7 +167,7 @@ class CSearchLanguage
 
 	//This function returns positions of the letters
 	//on the keyboard. This one is default English layout
-	function GetKeyboardLayout()
+	public function GetKeyboardLayout()
 	{
 		return [
 			'lo' => '`          - ' . 'qwertyuiop[]' . "asdfghjkl;'"
@@ -173,7 +176,7 @@ class CSearchLanguage
 		];
 	}
 
-	function ConvertFromScancode($arScancode)
+	public function ConvertFromScancode($arScancode)
 	{
 		$result = '';
 		$keyboard = $this->GetKeyboardLayout();
@@ -238,7 +241,7 @@ class CSearchLanguage
 				$keyboards[$combo] = [];
 				foreach ($keyboards[$from] as $i => $ch)
 				{
-					if ($ch != false)
+					if ($ch !== false)
 					{
 						$keyboards[$combo][$ch] = $keyboards[$to][$i];
 					}
@@ -266,7 +269,7 @@ class CSearchLanguage
 
 	//This function converts text into array of character positions
 	//on the keyboard. Not defined chars turns into "false" value.
-	function ConvertToScancode($text, $strict=false, $binary=false)
+	public function ConvertToScancode($text, $strict=false, $binary=false)
 	{
 		static $cache = [];
 		if (!isset($cache[$this->_lang_id]))
@@ -274,12 +277,12 @@ class CSearchLanguage
 			$cache[$this->_lang_id] = [];
 			$keyboard = $this->GetKeyboardLayout();
 
-			foreach ($this->StrToArray($keyboard['lo']) as $pos => $ch)
+			foreach (static::StrToArray($keyboard['lo']) as $pos => $ch)
 			{
 				$cache[$this->_lang_id][$ch] = $pos;
 			}
 
-			foreach ($this->StrToArray($keyboard['hi']) as $pos => $ch)
+			foreach (static::StrToArray($keyboard['hi']) as $pos => $ch)
 			{
 				$cache[$this->_lang_id][$ch] = $pos;
 			}
@@ -290,7 +293,7 @@ class CSearchLanguage
 		if ($binary)
 		{
 			$result = '';
-			foreach ($this->StrToArray($text) as $ch)
+			foreach (static::StrToArray($text) as $ch)
 			{
 				if (
 					isset($scancodes[$ch])
@@ -305,7 +308,7 @@ class CSearchLanguage
 		else
 		{
 			$result = [];
-			foreach ($this->StrToArray($text) as $ch)
+			foreach (static::StrToArray($text) as $ch)
 			{
 				if ($ch === ' ')
 				{
@@ -328,7 +331,7 @@ class CSearchLanguage
 		return $result;
 	}
 
-	function PreGuessLanguage($text, $lang=false)
+	public function PreGuessLanguage($text, $lang=false)
 	{
 		//Indicates that there is no own guess
 		return false;
@@ -337,7 +340,7 @@ class CSearchLanguage
 		//or parent::GuessLanguage for futher processing
 	}
 
-	public static function GuessLanguage($text, $lang=false)
+	public static function GuessLanguage($text, $language = false)
 	{
 		if ($text == '')
 		{
@@ -358,9 +361,9 @@ class CSearchLanguage
 			}
 		}
 
-		if (is_array($lang))
+		if (is_array($language))
 		{
-			$arLanguages = $lang;
+			$arLanguages = $language;
 		}
 		else
 		{
@@ -454,7 +457,7 @@ class CSearchLanguage
 		//Now try the best to detect the language
 		$arDetection = [];
 		$i = 0;
-		foreach ($arDetectionFrom as $lang_from => $arTemp)
+		foreach ($arDetectionFrom as $lang_from => $_)
 		{
 			foreach ($arLanguages as $lang)
 			{
@@ -498,7 +501,7 @@ class CSearchLanguage
 	}
 
 	//Compare to results of text analysis
-	static function cmp($a, $b)
+	public static function cmp($a, $b)
 	{
 		$c = count($a);
 		for ($i = 0; $i < $c; $i++)
@@ -517,7 +520,7 @@ class CSearchLanguage
 
 	//Function returns distance of the text (sequence of scan codes)
 	//from language model
-	function GetDeviation($arScanCodes)
+	public function GetDeviation($arScanCodes)
 	{
 		//This is language model
 		$lang_bigrams = $this->GetBigrammScancodeFreq();
@@ -554,7 +557,7 @@ class CSearchLanguage
 	//For example "FAT RAT" will be
 	//array("FA", "AT", "RA", "AT")
 	//This is model of the text
-	function ConvertToBigramms($arScancodes)
+	public function ConvertToBigramms($arScancodes)
 	{
 		$result = ['count' => 0];
 
@@ -578,13 +581,18 @@ class CSearchLanguage
 		return $result;
 	}
 
-	function HasBigrammInfo()
+	public function HasBigrammInfo()
 	{
 		return $this->_has_bigramm_info;
 	}
 
+	public function GetBigrammLetterFreq()
+	{
+		return [];
+	}
+
 	//Function returns model of the language
-	function GetBigrammScancodeFreq()
+	public function GetBigrammScancodeFreq()
 	{
 		if (!$this->HasBigrammInfo())
 		{

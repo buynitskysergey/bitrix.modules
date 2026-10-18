@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Rest\V3\Exceptions;
 
 use Bitrix\Rest\V3\Exception\RestException;
+use Bitrix\Rest\V3\Exception\SkipWriteToLogException;
 
-class SearchQueryTooLongException extends RestException
+class SearchQueryTooLongException extends RestException implements SkipWriteToLogException
 {
 	public function __construct(
 		private readonly int $maxLength,

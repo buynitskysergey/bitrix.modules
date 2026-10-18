@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Integration\Im;
 
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Note\Internal\Configuration;
+use Bitrix\Note\Internal\Service\Notification\NotificationShippingPolicy;
 
 /**
- * [P7.T3/T4] OnGetNotifySchema handler, registered in install/index.php via
+ * OnGetNotifySchema handler, registered in install/migrations/events.php via
  * EventManager::registerEventHandler('im', 'OnGetNotifySchema', ...) — same spot
  * as note's existing pull/mobile handlers. Declares note's own notification
  * group/types in the user's im settings, by the disk example (NotifySchema).
@@ -16,21 +18,44 @@ use Bitrix\Main\Localization\Loc;
  */
 final class NotifySchemaHandler
 {
+	/**
+	 * Explicit kind -> lang key map for every notification note knows how to render, mirroring
+	 * ImNotificationGateway's message maps. Only the kinds delivered right now reach the settings
+	 * screen: a toggle for something never delivered switches nothing. The rest stay here, and in
+	 * the lang files, so that shipping one more kind is an edit of NotificationShippingPolicy alone.
+	 */
+	private const SCHEMA_MESSAGE_KEYS = [
+		'created' => 'NOTE_NOTIFY_SCHEMA_CREATED',
+		'content_changed' => 'NOTE_NOTIFY_SCHEMA_CONTENT_CHANGED',
+		'title_changed' => 'NOTE_NOTIFY_SCHEMA_TITLE_CHANGED',
+		'moved' => 'NOTE_NOTIFY_SCHEMA_MOVED',
+		'archived' => 'NOTE_NOTIFY_SCHEMA_ARCHIVED',
+		'archive_restored' => 'NOTE_NOTIFY_SCHEMA_ARCHIVE_RESTORED',
+		'trashed' => 'NOTE_NOTIFY_SCHEMA_TRASHED',
+		'trash_restored' => 'NOTE_NOTIFY_SCHEMA_TRASH_RESTORED',
+		'access_changed' => 'NOTE_NOTIFY_SCHEMA_ACCESS_CHANGED',
+	];
+
 	public static function onGetNotifySchema(): array
 	{
+		// Nothing is delivered while the option is off, so the settings screen is given no group to
+		// hold toggles for it.
+		if (!Configuration::isNotificationsEnabled())
+		{
+			return [];
+		}
+
+		$shippedKeys = array_intersect_key(
+			self::SCHEMA_MESSAGE_KEYS,
+			array_flip(NotificationShippingPolicy::shippedKinds()),
+		);
+
 		return [
 			'note' => [
-				'NOTIFY' => [
-					'created' => self::schemaItem('NOTE_NOTIFY_SCHEMA_CREATED'),
-					'content_changed' => self::schemaItem('NOTE_NOTIFY_SCHEMA_CONTENT_CHANGED'),
-					'title_changed' => self::schemaItem('NOTE_NOTIFY_SCHEMA_TITLE_CHANGED'),
-					'moved' => self::schemaItem('NOTE_NOTIFY_SCHEMA_MOVED'),
-					'archived' => self::schemaItem('NOTE_NOTIFY_SCHEMA_ARCHIVED'),
-					'archive_restored' => self::schemaItem('NOTE_NOTIFY_SCHEMA_ARCHIVE_RESTORED'),
-					'trashed' => self::schemaItem('NOTE_NOTIFY_SCHEMA_TRASHED'),
-					'trash_restored' => self::schemaItem('NOTE_NOTIFY_SCHEMA_TRASH_RESTORED'),
-					'access_changed' => self::schemaItem('NOTE_NOTIFY_SCHEMA_ACCESS_CHANGED'),
-				],
+				'NOTIFY' => array_map(
+					static fn(string $nameCode): array => self::schemaItem($nameCode),
+					$shippedKeys,
+				),
 			],
 		];
 	}

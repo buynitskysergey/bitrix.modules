@@ -9,54 +9,22 @@ class CSearchOpenSearch extends CSearchFullText
 	public $tags = '';
 	public $SITE_ID = '';
 	public $connectionString = '';
-	protected $user = '';
-	protected $password = '';
+	public $user = '';
+	public $password = '';
 	public $indexName = '';
 	public $siteAnalyzerMap = [];
+	protected $connected = false;
 
-	public function connect($connectionString, $user = '', $password = '', $indexName = '', $ignoreErrors = false, $siteAnalyzerMap = '')
+	public function __construct($config = [])
 	{
-		global $APPLICATION;
+		parent::__construct($config);
 
-		if (!preg_match('/^[a-zA-Z0-9_-]+$/', $indexName))
-		{
-			if ($ignoreErrors)
-			{
-				$APPLICATION->ThrowException(GetMessage('SEARCH_OPENSEARCH_CONN_ERROR_INDEX_NAME'));
-			}
-			else
-			{
-				throw new \Bitrix\Main\Db\ConnectionException('OpenSearch connect error', GetMessage('SEARCH_OPENSEARCH_CONN_ERROR_INDEX_NAME'));
-			}
-			return false;
-		}
+		$this->connectionString = $this->config['connection'];
+		$this->user = $this->config['user'];
+		$this->password = $this->config['password'];
+		$this->indexName = $this->config['index_name'];
+		$this->siteAnalyzerMap = $this->config['analyzers'] ?? [];
 
-		$error = '';
-		$server = new Bitrix\Main\Web\HttpClient([
-			'disableSslVerification' => true,
-		]);
-
-		$server->setAuthorization($user, $password);
-		$strJson = $server->get($connectionString);
-		if ($server->getStatus() !== 200 || !is_array(json_decode($strJson, true)))
-		{
-			$error = $strJson;
-			if ($ignoreErrors)
-			{
-				$APPLICATION->ThrowException(GetMessage('SEARCH_OPENSEARCH_CONN_ERROR', ['#ERRSTR#' => $error]));
-			}
-			else
-			{
-				throw new \Bitrix\Main\Db\ConnectionException('OpenSearch connect error', GetMessage('SEARCH_OPENSEARCH_CONN_ERROR', ['#ERRSTR#' => $error]));
-			}
-			return false;
-		}
-
-		$this->connectionString = $connectionString;
-		$this->user = $user;
-		$this->password = $password;
-
-		$this->siteAnalyzerMap = $siteAnalyzerMap ?: [];
 		if (!$this->siteAnalyzerMap)
 		{
 			$langs = CLang::GetList();
@@ -70,21 +38,66 @@ class CSearchOpenSearch extends CSearchFullText
 				$this->siteAnalyzerMap[$site['ID']] = $analyzer;
 			}
 		}
+	}
+
+	public function connect($ignoreErrors = false)
+	{
+		global $APPLICATION;
+
+		if ($this->connected)
+		{
+			return true;
+		}
+
+		if (!preg_match('/^[a-zA-Z0-9_-]+$/', $this->indexName))
+		{
+			if ($ignoreErrors)
+			{
+				$APPLICATION->ThrowException(GetMessage('SEARCH_OPENSEARCH_CONN_ERROR_INDEX_NAME'));
+			}
+			else
+			{
+				throw new \Bitrix\Main\DB\ConnectionException('OpenSearch connect error', GetMessage('SEARCH_OPENSEARCH_CONN_ERROR_INDEX_NAME'));
+			}
+
+			return false;
+		}
 
 		if ($ignoreErrors)
 		{
+			$error = '';
+			$server = new Bitrix\Main\Web\HttpClient([
+				'disableSslVerification' => true,
+			]);
+
+			$server->setAuthorization($this->user, $this->password);
+			$strJson = $server->get($this->connectionString);
+			if ($server->getStatus() !== 200 || !is_array(json_decode($strJson, true)))
+			{
+				if ($server->getStatus())
+				{
+					$error = $strJson;
+				}
+				else
+				{
+					$error = implode('<br.', $server->getError());
+				}
+
+				$APPLICATION->ThrowException(GetMessage('SEARCH_OPENSEARCH_CONN_ERROR', ['#ERRSTR#' => $error]));
+
+				return false;
+			}
+
 			foreach ($this->siteAnalyzerMap as $siteId => $analyzer)
 			{
-				if (!$this->checkIndexTemplate($indexName, $siteId, $analyzer))
+				if (!$this->checkIndexTemplate($this->indexName, $siteId, $analyzer))
 				{
 					$APPLICATION->ThrowException(GetMessage('SEARCH_OPENSEARCH_CONN_ERROR', ['#ERRSTR#' => $this->getError()]));
+
 					return false;
 				}
 			}
 		}
-
-		$this->indexName = $indexName;
-		$this->connectionIndex = $connectionIndex;
 
 		return true;
 	}
@@ -130,12 +143,23 @@ class CSearchOpenSearch extends CSearchFullText
 		];
 	}
 
-	protected $version = 27;
+	protected $version = 28;
+
 	protected function checkIndexTemplate($indexName, $siteId, $analyzer, $adminNotify = true)
 	{
-		$templateName = $indexName . '-' . $siteId. '-template';
-		$result = $this->query('GET', '/_index_template/' . $templateName);
-		if (!$result && $this->errorNumber !== 404)
+		$templateName = $indexName . '-' . $siteId . '-template';
+		$pipelineName = $indexName . '-pipeline'; // TODO $indexName . '-' . $siteId. '-pipeline'
+
+		$result = false;
+		try
+		{
+			$result = $this->query('GET', '/_index_template/' . $templateName);
+		}
+		catch (\Bitrix\Main\DB\ConnectionException $e)
+		{
+		}
+
+		if (!$result && !in_array($this->errorNumber, [400, 404]))
 		{
 			return false;
 		}
@@ -158,16 +182,71 @@ class CSearchOpenSearch extends CSearchFullText
 			$analyzerMatch = !isset($result['index_templates'][0]['index_template']['template']['mappings']['properties']['body']['analyzer']);
 		}
 
-		$updateNeeded = !$versionMatch || !$analyzerMatch;
+		$ml = CPageOption::GetOptionString('search', 'opensearch_index_model_id', null) ?? COption::GetOptionString('search', 'opensearch_index_model_id');
+		$mlMatch = true;
+		if ($ml)
+		{
+			$mlDimension = CPageOption::GetOptionInt('search', 'opensearch_index_dimension') ?: COption::GetOptionInt('search', 'opensearch_index_dimension');
+			$mlSpaceType = CPageOption::GetOptionString('search', 'opensearch_index_space_type') ?: COption::GetOptionString('search', 'opensearch_index_space_type');
+			$mlMatch = (
+				isset($result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml']['type'])
+				&& $result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml']['type'] === 'knn_vector'
+			)
+			&& (
+				isset($result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml']['dimension'])
+				&& $result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml']['dimension'] === $mlDimension
+			)
+			&& (
+				isset($result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml']['method']['space_type'])
+				&& $result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml']['method']['space_type'] === $mlSpaceType
+			)
+			&& (
+				isset($result['index_templates'][0]['index_template']['template']['settings']['index']['knn'])
+				&& $result['index_templates'][0]['index_template']['template']['settings']['index']['knn'] === 'true'
+			)
+			&& (
+				isset($result['index_templates'][0]['index_template']['template']['settings']['index']['default_pipeline'])
+				&& $result['index_templates'][0]['index_template']['template']['settings']['index']['default_pipeline'] === $pipelineName
+			)
+			;
+		}
+		else
+		{
+			$mlDimension = false;
+			$mlSpaceType = false;
+			$mlMatch = !(
+				isset($result['index_templates'][0]['index_template']['template']['mappings']['properties']['body_ml'])
+			)
+			&& !(
+				isset($result['index_templates'][0]['index_template']['template']['settings']['index']['knn'])
+			)
+			&& !(
+				isset($result['index_templates'][0]['index_template']['template']['settings']['index']['default_pipeline'])
+			)
+			;
+		}
+
+		$updateNeeded = !$versionMatch || !$analyzerMatch || !$mlMatch;
 
 		if ($updateNeeded)
 		{
-			$result = $this->query('DELETE', '/_index_template/' . $templateName);
+			try
+			{
+				$result = $this->query('DELETE', '/_index_template/' . $templateName);
+			}
+			catch (\Bitrix\Main\DB\ConnectionException $e)
+			{
+				// Suppress error when no template was there yet.
+			}
 		}
 
 		if ($this->errorNumber === 404 || $updateNeeded)
 		{
 			$template = [
+				'settings' => [
+					'index.knn' => true,
+					'default_pipeline' => $pipelineName,
+				],
 				'mappings' => [
 					'properties' => [
 						'id' => [
@@ -189,24 +268,37 @@ class CSearchOpenSearch extends CSearchFullText
 						'custom_rank' => [
 							'type' => 'integer',
 						],
-						// user_id
-						// entity_type_id
-						// entity_id
-						// url
+						'user_id' => [
+							'type' => 'integer',
+						],
+						'entity_type_id' => [
+							'type' => 'keyword',
+						],
+						'entity_id' => [
+							'type' => 'keyword',
+						],
 						'title' => [
 							'type' => 'text',
 						],
 						'body' => [
 							'type' => 'text',
 						],
-						// tags
+						'body_ml' => [
+							'type' => 'knn_vector',
+							'dimension' => $mlDimension,
+							'method' => [
+								'engine' => 'lucene',
+								'space_type' => $mlSpaceType,
+								'name' => 'hnsw',
+								'parameters' => new stdClass(),
+							],
+						],
 						'param1' => [
 							'type' => 'keyword',
 						],
 						'param2' => [
 							'type' => 'keyword',
 						],
-						// upd
 						'date_from' => [
 							'type' => 'date',
 							'format' => 'date_time_no_millis',
@@ -228,7 +320,7 @@ class CSearchOpenSearch extends CSearchFullText
 							'type' => 'keyword', // array
 						],
 						'param' => [
-							'properties' => [],
+							'properties' => new stdClass(),
 							'dynamic' => true,
 						],
 					]
@@ -238,6 +330,12 @@ class CSearchOpenSearch extends CSearchFullText
 			if ($analyzer)
 			{
 				$template['mappings']['properties']['body']['analyzer'] = $analyzer;
+			}
+
+			if (!$ml)
+			{
+				unset($template['settings']);
+				unset($template['mappings']['properties']['body_ml']);
 			}
 
 			$result = $this->query('PUT', '/_index_template/' . $templateName, [
@@ -251,7 +349,9 @@ class CSearchOpenSearch extends CSearchFullText
 			if ($adminNotify)
 			{
 				$error = [
-					'MESSAGE' => GetMessage("SEARCH_OPENSEARCH_REINDEX", ['#LINK#' => '/bitrix/admin/search_reindex.php?lang=' . LANGUAGE_ID]),
+					'MESSAGE' => GetMessage('SEARCH_OPENSEARCH_REINDEX', [
+						'#LINK#' => '/bitrix/admin/search_reindex.php?lang=' . LANGUAGE_ID,
+					]),
 					'TAG' => 'SEARCH_REINDEX',
 					'MODULE_ID' => 'SEARCH',
 					'NOTIFY_TYPE' => CAdminNotify::TYPE_ERROR,
@@ -265,7 +365,8 @@ class CSearchOpenSearch extends CSearchFullText
 		return true;
 	}
 
-	static $siteIdChecked = [];
+	protected static $siteIdChecked = [];
+
 	protected function checkTemplateBySiteId($siteId)
 	{
 		global $CACHE_MANAGER;
@@ -282,12 +383,18 @@ class CSearchOpenSearch extends CSearchFullText
 			return;
 		}
 
+		// a site with no analyzer has no template to check, but a failed check must not be cached as a success
+		$templateChecked = true;
 		if (isset($this->siteAnalyzerMap[$siteId]))
 		{
-			$this->checkIndexTemplate($this->indexName, $siteId, $this->siteAnalyzerMap[$siteId], false);
+			$analyzer = $this->siteAnalyzerMap[$siteId];
+			$templateChecked = (bool)$this->checkIndexTemplate($this->indexName, $siteId, $analyzer, false);
 		}
 
-		$CACHE_MANAGER->Set($cacheId, true);
+		if ($templateChecked)
+		{
+			$CACHE_MANAGER->Set($cacheId, true);
+		}
 	}
 
 	public function truncate()
@@ -297,16 +404,21 @@ class CSearchOpenSearch extends CSearchFullText
 
 	public function deleteById($ID)
 	{
+		$deleteBatch = '';
 		foreach ($this->siteAnalyzerMap as $siteId => $_)
 		{
-			$this->query('DELETE', '/' . $this->indexName . '-' . $siteId . '/_doc/' . intval($ID));
+			$deleteBatch .= json_encode([
+				'delete' => [
+					'_index' => $this->indexName . '-' . $siteId,
+					'_id' => intval($ID),
+				],
+			]) . "\n";
 		}
+		$this->query('POST', '/_bulk', $deleteBatch);
 	}
 
 	public function replace($ID, $arFields)
 	{
-		$DB = CDatabase::GetModuleConnection('search');
-
 		if (array_key_exists('~DATE_CHANGE', $arFields))
 		{
 			$arFields['DATE_CHANGE'] = $arFields['~DATE_CHANGE'];
@@ -319,18 +431,19 @@ class CSearchOpenSearch extends CSearchFullText
 		}
 		elseif (array_key_exists('DATE_CHANGE', $arFields))
 		{
-			$arFields['DATE_CHANGE'] = $DB->FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
+			$arFields['DATE_CHANGE'] = CDatabase::FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
 		}
 
-		$DATE_FROM = intval(MakeTimeStamp($arFields['DATE_FROM']));
-		$DATE_TO = intval(MakeTimeStamp($arFields['DATE_TO']));
+		$DATE_FROM = isset($arFields['DATE_FROM']) && $arFields['DATE_FROM'] ? intval(MakeTimeStamp($arFields['DATE_FROM'])) : 0;
+		$DATE_TO = isset($arFields['DATE_TO']) && $arFields['DATE_TO'] ? intval(MakeTimeStamp($arFields['DATE_TO'])) : 0;
 		$DATE_CHANGE = intval(MakeTimeStamp($arFields['DATE_CHANGE']));
 
-		$BODY =  ($arFields['TITLE'] ? CSearch::KillEntities($arFields['TITLE']) . "\n" : '')
+		$BODY = (isset($arFields['TITLE']) && $arFields['TITLE'] ? CSearch::KillEntities($arFields['TITLE']) . "\n" : '')
 			. CSearch::KillEntities($arFields['BODY'])
-			. ($arFields['TAGS'] ? "\n" . $arFields['TAGS'] : '')
+			. (isset($arFields['TAGS']) && $arFields['TAGS'] ? "\n" . $arFields['TAGS'] : '')
 		;
 
+		$deleteBatch = '';
 		$sites = $this->sites($arFields['SITE_ID']);
 		foreach ($this->siteAnalyzerMap as $siteId => $_)
 		{
@@ -342,8 +455,11 @@ class CSearchOpenSearch extends CSearchFullText
 					'date_change_ts' => $DATE_CHANGE ? $DATE_CHANGE - CTimeZone::GetOffset() : 0,
 					'module_id' => $arFields['MODULE_ID'],
 					'item_id' => $arFields['ITEM_ID'],
-					'custom_rank' => intval($arFields['CUSTOM_RANK']),
-					'title' => $arFields['TITLE'],
+					'custom_rank' => intval($arFields['CUSTOM_RANK'] ?? 0),
+					'user_id' => intval($arFields['USER_ID'] ?? 0),
+					'entity_type_id' => $arFields['ENTITY_TYPE_ID'] ?? '',
+					'entity_id' => $arFields['ENTITY_ID'] ?? '',
+					'title' => $arFields['TITLE'] ?? '',
 					'body' => $BODY,
 					'param1' => $arFields['PARAM1'],
 					'param2' => $arFields['PARAM2'],
@@ -351,21 +467,37 @@ class CSearchOpenSearch extends CSearchFullText
 					'date_from_ts' => $DATE_FROM ? $DATE_FROM - CTimeZone::GetOffset() : 0,
 					'date_to' => $DATE_TO ? date('c', $DATE_TO) : null,
 					'date_to_ts' => $DATE_TO ? $DATE_TO - CTimeZone::GetOffset() : 0,
-					'tag' => $this->tags($arFields['SITE_ID'], $arFields['TAGS']),
+					'tag' => $this->tags($arFields['SITE_ID'], $arFields['TAGS'] ?? ''),
 					'xright' => $this->rights($arFields['PERMISSIONS']),
-					'param' => $this->params($arFields['PARAMS']),
+					'param' => $this->params($arFields['PARAMS'] ?? []),
 				];
 				$this->checkTemplateBySiteId($siteId);
-				$result = $this->query('PUT', '/' . $this->indexName . '-' . $siteId . '/_doc/' . intval($ID), $doc);
+
+				$result = $this->query(
+					'PUT',
+					'/' . $this->indexName . '-' . $siteId . '/_doc/' . intval($ID),
+					$doc
+				);
+
 				if (!$result)
 				{
-					throw new \Bitrix\Main\Db\SqlQueryException('OpenSearch index error', $this->getError(), '');
+					throw new \Bitrix\Main\DB\SqlQueryException('OpenSearch index error', $this->getError(), '');
 				}
 			}
-			else
+			elseif (!defined('BX_SEARCH_FULL_REINDEXING'))
 			{
-				$result = $this->query('DELETE', '/' . $this->indexName . '-' . $siteId . '/_doc/' . intval($ID));
+				$deleteBatch .= json_encode([
+					'delete' => [
+						'_index' => $this->indexName . '-' . $siteId,
+						'_id' => intval($ID),
+					],
+				]) . "\n";
 			}
+		}
+
+		if ($deleteBatch)
+		{
+			$this->query('POST', '/_bulk', $deleteBatch);
 		}
 	}
 
@@ -395,7 +527,7 @@ class CSearchOpenSearch extends CSearchFullText
 		}
 		elseif (array_key_exists('DATE_CHANGE', $arFields))
 		{
-			$arFields['DATE_CHANGE'] = $DB->FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
+			$arFields['DATE_CHANGE'] = CDatabase::FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
 		}
 
 		if (array_key_exists('DATE_CHANGE', $arFields))
@@ -447,37 +579,77 @@ class CSearchOpenSearch extends CSearchFullText
 		{
 			$sites = [];
 			$dbSites = $DB->Query('SELECT * from b_search_content_site WHERE SEARCH_CONTENT_ID=' . $ID);
-			while ($site = $dbSites->fetch())
+			while ($site = $dbSites->Fetch())
 			{
 				$sites[$site['SITE_ID']] = $site['SITE_ID'];
 			}
 		}
 
+		$isDocumentMissing = false;
 		if (!empty($arUpdate) && !$bReplace)
 		{
+			$deleteBatch = '';
 			foreach ($this->siteAnalyzerMap as $siteId => $_)
 			{
 				if (in_array($siteId, $sites))
 				{
-					$result = $this->query('POST', '/' . $this->indexName . '-' . $siteId . '/_update/' . intval($ID), [
-						'doc' => $arUpdate,
-					]);
+					try
+					{
+						$result = $this->query('POST', '/' . $this->indexName . '-' . $siteId . '/_update/' . intval($ID), [
+							'doc' => $arUpdate,
+						]);
+					}
+					catch (\Bitrix\Main\DB\ConnectionException $e)
+					{
+						// a missing document or index answers 404, and 400 on servers that never answer 404
+						if (!in_array($this->errorNumber, [400, 404], true))
+						{
+							throw $e;
+						}
+
+						$isDocumentMissing = true;
+						break;
+					}
 				}
 				else
 				{
-					$result = $this->query('DELETE', '/' . $this->indexName . '-' . $siteId . '/_doc/' . intval($ID));
+					$deleteBatch .= json_encode([
+						'delete' => [
+							'_index' => $this->indexName . '-' . $siteId,
+							'_id' => intval($ID),
+						],
+					]) . "\n";
 				}
 			}
+
+			if ($deleteBatch)
+			{
+				$this->query('POST', '/_bulk', $deleteBatch);
+			}
+
+			if (!$isDocumentMissing)
+			{
+				return;
+			}
 		}
-		elseif ($bReplace)
+
+		if ($bReplace || $isDocumentMissing)
 		{
-			$dbItem = $DB->Query('SELECT * FROM b_search_content WHERE ID = ' . $ID);
-			$searchItem = $dbItem->fetch();
+			$dbItem = $DB->Query('
+				SELECT
+					*
+					, ' . $DB->DateToCharFunction('DATE_CHANGE') . ' as LAST_MODIFIED
+					, ' . $DB->DateToCharFunction('DATE_FROM') . ' as DATE_FROM
+					, ' . $DB->DateToCharFunction('DATE_TO') . ' as DATE_TO
+				FROM b_search_content
+				WHERE ID = ' . $ID
+			);
+			$searchItem = $dbItem->Fetch();
 			if ($searchItem)
 			{
 				$arTags = [];
 				$dbTags = $DB->Query('SELECT * from b_search_tags WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($tag = $dbTags->fetch())
+				while ($tag = $dbTags->Fetch())
 				{
 					$arTags[] = $tag['NAME'];
 				}
@@ -485,21 +657,21 @@ class CSearchOpenSearch extends CSearchFullText
 
 				$searchItem['PERMISSIONS'] = [];
 				$dbRights = $DB->Query('SELECT * from b_search_content_right WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($right = $dbRights->fetch())
+				while ($right = $dbRights->Fetch())
 				{
 					$searchItem['PERMISSIONS'][] = $right['GROUP_CODE'];
 				}
 
 				$searchItem['SITE_ID'] = [];
 				$dbSites = $DB->Query('SELECT * from b_search_content_site WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($site = $dbSites->fetch())
+				while ($site = $dbSites->Fetch())
 				{
 					$searchItem['SITE_ID'][$site['SITE_ID']] = $site['URL'];
 				}
 
 				$searchItem['PARAMS'] = [];
 				$dbParams = $DB->Query('SELECT * from b_search_content_param WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($param = $dbParams->fetch())
+				while ($param = $dbParams->Fetch())
 				{
 					$searchItem['PARAMS'][$param['PARAM_NAME']][] = $param['PARAM_VALUE'];
 				}
@@ -509,12 +681,26 @@ class CSearchOpenSearch extends CSearchFullText
 		}
 	}
 
-	function tags($arLID, $sContent)
+	public function syncPermission($permission, $arFilter)
+	{
+		$message = new \Bitrix\Search\SyncPermissionMessage($permission, $arFilter);
+		$message->send('search_sync_perm');
+	}
+
+	public function syncContent($id)
+	{
+		$message = new \Bitrix\Search\SyncIndexItemMessage($id);
+		$message->send('search_sync_content');
+
+		return true;
+	}
+
+	public function tags($arLID, $sContent)
 	{
 		$tags = [];
 		if (is_array($arLID))
 		{
-			foreach ($arLID as $site_id => $url)
+			foreach ($arLID as $site_id => $_)
 			{
 				$arTags = tags_prepare($sContent, $site_id);
 				foreach ($arTags as $tag)
@@ -523,11 +709,12 @@ class CSearchOpenSearch extends CSearchFullText
 				}
 			}
 		}
+		sort($tags);
 
-		return array_values($tags);
+		return $tags;
 	}
 
-	function rights($arRights)
+	public function rights($arRights)
 	{
 		$rights = [];
 		if (is_array($arRights))
@@ -544,16 +731,17 @@ class CSearchOpenSearch extends CSearchFullText
 				}
 			}
 		}
+		sort($rights);
 
-		return array_values($rights);
+		return $rights;
 	}
 
-	function sites($arSites)
+	public function sites($arSites)
 	{
 		$sites = [];
 		if (is_array($arSites))
 		{
-			foreach ($arSites as $site_id => $url)
+			foreach ($arSites as $site_id => $_)
 			{
 				$sites[$site_id] = $site_id;
 			}
@@ -562,11 +750,12 @@ class CSearchOpenSearch extends CSearchFullText
 		{
 			$sites[$arSites] = $arSites;
 		}
+		sort($sites);
 
-		return array_values($sites);
+		return $sites;
 	}
 
-	function params($arParams)
+	public function params($arParams)
 	{
 		$params = [];
 		if (is_array($arParams))
@@ -574,7 +763,7 @@ class CSearchOpenSearch extends CSearchFullText
 			foreach ($arParams as $k1 => $v1)
 			{
 				$name = trim($k1);
-				if ($name != '')
+				if ($name !== '')
 				{
 					if (!is_array($v1))
 					{
@@ -584,7 +773,7 @@ class CSearchOpenSearch extends CSearchFullText
 					foreach ($v1 as $v2)
 					{
 						$value = trim($v2);
-						if ($value != '')
+						if ($value !== '')
 						{
 							$params[$name] = $value;
 						}
@@ -608,8 +797,6 @@ class CSearchOpenSearch extends CSearchFullText
 
 	public function search($arParams, $aSort, $aParamsEx, $bTagsCloud)
 	{
-		$DB = CDatabase::GetModuleConnection('search');
-
 		$result = [];
 		$this->errorText = '';
 		$this->errorNumber = 0;
@@ -638,6 +825,12 @@ class CSearchOpenSearch extends CSearchFullText
 			unset($aParamsEx['OFFSET']);
 		}
 
+		if (is_array($aParamsEx) && isset($aParamsEx['QUERY_OBJECT']))
+		{
+			unset($aParamsEx['QUERY_OBJECT']);
+			unset($aParamsEx['STEMMING']);
+		}
+
 		if (is_array($aParamsEx) && !empty($aParamsEx))
 		{
 			$aParamsEx['LOGIC'] = 'OR';
@@ -653,6 +846,12 @@ class CSearchOpenSearch extends CSearchFullText
 				'bool' => [
 					'must' => [
 					],
+					'filter' => [
+						'bool' => [
+							'must' => [
+							],
+						],
+					],
 				],
 			],
 			'from' => $offset,
@@ -660,29 +859,39 @@ class CSearchOpenSearch extends CSearchFullText
 		];
 
 		$strQuery = trim($arParams['QUERY']);
-		if ($strQuery != '')
+		if ($strQuery !== '')
 		{
-			$query['query']['bool']['must'][] = [
-				'match' => [
-					'body' => [
-						'query' => $strQuery,
+			$ml = CPageOption::GetOptionString('search', 'opensearch_index_model_id', null) ?? COption::GetOptionString('search', 'opensearch_index_model_id');
+			if ($ml)
+			{
+				$query['query']['bool']['must'][] = [
+					'neural' => [
+						'body_ml' => [
+							'query_text' => $strQuery,
+							'model_id' => $ml,
+							'k' => 10,
+						],
 					],
-				],
-			];
+				];
+			}
+			else
+			{
+				$query['query']['bool']['must'][] = [
+					'match' => [
+						'body' => [
+							'query' => $strQuery,
+						],
+					],
+				];
+			}
 		}
 
 		$rights = $this->CheckPermissions();
 		if ($rights)
 		{
-			$query['query']['bool']['filter'] = [
-				'bool' => [
-					'must' => [
-						[
-							'terms' => [
-								'xright' => $rights,
-							],
-						],
-					],
+			$query['query']['bool']['filter']['bool']['must'][] = [
+				'terms' => [
+					'xright' => $rights,
 				],
 			];
 		}
@@ -690,7 +899,12 @@ class CSearchOpenSearch extends CSearchFullText
 		$arWhere = $this->prepareFilter($arParams);
 		if ($arWhere)
 		{
-			$query['query']['bool']['must'][] = $arWhere;
+			$query['query']['bool']['filter']['bool']['must'][] = $arWhere;
+		}
+
+		if (!$query['query']['bool']['filter']['bool']['must'])
+		{
+			unset($query['query']['bool']['filter']);
 		}
 
 		if ($strQuery || $this->tags || $bTagsCloud)
@@ -717,7 +931,7 @@ class CSearchOpenSearch extends CSearchFullText
 				$r = $this->query('GET', '/' . $this->indexName . '-' . $this->SITE_ID . '/_search', $query);
 				if (!$r)
 				{
-					throw new \Bitrix\Main\Db\SqlQueryException('OpenSearch select error', $this->getError(), $sql);
+					throw new \Bitrix\Main\DB\SqlQueryException('OpenSearch select error', $this->getError(), 'GET /' . $this->indexName . '-' . $this->SITE_ID . '/_search');
 				}
 				else
 				{
@@ -743,18 +957,18 @@ class CSearchOpenSearch extends CSearchFullText
 			}
 			else
 			{
-				$order = $this->__PrepareSort($order);
+				$order = $this->__PrepareSort($aSort);
 				if ($order)
 				{
 					$query['sort'] = $order;
 				}
 
-				$query['fields'] = ['id', 'module_id', 'param2'];
+				$query['fields'] = ['id', 'module_id', 'param1', 'param2'];
 
 				$r = $this->query('GET', '/' . $this->indexName . '-' . $this->SITE_ID . '/_search', $query);
 				if (!$r)
 				{
-					throw new \Bitrix\Main\Db\SqlQueryException('OpenSearch select error', $this->getError(), json_encode($query));
+					throw new \Bitrix\Main\DB\SqlQueryException('OpenSearch select error', $this->getError(), json_encode($query));
 				}
 				else
 				{
@@ -779,6 +993,9 @@ class CSearchOpenSearch extends CSearchFullText
 							}
 							$result[] = [
 								'ID' => $searchHit['fields']['id'][0],
+								'MODULE_ID' => $searchHit['fields']['module_id'][0],
+								'PARAM1' => $searchHit['fields']['param1'][0],
+								'PARAM2' => $searchHit['fields']['param2'][0],
 							];
 						}
 					}
@@ -794,7 +1011,7 @@ class CSearchOpenSearch extends CSearchFullText
 		return $result;
 	}
 
-	function searchTitle($phrase = '', $arPhrase = [], $nTopCount = 5, $arParams = [], $bNotFilter = false, $order = '')
+	public function searchTitle($phrase = '', $arPhrase = [], $nTopCount = 5, $arParams = [], $bNotFilter = false, $order = '')
 	{
 		$query = [
 			'_source' => false,
@@ -820,26 +1037,26 @@ class CSearchOpenSearch extends CSearchFullText
 			unset($arParams['SITE_ID']);
 		}
 
+		$query['query']['bool']['filter']['bool']['must'] = [];
 		$arWhere = $this->prepareFilter($arParams);
 		if ($arWhere)
 		{
-			$query['query']['bool']['must'][] = $arWhere;
+			$query['query']['bool']['filter']['bool']['must'][] = $arWhere;
 		}
 
 		$rights = $this->CheckPermissions();
 		if ($rights)
 		{
-			$query['query']['bool']['filter'] = [
-				'bool' => [
-					'must' => [
-						[
-							'terms' => [
-								'xright' => $rights,
-							],
-						],
-					],
+			$query['query']['bool']['filter']['bool']['must'][] = [
+				'terms' => [
+					'xright' => $rights,
 				],
 			];
+		}
+
+		if (!$query['query']['bool']['filter']['bool']['must'])
+		{
+			unset($query['query']['bool']['filter']);
 		}
 
 		$order = $this->__PrepareSort($order);
@@ -851,7 +1068,7 @@ class CSearchOpenSearch extends CSearchFullText
 		$r = $this->query('GET', '/' . $this->indexName . '-' . $site_id . '/_search', $query);
 		if (!$r)
 		{
-			throw new \Bitrix\Main\Db\SqlQueryException('OpenSearch query error', $this->getError(), json_encode($query));
+			throw new \Bitrix\Main\DB\SqlQueryException('OpenSearch query error', $this->getError(), json_encode($query));
 		}
 		else
 		{
@@ -874,14 +1091,13 @@ class CSearchOpenSearch extends CSearchFullText
 		}
 	}
 
-	function getRowFormatter()
+	public function getRowFormatter()
 	{
 		return new CSearchOpenSearchFormatter($this);
 	}
 
-	function filterField($field, $value, $logic = 'should')
+	public function filterField($field, $value, $logic = 'should')
 	{
-		$DB = CDatabase::GetModuleConnection('search');
 		$arWhere = [];
 
 		if (is_array($value))
@@ -894,7 +1110,7 @@ class CSearchOpenSearch extends CSearchFullText
 						]
 					]
 				];
-				foreach ($value as $i => $v)
+				foreach ($value as $v)
 				{
 					$arWhere['bool'][$logic][] = [
 						'term' => [
@@ -927,10 +1143,8 @@ class CSearchOpenSearch extends CSearchFullText
 		return $arWhere;
 	}
 
-	function prepareFilter($arFilter)
+	public function prepareFilter($arFilter)
 	{
-		$DB = CDatabase::GetModuleConnection('search');
-
 		if (!is_array($arFilter))
 		{
 			$arFilter = [];
@@ -967,80 +1181,44 @@ class CSearchOpenSearch extends CSearchFullText
 				$val = $val[0];
 			}
 
+			$negate = false;
+			if (str_starts_with($field, '!'))
+			{
+				$negate = true;
+				$field = mb_substr($field, 1);
+			}
+			$field = mb_strtolower($field);
+
 			switch ($field)
 			{
-			case 'ITEM_ID':
-			case '=ITEM_ID':
-				$cond = $this->filterField('item_id', $val);
-				if ($cond)
+			case 'item_id':
+			case '=item_id':
+			case 'module_id':
+			case '=module_id':
+			case 'param1':
+			case '=param1':
+			case 'param2':
+			case '=param2':
+			case 'user_id':
+			case '=user_id':
+			case 'entity_id':
+			case '=entity_id':
+			case 'entity_type_id':
+			case '=entity_type_id':
+				if ($negate)
 				{
-					array_push($arWhere['bool'][$logic], $cond);
-				}
-				break;
-			case '!ITEM_ID':
-				if (
-					$val !== false
-					&& !is_array($val)
-				)
-				{
-					array_push($arWhere['bool'][$logic], $this->filterField('item_id', $val, 'must_not'));
-				}
-				break;
-			case 'MODULE_ID':
-			case '=MODULE_ID':
-				if ($val !== false && $val !== 'no')
-				{
-					$cond = $this->filterField('module_id', $val);
-					if ($cond)
+					if ($val !== false  && $val !== 'no' && !is_array($val))
 					{
-						array_push($arWhere['bool'][$logic], $cond);
+						$arWhere['bool'][$logic][] = $this->filterField($field, $val, 'must_not');
 					}
 				}
-				break;
-			case '!MODULE_ID':
-			case '!=MODULE_ID':
-				if (
-					$val !== false
-					&& !is_array($val)
-				)
+				else
 				{
-					array_push($arWhere['bool'][$logic], $this->filterField('module_id', $val, 'must_not'));
-				}
-				break;
-			case 'PARAM1':
-			case '=PARAM1':
-				$cond = $this->filterField('param1', $val);
-				if ($cond)
-				{
-					array_push($arWhere['bool'][$logic], $cond);
-				}
-				break;
-			case '!PARAM1':
-			case '!=PARAM1':
-				if (
-					$val !== false
-					&& !is_array($val)
-				)
-				{
-					array_push($arWhere['bool'][$logic], $this->filterField('param1', $val, 'must_not'));
-				}
-				break;
-			case 'PARAM2':
-			case '=PARAM2':
-				$cond = $this->filterField('param2', $val);
-				if ($cond)
-				{
-					array_push($arWhere['bool'][$logic], $cond);
-				}
-				break;
-			case '!PARAM2':
-			case '!=PARAM2':
-				if (
-					$val !== false
-					&& !is_array($val)
-				)
-				{
-					array_push($arWhere['bool'][$logic], $this->filterField('param2', $val, 'must_not'));
+					$cond = $this->filterField($field, $val);
+					if ($cond)
+					{
+						$arWhere['bool'][$logic][] = $cond;
+					}
 				}
 				break;
 			case 'DATE_CHANGE':
@@ -1139,7 +1317,7 @@ class CSearchOpenSearch extends CSearchFullText
 				foreach ($arTags as $i => &$strTag)
 				{
 					$strTag = trim($strTag, " \n\r\t\"");
-					if ($strTag == '')
+					if ($strTag === '')
 					{
 						unset($arTags[$i]);
 					}
@@ -1149,7 +1327,7 @@ class CSearchOpenSearch extends CSearchFullText
 				$cond = $this->filterField('tag', $arTags, 'must');
 				if ($cond)
 				{
-					array_push($arWhere['bool'][$logic], $cond);
+					$arWhere['bool'][$logic][] = $cond;
 				}
 				break;
 			case 'PARAMS':
@@ -1168,11 +1346,11 @@ class CSearchOpenSearch extends CSearchFullText
 					}
 					if ($params)
 					{
-						array_push($arWhere['bool'][$logic], [
+						$arWhere['bool'][$logic][] = [
 							'bool' => [
 								'must' => $params
 							]
-						]);
+						];
 					}
 				}
 				break;
@@ -1206,7 +1384,7 @@ class CSearchOpenSearch extends CSearchFullText
 		return $arWhere;
 	}
 
-	function CheckPermissions()
+	public function CheckPermissions()
 	{
 		global $USER;
 		$DB = CDatabase::GetModuleConnection('search');
@@ -1233,7 +1411,7 @@ class CSearchOpenSearch extends CSearchFullText
 		return $this->rights($arResult);
 	}
 
-	function __PrepareSort($aSort = [])
+	public function __PrepareSort($aSort = [])
 	{
 		$arOrder = [];
 		if (!is_array($aSort))
@@ -1241,10 +1419,9 @@ class CSearchOpenSearch extends CSearchFullText
 			$aSort = [$aSort => 'ASC'];
 		}
 
-		$this->flagsUseRatingSort = 0;
 		foreach ($aSort as $key => $ord)
 		{
-			$ord = mb_strtoupper($ord) <> 'ASC' ? 'desc' : 'asc';
+			$ord = mb_strtoupper($ord) !== 'ASC' ? 'desc' : 'asc';
 			$key = mb_strtoupper($key);
 			switch ($key)
 			{
@@ -1277,52 +1454,105 @@ class CSearchOpenSearch extends CSearchFullText
 		return $arOrder;
 	}
 
-	public function query($verb, $url, $params = [])
+	protected static function collectError($error)
 	{
+		if (is_array($error))
+		{
+			$result = $error['reason'] ?? '';
+			if (isset($error['caused_by']))
+			{
+				$result .= '<br>' . static::collectError($error['caused_by']);
+			}
+		}
+		else
+		{
+			$result = $error;
+		}
+
+		return $result;
+	}
+
+	protected ?COpenSearchServer $server = null;
+
+	public function query($verb, $url, $params = '')
+	{
+		global $DB;
+
+		if (!$this->connected)
+		{
+			$this->connect();
+		}
+
 		$this->errorText = '';
 		$this->errorNumber = 0;
 
 		$result = false;
 
-		$server = new Bitrix\Main\Web\HttpClient([
-			'disableSslVerification' => true,
-		]);
-
-		if ($this->user)
+		if ($this->server === null)
 		{
-			$server->setAuthorization($this->user, $this->password);
+			$this->server = extension_loaded('curl') ? new COpenSearchServerCurl($this) : new COpenSearchServerHttpClient($this);
 		}
 
-		if ($params)
+		$this->server->prepareRequest($verb, $url, is_array($params) ? json_encode($params) : $params);
+
+		$stime = 0;
+		if ($DB->ShowSqlStat)
 		{
-			$server->setHeader('Content-Type', 'application/json');
+			$stime = microtime(1);
 		}
-		$server->query($verb, $this->connectionString . $url, $params ? json_encode($params) : false);
+
+		$this->server->sendRequest();
+
+		if ($DB->ShowSqlStat)
+		{
+			$DB->addDebugQuery($verb . ' ' . $url . "\n" . json_encode($params, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), microtime(1) - $stime);
+		}
+
+		$responseStatus = $this->server->responseStatus;
+		$responseContents = $this->server->responseContents;
+
 		if (
-			$server->getStatus() === 200
-			|| $server->getStatus() === 201
+			$responseStatus === 200
+			|| $responseStatus === 201
 		)
 		{
-			$result = json_decode($server->getResult(), true);
+			$result = json_decode($responseContents, true);
 		}
-		// AddMessage2Log([$verb . ' ' . $url, $server->getStatus(), $result ?: $server->getResult()]);
+
 		if (!is_array($result))
 		{
-			if ($server->getStatus())
+			if ($responseStatus)
 			{
-				$this->errorText = $server->getResult();
-				$this->errorNumber = $server->getStatus();
+				$errorText = $responseContents;
+				// try to parse
+				try
+				{
+					$error = json_decode($errorText, true);
+					if (is_array($error) && isset($error['error']))
+					{
+						$errorText = static::collectError($error['error']);
+					}
+				}
+				catch (\Throwable $_)
+				{
+				}
+				$this->errorText = $errorText;
+				$this->errorNumber = $responseStatus;
 			}
 			else
 			{
-				$errors = $server->getError();
-				$this->errorText = $errors ? implode(' ', $errors) : '-1';
+				$this->errorText = $this->server->errorText;
 			}
 		}
 		elseif (isset($result['error']))
 		{
 			$this->errorText = $result['error'];
 			$this->errorNumber = $result['status'];
+		}
+
+		if ($this->errorText)
+		{
+			throw new \Bitrix\Main\DB\ConnectionException('OpenSearch query error', $this->errorText);
 		}
 
 		return $result;
@@ -1348,12 +1578,12 @@ class CSearchOpenSearchFormatter extends CSearchFormatter
 	/** @var CSearchOpenSearch */
 	private $search = null;
 
-	function __construct($search)
+	public function __construct($search)
 	{
 		$this->search = $search;
 	}
 
-	function format($r)
+	public function format($r)
 	{
 		if ($r)
 		{
@@ -1368,7 +1598,7 @@ class CSearchOpenSearchFormatter extends CSearchFormatter
 		}
 	}
 
-	function formatRow($r)
+	public function formatRow($r)
 	{
 		$DB = CDatabase::GetModuleConnection('search');
 		$ID = intval($r['ID']);
@@ -1429,5 +1659,121 @@ class CSearchOpenSearchFormatter extends CSearchFormatter
 		$r = $rs->Fetch();
 
 		return $r;
+	}
+}
+
+abstract class COpenSearchServer
+{
+	public $responseContents = null;
+	public $responseStatus = null;
+	public $errorText = '';
+
+	public function __construct(protected CSearchOpenSearch $openSearch)
+	{
+	}
+
+	abstract public function prepareRequest($verb, $url, $params = '');
+
+	abstract public function sendRequest();
+}
+
+class COpenSearchServerHttpClient extends COpenSearchServer
+{
+	protected ?\Bitrix\Main\Web\HttpClient $server = null;
+	protected ?\Bitrix\Main\Web\Http\Request $request = null;
+
+	public function __construct(protected CSearchOpenSearch $openSearch)
+	{
+		parent::__construct($openSearch);
+		$this->server = new \Bitrix\Main\Web\HttpClient([
+			'disableSslVerification' => true,
+		]);
+	}
+
+	public function prepareRequest($verb, $url, $params = '')
+	{
+		$headers = [];
+		if ($this->openSearch->user)
+		{
+			$headers['Authorization'] = 'Basic ' . base64_encode($this->openSearch->user . ':' . $this->openSearch->password);
+		}
+
+		$headers['Content-Type'] = 'application/json';
+
+		$body = new \Bitrix\Main\Web\Http\Stream('php://temp', 'r+');
+		$body->write($params);
+
+		$this->request = new \Bitrix\Main\Web\Http\Request(
+			$verb,
+			new \Bitrix\Main\Web\Uri($this->openSearch->connectionString . $url),
+			$headers,
+			$body
+		);
+	}
+
+	public function sendRequest()
+	{
+		$response = $this->server->sendRequest($this->request);
+		$this->responseStatus = $response->getStatusCode();
+		$this->responseContents = (string)$response->getBody();
+
+		if (!$this->responseStatus)
+		{
+			$errors = $this->server->getError();
+			$this->errorText = $errors ? implode(' ', $errors) : '-1';
+		}
+	}
+}
+
+class COpenSearchServerCurl extends COpenSearchServer
+{
+	protected $server = null;
+
+	public function __construct(protected CSearchOpenSearch $openSearch)
+	{
+		parent::__construct($openSearch);
+		$this->server = curl_init();
+	}
+
+	public function prepareRequest($verb, $url, $params = '')
+	{
+		curl_setopt($this->server, CURLOPT_URL, $this->openSearch->connectionString . $url);
+		curl_setopt($this->server, CURLOPT_RETURNTRANSFER, true);
+
+		// Disable SSL verification
+		curl_setopt($this->server, CURLOPT_SSL_VERIFYPEER, false);
+		curl_setopt($this->server, CURLOPT_SSL_VERIFYHOST, false);
+
+		$headers = [];
+		if ($this->openSearch->user)
+		{
+			$credentials = base64_encode($this->openSearch->user . ':' . $this->openSearch->password);
+			$headers[] = 'Authorization: Basic ' . $credentials;
+		}
+
+		$headers[] = 'Content-Type: application/json';
+		if ($params)
+		{
+			curl_setopt($this->server, CURLOPT_POSTFIELDS, $params);
+			$headers[] = 'Content-Length: ' . strlen($params);
+		}
+
+		curl_setopt($this->server, CURLOPT_HTTPHEADER, $headers);
+
+		curl_setopt($this->server, CURLOPT_CUSTOMREQUEST, $verb);
+	}
+
+	public function sendRequest()
+	{
+		$this->responseContents = curl_exec($this->server);
+		if ($this->responseContents === false)
+		{
+			$this->responseStatus = 0;
+			$this->errorText = curl_error($this->server) . ' [' . curl_errno($this->server) . ']';
+		}
+		else
+		{
+			$this->responseStatus = curl_getinfo($this->server, CURLINFO_HTTP_CODE);
+		}
 	}
 }

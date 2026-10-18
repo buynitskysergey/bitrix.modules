@@ -15,12 +15,12 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Favorite\FavoriteLockService;
 
 /**
- * [P6.T3 / API-07] Subscribe / change scope. Idempotent upsert on
+ * Subscribe / change scope. Idempotent upsert on
  * UNIQUE(USER_ID, SCOPE, ENTITY_ID) — scope/mode validity and the "view on
  * target" permission are the controller's responsibility (per MODULE.md,
  * commands do not re-check ACL); this command only persists the row.
  *
- * [P3.T3] Positive modes additionally require an existing favorite row on the same object: the
+ * Positive modes additionally require an existing favorite row on the same object: the
  * subscription is a property of a favorite, not a standalone entity.
  */
 class SetSubscriptionCommand extends AbstractCommand
@@ -115,7 +115,7 @@ class SetSubscriptionCommand extends AbstractCommand
 	}
 
 	/**
-	 * [EVENT-02] subscriptionSet into the personal channel. The initiator is not excluded: the bell
+	 * subscriptionSet into the personal channel. The initiator is not excluded: the bell
 	 * of the same document open in another tab has no other way to converge.
 	 */
 	private function emitSet(): void

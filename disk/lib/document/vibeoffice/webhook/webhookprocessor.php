@@ -8,11 +8,20 @@ use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Document\Models\DocumentSessionTable;
 use Bitrix\Disk\Document\Vibeoffice\Configuration;
 use Bitrix\Disk\Document\Vibeoffice\DocumentSessionManager;
+use Bitrix\Disk\Document\Vibeoffice\DocumentStateRepository;
+use Bitrix\Disk\Document\Vibeoffice\Models\PlatformSessionTable;
+use Bitrix\Disk\Document\Vibeoffice\SavedDocumentWriterInterface;
+use Bitrix\Disk\Document\Vibeoffice\SavedDocumentWriter;
+use Bitrix\Disk\Document\Vibeoffice\SessionRegistry;
+use Bitrix\Disk\Document\Vibeoffice\TerminalSessionFinalizer;
+use Bitrix\Disk\Document\Vibeoffice\TerminalSessionFinalizerInterface;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
 use Bitrix\Disk\SystemUser;
 use Bitrix\Main\Application;
+use Bitrix\Main\Data\Storage\PersistentStorageInterface;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Main\Security\Random;
@@ -20,26 +29,18 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\MimeType;
 use Bitrix\Main\Web\Uri;
+use Closure;
+use Throwable;
 
 /**
- * Dispatches verified vibeoffice webhooks (P5.T1 + P5.T2).
+ * Dispatches verified vibeoffice webhooks.
  *
- * The HMAC signature, timestamp window and content-type are already enforced by the
- * controller prefilters ({@see \Bitrix\Disk\Document\Vibeoffice\Filters\WebhookSignatureCheck}).
- * This processor adds idempotency by `X-VO-Delivery` and dispatches by `X-VO-Event`:
+ * The HMAC signature, timestamp window and content type are already enforced by the
+ * controller prefilters. This processor adds idempotency by `X-VO-Delivery` and dispatches
+ * by `X-VO-Event`.
  *
- *  - `document.saved`         → download `file_url` and persist a new Disk version through
- *                               {@see File::uploadVersion()} (P5.T2): the version becomes a
- *                               regular Disk file in the shared `b_disk_version` chain, which
- *                               is exactly why no migration is needed on rollback (ADR §3).
- *  - `document.failover`      → refresh the stored vo-metadata of the session (Q-3); the
- *                               frontend helper restores itself over SSE.
- *  - `document.session-closed`→ deactivate the local sessions for the document key.
- *
- * The processor returns a {@see Result}; the caller responds 2xx only on success (for
- * `document.saved`, only after the download+save completed — otherwise the platform retries).
- *
- * This path never touches the OnlyOffice webhook handler; it is wholly additive.
+ * Pinned document state uses the durable saved writer and exact UUID finalization.
+ * Historical sessions without pinned state retain the legacy upload/finalization path.
  */
 final class WebhookProcessor
 {
@@ -47,7 +48,17 @@ final class WebhookProcessor
 	public const EVENT_FAILOVER = 'document.failover';
 	public const EVENT_SESSION_CLOSED = 'document.session-closed';
 
-	/** terminal sources that finish editing → deactivate the local session. */
+	/** Stages of a `document.saved` that is applied in several steps. */
+	private const SAVED_STAGE_VERSION_APPLIED = 'version-applied';
+	private const SAVED_STAGE_SIDE_EFFECTS_APPLIED = 'side-effects-applied';
+
+	/** Persistent storage key prefix of the per-delivery saved-stage checkpoint. */
+	private const SAVED_STAGE_KEY_PREFIX = 'disk_vo_saved_delivery_stage_';
+
+	/** Legacy checkpoint lifetime; durable deliveries do not use this cache. */
+	private const SAVED_STAGE_TTL = 24 * 3600;
+
+	/** Terminal sources that finish editing and deactivate local sessions. */
 	private const TERMINAL_SOURCES = ['save', 'forgotten'];
 
 	/** Named application lock prefix that serialises processing of one delivery. */
@@ -56,72 +67,205 @@ final class WebhookProcessor
 	/** Seconds to wait for the per-delivery lock before giving up (concurrent retry in flight). */
 	private const LOCK_TIMEOUT = 15;
 
+	/** Diagnostic channel of the asynchronous delivery path; `.settings.php` redirects it by id. */
+	private const LOGGER_ID = 'disk.vibeoffice.webhook';
+
+	private TerminalSessionFinalizerInterface $terminalSessionFinalizer;
+	private Closure $deliveryMarkerWriter;
+	private Closure $savedVersionUploader;
+	private Closure $savedSideEffectsHandler;
+	private SessionRegistry $registry;
+	private WebhookScopeResolver $scopeResolver;
+	private readonly SavedDocumentWriterInterface $savedDocumentWriter;
+
 	/**
-	 * Processes a single delivery atomically with respect to idempotency (B3).
-	 *
-	 * The whole claim→process→commit sequence for one `X-VO-Delivery` runs under a named
-	 * application lock keyed by the delivery id, so a concurrent retry of the same delivery
-	 * cannot observe a half-applied state:
-	 *
-	 *   1. acquire the per-delivery lock (a concurrent retry blocks here);
-	 *   2. inside the lock, check whether the delivery row already exists — if so the delivery
-	 *      was already fully applied → early 2xx, no re-work, no duplicate version;
-	 *   3. otherwise run the handler (download + uploadVersion etc.); ONLY after it succeeds,
-	 *      write the delivery row (the UNIQUE `DELIVERY_ID` is the final "done" marker and the
-	 *      last line of defence against a race);
-	 *   4. on a handler failure no row is written → the platform's retry re-processes the
-	 *      delivery, and the caller returns a non-2xx (B2).
-	 *
-	 * @param int $deliveryId the `X-VO-Delivery` id (idempotency key)
-	 * @param string $event the `X-VO-Event` value
-	 * @param array $payload the decoded webhook body (parsed from the RAW, signed body — see
-	 *        the controller: critical fields are read straight from the parsed body, not from
-	 *        the proactively-filtered JsonPayload::getData()).
-	 *
-	 * @return Result success: the delivery was processed (or is a no-op duplicate);
-	 *         failure: processing failed and the platform should retry (no 2xx).
+	 * @param callable(array): Result|null $deliveryMarkerWriter Internal ORM failure seam for tests.
+	 * @param callable(array, string): Result|null $savedVersionUploader Internal saved-version seam for tests.
+	 * @param callable(array): Result|null $savedSideEffectsHandler Internal saved side-effects seam for tests.
 	 */
+	public function __construct(
+		?TerminalSessionFinalizerInterface $terminalSessionFinalizer = null,
+		?callable $deliveryMarkerWriter = null,
+		?callable $savedVersionUploader = null,
+		?callable $savedSideEffectsHandler = null,
+		?SavedDocumentWriterInterface $savedDocumentWriter = null,
+		?DocumentStateRepository $documentStateRepository = null,
+	)
+	{
+		$documentStateRepository ??= new DocumentStateRepository();
+		$this->savedDocumentWriter = $savedDocumentWriter ?? new SavedDocumentWriter(repository: $documentStateRepository);
+		$this->registry = new SessionRegistry($documentStateRepository);
+		$this->scopeResolver = new WebhookScopeResolver($documentStateRepository, $this->registry);
+		$this->terminalSessionFinalizer = $terminalSessionFinalizer ?? new TerminalSessionFinalizer(repository: $documentStateRepository);
+		$this->deliveryMarkerWriter = Closure::fromCallable(
+			$deliveryMarkerWriter
+			?? static function (array $fields): Result {
+				$id = $fields['ID'] ?? null;
+				unset($fields['ID']);
+
+				return $id === null ? DeliveryTable::add($fields) : DeliveryTable::update((int)$id, $fields);
+			}
+		);
+		$this->savedVersionUploader = Closure::fromCallable(
+			$savedVersionUploader
+			?? fn(array $payload, string $externalHash): Result => $this->uploadSavedVersion($payload, $externalHash)
+		);
+		$this->savedSideEffectsHandler = Closure::fromCallable(
+			$savedSideEffectsHandler
+			?? fn(array $data): Result => $this->dispatchSavedSideEffects($data)
+		);
+	}
+
 	public function process(int $deliveryId, string $event, array $payload): Result
 	{
-		$result = new Result();
+		$result = $this->dispatch($deliveryId, $event, $payload);
+		if (!WebhookEventPolicy::isPermanentFailure($result))
+		{
+			return $result;
+		}
+		$reasons = array_map(
+			static fn(Error $error): string => $error->getCode() . ': ' . $error->getMessage(),
+			$result->getErrors(),
+		);
 
-		$externalHash = $this->extractExternalHash($payload);
+		return $this->acknowledgePermanent(
+			"Vibeoffice webhook: permanent failure; event={$event}; delivery={$deliveryId}; "
+			. implode(' ', $reasons)
+		);
+	}
 
+	private function dispatch(int $deliveryId, string $event, array $payload): Result
+	{
+		if ($deliveryId <= 0)
+		{
+			return (new Result())->addError(new Error('Invalid delivery ID.', 'validation'));
+		}
 		$connection = Application::getConnection();
 		$lockName = self::LOCK_NAME_PREFIX . $deliveryId;
-
-		// Serialise concurrent retries of the same delivery. If the lock cannot be taken in
-		// time, treat it as a transient failure (non-2xx) so the platform retries later — we
-		// never apply the delivery twice.
 		if (!$connection->lock($lockName, self::LOCK_TIMEOUT))
 		{
-			return $result->addError(new Error('Could not acquire the delivery lock.', 'lock_timeout'));
+			return (new Result())->addError(new Error('Could not acquire the delivery lock.', 'lock_timeout'));
 		}
 
 		try
 		{
-			// Already applied? (the row is written only after a successful handler below).
-			if ($this->isDeliveryProcessed($deliveryId))
+			$delivery = $this->getDelivery($deliveryId);
+			if ($delivery && ($delivery['EVENT'] !== $event || (
+				$delivery['HOST_DOC_KEY'] !== null && $delivery['HOST_DOC_KEY'] !== ($payload['host_doc_key'] ?? null)
+			)))
 			{
-				return $result;
+				return (new Result())->addError(new Error('Delivery identity changed.', 'validation'));
+			}
+			if ($delivery && $delivery['STATUS'] === DeliveryTable::STATUS_DONE
+				&& ($event !== self::EVENT_SAVED || $delivery['HOST_DOC_KEY'] === null || (int)$delivery['RESULT_OBJECT_ID'] <= 0))
+			{
+				return new Result();
 			}
 
-			$processResult = match ($event)
+			if (!in_array($event, [self::EVENT_SAVED, self::EVENT_FAILOVER, self::EVENT_SESSION_CLOSED], true))
 			{
-				self::EVENT_SAVED => $this->handleSaved($payload),
-				self::EVENT_FAILOVER => $this->handleFailover($payload),
+				$this->handleUnsupportedEvent($event);
+
+				return $this->markDeliveryProcessed($deliveryId, $event, $this->extractExternalHash($payload));
+			}
+
+			$classification = (new WebhookEventPolicy())->classify($event, $payload);
+			if (!$classification->isSuccess())
+			{
+				return $classification;
+			}
+			$policy = $classification->getData();
+			$key = $policy['hostDocKey'];
+			$scopeResult = $this->scopeResolver->resolveState($key);
+			if ($scopeResult->isSuccess() && (!$scopeResult->getData()['state']
+				|| ($policy['legacy'] && $scopeResult->getData()['legacy'])))
+			{
+				$scopeResult = $this->scopeResolver->resolve($key);
+			}
+			if (!$scopeResult->isSuccess())
+			{
+				return $this->ignoreDelivery($deliveryId, $event, $key, 'scope_unknown');
+			}
+			$scope = $scopeResult->getData();
+			if ((!$policy['identityKnown'] && (!$policy['legacy'] || $event === self::EVENT_FAILOVER))
+				|| ($policy['legacy'] && !$scope['legacy'] && $event !== self::EVENT_FAILOVER)
+				|| (!$scope['state'] && (!$policy['legacy'] || $scope['sessions'] === [])))
+			{
+				return $this->ignoreDelivery($deliveryId, $event, $key, 'origin_unknown');
+			}
+
+			if ($delivery && $delivery['STATUS'] === DeliveryTable::STATUS_DONE)
+			{
+				if (($delivery['SNAPSHOT_SEQ'] === null ? null : (int)$delivery['SNAPSHOT_SEQ']) !== $policy['snapshotSeq'])
+				{
+					return (new Result())->addError(new Error('Delivery snapshot changed.', 'validation'));
+				}
+
+				return $this->completeSavedDelivery((int)$delivery['ID'], $policy);
+			}
+
+			if ($event === self::EVENT_SAVED && $scope['state'])
+			{
+				return $this->processSavedDelivery($deliveryId, $payload, $policy, $scope, $delivery);
+			}
+			if ($event === self::EVENT_SESSION_CLOSED && !$policy['legacy'])
+			{
+				return $this->terminalSessionFinalizer->withDocumentTransaction(
+					$key,
+					function () use ($deliveryId, $event, $key, $policy): Result {
+						$closed = $this->registry->applyClosed($key, $policy['terminated'], $policy['retained']);
+						if (!$closed->isSuccess())
+						{
+							return $closed;
+						}
+						$finalized = $this->terminalSessionFinalizer->finalizeSessions($closed->getData()['sessionIds']);
+
+						return $finalized->isSuccess()
+							? $this->markDeliveryProcessed($deliveryId, $event, null, ['HOST_DOC_KEY' => $key])
+							: $finalized;
+					},
+				);
+			}
+			if ($event === self::EVENT_FAILOVER && $scope['state'])
+			{
+				return $this->terminalSessionFinalizer->withDocumentTransaction(
+					$key,
+					function () use ($payload, $scope, $deliveryId, $event, $key): Result {
+						$recipients = $scope['legacy'] && $scope['sessions'] !== []
+							? (new Result())->setData(['sessions' => $scope['sessions']])
+							: $this->scopeResolver->resolveRecipients($key, $payload['editor_key'], $payload['rev']);
+						if (!$recipients->isSuccess())
+						{
+							return $recipients;
+						}
+						$updated = $this->updateFailoverMetadata($payload, $recipients->getData()['sessions']);
+
+						return $updated->isSuccess()
+							? $this->markDeliveryProcessed($deliveryId, $event, null, ['HOST_DOC_KEY' => $key]) : $updated;
+					},
+				);
+			}
+
+			$processed = match ($event)
+			{
+				self::EVENT_SAVED => $this->handleSaved($deliveryId, $payload),
 				self::EVENT_SESSION_CLOSED => $this->handleSessionClosed($payload),
-				default => $this->handleUnsupportedEvent($event),
+				default => $this->updateFailoverMetadata($payload, $scope['sessions']),
 			};
-
-			// Persist the "done" marker ONLY after the delivery was actually applied; on a
-			// failure the row stays absent so the platform retry re-processes it (B2/B3).
-			if ($processResult->isSuccess())
+			if (!$processed->isSuccess())
 			{
-				$this->markDeliveryProcessed($deliveryId, $event, $externalHash);
+				return $processed;
 			}
+			$fields = $scope['state'] || ($processed->getData()['savedContentApplied'] ?? true) === false
+				? ['HOST_DOC_KEY' => $key] : [];
 
-			return $processResult;
+			return $this->markDeliveryProcessed($deliveryId, $event, $key, $fields);
+		}
+		catch (Throwable $exception)
+		{
+			$this->logDeliveryException($exception, $event, $deliveryId);
+
+			return (new Result())->addError(new Error('Could not process the Vibeoffice delivery.', 'vibeoffice_delivery_failed'));
 		}
 		finally
 		{
@@ -129,57 +273,168 @@ final class WebhookProcessor
 		}
 	}
 
-	/**
-	 * Whether the delivery has already been fully applied (its "done" row exists). Called
-	 * inside the per-delivery lock, so this is a reliable existence check — no fragile
-	 * parsing of the DB duplicate-key message (V3).
-	 */
-	private function isDeliveryProcessed(int $deliveryId): bool
+	private function getDelivery(int $deliveryId): ?array
 	{
-		$row = DeliveryTable::getRow([
-			'select' => ['ID'],
-			'filter' => ['=DELIVERY_ID' => $deliveryId],
-		]);
-
-		return $row !== null;
+		return DeliveryTable::query()->setSelect(['*'])->where('DELIVERY_ID', $deliveryId)->fetch() ?: null;
 	}
 
 	/**
-	 * Writes the final "done" marker for a successfully applied delivery. The UNIQUE
-	 * `DELIVERY_ID` constraint remains the last-resort guard against a race; under the
-	 * per-delivery lock a duplicate here is not expected, so any error propagates to the
-	 * caller's failure path (the platform then retries and the existence check short-circuits).
+	 * `DELIVERY_ID` carries a unique index, so an existing ledger row - a saved delivery that
+	 * already reached PENDING and then took another branch on a retry - has to be updated, never
+	 * inserted a second time.
 	 */
-	private function markDeliveryProcessed(int $deliveryId, string $event, ?string $externalHash): void
+	private function markDeliveryProcessed(int $deliveryId, string $event, ?string $externalHash, array $extra = []): Result
 	{
-		DeliveryTable::add([
+		$existing = $this->getDelivery($deliveryId);
+		if ($existing)
+		{
+			$extra['ID'] = (int)$existing['ID'];
+		}
+
+		return $this->writeDelivery($extra + [
 			'DELIVERY_ID' => $deliveryId,
 			'EXTERNAL_HASH' => $externalHash,
 			'EVENT' => $event,
+			'STATUS' => DeliveryTable::STATUS_DONE,
 			'PROCESSED_TIME' => new DateTime(),
 		]);
 	}
 
-	/**
-	 * P5.T2: `document.saved` → continuity of versions.
-	 *
-	 * Resolves the document by `host_doc_key` → `EXTERNAL_HASH`, downloads the presigned
-	 * `file_url` and stores it as a new Disk version via {@see File::uploadVersion()}.
-	 * The download+save must complete before the caller answers 2xx (otherwise the platform
-	 * retries the delivery). Platform-origin auto-forcesave (`origin=platform`) is never
-	 * delivered to the host, so every saved we see is a host-visible save/forcesave/forgotten.
-	 *
-	 * `source` is honoured exactly as OnlyOffice does (api-reference §6.3, mirroring
-	 * {@see \Bitrix\Disk\Controller\OnlyOffice::handleOnlyOfficeAction()}):
-	 *  - `save`/`forgotten` (terminal — editing finished, all editors out) → upload the version
-	 *    AND deactivate the local sessions;
-	 *  - `forcesave` (periodic/host-initiated forced save while editing continues) → upload the
-	 *    version but DO NOT deactivate — the live session must survive every autosave/forcesave.
-	 * Drain (P5.T3) issues a `forcesave` and waits for the resulting saved; it deactivates /
-	 * deletes the session itself after the save is confirmed, so it does not rely on this path
-	 * deactivating the session.
-	 */
-	private function handleSaved(array $payload): Result
+	private function writeDelivery(array $fields): Result
+	{
+		try
+		{
+			return ($this->deliveryMarkerWriter)($fields);
+		}
+		catch (Throwable)
+		{
+			return (new Result())->addError(new Error('Could not persist the delivery.', 'delivery_marker_failed'));
+		}
+	}
+
+	private function ignoreDelivery(int $deliveryId, string $event, string $key, string $reason): Result
+	{
+		$this->acknowledgePermanent("Vibeoffice webhook: {$reason}; event={$event}; delivery={$deliveryId}.");
+
+		return $this->markDeliveryProcessed($deliveryId, $event, null, ['HOST_DOC_KEY' => $key]);
+	}
+
+	private function processSavedDelivery(int $deliveryId, array $payload, array $policy, array $scope, ?array $delivery): Result
+	{
+		$key = $policy['hostDocKey'];
+		if ($delivery === null)
+		{
+			$created = $this->markDeliveryProcessed($deliveryId, self::EVENT_SAVED, null, [
+				'HOST_DOC_KEY' => $key,
+				'STATUS' => DeliveryTable::STATUS_PENDING,
+				'SNAPSHOT_SEQ' => $policy['snapshotSeq'],
+			]);
+			if (!$created->isSuccess())
+			{
+				return $created;
+			}
+			$delivery = $this->getDelivery($deliveryId);
+		}
+		if ($delivery === null)
+		{
+			return (new Result())->addError(new Error('Saved delivery was not persisted.', 'delivery_marker_failed'));
+		}
+		if (($delivery['SNAPSHOT_SEQ'] === null ? null : (int)$delivery['SNAPSHOT_SEQ']) !== $policy['snapshotSeq'])
+		{
+			return (new Result())->addError(new Error('Delivery snapshot changed.', 'validation'));
+		}
+		$ledgerId = (int)$delivery['ID'];
+		if ($delivery['STATUS'] !== DeliveryTable::STATUS_APPLIED)
+		{
+			$prepared = $this->savedDocumentWriter->prepare($ledgerId, $payload);
+			if (!$prepared->isSuccess())
+			{
+				return $prepared;
+			}
+			$applied = $this->savedDocumentWriter->apply($ledgerId, $payload, $prepared->getData()['stagedFile']);
+			if (!$applied->isSuccess())
+			{
+				return $applied;
+			}
+		}
+
+		$finished = $this->terminalSessionFinalizer->withDocumentTransaction(
+			$key,
+			function () use ($deliveryId, $ledgerId, $key, $policy, $scope): Result {
+				$delivery = $this->getDelivery($deliveryId);
+				if ($delivery['STATUS'] !== DeliveryTable::STATUS_APPLIED || (int)$delivery['RESULT_OBJECT_ID'] <= 0)
+				{
+					return (new Result())->addError(new Error('Saved content is not committed.', 'vibeoffice_saved_not_applied'));
+				}
+				$finalization = $this->finalizeSavedSessions($policy, $scope);
+				if (!$finalization->isSuccess())
+				{
+					return $finalization;
+				}
+
+				return $this->writeDelivery([
+					'ID' => $ledgerId,
+					'STATUS' => DeliveryTable::STATUS_DONE,
+					'PROCESSED_TIME' => new DateTime(),
+				]);
+			},
+		);
+
+		return $finished->isSuccess() ? $this->completeSavedDelivery($ledgerId, $policy) : $finished;
+	}
+
+	private function finalizeSavedSessions(array $policy, array $scope): Result
+	{
+		if (!in_array($policy['finalization'], [WebhookEventPolicy::FINALIZATION_THIS_EVENT, WebhookEventPolicy::FINALIZATION_LEGACY], true))
+		{
+			return new Result();
+		}
+		$key = $policy['hostDocKey'];
+		if ($policy['finalization'] === WebhookEventPolicy::FINALIZATION_THIS_EVENT)
+		{
+			// Forgotten and a delayed retained decision may arrive in either order.
+			$rows = PlatformSessionTable::query()->setSelect(['DOCUMENT_SESSION_ID'])
+				->where('HOST_DOC_KEY', $key)->where('EDITOR_KEY', $policy['editorKey'])->where('REV', $policy['rev'])
+				->where('STATUS', PlatformSessionTable::STATUS_TERMINATED)->whereNotNull('API_SESSION_ID')->fetchAll();
+
+			$ids = array_map('intval', array_column($rows, 'DOCUMENT_SESSION_ID'));
+
+			return $this->terminalSessionFinalizer->finalizeSessions($ids);
+		}
+		if ($policy['identityKnown'])
+		{
+			$terminated = $this->registry->terminateEditorGeneration($key, $policy['editorKey'], $policy['rev']);
+		}
+		else
+		{
+			$rows = PlatformSessionTable::query()->setSelect(['API_SESSION_ID'])
+				->where('HOST_DOC_KEY', $key)->whereNotNull('API_SESSION_ID')->fetchAll();
+			$terminated = $this->registry->applyClosed($key, array_column($rows, 'API_SESSION_ID'), []);
+		}
+		if (!$terminated->isSuccess())
+		{
+			return $terminated;
+		}
+		$ids = $terminated->getData()['sessionIds'];
+		if ($policy['finalization'] === WebhookEventPolicy::FINALIZATION_LEGACY && !$policy['identityKnown'])
+		{
+			$ids = array_merge($ids, array_map(static fn(DocumentSession $session): int => (int)$session->getId(), $scope['sessions']));
+		}
+
+		return $this->terminalSessionFinalizer->finalizeSessions($ids);
+	}
+
+	private function completeSavedDelivery(int $ledgerId, array $policy): Result
+	{
+		$generation = $policy['identityKnown'] && !$policy['legacy'] ? [
+			'hostDocKey' => $policy['hostDocKey'], 'editorKey' => $policy['editorKey'], 'rev' => $policy['rev'],
+		] : null;
+
+		return $this->savedDocumentWriter->complete($ledgerId, $generation);
+	}
+
+	/** Historical sessions without pinned state use the legacy source rules and cache checkpoint. */
+	private function handleSaved(int $deliveryId, array $payload): Result
 	{
 		$result = new Result();
 
@@ -189,14 +444,80 @@ final class WebhookProcessor
 			return $result->addError(new Error('Missing host_doc_key in document.saved webhook.', 'validation'));
 		}
 
+		$source = mb_strtolower((string)($payload['source'] ?? 'save'));
+		$savedDeliveryStage = $this->getSavedDeliveryStage($deliveryId);
+		$savedData = [];
+
+		if ($savedDeliveryStage === null)
+		{
+			$uploadResult = ($this->savedVersionUploader)($payload, $externalHash);
+			if (!$uploadResult->isSuccess())
+			{
+				return $result->addErrors($uploadResult->getErrors());
+			}
+
+			$savedData = $uploadResult->getData();
+			if (($savedData['savedContentApplied'] ?? true) === false)
+			{
+				return $result->setData(['savedContentApplied' => false]);
+			}
+
+			$versionMarkerResult = $this->markSavedDeliveryStage($deliveryId, self::SAVED_STAGE_VERSION_APPLIED);
+			if (!$versionMarkerResult->isSuccess())
+			{
+				return $result->addErrors($versionMarkerResult->getErrors());
+			}
+
+			$savedDeliveryStage = self::SAVED_STAGE_VERSION_APPLIED;
+		}
+
+		if (in_array($source, self::TERMINAL_SOURCES, true))
+		{
+			$finalizationResult = $this->terminalSessionFinalizer->finalizeDocument($externalHash);
+			if (!$finalizationResult->isSuccess())
+			{
+				return $result->addErrors($finalizationResult->getErrors());
+			}
+		}
+
+		if ($savedDeliveryStage !== self::SAVED_STAGE_SIDE_EFFECTS_APPLIED)
+		{
+			if ($savedData === [])
+			{
+				$savedData = $this->loadSavedSideEffectsData($externalHash);
+			}
+
+			$sideEffectsResult = ($this->savedSideEffectsHandler)($savedData);
+			if (!$sideEffectsResult->isSuccess())
+			{
+				return $result->addErrors($sideEffectsResult->getErrors());
+			}
+
+			$sideEffectsMarkerResult = $this->markSavedDeliveryStage(
+				$deliveryId,
+				self::SAVED_STAGE_SIDE_EFFECTS_APPLIED,
+			);
+			if (!$sideEffectsMarkerResult->isSuccess())
+			{
+				return $result->addErrors($sideEffectsMarkerResult->getErrors());
+			}
+		}
+
+		return $result;
+	}
+
+	private function uploadSavedVersion(array $payload, string $externalHash): Result
+	{
+		$result = new Result();
+
 		$fileUrl = (string)($payload['file_url'] ?? '');
 		if ($fileUrl === '')
 		{
 			return $result->addError(new Error('Missing file_url in document.saved webhook.', 'validation'));
 		}
 
-		// SSRF guard (RF-S1): `file_url` is attacker-influenceable payload data, so never
-		// dereference it blindly — accept only http(s) URLs pointing at the configured
+		// `file_url` is attacker-influenceable payload data, so never dereference it blindly.
+		// Accept only http(s) URLs pointing at the configured
 		// platform host before it is downloaded and stored as a Disk version.
 		if (!$this->isAllowedFileUrl($fileUrl))
 		{
@@ -207,23 +528,23 @@ final class WebhookProcessor
 		$session = $sessions[0] ?? null;
 		if (!$session)
 		{
-			// PERMANENT not-found (IMP1): the local session was drained/deleted while a late
+			// Permanent not-found: the local session was drained/deleted while a late
 			// save still arrived. Retrying can never resolve it, so acknowledge (2xx + ledger
-			// row) and log instead of a non-2xx that triggers an endless retry-storm — mirrors
+			// row) and log instead of a non-2xx that triggers an endless retry storm. Mirrors
 			// self::handleUnsupportedEvent(). Transient failures (download) stay retryable below.
 			return $this->acknowledgePermanent(
 				"Vibeoffice webhook: no local session for document.saved key '{$externalHash}', acknowledging."
-			);
+			)->setData(['savedContentApplied' => false]);
 		}
 
 		$file = $session->getFile();
 		if (!($file instanceof File))
 		{
-			// PERMANENT not-found (IMP1): the session's file was removed. Acknowledge + log; a
+			// Permanent not-found: the session's file was removed. Acknowledge + log; a
 			// retry would fail identically forever.
 			return $this->acknowledgePermanent(
 				"Vibeoffice webhook: no file for document.saved session (key '{$externalHash}'), acknowledging."
-			);
+			)->setData(['savedContentApplied' => false]);
 		}
 
 		$downloadResult = $this->downloadFromPlatform($fileUrl);
@@ -236,14 +557,14 @@ final class WebhookProcessor
 		$tmpFileArray = \CFile::makeFileArray($tmpFile);
 		if (!is_array($tmpFileArray) || empty($tmpFileArray['tmp_name']))
 		{
-			// RF-M2: makeFileArray() returns null/false for a missing or empty temp file;
+			// Missing or empty temp files make makeFileArray return null/false.
 			// bail out with a clear error (the platform retries) instead of feeding an
 			// invalid array into uploadVersion and emitting a PHP warning.
 			return $result->addError(new Error('Downloaded document is not a readable file.', 'download_failed'));
 		}
 
-		// Ingress size guard (M4): cap the platform-supplied file against getMaxFileSize() before
-		// storing it as a Disk version. An oversized file is a PERMANENT condition (the same bytes
+		// Cap the platform-supplied file against getMaxFileSize() before storing it as a Disk
+		// version. An oversized file is a permanent condition (the same bytes
 		// would download every retry), so acknowledge + log instead of an endless retry.
 		$maxFileSize = $this->getConfiguration()->getMaxFileSize();
 		$fileSize = (int)($tmpFileArray['size'] ?? 0);
@@ -256,7 +577,7 @@ final class WebhookProcessor
 			return $this->acknowledgePermanent(
 				"Vibeoffice webhook: downloaded document ({$fileSize} bytes) exceeds the max file size"
 				. " ({$maxFileSize} bytes) for key '{$externalHash}'; skipping upload."
-			);
+			)->setData(['savedContentApplied' => false]);
 		}
 
 		if (in_array($tmpFileArray['type'] ?? null, ['application/encrypted', 'application/zip'], true))
@@ -273,74 +594,132 @@ final class WebhookProcessor
 			return $result->addError(new Error('Could not upload the new document version.', 'upload_failed'));
 		}
 
-		// Differentiate `source` (P5.T2 / B1): deactivate the local sessions ONLY on a
-		// terminal save (`save`/`forgotten`) — exactly like OnlyOffice deactivates on
-		// STATUS_IS_READY_FOR_SAVE but NOT on STATUS_FORCE_SAVE. A periodic `forcesave`
-		// persists the version while the live session keeps editing.
-		$source = mb_strtolower((string)($payload['source'] ?? 'save'));
-		if (in_array($source, self::TERMINAL_SOURCES, true))
+		return $result->setData([
+			'savedContentApplied' => true,
+			'file' => $file,
+			'sessions' => $sessions,
+		]);
+	}
+
+	private function dispatchSavedSideEffects(array $data): Result
+	{
+		$sessions = $data['sessions'] ?? [];
+		$file = $data['file'] ?? null;
+
+		if ($file instanceof File)
 		{
-			$this->deactivateSessions($externalHash);
+			$this->commentAttachedObjectsOnBackground($file);
 		}
 
-		// Finalize side effects on background, after the version is durably saved (the 2xx
-		// the caller returns confirms the save).
-		$this->commentAttachedObjectsOnBackground($file);
-		$this->sendEventToParticipants($sessions, 'saved');
+		if (is_array($sessions))
+		{
+			$this->sendEventToParticipants($sessions, 'saved');
+		}
 
-		return $result;
+		return new Result();
+	}
+
+	private function loadSavedSideEffectsData(string $externalHash): array
+	{
+		$sessions = $this->getSessionsByHash($externalHash);
+		$session = $sessions[0] ?? null;
+		$file = $session?->getFile();
+
+		return [
+			'file' => $file instanceof File ? $file : null,
+			'sessions' => $sessions,
+		];
 	}
 
 	/**
-	 * `document.failover` → refresh the vo-metadata stored in the session CONTEXT (Q-3).
+	 * How far a `document.saved` that is still being applied has got.
 	 *
-	 * Additional idempotency by `editor_key`: a failover that does not change `editor_key`
-	 * (relative to what is already stored) is a no-op. The frontend helper performs the
-	 * actual SSE/refresh recovery; the host only keeps the latest `editor_key`/`rev` so it
-	 * can re-issue the config and for drain.
+	 * A saved is applied in two steps (the version, then the side effects), and a failure in
+	 * between makes the platform re-deliver it, so the reached step is checkpointed. The delivery
+	 * ledger is not the place for it: {@see DeliveryTable} holds one row per real platform
+	 * delivery and its `EVENT` is the protocol event. The checkpoint lives in the shared
+	 * persistent storage instead, where its own {@see self::SAVED_STAGE_TTL} applies; if it does
+	 * expire before a very late retry, the retry simply repeats the upload.
 	 */
-	private function handleFailover(array $payload): Result
+	private function getSavedDeliveryStage(int $deliveryId): ?string
+	{
+		$stage = $this->getSavedDeliveryStageStorage()->get($this->getSavedDeliveryStageKey($deliveryId));
+		if (
+			$stage === self::SAVED_STAGE_VERSION_APPLIED
+			|| $stage === self::SAVED_STAGE_SIDE_EFFECTS_APPLIED
+		)
+		{
+			return $stage;
+		}
+
+		return null;
+	}
+
+	private function markSavedDeliveryStage(int $deliveryId, string $stage): Result
 	{
 		$result = new Result();
 
-		$externalHash = $this->extractExternalHash($payload);
-		if ($externalHash === null)
+		try
 		{
-			return $result->addError(new Error('Missing host_doc_key in document.failover webhook.', 'validation'));
+			$stored = $this->getSavedDeliveryStageStorage()->set(
+				$this->getSavedDeliveryStageKey($deliveryId),
+				$stage,
+				self::SAVED_STAGE_TTL,
+			);
+		}
+		catch (Throwable $exception)
+		{
+			return $result->addError(new Error(
+				$exception->getMessage(),
+				'saved_delivery_stage_marker_failed',
+			));
 		}
 
-		$metadata = array_filter([
-			'editor_key' => $payload['editor_key'] ?? null,
-			'rev' => $payload['rev'] ?? null,
-		], static fn($value) => $value !== null);
-
-		if (empty($metadata))
+		if (!$stored)
 		{
-			// Nothing host-relevant to store; treat as a benign no-op.
-			return $result;
-		}
-
-		$sessionManager = new DocumentSessionManager();
-		foreach ($this->getSessionsByHash($externalHash) as $session)
-		{
-			$stored = DocumentSessionManager::extractVoMetadata($session);
-			$newEditorKey = $metadata['editor_key'] ?? null;
-			if ($newEditorKey !== null && ($stored['editor_key'] ?? null) === $newEditorKey)
-			{
-				// Same editor_key already recorded — idempotent failover, skip.
-				continue;
-			}
-
-			$sessionManager->persistSessionMetadata($session, $metadata);
+			return $result->addError(new Error(
+				'Could not store the saved delivery stage.',
+				'saved_delivery_stage_marker_failed',
+			));
 		}
 
 		return $result;
 	}
 
+	private function getSavedDeliveryStageKey(int $deliveryId): string
+	{
+		return self::SAVED_STAGE_KEY_PREFIX . $deliveryId;
+	}
+
+	private function getSavedDeliveryStageStorage(): PersistentStorageInterface
+	{
+		return ServiceLocator::getInstance()->get(PersistentStorageInterface::class);
+	}
+
+	private function updateFailoverMetadata(array $payload, array $sessions): Result
+	{
+		$metadata = ['editor_key' => $payload['editor_key'], 'rev' => $payload['rev']];
+		$manager = new DocumentSessionManager();
+		foreach ($sessions as $session)
+		{
+			$stored = DocumentSessionManager::extractVoMetadata($session);
+			if (($stored['editor_key'] ?? null) === $metadata['editor_key'] && ($stored['rev'] ?? null) === $metadata['rev'])
+			{
+				continue;
+			}
+			if (!$manager->persistSessionMetadata($session, $metadata))
+			{
+				return (new Result())->addError(new Error('Could not persist failover metadata.', 'vibeoffice_metadata_failed'));
+			}
+		}
+
+		return new Result();
+	}
+
 	/**
-	 * `document.session-closed` → deactivate the local sessions for the document key
-	 * (by analogy with {@see DocumentSessionTable::deactivateByHash()} used by OnlyOffice
-	 * on close-without-changes / save).
+	 * Deactivates the local sessions for the document key. A strict
+	 * `notmodified:true` is a global terminal outcome and also releases document restrictions.
+	 * revoked or otherwise ambiguous closes keep the restrictions for drain.
 	 */
 	private function handleSessionClosed(array $payload): Result
 	{
@@ -352,41 +731,43 @@ final class WebhookProcessor
 			return $result->addError(new Error('Missing host_doc_key in document.session-closed webhook.', 'validation'));
 		}
 
-		$this->deactivateSessions($externalHash);
+		if (($payload['notmodified'] ?? null) === true)
+		{
+			$finalizationResult = $this->terminalSessionFinalizer->finalizeDocument($externalHash);
+			if (!$finalizationResult->isSuccess())
+			{
+				return $result->addErrors($finalizationResult->getErrors());
+			}
+		}
+		else
+		{
+			return $this->deactivateSessions($externalHash);
+		}
 
 		return $result;
 	}
 
 	/**
-	 * Resolves the user the new version is attributed to (RF-S2).
-	 *
-	 * The saved-webhook `users[0]` is honoured ONLY when it belongs to a local session of
-	 * this document (i.e. a real participant of the `EXTERNAL_HASH` sessions); otherwise the
-	 * payload could spoof authorship in the version history. When it does not match, we fall
-	 * back to the session owner, and finally to the system user.
+	 * Resolves the user the new version is attributed to: the claim of the payload when it names a
+	 * participant of the `EXTERNAL_HASH` sessions, otherwise the session owner and finally the
+	 * system user. See {@see WebhookEventPolicy::resolveVersionAuthorId()}.
 	 *
 	 * @param DocumentSession[] $sessions
 	 */
 	private function resolveSavingUserId(array $payload, array $sessions, DocumentSession $session): int
 	{
-		$users = $payload['users'] ?? null;
-		if (is_array($users) && isset($users[0]))
-		{
-			$candidate = (int)$users[0];
-			if ($candidate > 0 && in_array($candidate, $this->collectSessionUserIds($sessions), true))
-			{
-				return $candidate;
-			}
-		}
-
 		$sessionUserId = $session->getUserId();
 
-		return $sessionUserId > 0 ? $sessionUserId : SystemUser::SYSTEM_USER_ID;
+		return WebhookEventPolicy::resolveVersionAuthorId(
+			$payload,
+			$this->collectSessionUserIds($sessions),
+			$sessionUserId > 0 ? $sessionUserId : SystemUser::SYSTEM_USER_ID,
+		);
 	}
 
 	/**
 	 * User ids that participate in the given document sessions (the trusted set of possible
-	 * version authors — see {@see self::resolveSavingUserId()}).
+	 * version authors. See {@see self::resolveSavingUserId()}.
 	 *
 	 * @param DocumentSession[] $sessions
 	 * @return int[]
@@ -407,7 +788,7 @@ final class WebhookProcessor
 	}
 
 	/**
-	 * SSRF allowlist for the platform-supplied `file_url` (RF-S1).
+	 * SSRF allowlist for the platform-supplied `file_url`.
 	 *
 	 * Accepts only http(s) URLs whose host equals the configured platform base URL host
 	 * ({@see Configuration::getServer()}). If the platform base URL is not configured we
@@ -439,17 +820,17 @@ final class WebhookProcessor
 			return false;
 		}
 
-		// Defense-in-depth (M3): also pin the port, so a same-host URL on a different port (e.g.
+		// Defense-in-depth: also pin the port, so a same-host URL on a different port (e.g.
 		// an internal service co-located on the platform host) is rejected. Uri::getPort()
 		// normalises the scheme default (80/443), so an explicit default port compares equal.
-		// Private IPs are still deliberately NOT blocked (box/on-prem reachability) — see
+		// Private IPs are still deliberately NOT blocked (box/on-prem reachability). See
 		// self::downloadFromPlatform().
 		return $url->getPort() === $expectedUri->getPort();
 	}
 
 	/**
 	 * Resolves the shared vibeoffice {@see Configuration} through the registered singleton
-	 * service (M2) instead of `new Configuration()`, so the php_interface override file is
+	 * service instead of `new Configuration()`, so the php_interface override file is
 	 * stat'ed/required once per request rather than on every hot-path call.
 	 */
 	private function getConfiguration(): Configuration
@@ -458,11 +839,12 @@ final class WebhookProcessor
 	}
 
 	/**
-	 * Acknowledges a PERMANENTLY unprocessable saved-delivery (the target session/file no longer
-	 * exists, or the downloaded document violates a hard limit): logs it and returns a successful
-	 * Result so {@see self::process()} writes the ledger row and the caller answers 2xx. A
-	 * permanent condition can never succeed on retry, so a non-2xx here would only cause an
-	 * endless retry-storm + log spam (IMP1) — mirrors {@see self::handleUnsupportedEvent()}.
+	 * Acknowledges a PERMANENTLY unprocessable delivery (the target session/file no longer
+	 * exists, the downloaded document violates a hard limit, or the envelope itself is rejected -
+	 * see {@see WebhookEventPolicy::isPermanentFailure()}): logs it and returns a successful
+	 * Result so the caller answers 2xx. A permanent condition can never succeed on retry, so a
+	 * non-2xx here would only cause an endless retry storm and log spam. Mirrors
+	 * {@see self::handleUnsupportedEvent()}.
 	 */
 	private function acknowledgePermanent(string $message): Result
 	{
@@ -472,18 +854,32 @@ final class WebhookProcessor
 	}
 
 	/**
-	 * Downloads the presigned platform `file_url` into a temp file, hardened against SSRF (RF-S1).
+	 * Keeps a swallowed delivery failure diagnosable: a repeating non-2xx is otherwise the only
+	 * trace of a deadlock, a lock timeout or a CFile failure. The record names the event, the
+	 * delivery and the exception, and carries neither payload nor session hash.
+	 */
+	private function logDeliveryException(Throwable $exception, string $event, int $deliveryId): void
+	{
+		(new LoggerFactory())
+			->createById(self::LOGGER_ID, isCheckEnabledFromRegistry: false)
+			?->error('Vibeoffice webhook: event={event}, deliveryId={deliveryId}, {exception}: {message}.', [
+				'event' => $event,
+				'deliveryId' => $deliveryId,
+				'exception' => $exception::class,
+				'message' => $exception->getMessage(),
+			])
+		;
+	}
+
+	/**
+	 * Downloads the presigned platform `file_url` into a temp file, hardened against SSRF.
 	 *
-	 * SSRF is contained by two mechanisms that do NOT block private IPs: {@see self::isAllowedFileUrl()}
-	 * pins the target host to the configured platform host, and `setRedirect(false)` refuses to follow
-	 * redirects — the presigned platform URL serves the bytes directly, so a 3xx here is treated as a
-	 * failure and a redirect to another address cannot be used to pivot. Private-IP targets are
-	 * deliberately NOT blocked (no `setPrivateIp(false)`): the vibeoffice platform is legitimately
-	 * reachable at a private/internal address in box/on-prem/local-dev deployments (e.g. vo-platformd
-	 * on 127.0.0.1), and blocking private IPs would break the normal download there. This is also why
-	 * the fetch is NOT delegated to the shared {@see \Bitrix\Disk\Document\OnlyOffice\FileDownloader}
-	 * (used by OnlyOffice — it must not change): the webhook path uses its own no-redirect client. A
-	 * failure returns a non-2xx so the platform simply retries the delivery.
+	 * SSRF is contained by a host allowlist and by disabled redirects. The presigned platform
+	 * URL serves the bytes directly, so a 3xx here is treated as a failure and a redirect to
+	 * another address cannot be used to pivot. Private IP targets are deliberately allowed:
+	 * the vibeoffice platform can be reachable at a private/internal address in box,
+	 * on-premise or local development deployments. This path uses a no-redirect client so
+	 * OnlyOffice download behavior stays unchanged.
 	 */
 	private function downloadFromPlatform(string $fileUrl): Result
 	{
@@ -510,7 +906,7 @@ final class WebhookProcessor
 	}
 
 	/**
-	 * Unsupported/unknown webhook event (RF-M1).
+	 * Unsupported/unknown webhook event.
 	 *
 	 * Failing here would make the caller answer non-2xx and the platform would retry the
 	 * same delivery forever. Instead we acknowledge it: the successful Result makes
@@ -524,9 +920,18 @@ final class WebhookProcessor
 		return new Result();
 	}
 
-	private function deactivateSessions(string $externalHash): void
+	private function deactivateSessions(string $externalHash): Result
 	{
-		DocumentSessionTable::deactivateByHash($externalHash);
+		foreach ($this->getSessionsByHash($externalHash) as $session)
+		{
+			$update = DocumentSessionTable::update((int)$session->getId(), ['STATUS' => DocumentSessionTable::STATUS_NON_ACTIVE]);
+			if (!$update->isSuccess())
+			{
+				return (new Result())->addErrors($update->getErrors());
+			}
+		}
+
+		return new Result();
 	}
 
 	private function commentAttachedObjectsOnBackground(File $file): void
@@ -564,11 +969,9 @@ final class WebhookProcessor
 	 */
 	private function getSessionsByHash(string $externalHash): array
 	{
-		return DocumentSession::getModelList([
-			'filter' => [
-				'=EXTERNAL_HASH' => $externalHash,
-			],
-		]);
+		$result = $this->scopeResolver->resolve($externalHash);
+
+		return $result->isSuccess() && $result->getData()['legacy'] ? $result->getData()['sessions'] : [];
 	}
 
 	private function extractExternalHash(array $payload): ?string

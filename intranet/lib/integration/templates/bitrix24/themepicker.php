@@ -46,6 +46,8 @@ class ThemePicker
 
 	public const DEFAULT_THEME_ID = 'light:vibecode';
 
+	private const CUSTOM_THEME_ID_PREFIX = 'custom_';
+
 	private static $instance = null;
 	private static $config = null;
 
@@ -688,6 +690,7 @@ class ThemePicker
 
 		$customTheme = array(
 			"id" => $customThemeId,
+			"title" => static::getCustomThemeTitle($customThemeId),
 			"css" => $this->getBaseThemeCss($baseThemeId),
 			"removable" => true,
 			"new" => false,
@@ -754,6 +757,41 @@ class ThemePicker
 		$customTheme["style"] = $style;
 
 		return $customTheme;
+	}
+
+	public static function getCustomThemeTitle(string $themeId): string
+	{
+		$createdAt = static::getCustomThemeCreationTime($themeId);
+		if ($createdAt === null)
+		{
+			return (string)Loc::getMessage('INTRANET_B24_INTEGRATION_CUSTOM_THEME_TITLE');
+		}
+
+		// FormatDate keeps the site culture formats without the viewer's timezone offset:
+		// the title must be identical for every consumer, including other users' themes.
+		// A context without a site (CLI, agent) carries no culture: default formats keep the moment.
+		$culture = Application::getInstance()->getContext()->getCulture();
+		$dateFormat = $culture?->getLongDateFormat() ?? 'j F Y';
+		$timeFormat = $culture?->getLongTimeFormat() ?? 'H:i:s';
+		$format = $dateFormat . ' ' . $timeFormat;
+
+		return (string)Loc::getMessage(
+			'INTRANET_B24_INTEGRATION_CUSTOM_THEME_TITLE_WITH_DATE',
+			['#DATE_TIME#' => FormatDate($format, $createdAt)]
+		);
+	}
+
+	private static function getCustomThemeCreationTime(string $themeId): ?int
+	{
+		[, $subThemeId] = static::getThemeIdParts($themeId);
+		if (!is_string($subThemeId))
+		{
+			return null;
+		}
+
+		$pattern = '/^' . preg_quote(self::CUSTOM_THEME_ID_PREFIX, '/') . '([0-9]{10})$/D';
+
+		return preg_match($pattern, $subThemeId, $matches) === 1 ? (int)$matches[1] : null;
 	}
 
 	protected function validateBgImage(array $customTheme, $option = "bgImage"): bool
@@ -1093,7 +1131,7 @@ class ThemePicker
 
 	public function getCustomThemePrefix()
 	{
-		return "custom_";
+		return self::CUSTOM_THEME_ID_PREFIX;
 	}
 
 	private static function isValidTemplateId($templateId)

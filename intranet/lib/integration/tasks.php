@@ -5,8 +5,10 @@ use Bitrix\Extranet\Service\ServiceContainer;
 use Bitrix\Intranet\Secretary;
 use Bitrix\Main\Entity\Query;
 use Bitrix\Main\Entity\ReferenceField;
+use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Result;
 use Bitrix\Tasks\Internals\Task\Priority;
 use Bitrix\Tasks\Internals\Task\Status;
 use Bitrix\Tasks\Util\User;
@@ -67,16 +69,24 @@ final class Tasks
 		}
 	}
 
-	public static function createDemoTasksForUser(int $userId): void
+	public static function createDemoTasksForUser(int $userId): Result
 	{
+		$result = new Result();
+		$templateCount = 0;
+		$createdTaskCount = 0;
+		$result->setData([
+			'templateCount' => $templateCount,
+			'createdTaskCount' => $createdTaskCount,
+		]);
+
 		if (!Loader::includeModule('tasks'))
 		{
-			return;
+			return $result;
 		}
 
 		if (self::isCollaber($userId))
 		{
-			return;
+			return $result;
 		}
 
 		$templateResult = \CTaskTemplates::GetList(
@@ -96,13 +106,36 @@ final class Tasks
 		);
 		while ($item = $templateResult->Fetch())
 		{
-			\CTaskItem::addByTemplate(
+			$templateCount++;
+			$createdTasks = \CTaskItem::addByTemplate(
 				$item['ID'],
 				$item['CREATED_BY'],
 				false,
-				['BEFORE_ADD_CALLBACK' => self::getBeforeAddCallback($userId)]
+				[
+					'BEFORE_ADD_CALLBACK' => self::getBeforeAddCallback($userId),
+					'COPY_FILE_ATTACHMENTS_WITH_DESCRIPTION' => true,
+				],
 			);
+
+			if ($createdTasks === [])
+			{
+				$result->addError(new Error(
+					"Failed to create tasks from new employee template {$item['ID']}.",
+					'INTRANET_NEW_EMPLOYEE_TEMPLATE_TASK_CREATION_FAILED',
+				));
+
+				continue;
+			}
+
+			$createdTaskCount += count($createdTasks);
 		}
+
+		$result->setData([
+			'templateCount' => $templateCount,
+			'createdTaskCount' => $createdTaskCount,
+		]);
+
+		return $result;
 	}
 
 	private static function getBeforeAddCallback(int $userId): \Closure

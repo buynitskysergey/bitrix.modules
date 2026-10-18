@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Timeman\V2\Internal\DI;
 
+use Bitrix\Timeman\Repository\Worktime\WorktimeRepository;
+use Bitrix\Timeman\V2\Internal\Integration\Socialnetwork\FullReportLivefeedService;
 use Bitrix\Timeman\V2\Internal\Repository\FileRepository;
 use Bitrix\Timeman\V2\Internal\Repository\FullReportRepository;
 use Bitrix\Timeman\V2\Internal\Repository\InMemoryUserRepository;
@@ -15,6 +17,7 @@ use Bitrix\Timeman\V2\Internal\Repository\ReportRepository;
 use Bitrix\Timeman\V2\Internal\Repository\ScheduleRepository;
 use Bitrix\Timeman\V2\Internal\Repository\ShiftRepository;
 use Bitrix\Timeman\V2\Internal\Repository\UserRepository;
+use Bitrix\Timeman\V2\Internal\Service\AccessService;
 use Bitrix\Timeman\V2\Internal\Service\FullReportFacade;
 use Bitrix\Timeman\V2\Internal\Service\FullReportService;
 use Bitrix\Timeman\V2\Internal\Service\FullReportUserService;
@@ -131,5 +134,22 @@ class Container extends AbstractContainer
 	public function getReportTextNormalizerService(): ReportTextNormalizerService
 	{
 		return $this->get(ReportTextNormalizerService::class);
+	}
+
+	public function getFullReportLivefeedService(): FullReportLivefeedService
+	{
+		return $this->get(FullReportLivefeedService::class);
+	}
+
+	public function getAccessService(): AccessService
+	{
+		return $this->get(AccessService::class);
+	}
+
+	// The legacy worktime repository, resolved through the composition root instead of the legacy
+	// dependency manager, so v2 code depends on the repository alone.
+	public function getLegacyWorktimeRepository(): WorktimeRepository
+	{
+		return $this->get(WorktimeRepository::class);
 	}
 }

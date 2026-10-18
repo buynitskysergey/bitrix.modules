@@ -10,6 +10,7 @@ use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
+use Bitrix\Note\Internal\Service\Import\LandingImportAvailability;
 use Bitrix\Note\Internal\Service\Import\WikiImportAvailability;
 use Bitrix\Note\Public\Provider\CollectionProvider;
 
@@ -19,15 +20,19 @@ class InitialCollectionsService
 
 	private WikiImportAvailability $wikiImportAvailability;
 
+	private LandingImportAvailability $landingImportAvailability;
+
 	private const INITIAL_COLLECTIONS_PAGE_SIZE = 50;
 
 	public function __construct(
 		?CollectionRepository $repository = null,
 		?WikiImportAvailability $wikiImportAvailability = null,
+		?LandingImportAvailability $landingImportAvailability = null,
 	)
 	{
 		$this->repository = $repository ?? new CollectionRepository();
 		$this->wikiImportAvailability = $wikiImportAvailability ?? new WikiImportAvailability();
+		$this->landingImportAvailability = $landingImportAvailability ?? new LandingImportAvailability();
 	}
 
 	public function resolve(
@@ -178,6 +183,7 @@ class InitialCollectionsService
 			'canEditGlobalPermissions' => AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_EDIT_PERMISSIONS),
 			'canImport' => $canImport,
 			'canImportWiki' => $canImport && $this->wikiImportAvailability->isEnabled(),
+			'canImportLanding' => $canImport && $this->landingImportAvailability->isEnabled(),
 			'hasManageableCollection' => CollectionAccessService::userHasManageableCollection($userId),
 		];
 	}

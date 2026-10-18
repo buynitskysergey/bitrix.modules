@@ -64,6 +64,8 @@ class MailEntityOptionsTable extends Entity\DataManager
 		way, and ten minutes later is too soon to ask again.
 	*/
 	const HISTORY_SYNC_RETRY_AFTER_PROPERTY_NAME = 'HISTORY_SYNC_RETRY_AFTER';
+	const DELIVERY_BOUNDARY_ENABLED_PROPERTY_NAME = 'DELIVERY_BOUNDARY_ENABLED_V1';
+	const DELIVERY_BOUNDARY_PROPERTY_NAME = 'SYNC_DELIVERY_BOUNDARY_V1';
 
 	private const MAILBOX_OPTION_CACHE_TTL = 86400;
 	private const MAILBOX_OPTION_CACHE_KEY_PREFIX = 'mail_mailbox_option_';

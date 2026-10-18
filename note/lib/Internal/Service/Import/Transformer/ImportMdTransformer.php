@@ -25,15 +25,51 @@ abstract class ImportMdTransformer
 	}
 
 	/**
+	 * Source-specific hook called by the last step of the attachment chain: whatever placeholder the
+	 * download and the retry could not resolve has to leave the chain as something a reader can use.
+	 * Default: identity - a source whose placeholder is an address that stays usable on its own
+	 * (Outline) has nothing to unwrap.
+	 */
+	public function unwrapUnresolvedAttachments(string $markdown): string
+	{
+		return $markdown;
+	}
+
+	/**
 	 * Extracts all attachment IDs from markdown text.
 	 *
 	 * @return string[]
 	 */
 	public function extractAttachmentIds(string $markdown): array
 	{
-		preg_match_all($this->getPattern(), $markdown, $matches);
+		if (!preg_match_all($this->getPattern(), $markdown, $matches, PREG_SET_ORDER))
+		{
+			return [];
+		}
 
-		return array_values(array_unique($matches['attachmentId'] ?? []));
+		$ids = [];
+		foreach ($matches as $match)
+		{
+			$key = $this->attachmentKey($match);
+			if ($key !== '')
+			{
+				$ids[] = $key;
+			}
+		}
+
+		return array_values(array_unique($ids));
+	}
+
+	/**
+	 * Resolves the download/lookup key for a single attachment match. Defaults to the
+	 * `attachmentId` named group; subclasses that surface more than one placeholder scheme
+	 * (e.g. local files vs external image URLs) override this to pick the right group.
+	 *
+	 * @param array<string|int, string> $matches one match from the {@see getPattern()} regex
+	 */
+	protected function attachmentKey(array $matches): string
+	{
+		return (string)($matches['attachmentId'] ?? '');
 	}
 
 	/**
@@ -47,11 +83,19 @@ abstract class ImportMdTransformer
 	{
 		$fileIds = [];
 
+		// Assets that sit inside a markdown table row must render *inline in their cell*: the note
+		// editor stores in-cell attachments as `![](type){type=.. fileId=.. documentId=.. ..}`
+		// (enriched-asset-parser.js parseEnrichedAssetCell). The block `[[image fileId=N]]` token
+		// used everywhere else would be pulled to column 0 by splitInlineAssets() below and shatter
+		// the row, so table-row placeholders are rewritten to the enriched inline form up front.
+		// Their rewritten URL is no longer a landing/api placeholder, so the main pass skips them.
+		$markdown = $this->enrichTableRowAssets($markdown, $documentId, $attachmentFileMap, $fileIds);
+
 		$result = preg_replace_callback(
 			$this->getPattern(),
 			function (array $matches) use ($documentId, $attachmentFileMap, &$fileIds): string {
-				$attachmentId = $matches['attachmentId'] ?? null;
-				if ($attachmentId === null || !isset($attachmentFileMap[$attachmentId]))
+				$attachmentId = $this->attachmentKey($matches);
+				if ($attachmentId === '' || !isset($attachmentFileMap[$attachmentId]))
 				{
 					return $matches[0];
 				}
@@ -59,11 +103,10 @@ abstract class ImportMdTransformer
 				$file = $attachmentFileMap[$attachmentId];
 				$fileIds[] = $file['fileId'];
 
-				return sprintf(
-					'[[%s fileId=%d]]',
-					$this->resolveType($file['mimeType']),
-					$file['fileId'],
-				);
+				$type = $this->resolveType($file['mimeType']);
+				$attrsSuffix = $this->buildAssetAttrs($type, $matches['attrs'] ?? '');
+
+				return sprintf('[[%s fileId=%d%s]]', $type, $file['fileId'], $attrsSuffix);
 			},
 			$markdown,
 		);
@@ -71,6 +114,136 @@ abstract class ImportMdTransformer
 		$result = $this->splitInlineAssets($result ?? $markdown);
 
 		return new TransformResult($result, array_unique($fileIds));
+	}
+
+	/**
+	 * Rewrites attachment placeholders that sit inside a GFM table row to the enriched inline asset
+	 * syntax the note editor uses for in-cell attachments (enriched-asset-parser.js). Only bordered
+	 * rows (`| ... |`) are touched: both the card table and real landing tables render that way, while
+	 * prose with a stray pipe does not, and the block asset token would otherwise be lifted out of
+	 * the row by {@see splitInlineAssets()} and break the table. Non-table markdown is untouched.
+	 *
+	 * @param array<string, array{fileId: int, name: string, size: int, mimeType: string}> $attachmentFileMap
+	 * @param int[] $fileIds collected file ids, by reference - same contract as {@see transform()}
+	 */
+	private function enrichTableRowAssets(
+		string $markdown,
+		int $documentId,
+		array $attachmentFileMap,
+		array &$fileIds,
+	): string
+	{
+		if ($markdown === '' || !str_contains($markdown, '|'))
+		{
+			return $markdown;
+		}
+
+		$lines = explode("\n", $markdown);
+		foreach ($lines as $index => $line)
+		{
+			// Bordered GFM row: up to 3 leading spaces, a leading `|`, and a trailing `|`.
+			if (!preg_match('/^ {0,3}\|.*\|[ \t]*$/', $line))
+			{
+				continue;
+			}
+
+			$lines[$index] = preg_replace_callback(
+				$this->getPattern(),
+				function (array $matches) use ($documentId, $attachmentFileMap, &$fileIds): string {
+					$attachmentId = $this->attachmentKey($matches);
+					if ($attachmentId === '' || !isset($attachmentFileMap[$attachmentId]))
+					{
+						return $matches[0];
+					}
+
+					$file = $attachmentFileMap[$attachmentId];
+					$fileIds[] = $file['fileId'];
+
+					return $this->buildInlineAsset($this->resolveType($file['mimeType']), $file, $documentId);
+				},
+				$line,
+			);
+		}
+
+		return implode("\n", $lines);
+	}
+
+	/**
+	 * Builds the enriched inline asset token consumed by the editor's table-cell parser
+	 * (enriched-asset-parser.js parseEnrichedAssetCell):
+	 *   `![](type){type=.. fileId=.. documentId=.. name=".." size=.. mimeType=".."}`
+	 *
+	 * The label and URL are cosmetic - the editor resolves the file by fileId + documentId - but the
+	 * URL must be non-empty and must not look like a landing/api placeholder (otherwise the main
+	 * transform pass would rewrite it), so the asset type word is used. width/align are intentionally
+	 * omitted: the cell parser does not read them and a cell sizes to its column.
+	 *
+	 * @param array{fileId: int, name: string, size: int, mimeType: string} $file
+	 */
+	private function buildInlineAsset(string $type, array $file, int $documentId): string
+	{
+		$attrs = [
+			'type=' . $type,
+			'fileId=' . (int)$file['fileId'],
+			'documentId=' . $documentId,
+		];
+
+		$name = (string)($file['name'] ?? '');
+		if ($name !== '')
+		{
+			$attrs[] = 'name="' . $this->sanitizeAssetAttr($name) . '"';
+		}
+
+		$attrs[] = 'size=' . (int)($file['size'] ?? 0);
+
+		$mimeType = (string)($file['mimeType'] ?? '');
+		if ($mimeType !== '')
+		{
+			$attrs[] = 'mimeType="' . $this->sanitizeAssetAttr($mimeType) . '"';
+		}
+
+		$prefix = $type === 'image' ? '!' : '';
+
+		return $prefix . '[](' . $type . '){' . implode(' ', $attrs) . '}';
+	}
+
+	/**
+	 * Neutralises characters that would truncate or misparse an enriched attr value: the value grammar
+	 * is `"[^"]*"` (no backslash-escaping) scanned inside a brace-balanced `{...}`, so a literal quote or
+	 * brace has to go, along with newlines that cannot appear inside a table cell.
+	 */
+	private function sanitizeAssetAttr(string $value): string
+	{
+		return trim(str_replace(['"', '{', '}', "\r", "\n"], ["'", '(', ')', ' ', ' '], $value));
+	}
+
+	/**
+	 * Parses a query string like `w=50&a=left` into a token suffix ` width=50 align=left`.
+	 * Attributes apply to image/video only; align in {left, right, center}; width in 1..100.
+	 */
+	private function buildAssetAttrs(string $type, string $attrsQuery): string
+	{
+		if ($attrsQuery === '' || ($type !== 'image' && $type !== 'video'))
+		{
+			return '';
+		}
+
+		parse_str($attrsQuery, $parsed);
+		$parts = [];
+
+		$width = isset($parsed['w']) ? (int)$parsed['w'] : 0;
+		if ($width >= 1 && $width <= 100)
+		{
+			$parts[] = 'width=' . $width;
+		}
+
+		$align = isset($parsed['a']) ? (string)$parsed['a'] : '';
+		if (in_array($align, ['left', 'right', 'center'], true))
+		{
+			$parts[] = 'align=' . $align;
+		}
+
+		return $parts === [] ? '' : ' ' . implode(' ', $parts);
 	}
 
 	/**

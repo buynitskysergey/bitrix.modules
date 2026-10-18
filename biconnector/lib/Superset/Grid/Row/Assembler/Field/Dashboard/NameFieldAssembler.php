@@ -172,7 +172,9 @@ class NameFieldAssembler extends DetailLinkFieldAssembler
 		return <<<HTML
 			<div class="{$classTypePrefix}-title-wrapper">
 				<div class="{$classTypePrefix}-title-wrapper__item {$classTypePrefix}-title-preview">
-					{$link}
+					<div class="biconnector-grid-title">
+						{$link}
+					</div>
 					{$buttons}
 				</div>
 			</div>

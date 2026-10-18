@@ -265,6 +265,16 @@ class Storage
 	}
 
 	/**
+	 * Total size of a single batch of documents uploaded at once.
+	 *
+	 * @return int size in bytes
+	 */
+	public function getUploadBatchTotalMaxSize(): int
+	{
+		return 1024 * (int)Main\Config\Option::get('sign', 'max_upload_batch_total_size_kb');
+	}
+
+	/**
 	 * @return int size in bytes
 	 */
 	public function getUploadImagesMaxSize(): int

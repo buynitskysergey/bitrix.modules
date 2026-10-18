@@ -11,6 +11,7 @@ use Bitrix\Disk\Document\Vibeoffice\VibeofficeHandler;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\Integration\Baas\BaasSessionBoostService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkSupportService;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Main\Context;
 use Bitrix\Main\DI\ServiceLocator;
@@ -21,9 +22,20 @@ use Bitrix\Main\Engine\Response;
 use Bitrix\Main\Error;
 use Bitrix\Main\HttpResponse;
 use Bitrix\Main\Loader;
+use Bitrix\Main\Request;
+use Bitrix\Main\Web\Uri;
 
 final class DocumentService extends Engine\Controller
 {
+	protected UnifiedLinkUrl $unifiedLinkUrl;
+
+	public function __construct(?Request $request = null)
+	{
+		parent::__construct($request);
+
+		$this->unifiedLinkUrl = ServiceLocator::getInstance()->get(UnifiedLinkUrl::class);
+	}
+
 	public function configureActions()
 	{
 		return [
@@ -110,6 +122,10 @@ final class DocumentService extends Engine\Controller
 			return null;
 		}
 		$sessionManager->unlock();
+		$restrictionOutcome = $sessionManager instanceof Document\Vibeoffice\DocumentSessionManager
+			? $sessionManager->getRestrictionOutcome()
+			: null
+		;
 
 		$response = new HttpResponse();
 
@@ -140,6 +156,7 @@ final class DocumentService extends Engine\Controller
 					'POPUP_COMPONENT_TEMPLATE_NAME' => '',
 					'POPUP_COMPONENT_PARAMS' => [
 						'DOCUMENT_SESSION' => $forkedSession,
+						'RESTRICTION_OUTCOME' => $restrictionOutcome,
 						'SHOW_BUTTON_OPEN_NEW_WINDOW' => false,
 					],
 					'PLAIN_VIEW' => true,
@@ -481,13 +498,37 @@ final class DocumentService extends Engine\Controller
 		$urlManager = $driver->getUrlManager();
 		if ($attachedObjectId)
 		{
-			LocalRedirect($urlManager::getUrlToStartEditUfFileByService($attachedObjectId, $documentHandler::getCode()));
+			LocalRedirect(
+				$this->addUnifiedLinkSignatureToUrl(
+					$urlManager::getUrlToStartEditUfFileByService($attachedObjectId, $documentHandler::getCode())
+				)
+			);
 
 		}
 		else
 		{
-			LocalRedirect($urlManager::getUrlForStartEditFile($objectId, $documentHandler::getCode()));
+			LocalRedirect(
+				$this->addUnifiedLinkSignatureToUrl(
+					$urlManager::getUrlForStartEditFile($objectId, $documentHandler::getCode())
+				)
+			);
 		}
+	}
+
+	protected function addUnifiedLinkSignatureToUrl(string $url): string
+	{
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->getRequest());
+
+		if (!is_string($uls) || $uls === '')
+		{
+			return $url;
+		}
+
+		$uri = new Uri($url);
+
+		$this->unifiedLinkUrl->addUlsToUri($uri, $uls);
+
+		return (string)$uri;
 	}
 
 	public function goToCreateAction(

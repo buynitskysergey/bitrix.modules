@@ -14,6 +14,7 @@ use Bitrix\Im\V2\Public\Message\BlocksBuilder\Entity\SpaceDividerSize;
 use Bitrix\Im\V2\Public\Message\BlocksBuilder\Entity\TitleSize;
 use Bitrix\Im\V2\Public\Message\BlocksBuilder\Field\Buttons;
 use Bitrix\Im\V2\Public\Message\BlocksBuilder\Field\Fold;
+use Bitrix\Im\V2\Public\Message\BlocksBuilder\Field\FormFields;
 use Bitrix\Im\V2\Public\Message\BlocksBuilder\Field\List\Icon;
 use Bitrix\Im\V2\Public\Message\BlocksBuilder\Field\List\OrderedListElements;
 use Bitrix\Im\V2\Public\Message\BlocksBuilder\Field\Sources;
@@ -157,6 +158,17 @@ class Builder
 	): self
 	{
 		$this->blocks[] = BlockItem::createGalleryBlock($fileIds, $id)->blockData;
+
+		return $this;
+	}
+
+	public function addFormBlock(
+		FormFields $fields,
+		Buttons $buttons,
+		?string $id = null
+	): self
+	{
+		$this->blocks[] = BlockItem::createFormBlock($fields, $buttons, $id)->blockData;
 
 		return $this;
 	}

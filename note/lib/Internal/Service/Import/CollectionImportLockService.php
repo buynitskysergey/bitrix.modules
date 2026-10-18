@@ -8,6 +8,7 @@ use Bitrix\Main\Config\Option;
 use Bitrix\Note\Infrastructure\Agent\Import\ImportAgent;
 use Bitrix\Note\Internal\Repository\ImportMapRepository;
 use Bitrix\Note\Internal\Repository\ImportSessionRepository;
+use Bitrix\Note\Internal\Service\Import\Step\CreateCollectionStep;
 
 /**
  * Detects whether a collection is currently the target of an active import session.
@@ -89,7 +90,11 @@ class CollectionImportLockService
 			return false;
 		}
 
-		return $this->mapRepository->findCollectionId($sourceType, $externalId) === $collectionId;
+		// The state of a conversion holds the id of a base at its source; the map holds its own key
+		// for it, and the two are not the same string for every source.
+		$mapKey = CreateCollectionStep::collectionMapKey($sourceType, $externalId);
+
+		return $this->mapRepository->findCollectionId($sourceType, $mapKey) === $collectionId;
 	}
 
 	private function loadSessionOption(int $sessionId): array

@@ -44,6 +44,7 @@ final class GetFilterValuesTool extends BaseBiTool
 				'dashboardId' => [
 					'type' => 'integer',
 					'description' => 'Dashboard ID from list_dashboards.',
+					'minimum' => 1,
 				],
 				'filterColumn' => [
 					'type' => 'string',
@@ -76,6 +77,7 @@ final class GetFilterValuesTool extends BaseBiTool
 							],
 						],
 						'required' => ['name', 'value'],
+						'additionalProperties' => false,
 					],
 				],
 				'urlParams' => [
@@ -114,7 +116,7 @@ final class GetFilterValuesTool extends BaseBiTool
 		$filterColumn = (string)($args['filterColumn'] ?? '');
 		if ($filterColumn === '')
 		{
-			throw new McpException('filterColumn is required.');
+			throw new McpException('filterColumn is required: provide the column name to fetch filter values for.');
 		}
 
 		$search = null;

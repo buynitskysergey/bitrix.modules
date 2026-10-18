@@ -95,6 +95,10 @@ class DeleteCollectionCommand extends AbstractCommand
 		// The main document carries the collection description: it lives outside the tree, so a
 		// trashed one could be restored but never shown again. It dies with the collection instead.
 		$mainDocumentId = $this->documentRepository->findMainDocumentIdByCollectionId($this->id);
+		$mainDocumentLinkChange = $mainDocumentId !== null
+			? $this->hardDeleteService->prepareDelete([$mainDocumentId])
+			: null
+		;
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
@@ -104,9 +108,12 @@ class DeleteCollectionCommand extends AbstractCommand
 			$trashedIds = $this->moveService->moveCollection($this->id, $this->userId);
 			if ($mainDocumentId !== null)
 			{
-				$mainDocumentCleanup = $this->hardDeleteService->deleteByDocumentIds([$mainDocumentId]);
+				$mainDocumentCleanup = $this->hardDeleteService->deleteByDocumentIds(
+					[$mainDocumentId],
+					$mainDocumentLinkChange,
+				);
 			}
-			// [P3.T2] Favorite rows on the knowledge base itself; the subscription on it is already
+			// Favorite rows on the knowledge base itself; the subscription on it is already
 			// cleared inside hardDeleteById(). The rows on its documents deliberately stay: those
 			// documents are not deleted here, they go to the recycle bin, where RecycleBinRepository
 			// ::listVisible() keeps showing them to their owner as orphans and they can be restored

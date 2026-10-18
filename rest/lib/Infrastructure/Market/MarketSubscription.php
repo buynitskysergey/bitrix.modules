@@ -11,16 +11,30 @@ use Bitrix\Rest\Internal\Integration\Bitrix24\MarketUrlProvider;
 use Bitrix\Rest\Marketplace\Client;
 use Bitrix\Rest\Service\RestOption;
 use Bitrix\Rest\Service\ServiceContainer;
+use Closure;
 
 class MarketSubscription
 {
 	private const BASE_CACHE_DIR = 'rest/market_subscription';
 
+	private readonly Closure $canBuySubscription;
+	private readonly Closure $subscriptionAccess;
+	private readonly Closure $licenseRegion;
+
 	public function __construct(
 		private readonly MarketOption $marketOption,
+		?Closure $canBuySubscription = null,
+		?Closure $subscriptionAccess = null,
+		?Closure $licenseRegion = null,
 		private readonly ?MonetizationModelProvider $monetizationModelProvider = null,
 	)
-	{}
+	{
+		$this->canBuySubscription = $canBuySubscription ?? static fn(): bool => Client::canBuySubscription();
+		$this->subscriptionAccess = $subscriptionAccess ?? static fn(): bool => Client::isSubscriptionAccess();
+		$this->licenseRegion
+			= $licenseRegion
+			?? static fn(): string => Application::getInstance()->getLicense()->getRegion();
+	}
 
 	public static function createByDefault(): self
 	{
@@ -29,7 +43,12 @@ class MarketSubscription
 
 	public function isRequiredSubscriptionModelStarted(): bool
 	{
-		if (!Client::isSubscriptionAccess())
+		if (!(($this->subscriptionAccess)()))
+		{
+			return false;
+		}
+
+		if (($this->licenseRegion)() !== 'ru')
 		{
 			return false;
 		}
@@ -56,7 +75,12 @@ class MarketSubscription
 
 	public function isAvailableToPurchase(): bool
 	{
-		return Client::isSubscriptionAccess();
+		return ($this->subscriptionAccess)();
+	}
+
+	public function canBuySubscription(): bool
+	{
+		return ($this->canBuySubscription)();
 	}
 
 	public function isActive(): bool
@@ -103,10 +127,9 @@ class MarketSubscription
 			return $cache->getVars();
 		}
 
-		$hasSubscriptionIntegrations =
-			ServiceContainer::getInstance()->getIntegrationService()->hasPaidIntegrations()
-			|| ServiceContainer::getInstance()->getAppService()->hasPaidApps()
-		;
+		$hasSubscriptionIntegrations
+			= ServiceContainer::getInstance()->getIntegrationService()->hasPaidIntegrations()
+			|| ServiceContainer::getInstance()->getAppService()->hasPaidApps();
 		$cache->startDataCache();
 		$cache->endDataCache($hasSubscriptionIntegrations);
 
@@ -115,7 +138,7 @@ class MarketSubscription
 
 	public function getBuyUrl(): string
 	{
-		return (new MarketUrlProvider)->getBuyUrl()->getUri();
+		return (new MarketUrlProvider())->getBuyUrl()->getUri();
 	}
 
 	public function getTransitionPeriodEndDate(): Date

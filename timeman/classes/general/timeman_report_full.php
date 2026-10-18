@@ -3,6 +3,7 @@
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Timeman\Helper\TimeHelper;
+use Bitrix\Timeman\Integration\Intranet\Settings;
 use Bitrix\Timeman\V2\Internal\Integration\HumanResources\Service\NodeSettingsService;
 use Bitrix\Timeman\V2\Internal\Entity\Report\RecordReportType;
 use Bitrix\Timeman\V2\Internal\Service\ReportTextHtmlRenderer;
@@ -1611,7 +1612,7 @@ class CUserReportFull
 		$text = preg_replace('/\[br\s*\/?]/i', "\n", $text) ?? $text;
 		$text = preg_replace('#\[/p]\s*\[p]#iu', "\n\n", $text) ?? $text;
 		$text = preg_replace('#\[/?p]#iu', '', $text) ?? $text;
-		$text = preg_replace('#\[/?(?:b|i|u)]#iu', '', $text) ?? $text;
+		$text = preg_replace('#\[/?(?:b|i|u|s)]#iu', '', $text) ?? $text;
 		$text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
 
 		return trim($text);
@@ -1995,7 +1996,10 @@ class CReportNotifications
 			$arSoFields["ENTITY_ID"] = $arReport["USER_ID"];
 			$arSoFields["USER_ID"] = $arReport["USER_ID"];
 //			CReportNotifications::Subscribe($arReport["USER_ID"]);
-			$logID = CSocNetLog::Add($arSoFields, false);
+			$logID = (new Settings())->isToolAvailable(Settings::TOOLS['worktime'])
+				? CSocNetLog::Add($arSoFields, false)
+				: false
+			;
 
 			if ((int)$logID > 0)
 			{
@@ -2037,6 +2041,10 @@ class CReportNotifications
 	protected static function NotifyIm($arReport)
 	{
 		if(!\Bitrix\Main\Loader::includeModule('im'))
+		{
+			return;
+		}
+		if (!(new Settings())->isToolAvailable(Settings::TOOLS['worktime']))
 		{
 			return;
 		}
@@ -2127,6 +2135,12 @@ class CReportNotifications
 	public static function MessageUpdate($REPORT_ID, $arReport = array(), $arFields = array())
 	{
 		global $DB,$USER;
+
+		if (!(new Settings())->isToolAvailable(Settings::TOOLS['worktime']))
+		{
+			return false;
+		}
+
 		$curUser = $USER->GetID();
 		if(CModule::IncludeModule("socialnetwork"))
 		{
@@ -2584,6 +2598,11 @@ class CReportNotifications
 		global $DB, $USER;
 		CModule::IncludeModule("socialnetwork");
 
+		if (!(new Settings())->isToolAvailable(Settings::TOOLS['worktime']))
+		{
+			return false;
+		}
+
 		$result = false;
 		$dbLog = CSocNetLog::GetList(Array(), Array("SOURCE_ID" => $arFields["REPORT_ID"], "EVENT_ID" => "report"));
 		if (!$arLog = $dbLog->Fetch())
@@ -2620,6 +2639,7 @@ class CReportNotifications
 	{
 		if (
 			CModule::IncludeModule("im")
+			&& (new Settings())->isToolAvailable(Settings::TOOLS['worktime'])
 			&& intval($arFields["USER_ID"]) > 0
 		)
 		{

@@ -58,6 +58,14 @@ class ExternalSourceRepository
 				'CODE' => Type::Mysql->value,
 				'NAME' => 'MySQL',
 			];
+
+			if (SourceManager::isClickhouseConnectionsAvailable())
+			{
+				$actualSourceList[] = [
+					'CODE' => Type::Clickhouse->value,
+					'NAME' => 'ClickHouse',
+				];
+			}
 		}
 
 		if (Loader::includeModule('rest'))

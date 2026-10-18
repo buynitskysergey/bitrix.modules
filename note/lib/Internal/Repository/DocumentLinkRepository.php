@@ -8,10 +8,9 @@ use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Model\DocumentLinkTable;
-use Bitrix\Note\Internal\Model\DocumentTable;
 
 /**
- * [P1.T2] b_note_document_link access: the current target set of one source, the whole-set
+ * b_note_document_link access: the current target set of one source, the whole-set
  * rewrite after a save, the keyset page of backlinks and the hard-delete cascades.
  *
  * Transactions belong to the calling command: replaceTargets() deletes and inserts as two
@@ -93,14 +92,17 @@ class DocumentLinkRepository
 		}
 
 		$map = array_fill_keys($normalized, []);
-		$rows = DocumentLinkTable::query()
-			->setSelect(['SOURCE_ID', 'TARGET_ID'])
-			->whereIn('SOURCE_ID', $normalized)
-			->fetchAll()
-		;
-		foreach ($rows as $row)
+		foreach (array_chunk($normalized, self::INSERT_CHUNK_SIZE) as $chunk)
 		{
-			$map[(int)$row['SOURCE_ID']][] = (int)$row['TARGET_ID'];
+			$rows = DocumentLinkTable::query()
+				->setSelect(['SOURCE_ID', 'TARGET_ID'])
+				->whereIn('SOURCE_ID', $chunk)
+				->fetchAll()
+			;
+			foreach ($rows as $row)
+			{
+				$map[(int)$row['SOURCE_ID']][] = (int)$row['TARGET_ID'];
+			}
 		}
 
 		return $map;
@@ -125,6 +127,51 @@ class DocumentLinkRepository
 		}
 
 		return array_keys($union);
+	}
+
+	/**
+	 * Existing documents that contain at least one link to any requested target. Archived and trashed
+	 * sources remain readable and subscribed to their document channel until hard delete. The extra
+	 * limit slot lets the caller enforce its realtime fan-out budget without counting the whole set.
+	 *
+	 * @param int[] $targetIds
+	 * @return int[]
+	 */
+	public function collectExistingSourceIdsByTargets(array $targetIds, int $limit): array
+	{
+		$normalized = $this->normalizeIds($targetIds);
+		if (empty($normalized) || $limit <= 0)
+		{
+			return [];
+		}
+
+		$sourceIds = [];
+		foreach (array_chunk($normalized, self::INSERT_CHUNK_SIZE) as $chunk)
+		{
+			$rows = DocumentLinkTable::query()
+				->setSelect(['SOURCE_ID'])
+				->whereIn('TARGET_ID', $chunk)
+				->whereNotNull('SOURCE.ID')
+				->setGroup(['SOURCE_ID'])
+				->addOrder('SOURCE_ID')
+				->setLimit($limit)
+				->fetchAll()
+			;
+
+			foreach ($rows as $row)
+			{
+				$sourceIds[(int)$row['SOURCE_ID']] = true;
+			}
+			if (count($sourceIds) >= $limit)
+			{
+				break;
+			}
+		}
+
+		$ids = array_keys($sourceIds);
+		sort($ids);
+
+		return array_slice($ids, 0, $limit);
 	}
 
 	/**

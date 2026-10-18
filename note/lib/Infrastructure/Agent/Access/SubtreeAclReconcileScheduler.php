@@ -7,7 +7,7 @@ namespace Bitrix\Note\Infrastructure\Agent\Access;
 use Bitrix\Note\Internal\Service\Access\SubtreeWidenDeferralSink;
 
 /**
- * [P4.T6] Hands an over-threshold widen pass to {@see SubtreeAclReconcileAgent}.
+ * Hands an over-threshold widen pass to {@see SubtreeAclReconcileAgent}.
  *
  * Deferred work is not kept anywhere of its own: registering the agent IS the record that the source
  * is pending, because the agent's b_agent row carries the source, its collection and the resume

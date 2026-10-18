@@ -2,6 +2,7 @@
 
 namespace Bitrix\BIConnector\ExternalSource\Dataset\Connector;
 
+use Bitrix\BIConnector\DataSourceConnector\Aggregation\ScopeId;
 use Bitrix\BIConnector\DataSourceConnector\FieldCollection;
 use Bitrix\BIConnector\ExternalSource\Internal\ExternalDatasetTable;
 use Bitrix\BIConnector\ExternalSource\Type;
@@ -31,6 +32,20 @@ abstract class ExternalSql extends Sql
 	protected const ANALYTIC_TAG_DATASET = 'EXTERNAL_SQL';
 
 	abstract protected function getType(): Type;
+
+	/**
+	 * External datasets are identified by their source, so the same table name backed by a different
+	 * connection yields a different scope and invalidates the capabilities cached by the plugin.
+	 */
+	protected function getAggregationScopeId(): string
+	{
+		$this->getConnection();
+
+		return $this->sourceId === null
+			? ''
+			: ScopeId::forExternalSource($this->sourceId)
+		;
+	}
 
 	protected function getConnection(): ?DB\Connection
 	{
@@ -69,7 +84,7 @@ abstract class ExternalSql extends Sql
 		{
 			/* @var ExternalSource\Source\ExternalSql $source */
 			$source = Source\Factory::getSource($this->getType(), $this->sourceId ?? 0);
-			$connection = $source->getConnection();
+			$connection = $source->getConnection(null, $this->sqlTimeLimitSeconds);
 		}
 		catch (DB\ConnectionException $e)
 		{
@@ -112,7 +127,7 @@ abstract class ExternalSql extends Sql
 			return false;
 		}
 
-		$result = $connection->biQuery($sql);
+		$result = $this->executeBiQuery($connection, $sql);
 		if ($result === false)
 		{
 			$errorMessage = $this->getQueryErrorMessage();
@@ -128,6 +143,11 @@ abstract class ExternalSql extends Sql
 	 */
 	protected function getQueryErrorMessage(): string
 	{
+		if ($this->biQueryError !== null)
+		{
+			return $this->biQueryError;
+		}
+
 		$connection = $this->getConnection();
 		if (!$connection)
 		{

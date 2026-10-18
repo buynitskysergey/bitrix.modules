@@ -9,6 +9,12 @@ use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Collection\CollectionService;
 
+/**
+ * The create_collection analytics event is deliberately NOT sent from here. Every caller knows the
+ * composition of the fresh collection better than the command does: the web permission dialog counts
+ * the members the user picked before the collection existed, the importer names the source tool. A
+ * send from here would either double-count the web path or replace those numbers with a guess.
+ */
 class CreateCollectionCommand extends AbstractCommand
 {
 	private readonly string $name;

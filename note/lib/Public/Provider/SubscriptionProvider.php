@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
 
 /**
- * [P6.T3 / API-09] Subscription state for the bell control. Right is plain
+ * Subscription state for the bell control. Right is plain
  * LEVEL_VIEW on the document (mirrors ViewProvider); the collection half of the
  * state is only reported when the viewer can also see the collection —
  * otherwise "this document and all nested" is not a meaningful choice for them

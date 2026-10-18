@@ -19,7 +19,7 @@ use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P2.T4 / API-02] Bulk soft-delete (move to recycle bin) of a
+ * Bulk soft-delete (move to recycle bin) of a
  * tree selection from the active or archive section. Requires MANAGE on each document's
  * owning collection — undeletable documents are reported as skippedByAccessCount, not errors.
  *

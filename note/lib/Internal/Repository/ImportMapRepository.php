@@ -40,8 +40,23 @@ class ImportMapRepository
 
 	public function findCollectionId(string $sourceType, string $externalId): ?int
 	{
+		$mapping = $this->findCollectionMapping($sourceType, $externalId);
+
+		return $mapping['collectionId'] ?? null;
+	}
+
+	/**
+	 * The mapping of a collection with the anchor the conversion wrote, which {@see findCollectionId}
+	 * drops. A source can encode something in the anchor that a caller needs back: landing puts the
+	 * id of the source site there ({@see \Bitrix\Note\Internal\Service\Import\Source\Landing\LandingId::collectionAnchor}),
+	 * so the old address of a base resolves without a query into landing to translate its code.
+	 *
+	 * @return array{collectionId:int, urlId:?string}|null null when nothing is mapped
+	 */
+	public function findCollectionMapping(string $sourceType, string $externalId): ?array
+	{
 		$row = ImportMapTable::getList([
-			'select' => ['COLLECTION_ID'],
+			'select' => ['COLLECTION_ID', 'URL_ID'],
 			'filter' => [
 				'=SOURCE_TYPE' => $sourceType,
 				[
@@ -54,7 +69,15 @@ class ImportMapRepository
 			'limit' => 1,
 		])->fetch();
 
-		return $row ? (int)$row['COLLECTION_ID'] : null;
+		if ($row === false)
+		{
+			return null;
+		}
+
+		return [
+			'collectionId' => (int)$row['COLLECTION_ID'],
+			'urlId' => $row['URL_ID'] !== null ? (string)$row['URL_ID'] : null,
+		];
 	}
 
 	/**

@@ -89,7 +89,11 @@ class NativeFilterBuilder
 			}
 		}
 
-		return sprintf('(%s)', implode(',', array_filter($formatted)));
+		$result = sprintf('(%s)', implode(',', array_filter($formatted)));
+
+		// Filter templates are indented for readability; raw newlines/tabs in the iframe src
+		// stop modern Chromium from navigating the frame. Strip them (values never contain them).
+		return preg_replace('/[\r\n\t]+/', '', $result) ?? $result;
 	}
 
 	/**

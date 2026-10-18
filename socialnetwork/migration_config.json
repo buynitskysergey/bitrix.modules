@@ -1,0 +1,9 @@
+{
+    "defaultTableName": "b_sonet_group_subject",
+    "installDirectoriesMapping": {
+        "install/activities": "activities",
+        "install/components": "components",
+        "install/gadgets": "gadgets",
+        "install/js": "js"
+    }
+}

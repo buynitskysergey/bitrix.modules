@@ -219,7 +219,7 @@ final class File extends BaseObject
 		$file = $this->get($id);
 
 		$securityContext = $file->getStorage()->getCurrentUserSecurityContext();
-		if(!$file->canRestore($securityContext))
+		if(!$file->canManageVersions($securityContext))
 		{
 			throw new AccessException;
 		}

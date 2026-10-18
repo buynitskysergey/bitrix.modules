@@ -11,7 +11,7 @@ use Bitrix\Note\Internal\Service\Bulk\SelectionResolver;
 use Bitrix\Note\Internal\Service\RecycleBin\HardDeleteService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P4.T1 / API-04] Bulk hard-delete (empty from the recycle bin)
+ * Bulk hard-delete (empty from the recycle bin)
  * of a selection. Owner of the API-04 contract.
  *
  * The recycle section is flat, so no subtree expansion happens (withNested=false). Per-record
@@ -56,11 +56,12 @@ class BulkHardDeleteDocumentsCommand extends AbstractBulkCommand
 
 	protected function applyChunk(array $documentIds): array
 	{
+		$preparedLinkChange = $this->hardDeleteService->prepareDelete($documentIds);
 		$connection = Application::getConnection();
 		$connection->startTransaction();
 		try
 		{
-			$cleanupPayload = $this->hardDeleteService->deleteByDocumentIds($documentIds);
+			$cleanupPayload = $this->hardDeleteService->deleteByDocumentIds($documentIds, $preparedLinkChange);
 			$connection->commitTransaction();
 		}
 		catch (\Throwable $e)

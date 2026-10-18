@@ -18,7 +18,7 @@ use Bitrix\Note\Public\Command\RemoveFavoriteCommand;
 use Bitrix\Note\Public\Provider\FavoriteProvider;
 
 /**
- * [P3.T4 / API-01..03] Personal favorites: composition and manual order of one user's list.
+ * Personal favorites: composition and manual order of one user's list.
  *
  * Adding requires LEVEL_VIEW on the target - only something visible can be starred - plus the same
  * two exclusions the listing applies: neither a collection's main document nor a trashed document may
@@ -48,7 +48,7 @@ class FavoriteController extends Controller
 	}
 
 	/**
-	 * [API-04] One page of the caller's own list, ordered (POSITION DESC, ID DESC). The end of the
+	 * One page of the caller's own list, ordered (POSITION DESC, ID DESC). The end of the
 	 * list is `nextCursor === null` - never the number of returned rows, which the visibility and
 	 * notification filters may leave short.
 	 *
@@ -74,7 +74,7 @@ class FavoriteController extends Controller
 	}
 
 	/**
-	 * [API-01] Adds the target to the caller's favorites. `position` is the ordinal of the insertion
+	 * Adds the target to the caller's favorites. `position` is the ordinal of the insertion
 	 * point (1 is the topmost row); without it the row goes on top. Idempotent.
 	 */
 	public function addAction(string $entityType, int $entityId, ?int $position = null): ?array
@@ -114,7 +114,7 @@ class FavoriteController extends Controller
 	}
 
 	/**
-	 * [API-02] Removes the target from the caller's favorites together with the positive subscription
+	 * Removes the target from the caller's favorites together with the positive subscription
 	 * on it, and returns what was taken away so a caller can put it back.
 	 */
 	public function removeAction(string $entityType, int $entityId): ?array
@@ -141,7 +141,7 @@ class FavoriteController extends Controller
 	}
 
 	/**
-	 * [API-03] Reorders one row of the caller's list. `position` is the ordinal of the target
+	 * Reorders one row of the caller's list. `position` is the ordinal of the target
 	 * insertion point.
 	 */
 	public function moveAction(string $entityType, int $entityId, ?int $position = null): ?array
@@ -200,7 +200,7 @@ class FavoriteController extends Controller
 	}
 
 	/**
-	 * [API-01] Only a document a listing can display may be starred: FavoriteListService drops the
+	 * Only a document a listing can display may be starred: FavoriteListService drops the
 	 * collection's main document (the hidden carrier of the knowledge base description, edited in the
 	 * "about" tab) and everything in the recycle bin, so a row on either would just hold a place in the
 	 * personal list and carry a subscription. Refused with its own code - silence would look like

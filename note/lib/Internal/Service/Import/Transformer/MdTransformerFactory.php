@@ -13,6 +13,7 @@ class MdTransformerFactory
 		return match ($sourceType)
 		{
 			'outline' => new OutlineMdTransformer(),
+			'landing' => new LandingMdTransformer(),
 			'wiki' => new WikiMdTransformer(),
 			default => throw new SystemException('No MD transformer for source type: ' . $sourceType),
 		};

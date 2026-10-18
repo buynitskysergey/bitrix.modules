@@ -8,7 +8,6 @@ use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\BIConnector\KeyManager;
-use Bitrix\Main\ErrorCollection;
 use Bitrix\BIConnector\KeyTable;
 use Bitrix\BIConnector\Integration\Superset\Integrator\IntegratorFactory;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
@@ -20,7 +19,6 @@ use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
 use Bitrix\Rest\AppTable;
 use Bitrix\Rest\Engine\ActionFilter\AuthType;
-use Bitrix\BIConnector\KeyUserTable;
 
 /**
  * Class Key
@@ -70,15 +68,15 @@ class Key extends Controller
 				'USER_ID' => $fields['USER_ID'],
 				'ACCESS_KEY' => $fields['ACCESS_KEY'] ?? '',
 				'ACTIVE' => ($fields['ACTIVE'] ?? 'N') === 'Y',
-			]
+			],
 		);
-		if ($res instanceof ErrorCollection)
+		if (!$res->isSuccess())
 		{
-			$result = $this->prepareErrorsForRest('ADD', $res);
+			$result = $this->prepareErrorsForRest('ADD', $res->getErrorCollection());
 		}
 		else
 		{
-			$result = (int)$res;
+			$result = (int)($res->getData()['ID'] ?? 0);
 		}
 
 		return $result;
@@ -247,16 +245,18 @@ class Key extends Controller
 			);
 			if ($item = $list->fetch())
 			{
-				KeyUserTable::deleteByFilter(
-					[
-						'=KEY_ID' => $item['ID'],
-					]
-				);
-
-				$deleteResult = KeyTable::delete($item['ID']);
+				$deleteResult = KeyManager::deleteKey((int)$item['ID']);
 				if (!$deleteResult->isSuccess())
 				{
-					$result = $this->prepareErrorsForRest('DELETE', $deleteResult->getErrorCollection());
+					if (
+						$deleteResult->getErrorCollection()->getErrorByCode(KeyManager::ERROR_KEY_NOT_FOUND) === null
+					)
+					{
+						$result = $this->prepareErrorsForRest(
+							'DELETE',
+							$deleteResult->getErrorCollection(),
+						);
+					}
 				}
 				else
 				{
@@ -453,7 +453,7 @@ class Key extends Controller
 		$response = $integrator->changeBiconnectorToken($accessKey);
 		if ($response->hasErrors())
 		{
-			SupersetKeyManager::deleteKey($accessKey);
+			SupersetKeyManager::deleteAccessKey($accessKey);
 
 			$this->addError(new Error('Failed to update token in Superset'));
 

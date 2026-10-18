@@ -178,7 +178,7 @@ final class CTaskElapsedItem extends CTaskSubItemAbstract
 		/** @noinspection PhpDeprecationInspection */
 		$rsData = CTaskElapsedTime::GetList(
 			array(),
-			array('ID' => (int) $itemId)
+			array('ID' => (int)$itemId, 'TASK_ID' => (int)$taskId)
 		);
 
 		if (is_object($rsData) && ($arData = $rsData->fetch()))

@@ -47,6 +47,8 @@ use Bitrix\Tasks\V2\Internal\LoggerInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ChatRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\CheckListRevisionRepository;
+use Bitrix\Tasks\V2\Internal\Repository\CheckListRevisionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListUserOptionRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListUserOptionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CounterRepository;
@@ -247,6 +249,9 @@ return [
 		],
 		CheckListRepositoryInterface::class => [
 			'className' => CheckListRepository::class,
+		],
+		CheckListRevisionRepositoryInterface::class => [
+			'className' => CheckListRevisionRepository::class,
 		],
 		CheckListUserOptionRepositoryInterface::class => [
 			'className' => CheckListUserOptionRepository::class,

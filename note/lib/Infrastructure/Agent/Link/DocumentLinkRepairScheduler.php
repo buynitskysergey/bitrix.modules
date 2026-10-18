@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Agent\Link;
 
 /**
- * [P2.T6] Hands a failed rebuild to {@see DocumentLinkRepairAgent}.
+ * Hands a failed rebuild to {@see DocumentLinkRepairAgent}.
  *
  * A thin seam on purpose: it keeps
  * {@see \Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService} — which lives in Internal and

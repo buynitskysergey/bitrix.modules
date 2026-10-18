@@ -112,6 +112,7 @@ class Auth
 				if ($otpParams = Otp::getDeferredParams())
 				{
 					$result["otpType"] = $otpParams['OTP_TYPE'];
+					$result["otpRequiredByMandatory"] = Otp::isOtpRequiredByMandatory();
 
 					$portalUserId = self::resolvePortalUserId($otpParams);
 					if ($portalUserId !== null)

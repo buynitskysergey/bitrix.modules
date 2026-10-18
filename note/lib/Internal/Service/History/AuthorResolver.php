@@ -13,7 +13,7 @@ use CSite;
 use CUser;
 
 /**
- * [P2.T3] Batch-resolves USER_ID -> {id, name, avatar} for the activity feed
+ * Batch-resolves USER_ID -> {id, name, avatar} for the activity feed
  * (actor + co-authors), privacy-safe: a deleted or blocked user never leaks
  * name/photo, only a neutral "unavailable" placeholder — mirrors the
  * deleted/no_access split in Mention\Resolver\UserMentionResolver.

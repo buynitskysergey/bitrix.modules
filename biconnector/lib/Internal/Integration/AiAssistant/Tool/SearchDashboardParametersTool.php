@@ -35,6 +35,7 @@ final class SearchDashboardParametersTool extends BaseBiTool
 				'dashboardId' => [
 					'type' => 'integer',
 					'description' => 'Dashboard ID from the list_dashboards tool result.',
+					'minimum' => 1,
 				],
 				'search' => [
 					'type' => 'string',

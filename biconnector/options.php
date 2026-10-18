@@ -5,6 +5,7 @@
 
 use Bitrix\BIConnector\Integration\Superset\SelfHostedConnectionService;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
+use Bitrix\BIConnector\Internal\Services\Concurrency\QuerySlotManager;
 use Bitrix\BIConnector\Superset\Logger\Logger;
 use Bitrix\BIConnector\Superset\Selfhost\License\LicenseLinks;
 use Bitrix\BIConnector\Superset\Selfhost\License\SelfHostedAvailability;
@@ -33,6 +34,7 @@ if ($canWrite || $canRead)
 
 	$allOptions = [
 		['gds_deployment_id', Loc::getMessage('BIC_OPTIONS_GDS_DEPLOYMENT_ID'), ['text', '70']],
+		['bi_builder_concurrency_limit', Loc::getMessage('BIC_OPTIONS_BI_BUILDER_CONCURRENCY_LIMIT'), ['text', '20']],
 	];
 
 	$isBoxed = !ModuleManager::isModuleInstalled('bitrix24');
@@ -158,6 +160,11 @@ if ($canWrite || $canRead)
 			if ($option[2][0] === 'checkbox' && $val !== 'Y')
 			{
 				$val = 'N';
+			}
+
+			if ($name === 'bi_builder_concurrency_limit' && $val !== '')
+			{
+				$val = (string)min(max((int)$val, 1), QuerySlotManager::MAX_SLOT_COUNT);
 			}
 
 			if ($val === $biconnector_default_option[$name])

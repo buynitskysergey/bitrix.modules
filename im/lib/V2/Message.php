@@ -160,6 +160,8 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	/** Display message as a system notification. */
 	protected bool $isSystem = false;
 
+	protected bool $sentFromUi = false;
+
 	protected ?UrlItem $url = null;
 
 	protected int $botId = 0;
@@ -253,6 +255,18 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 	public function isSystem(): bool
 	{
 		return $this->isSystem;
+	}
+
+	public function markSentFromUi(bool $flag): self
+	{
+		$this->sentFromUi = $flag;
+
+		return $this;
+	}
+
+	public function isSentFromUi(): bool
+	{
+		return $this->sentFromUi;
 	}
 
 	public function isDisappearing(): bool
@@ -1537,6 +1551,10 @@ class Message implements ArrayAccess, RegistryEntry, ActiveRecord, RestEntity, P
 			'SYSTEM' => [
 				'set' => 'markAsSystem', /** @see Message::markAsSystem */
 				'get' => 'isSystem', /** @see Message::isSystem */
+			],
+			'SENT_FROM_UI' => [
+				'set' => 'markSentFromUi', /** @see Message::markSentFromUi */
+				'get' => 'isSentFromUi', /** @see Message::isSentFromUi */
 			],
 			'PARAMS' => [
 				'set' => 'setParams', /** @see Message::setParams */

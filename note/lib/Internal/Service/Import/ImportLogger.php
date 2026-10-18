@@ -61,6 +61,17 @@ class ImportLogger
 			return Loc::getMessage('NOTE_IMPORT_ERROR_DOC_CONTENT_SAVE_FAILED');
 		}
 
+		return self::unexpectedErrorReason();
+	}
+
+	/**
+	 * The reason a failure with nothing recognisable about it is told by. Named on its own because a
+	 * failure does not always arrive as an exception - a step can come back with errors of its own - and
+	 * whatever those say is about the code, not about the base being converted: the log keeps the words,
+	 * the screen gets this.
+	 */
+	public static function unexpectedErrorReason(): string
+	{
 		return Loc::getMessage('NOTE_IMPORT_ERROR_UNEXPECTED');
 	}
 }

@@ -63,13 +63,11 @@ $jsConfig = [
 		'js' => [
 			$pathJS . '/ui/tool/action_dialog.js'
 		],
-		'css' => [
-			$pathCSS . '/ui/tool/action_dialog.css',
-		],
 		'rel' => [
 			'polyfill',
-			'popup',
 			'landing.loc',
+			'ui.dialogs.messagebox',
+			'ui.buttons'
 		],
 		'lang' => $pathLang . '/js/action_dialog.php'
 	],

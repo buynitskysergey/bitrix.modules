@@ -12,13 +12,15 @@ class AutoTaskStatus extends BaseEvent
 {
 	protected Status $status;
 	protected Message $message;
+	protected int $initiatorId;
 	protected bool $sendImmediately;
 
-	public function __construct(Message $message, Status $status, bool $sendImmediately = false)
+	public function __construct(Message $message, int $initiatorId, Status $status, bool $sendImmediately = false)
 	{
 		parent::__construct();
 
 		$this->message = $message;
+		$this->initiatorId = $initiatorId;
 		$this->status = $status;
 		$this->sendImmediately = $sendImmediately;
 	}
@@ -40,7 +42,12 @@ class AutoTaskStatus extends BaseEvent
 			return 'voiceNote';
 		}
 
-		return 'videoNote';
+		if ($this->message->isVideoNote())
+		{
+			return 'videoNote';
+		}
+
+		return 'message';
 	}
 
 	protected function getType(): EventType
@@ -50,7 +57,7 @@ class AutoTaskStatus extends BaseEvent
 
 	protected function getRecipients(): array
 	{
-		return [$this->message->getAuthorId()];
+		return [$this->initiatorId];
 	}
 
 	public function shouldSendToOnlySpecificRecipients(): bool

@@ -12,7 +12,7 @@ use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\Type\DateTime;
 
 /**
- * [P1.T1 / SQL-01] One row per (source document, target document) link found in the source's
+ * One row per (source document, target document) link found in the source's
  * content, rewritten as a whole set by DocumentLinkRepository on the
  * UNIQUE(SOURCE_ID, TARGET_ID) index.
  *
@@ -66,6 +66,12 @@ class DocumentLinkTable extends DataManager
 				'SOURCE',
 				DocumentTable::class,
 				['=this.SOURCE_ID' => 'ref.ID'],
+				['join_type' => 'LEFT'],
+			),
+			new Reference(
+				'TARGET',
+				DocumentTable::class,
+				['=this.TARGET_ID' => 'ref.ID'],
 				['join_type' => 'LEFT'],
 			),
 		];

@@ -268,6 +268,9 @@ return [
 			'humanresources.intergation.pull.pushMessageService' => [
 				'className' => \Bitrix\HumanResources\Integration\Pull\PushMessageService::class,
 			],
+			'humanresources.integration.bizproc.processLauncher' => [
+				'className' => \Bitrix\HumanResources\Integration\Bizproc\ProcessLauncher::class,
+			],
 			'humanresources.access.authProvider.structureAuthProvider' => [
 				'className' => \Bitrix\HumanResources\Access\AuthProvider\StructureAuthProvider::class,
 			],

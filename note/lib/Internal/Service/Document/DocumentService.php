@@ -16,7 +16,9 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
 use Bitrix\Note\Internal\Service\Document\Position\PositionCalculator;
 use Bitrix\Note\Internal\Service\DocumentFileService;
+use Bitrix\Note\Internal\Service\File\DiskAttachmentSyncService;
 use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
+use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 use Bitrix\Note\Internal\Service\User\SystemUser;
 use Bitrix\Note\Internal\Util\IdNormalizer;
@@ -31,6 +33,8 @@ class DocumentService
 		private readonly CollectionRepository $collectionRepository = new CollectionRepository(),
 		private readonly SubtreeAclReconciler $subtreeAclReconciler = new SubtreeAclReconciler(),
 		private readonly DocumentLinkIndexService $documentLinkIndexService = new DocumentLinkIndexService(),
+		private readonly DiskAttachmentSyncService $diskAttachmentSyncService = new DiskAttachmentSyncService(),
+		private readonly RecycleBinFilter $recycleBinFilter = new RecycleBinFilter(),
 	)
 	{
 	}
@@ -66,7 +70,7 @@ class DocumentService
 			->setIsArchived(false)
 			->setCreatedBy($userId)
 			->setUpdatedBy($userId)
-			// [P1.T4] create() indexes both derived projections (search and links) inline, so the
+			// create() indexes both derived projections (search and links) inline, so the
 			// content build time is recorded and the derived flag stays 'N' — nothing for the agent.
 			->setContentUpdatedAt(new DateTime())
 			->setDerivedStale(false)
@@ -87,7 +91,7 @@ class DocumentService
 			throw new SystemException('Failed to save document');
 		}
 
-		// [P4.T1] Inherit derived rows from every active source covering the new node's branch.
+		// Inherit derived rows from every active source covering the new node's branch.
 		// Fail-closed: a skipped materialisation only under-grants (never over-shares), so it must
 		// not turn a successful create into a failure — but it must not pass silently either. Without
 		// the derived rows the node stays outside the shared subtree for good: the grantee never sees
@@ -117,6 +121,15 @@ class DocumentService
 			// import document, filled through update()) would otherwise stay linkless after backfill.
 			// The rebuild absorbs its own failures, so create() keeps its contract.
 			$this->documentLinkIndexService->rebuild((int)$saved->getId());
+		}
+
+		// A document created with content may already reference files on Disk — an import brings its own
+		// text, a REST caller writes whatever it likes. Empty content is skipped: a row this fresh has no
+		// attachment anything could have to say about, so the lookup would answer nothing every time a
+		// page is created.
+		if ($markdown !== '' && $contentFormat !== DocumentTable::CONTENT_FORMAT_JSON)
+		{
+			$this->syncDiskAttachments((int)$saved->getId(), $markdown, $userId);
 		}
 
 		return $saved;
@@ -190,7 +203,7 @@ class DocumentService
 		;
 		$linksIndexedInline = is_string($markdown);
 
-		// [P1.T4] Stamp the content date only when markdown is actually written (a title-only update does
+		// Stamp the content date only when markdown is actually written (a title-only update does
 		// not rebuild the text). The flag is the exact complement of the inline work: a projection this
 		// path could have rebuilt but did not is handed off to the freshness agent ('Y').
 		if ($markdown !== null)
@@ -237,6 +250,11 @@ class DocumentService
 			$this->documentLinkIndexService->rebuild((int)$saved->getId());
 		}
 
+		if (is_string($markdown) && $derivableFromMarkdown)
+		{
+			$this->syncDiskAttachments((int)$saved->getId(), $markdown, $userId);
+		}
+
 		return $saved;
 	}
 
@@ -254,7 +272,7 @@ class DocumentService
 
 	public function setMarkdown(int $id, string $markdown): void
 	{
-		// [P1.T4] This path rebuilds only the link index below, not full-text search — so it records
+		// This path rebuilds only the link index below, not full-text search - so it records
 		// the content build time but raises IS_DERIVED_STALE='Y' to hand search off to the freshness
 		// agent. UPDATED_AT is intentionally left untouched (updatePartial does not move it).
 		$this->repository->updatePartial($id, [
@@ -263,7 +281,7 @@ class DocumentService
 			'IS_DERIVED_STALE' => DocumentTable::DERIVED_STALE_YES,
 		]);
 
-		// [P2.T4] Every direct write of content lands here — import steps, attachment back-patching,
+		// Every direct write of content lands here - import steps, attachment back-patching,
 		// mention reconciliation, install-time bootstrap — and none of them raises a content-settled
 		// event. The one-shot agent that seeds the index has unregistered itself long before an
 		// import runs, so without this call an imported knowledge base would never get links at all.
@@ -313,7 +331,7 @@ class DocumentService
 			->setIsArchived(false)
 			->setCreatedBy(SystemUser::ID)
 			->setUpdatedBy(SystemUser::ID)
-			// [P1.T4] createAsSystem() indexes both derived projections inline: record the build time,
+			// createAsSystem() indexes both derived projections inline: record the build time,
 			// keep the derived flag 'N'.
 			->setContentUpdatedAt(new DateTime())
 			->setDerivedStale(false)
@@ -355,6 +373,40 @@ class DocumentService
 		return $id;
 	}
 
+	/**
+	 * Brings the document's Disk attachments in line with the text this path has just written.
+	 *
+	 * Both create() and update() rebuild their projections inline and leave the dirty flag down, so the
+	 * freshness agent never looks at what they wrote: without this call a knowledge base filled through
+	 * REST or import would keep tokens for files attached to nothing, and everyone but the file's owner
+	 * would read the block as unavailable. The actor is the author of the write — attaching is an act on
+	 * the file, and Disk checks whose.
+	 *
+	 * The caller decides whether the text is markdown at all: a json (TipTap) payload holds an encoded
+	 * tree the token parser cannot read, and a sync over one would take "no tokens" for "no files" and
+	 * detach everything.
+	 *
+	 * A failure raises the dirty flag rather than failing the write — see
+	 * {@see DiskAttachmentSyncService::syncBestEffort()}, which is where that is decided for every path
+	 * that reconciles after the text is stored.
+	 *
+	 * This path hands over the text it wrote, not the text to reconcile against, and that distinction is
+	 * the whole point: unlike materialization, compaction and overwrite, it holds no projection lock, so
+	 * two writes on the same document can store in one order and reconcile in the other. Reconciling
+	 * against a snapshot would then leave the document showing one file and lending out another. The sync
+	 * therefore reads what is actually stored and treats the text below only as the limit of what this
+	 * author may attach.
+	 */
+	private function syncDiskAttachments(int $documentId, string $markdown, int $userId): void
+	{
+		if ($documentId <= 0)
+		{
+			return;
+		}
+
+		$this->diskAttachmentSyncService->syncBestEffort($documentId, $userId, actorMarkdown: $markdown);
+	}
+
 	private function validateReferencedFileIds(array $markdown, ?array $referencedFileIds): void
 	{
 		$fileIds = is_array($referencedFileIds)
@@ -385,7 +437,7 @@ class DocumentService
 	}
 
 	/**
-	 * [P4.T1] Records a failed inheritance materialisation and queues the covering sources for the
+	 * Records a failed inheritance materialisation and queues the covering sources for the
 	 * durable reconcile agent, so an access hole on a freshly created node closes by itself.
 	 * Best effort by construction: the create has already succeeded and must not be undone here.
 	 */
@@ -425,7 +477,11 @@ class DocumentService
 	}
 
 	/**
-	 * @throws ParentDocumentMismatchException when parent does not exist or lives in another collection.
+	 * A parent has to be a node the new document can actually hang under: it must exist, live in the
+	 * same collection, and be somewhere the subtree is reachable. An archived or trashed parent is
+	 * refused for the same reason as a foreign one - the child would be born outside the tree.
+	 *
+	 * @throws ParentDocumentMismatchException when the parent cannot hold a child.
 	 */
 	private function assertParentBelongsToCollection(?int $parentId, int $collectionId): void
 	{
@@ -434,8 +490,13 @@ class DocumentService
 			return;
 		}
 
-		$parent = $this->repository->getMetaById($parentId, ['ID', 'COLLECTION_ID']);
+		$parent = $this->repository->getMetaById($parentId, ['ID', 'COLLECTION_ID', 'IS_ARCHIVED']);
 		if ($parent === null || (int)$parent->getCollectionId() !== $collectionId)
+		{
+			throw new ParentDocumentMismatchException();
+		}
+
+		if ($parent->getIsArchived() || $this->recycleBinFilter->isInRecycleBin($parentId))
 		{
 			throw new ParentDocumentMismatchException();
 		}

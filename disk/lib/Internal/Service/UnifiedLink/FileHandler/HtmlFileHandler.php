@@ -17,7 +17,7 @@ use Bitrix\Main\SystemException;
  * Opens an html file by its unified link: a trusted portal page with the document in a sandboxed
  * iframe, rendered through the same shell as the office editors.
  */
-class HtmlFileHandler implements HtmlRenderableFileHandler
+class HtmlFileHandler implements HtmlRenderableHandler
 {
 	private HtmlViewerPageService $pageService;
 	private ExceptionHandler $exceptionHandler;
@@ -30,7 +30,7 @@ class HtmlFileHandler implements HtmlRenderableFileHandler
 		$this->exceptionHandler = Application::getInstance()->getExceptionHandler();
 	}
 
-	public function view(): FileHandlerOperationResult
+	public function view(): HandlerOperationResult
 	{
 		$content = $this->pageService->renderPage($this->buildParams());
 		if ($content === '')
@@ -39,14 +39,14 @@ class HtmlFileHandler implements HtmlRenderableFileHandler
 			return $this->createErrorResult('empty render of html viewer page');
 		}
 
-		return FileHandlerOperationResult::createSuccess($content);
+		return HandlerOperationResult::createSuccess($content);
 	}
 
 	/**
 	 * Html is read-only, so a reader whose unified link access level is Edit gets the same page
 	 * instead of an error.
 	 */
-	public function edit(): FileHandlerOperationResult
+	public function edit(): HandlerOperationResult
 	{
 		return $this->view();
 	}
@@ -76,10 +76,10 @@ class HtmlFileHandler implements HtmlRenderableFileHandler
 	 * The reader gets the generic server error page, so the reason is only ever visible in the log —
 	 * the same place the office handlers next door report their failures to.
 	 */
-	private function createErrorResult(string $message): FileHandlerOperationResult
+	private function createErrorResult(string $message): HandlerOperationResult
 	{
 		$this->exceptionHandler->writeToLog(new SystemException($message));
 
-		return FileHandlerOperationResult::createError(new ErrorCollection([new Error($message)]));
+		return HandlerOperationResult::createError(new ErrorCollection([new Error($message)]));
 	}
 }

@@ -7,6 +7,7 @@ namespace Bitrix\Socialnetwork\V2\Internal\Service\Convert;
 use Bitrix\Main\Error;
 use Bitrix\Socialnetwork\Internals\Registry\GroupRegistry;
 use Bitrix\Socialnetwork\Item\Workgroup;
+use Bitrix\Socialnetwork\Provider\GroupProvider;
 use Bitrix\Socialnetwork\V2\Internal\Entity\Convert\ConvertProgress;
 use Bitrix\Socialnetwork\V2\Internal\Entity\Convert\ConvertResult;
 use Bitrix\Socialnetwork\V2\Internal\Entity\Convert\ConvertTrackedHandler;
@@ -49,7 +50,15 @@ class ConvertService
 			return $result->addError(new Error('Group not found'));
 		}
 
-		if ($groupBefore->getType() === Workgroup\Type::Scrum)
+		// A row may hold no type at all, and then only the legacy markers tell a scrum from a project.
+		// Without resolving them a legacy scrum slips past the guard below, and the status service - which
+		// takes the type as a required argument - is handed nothing
+		$typeBefore = $groupBefore->getType()
+			?? GroupProvider::getInstance()->getGroupType($groupId)
+			?? Workgroup\Type::getDefault()
+		;
+
+		if ($typeBefore === Workgroup\Type::Scrum)
 		{
 			return $result->addError(new Error('Scrum group cannot be converted'));
 		}
@@ -61,7 +70,7 @@ class ConvertService
 			return $result->setGroupAfter($groupBefore);
 		}
 
-		$this->statusResolveService->start($progress, $groupBefore->getType());
+		$this->statusResolveService->start($progress, $typeBefore);
 		$this->progressRepository->save($progress);
 
 		try

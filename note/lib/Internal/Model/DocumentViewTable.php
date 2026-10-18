@@ -11,7 +11,7 @@ use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\Type\DateTime;
 
 /**
- * [P3.T1 / SQL-04] One row per (document, user) — last view timestamp. Upserted on
+ * One row per (document, user) - last view timestamp. Upserted on
  * awareness `join`, never appended: the composite PK is both the uniqueness
  * constraint and the merge target for DocumentViewRepository::track().
  *

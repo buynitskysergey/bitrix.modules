@@ -10,11 +10,15 @@ use Bitrix\HumanResources\Type\RelationEntitySubtype;
 use Bitrix\HumanResources\Type\RelationEntityType;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Result;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Loader;
 use Bitrix\Main\UI\EntitySelector\Converter;
 
 class Structure
 {
+	/** Hard limit of NodeRelationService::getUsersNotInRelation(), not a tuning knob */
+	private const USERS_PER_STRUCTURE_QUESTION = 500;
+
 	protected Chat $chat;
 
 	public function __construct(Chat $chat)
@@ -56,6 +60,131 @@ class Structure
 		return Loader::includeModule('humanresources')
 			&& Storage::instance()->isCompanyStructureConverted()
 		;
+	}
+
+	/**
+	 * Whether the company structure still holds the user in this chat through a linked node.
+	 * Returns null when the structure could not be asked at all, so the caller can keep a restriction
+	 * instead of widening rights on an unknown answer.
+	 */
+	public function holdsUser(int $userId): ?bool
+	{
+		return $this->holdsUsers([$userId])[$userId] ?? null;
+	}
+
+	/**
+	 * Batch form of holdsUser() for callers that delete members in a loop: without it every member
+	 * carrying a structure mark costs its own multi-join query on an interactive request.
+	 *
+	 * @param array<int|string> $userIds
+	 * @return array<int, bool|null> the answer of holdsUser() per user id
+	 */
+	public function holdsUsers(array $userIds): array
+	{
+		$userIds = array_values(array_unique(array_map('intval', $userIds)));
+
+		if (empty($userIds))
+		{
+			return [];
+		}
+
+		if (!$this->isStructureAvailable())
+		{
+			return array_fill_keys($userIds, false);
+		}
+
+		$answers = [];
+
+		// The chunk size is the contract of the service (TooMuchDataException), not a tuning knob.
+		foreach (array_chunk($userIds, self::USERS_PER_STRUCTURE_QUESTION) as $chunk)
+		{
+			$chunkAnswers = $this->askStructureAboutUsers($chunk);
+			$answers += $chunkAnswers;
+
+			if (in_array(null, $chunkAnswers, true))
+			{
+				// The chunks left are the same failing call repeated - each heavy, each another warning
+				// in the log - and unknown is what they would answer anyway. Unknown keeps the refusal.
+				return $answers + array_fill_keys($userIds, null);
+			}
+		}
+
+		return $answers;
+	}
+
+	/**
+	 * @param list<int> $userIds
+	 * @return array<int, bool|null>
+	 */
+	private function askStructureAboutUsers(array $userIds): array
+	{
+		try
+		{
+			$usersNotInNodes = Container::getNodeRelationService()->getUsersNotInRelation(
+				RelationEntityType::CHAT,
+				(int)$this->chat->getId(),
+				$userIds,
+			);
+		}
+		catch (\Throwable $exception)
+		{
+			$this->reportStructureFailure($userIds, $exception);
+
+			return array_fill_keys($userIds, null);
+		}
+
+		// Reverse polarity: the service answers with those who are NOT in the linked nodes.
+		$notHeld = array_fill_keys(array_map('intval', $usersNotInNodes), true);
+		$answers = [];
+
+		foreach ($userIds as $userId)
+		{
+			$answers[$userId] = !isset($notHeld[$userId]);
+		}
+
+		return $answers;
+	}
+
+	/**
+	 * Without a trace an operator is left with a refusal and no reason for it - but the trace is
+	 * diagnostics, and a broken logger must not turn a fail-closed refusal into an unhandled exception
+	 * on the deletion path.
+	 *
+	 * @param list<int> $userIds
+	 */
+	private function reportStructureFailure(array $userIds, \Throwable $exception): void
+	{
+		try
+		{
+			$this->writeStructureFailureWarning($userIds, $exception);
+		}
+		catch (\Throwable)
+		{
+			// There is nowhere left to report a broken logger to.
+		}
+	}
+
+	/**
+	 * @param list<int> $userIds
+	 */
+	protected function writeStructureFailureWarning(array $userIds, \Throwable $exception): void
+	{
+		(new LoggerFactory())->createById('im.HumanResources.HoldsUser')?->warning(
+			'Failed to ask the company structure whether it holds the users',
+			[
+				'chatId' => (int)$this->chat->getId(),
+				'userIds' => $userIds,
+				'exception' => $exception->getMessage(),
+			],
+		);
+	}
+
+	/**
+	 * Seam over the static predicate: a subclass can substitute it, the static call cannot be stubbed.
+	 */
+	protected function isStructureAvailable(): bool
+	{
+		return static::isSyncAvailable();
 	}
 
 	public function link(array $structureNodeIds): Result

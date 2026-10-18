@@ -38,5 +38,10 @@ trait SidebarFilterProcessorTrait
 		{
 			$query->where($fieldsMap['MESSAGE_ID'] ?? 'MESSAGE_ID', '>=', $filter['START_ID']);
 		}
+
+		if (isset($filter['END_ID']) && (int)$filter['END_ID'] > 0)
+		{
+			$query->where($fieldsMap['MESSAGE_ID'] ?? 'MESSAGE_ID', '<=', $filter['END_ID']);
+		}
 	}
 }

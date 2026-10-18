@@ -636,7 +636,7 @@ class HrBotMessageService
 		$initiatorUserId = $document->createdById;
 		$initiatorName = $this->memberService->getUserRepresentedName($initiatorUserId);
 
-		return match ($member->role)
+		$message = match ($member->role)
 		{
 			Role::ASSIGNEE => $userIdTo !== $document->createdById
 				? new Im\Messages\InviteToSign\CompanyWithInitiator($userIdFrom, $userIdTo, $initiatorUserId, $initiatorName, $document, $signingLink)
@@ -652,11 +652,15 @@ class HrBotMessageService
 		,
 			Role::SIGNER => match ($providerCode)
 			{
-				ProviderCode::GOS_KEY => new Im\Messages\InviteToSign\Goskey($userIdFrom, $userIdTo, $initiatorUserId, $initiatorName, $document, $signingLink),
-				default => new Im\Messages\InviteToSign\EmployeeSes($userIdFrom, $userIdTo, $initiatorUserId, $initiatorName, $document, $signingLink),
+				ProviderCode::GOS_KEY => new Im\Messages\InviteToSign\Goskey($userIdFrom, $userIdTo, $initiatorUserId, $initiatorName, $document, $signingLink, $document->inviteMessage),
+				default => new Im\Messages\InviteToSign\EmployeeSes($userIdFrom, $userIdTo, $initiatorUserId, $initiatorName, $document, $signingLink, $document->inviteMessage),
 			},
 			default => null,
 		};
+
+		// The card carries the member record it is addressed to, so that the signing domain can find
+		// it again by that key and repaint it once this participant is no longer expected to act.
+		return $message?->setMember($member);
 	}
 
 	/**

@@ -1,81 +1,48 @@
 <?php
-
 declare(strict_types=1);
 
 namespace Bitrix\Disk\Internal\Service\UnifiedLink\SupportPolicy;
 
+use Bitrix\Disk\BaseObject;
 use Bitrix\Disk\File;
+use Bitrix\Disk\Folder;
 use Bitrix\Disk\Internal\Service\UnifiedLink\Configuration;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UniqueCodeBackfiller;
 
 class BaseSupportPolicy implements SupportPolicy
 {
-	/** @var array<int, bool> Cache of supported file types. */
-	private array $supportedFileTypes = [];
-
+	/**
+	 * @param UniqueCodeBackfiller $uniqueCodeBackfiller
+	 */
 	public function __construct(
-		private readonly UniqueCodeBackfiller $uniqueCodeBackfiller,
+		protected readonly UniqueCodeBackfiller $uniqueCodeBackfiller,
 	)
 	{
 	}
 
 	/**
-	 * Checks if the given file has unified link support.
-	 * @param File $file
-	 * @return bool
+	 * {@inheritDoc}
 	 */
-	final public function supports(File $file): bool
+	public function supports(BaseObject $baseObject): bool
 	{
-		return $this->passesBaseSupportChecks($file)
-			&& $this->passesSpecializedChecks($file);
-	}
-
-	/**
-	 * Basic checks common to all support policies.
-	 * Has side effects: backfills the file's unique code.
-	 * @param File $file
-	 * @return bool
-	 */
-	final protected function passesBaseSupportChecks(File $file): bool
-	{
-		$uniqueCode = $file->getUniqueCode();
-		$fileType = (int)$file->getTypeFile();
-
-		$isSetUniqueCode = (string)$uniqueCode !== '';
-		$passesConfigurationChecks = $this->passesConfigurationChecks($fileType);
-
-		if (!$isSetUniqueCode && $passesConfigurationChecks)
+		if (!Configuration::isEnabled())
 		{
-			$isSetUniqueCode = $this->uniqueCodeBackfiller->backfillUniqueCode((int)$file->getId());
+			return false;
 		}
 
-		return $isSetUniqueCode
-			&& $passesConfigurationChecks;
-	}
+		if (!$baseObject instanceof File && !$baseObject instanceof Folder)
+		{
+			return false;
+		}
 
-	/**
-	 * Checks against configuration settings.
-	 * @param int $fileType
-	 * @return bool
-	 */
-	final protected function passesConfigurationChecks(int $fileType): bool
-	{
-		$this->supportedFileTypes[$fileType] ??= (
-			Configuration::isEnabled()
-			&& Configuration::isFileTypeAllowed($fileType)
-		);
+		$uniqueCode = $baseObject->getUniqueCode();
+		$isSetUniqueCode = (string)$uniqueCode !== '';
 
-		return $this->supportedFileTypes[$fileType];
-	}
+		if (!$isSetUniqueCode)
+		{
+			$isSetUniqueCode = $this->uniqueCodeBackfiller->backfillUniqueCode((int)$baseObject->getId());
+		}
 
-	/**
-	 * Additional (specialized) checks.
-	 * Can be extended by descendants if necessary.
-	 * @param File $file
-	 * @return bool
-	 */
-	protected function passesSpecializedChecks(File $file): bool
-	{
-		return true;
+		return $isSetUniqueCode;
 	}
 }

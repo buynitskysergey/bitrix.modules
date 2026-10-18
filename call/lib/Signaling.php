@@ -192,7 +192,7 @@ class Signaling
 		$pushTag = 'IM_CALL_'.$this->call->getId();
 		$push = [
 			'message' => $pushText,
-			'expiry' => 0,
+			'expiry' => $this->getInvitePushExpiry(),
 			'params' => [
 				'ACTION' => 'IMINV_'.$this->call->getId()."_".time()."_".($video ? 'Y' : 'N'),
 				'PARAMS' => [
@@ -931,7 +931,7 @@ class Signaling
 		$pushTag = 'IM_CALL_'.$this->call->getId();
 		$push = [
 			'message' => $pushText,
-			'expiry' => 0,
+			'expiry' => $this->getInvitePushExpiry(),
 			'params' => [
 				'ACTION' => 'IMINV_'.$this->call->getId()."_".time()."_".($video ? 'Y' : 'N'),
 				'PARAMS' => [
@@ -1303,5 +1303,30 @@ class Signaling
 		$this->callInfoCache[$key] = $payload;
 
 		return $payload;
+	}
+
+	/**
+	 * Returns the TTL (in seconds) for the invite push notification.
+	 *
+	 * The TTL is set to twice the ring/invite period so that:
+	 * - The push lives long enough to reach the recipient on a slow network
+	 *   (at least one full invite period as a delivery buffer).
+	 * - Stale invites are guaranteed to expire and not re-surface after the
+	 *   call is finished or declined.
+	 *
+	 * Formula: 2 * periodSeconds (one period + one period buffer).
+	 * Default: 2 * 30 s = 60 s.
+	 *
+	 * The result is clamped to at least 1 second: a misconfigured zero/negative
+	 * invite period must never collapse the TTL back to 0 (the unbounded expiry
+	 * this fix removes).
+	 *
+	 * @return int TTL in seconds, always >= 1.
+	 */
+	private function getInvitePushExpiry(): int
+	{
+		$periodSeconds = (int)ceil(Settings::getCallInvitePeriod() / 1000);
+
+		return max(1, $periodSeconds * 2);
 	}
 }

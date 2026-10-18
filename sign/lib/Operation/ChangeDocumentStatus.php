@@ -16,6 +16,7 @@ use Bitrix\Sign\Service\HrBotMessageService;
 use Bitrix\Sign\Service\Integration\Crm\EventHandlerService;
 use Bitrix\Sign\Service\PullService;
 use Bitrix\Sign\Service\Integration\Im\ImService;
+use Bitrix\Sign\Service\Integration\Im\InviteCardService;
 use Bitrix\Sign\Service\UserService;
 use Bitrix\Sign\Service\Sign\LegalLogService;
 use Bitrix\Sign\Service\Sign\MemberService;
@@ -42,6 +43,7 @@ final class ChangeDocumentStatus implements Contract\Operation
 	private readonly UserService $userService;
 	private readonly AnalyticService $analyticService;
 	private readonly HcmLinkService $hcmLinkService;
+	private readonly InviteCardService $inviteCardService;
 
 	/**
 	 * @param bool $initiatorIsUnknown the status change repeats what already happened elsewhere - in the
@@ -57,6 +59,7 @@ final class ChangeDocumentStatus implements Contract\Operation
 	)
 	{
 		$container = Container::instance();
+		$this->inviteCardService = $container->getInviteCardService();
 		$this->documentRepository = $container->getDocumentRepository();
 		$this->eventHandlerService = $container->getEventHandlerService();
 		$this->pullService = $container->getPullService();
@@ -151,6 +154,17 @@ final class ChangeDocumentStatus implements Contract\Operation
 			);
 
 			$members = $this->memberRepository->listByDocumentId($this->document->id);
+
+			// A document that ended expects nobody to act any more, and this is its last event. Both
+			// endings need it: stopping does not move participants to a finished status at all, and
+			// past a completed document their own status change cannot mark anything either - the
+			// action counts as over before and after it alike. On a completion the call normally finds
+			// every card marked already and costs the lookup and nothing else. Above every early
+			// return below, and on the list loaded here.
+			if (in_array($this->status, Type\DocumentStatus::getFinalStatuses(), true))
+			{
+				$this->inviteCardService->markCompletedForMembers($members);
+			}
 
 			foreach ($members->toArray() as $member)
 			{

@@ -12,7 +12,9 @@ use Bitrix\Landing\Copilot\Generation\Scenario\IScenario;
 use Bitrix\Landing\Copilot\Generation\Scenario\Scenarist;
 use Bitrix\Landing\Copilot\Generation\Timer;
 use Bitrix\Landing\Copilot\Generation\Type\GenerationErrors;
+use Bitrix\Landing\Copilot\Generation\Type\StepStatuses;
 use Bitrix\Landing\Copilot\Model\GenerationsTable;
+use Bitrix\Landing\Copilot\Model\StepsTable;
 use Bitrix\Landing\Copilot\Services\FirstSiteGenerationService;
 use Bitrix\Landing\Copilot\Services\GenerationErrorStatusMapper;
 use Bitrix\Landing\Metrika;
@@ -26,6 +28,11 @@ use Bitrix\Main\Web\Json;
 /**
  * This class is responsible for generating site content using various managers and connectors.
  * It manages the generation process, scenario execution, metrika analytics, and error handling.
+ *
+ * An instance is either full or narrow: initByIdWithoutHtmlBlocks() skips HTML_BLOCKS, every other
+ * initializer reads them. A narrow instance refuses getHtmlBlocks() with \LogicException and keeps
+ * the stored blocks intact on save(), so it must stay inside the read path that asked for it -
+ * re-read with initById() before handing it to code that works with the blocks.
  */
 class Generation
 {
@@ -44,6 +51,8 @@ class Generation
 	private ?array $data = null;
 	/** @var list<Data\HtmlBlock> */
 	private array $htmlBlocks = [];
+	/** False when the instance was initialized without reading HTML_BLOCKS. */
+	private bool $htmlBlocksLoaded = true;
 	private int $step;
 	private int $authorId;
 	private ?DateTime $dateFinished = null;
@@ -149,9 +158,21 @@ class Generation
 
 	/**
 	 * @return list<Data\HtmlBlock>
+	 *
+	 * @throws \LogicException When the instance is a narrow one (initByIdWithoutHtmlBlocks()) and the
+	 *   blocks were never read - a programmer error of the calling path, see the class docblock.
 	 */
 	public function getHtmlBlocks(): array
 	{
+		if (!$this->htmlBlocksLoaded)
+		{
+			// silent [] here would be indistinguishable from "there are none" and would let a
+			// read-modify-write of this instance erase the stored blocks
+			throw new \LogicException(
+				'Generation was initialized without HTML_BLOCKS: use initById() to read them.'
+			);
+		}
+
 		return $this->htmlBlocks;
 	}
 
@@ -169,6 +190,7 @@ class Generation
 		}
 
 		$this->htmlBlocks = array_values($htmlBlocks);
+		$this->htmlBlocksLoaded = true;
 	}
 
 	/**
@@ -350,6 +372,27 @@ class Generation
 	 */
 	public function initById(int $generationId): bool
 	{
+		return $this->initByIdInternal($generationId, true);
+	}
+
+	/**
+	 * Answers like initById(), but skips HTML_BLOCKS - a heavy mediumtext that grows while the site
+	 * is being generated. For read paths that never call getHtmlBlocks(), status polling above all.
+	 *
+	 * The rest of the payload is still read, so this answers about a generation; whether the caller
+	 * may have one at all is findDescriptorById().
+	 *
+	 * @param int $generationId Generation ID.
+	 *
+	 * @return bool True if found and initialized, false otherwise.
+	 */
+	public function initByIdWithoutHtmlBlocks(int $generationId): bool
+	{
+		return $this->initByIdInternal($generationId, false);
+	}
+
+	private function initByIdInternal(int $generationId, bool $withHtmlBlocks): bool
+	{
 		if ($generationId <= 0)
 		{
 			return false;
@@ -362,7 +405,7 @@ class Generation
 				->where('ID', '=', $generationId)
 		;
 
-		return $this->initExists($filter);
+		return $this->initExists($filter, $withHtmlBlocks);
 	}
 
 	/**
@@ -412,16 +455,93 @@ class Generation
 	}
 
 	/**
+	 * Reads the identity of a generation without its payload.
+	 * Answers like initById() about existence, scenario, author and both terminal marks,
+	 * but does not read the heavy fields of the generation.
+	 *
+	 * Cheap enough to run on every request; once the job is known to be theirs,
+	 * initByIdWithoutHtmlBlocks() loads what the answer needs.
+	 *
+	 * @param int $generationId Generation ID.
+	 *
+	 * @return Generation\Descriptor|null Descriptor of the generation, or null when initById() would fail too.
+	 */
+	public static function findDescriptorById(int $generationId): ?Generation\Descriptor
+	{
+		if ($generationId <= 0)
+		{
+			return null;
+		}
+
+		$generation = GenerationsTable::query()
+			->where('ID', '=', $generationId)
+			// SITE_DATA is written as a serialized array when the generation is created, so NULL there
+			// marks a record the initialization path cannot use: initExists() leaves siteData unset and
+			// initScenarist() gives up on it. The predicate keeps the answer of this method equal to the
+			// answer of initById() without reading the heavy fields of the generation
+			->whereNotNull('SITE_DATA')
+			->setSelect(['ID', 'SCENARIO', 'CREATED_BY_ID', 'DATE_FINISHED'])
+			->setLimit(1)
+			->fetch()
+		;
+
+		if (!$generation || !class_exists($generation['SCENARIO']))
+		{
+			return null;
+		}
+
+		return new Generation\Descriptor(
+			id: (int)$generation['ID'],
+			scenarioClass: $generation['SCENARIO'],
+			authorId: (int)$generation['CREATED_BY_ID'],
+			isFinished: ($generation['DATE_FINISHED'] ?? null) instanceof DateTime,
+			hasError: self::hasErroredStep((int)$generation['ID']),
+		);
+	}
+
+	/**
+	 * Tells if a step of the generation ended with an error, without reading the generation itself.
+	 *
+	 * The mark is persisted per step in its own table, indexed by generation, so the answer costs
+	 * one light read. It is not the same predicate as Scenarist::isError(): a row whose step has
+	 * left the scenario map counts here and not there, and that direction only drops a wait for a
+	 * job nothing is going to advance.
+	 *
+	 * @param int $generationId Generation ID.
+	 *
+	 * @return bool True when at least one step of the generation is marked as errored.
+	 */
+	private static function hasErroredStep(int $generationId): bool
+	{
+		$step = StepsTable::query()
+			->setSelect(['ID'])
+			->where('GENERATION_ID', '=', $generationId)
+			->where('STATUS', '=', StepStatuses::Error->value)
+			->setLimit(1)
+			->fetch()
+		;
+
+		return (bool)$step;
+	}
+
+	/**
 	 * Initializes this instance with data from an existing generation matching the filter.
 	 * @param Filter\ConditionTree $filter ORM filter for the query.
+	 * @param bool $withHtmlBlocks False to skip the heavy HTML_BLOCKS field.
 	 *
 	 * @return bool True if found and initialized, false otherwise.
 	 */
-	private function initExists(Filter\ConditionTree $filter): bool
+	private function initExists(Filter\ConditionTree $filter, bool $withHtmlBlocks = true): bool
 	{
+		$select = ['ID', 'SCENARIO', 'STEP', 'SITE_DATA', 'DATA', 'CREATED_BY_ID', 'DATE_FINISHED'];
+		if ($withHtmlBlocks)
+		{
+			$select[] = 'HTML_BLOCKS';
+		}
+
 		$generation = GenerationsTable::query()
 			->where($filter)
-			->setSelect(['ID', 'SCENARIO', 'STEP', 'SITE_DATA', 'DATA', 'HTML_BLOCKS', 'CREATED_BY_ID', 'DATE_FINISHED'])
+			->setSelect($select)
 			->fetch()
 		;
 
@@ -464,7 +584,8 @@ class Generation
 			$this->data = $generation['DATA'];
 		}
 
-		$storedHtmlBlocks = $generation['HTML_BLOCKS'] ?? null;
+		$this->htmlBlocksLoaded = $withHtmlBlocks;
+		$storedHtmlBlocks = $withHtmlBlocks ? ($generation['HTML_BLOCKS'] ?? null) : null;
 		$this->hydrateHtmlBlocks(is_array($storedHtmlBlocks) ? $storedHtmlBlocks : null);
 
 		if (!$this->initScenarist())
@@ -931,9 +1052,14 @@ class Generation
 			'SITE_ID' => $this->siteData->getSiteId(),
 			'SITE_DATA' => $siteData,
 			'DATA' => $this->getData(),
-			'HTML_BLOCKS' => $this->serializeHtmlBlocks(),
 			'CREATED_BY_ID' => $this->getAuthorId(),
 		];
+
+		// an instance initialized without HTML_BLOCKS knows nothing about the stored blocks and must not erase them
+		if ($this->htmlBlocksLoaded)
+		{
+			$fields['HTML_BLOCKS'] = $this->serializeHtmlBlocks();
+		}
 
 		if (isset($this->id) && $this->id)
 		{

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Bitrix\Intranet\Internal\Integration\Extranet;
 
+use Bitrix\Extranet\Service\ServiceContainer;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
+use Bitrix\Main\ObjectNotFoundException;
+use Psr\Container\NotFoundExceptionInterface;
 
 class ExtranetService
 {
@@ -29,5 +32,22 @@ class ExtranetService
 		}
 
 		return \Bitrix\Extranet\PortalSettings::getInstance()->isEnabledCollabersInvitation();
+	}
+
+	public function isCollaber(int $userId): bool
+	{
+		if (!Loader::includeModule('extranet'))
+		{
+			return false;
+		}
+
+		try
+		{
+			return ServiceContainer::getInstance()->getCollaberService()->isCollaberById($userId);
+		}
+		catch (NotFoundExceptionInterface | ObjectNotFoundException | \Error)
+		{
+			return false;
+		}
 	}
 }

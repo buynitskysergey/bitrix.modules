@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\BIConnector;
 
+use Bitrix\BIConnector\Services\ApacheSuperset;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
@@ -500,6 +501,13 @@ class Manager
 			}
 		}
 
+		// Key activity above is tracked always, only the log record itself depends on the logging window.
+		$isExternalService = $this->serviceId !== ApacheSuperset::getServiceId();
+		if ($isExternalService && !ExternalStatLoggerManager::isActive())
+		{
+			return false;
+		}
+
 		$addResult = \Bitrix\BIConnector\LogTable::add($statData);
 		if ($addResult->isSuccess())
 		{
@@ -518,10 +526,13 @@ class Manager
 	 * @param int $count How many data records was processed.
 	 * @param int $size Http response body size in bytes.
 	 * @param bool $isOverLimit True if there was limit over.
+	 * @param array|null $scanStatistics Rows and bytes the source scanned, when it reports them.
+	 *                                   Kept apart from $count: with a delegated aggregation the
+	 *                                   client receives groups while the source scans raw rows.
 	 *
 	 * @return void
 	 */
-	public function endQuery($logId, $count, $size = null, $isOverLimit = false)
+	public function endQuery($logId, $count, $size = null, $isOverLimit = false, ?array $scanStatistics = null)
 	{
 		if (isset($this->stime[$logId]))
 		{
@@ -529,6 +540,8 @@ class Manager
 				'TIMESTAMP_X' => new \Bitrix\Main\Type\DateTime(),
 				'ROW_NUM' => $count,
 				'DATA_SIZE' => $size,
+				'READ_ROWS' => $scanStatistics['readRows'] ?? null,
+				'READ_BYTES' => $scanStatistics['readBytes'] ?? null,
 				'REAL_TIME' => microtime(true) - $this->stime[$logId],
 				'IS_OVER_LIMIT' => $isOverLimit,
 			];

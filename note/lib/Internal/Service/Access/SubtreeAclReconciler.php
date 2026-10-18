@@ -12,13 +12,13 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 
 /**
- * [P3.T3 / ALG-04] Reconciles the derived ACL rows of a source document R against R's CURRENT
+ * Reconciles the derived ACL rows of a source document R against R's CURRENT
  * target state — the set of subtree markers (rows where SOURCE_DOCUMENT_ID == R and
  * DOCUMENT_ID == R). It always converges to the live markers, never to a captured snapshot, so a
  * concurrent narrow that removed a marker wins over an in-flight widen: the widen simply stops
  * materialising the subject that is no longer in the target.
  *
- * [P4.T5] This class is ALSO the single choke-point for narrowing synchronisation across the four
+ * This class is ALSO the single choke-point for narrowing synchronisation across the four
  * tree events. Every entry that can strand derived rows — reparent (move / restore-with-reparent)
  * and source removal (hard-delete) — MUST route through {@see syncOnMove()} / {@see revokeSource()}.
  * Widening is fail-closed (a skip merely under-grants); narrowing is fail-open (a skip over-shares),
@@ -123,7 +123,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T2 / P4.T5] Reparent choke-point. After $movedId's PARENT_ID/COLLECTION_ID have been
+	 * Reparent choke-point. After $movedId's PARENT_ID/COLLECTION_ID have been
 	 * updated, re-align the derived rows of its whole subtree:
 	 *   - NARROW (synchronous, atomic): drop derived rows pushed by ancestor sources that no longer
 	 *     cover the subtree. Internal markers (source inside the subtree) and still-covering ancestors
@@ -143,7 +143,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T5] Batch form of {@see syncOnMove()} for the reparent of several siblings onto ONE parent
+	 * Batch form of {@see syncOnMove()} for the reparent of several siblings onto ONE parent
 	 * (the archive/trash re-hang). Same contract, same transaction requirement — it only removes the
 	 * work that is identical for every moved node: the covering chain of the shared target parent is
 	 * read once, and each covering source is materialised over the union of the subtrees, so its
@@ -197,7 +197,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T1] Materialise every ACTIVE covering source's target onto a freshly created node (widening
+	 * Materialise every ACTIVE covering source's target onto a freshly created node (widening
 	 * only; fail-closed at the call site). Covering sources are ancestor markers on the node's path to
 	 * root (an archived ancestor breaks the chain — no new inheritance under a soft-archived source).
 	 */
@@ -215,7 +215,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T4 / P4.T5] Revoke ALL derived rows pushed by $sourceId across its former subtree (source
+	 * Revoke ALL derived rows pushed by $sourceId across its former subtree (source
 	 * removed / hard-deleted). Addressed by SOURCE_DOCUMENT_ID — descendant rows are NOT reachable by
 	 * deleting the source document's own id, so this is a distinct cascade step. Also sweeps the
 	 * source's own marker row (source == document) harmlessly.
@@ -226,7 +226,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T4 / P4.T5] Batch variant of {@see revokeSource()} for a hard-delete cascade that removes a
+	 * Batch variant of {@see revokeSource()} for a hard-delete cascade that removes a
 	 * whole subtree at once: any deleted document may itself be a source, so its dangling derived rows
 	 * across the (former) subtree are swept in id-bounded chunks.
 	 *
@@ -247,7 +247,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T2] Escalation predicate for the move/restore moderate-gate. Would placing a subtree under
+	 * Escalation predicate for the move/restore moderate-gate. Would placing a subtree under
 	 * $targetParentId hand a positive DERIVED level to any subject that does not already have at least
 	 * that effective level on some node (including a node whose only local row is an explicit none)?
 	 *
@@ -304,7 +304,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T6] Synchronous narrowing + lowering to the current target, with NO widen. Called by the
+	 * Synchronous narrowing + lowering to the current target, with NO widen. Called by the
 	 * durable agent at the start of a source's chunked widen so removals are applied exactly once.
 	 * Safe to re-run.
 	 *
@@ -345,7 +345,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T6] Public target read used by the agent.
+	 * Public target read used by the agent.
 	 *
 	 * @return array<string, int> subject => level (positive only)
 	 */
@@ -355,7 +355,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T6] Subtree descendant ids of a source (root excluded), sorted ascending so the agent can
+	 * Subtree descendant ids of a source (root excluded), sorted ascending so the agent can
 	 * chunk by a cursor on the id.
 	 *
 	 * The walk itself cannot be paginated by that cursor: children are reachable only through their
@@ -384,7 +384,7 @@ class SubtreeAclReconciler
 	}
 
 	/**
-	 * [P4.T6] Public, idempotent widen of a source's target onto an explicit chunk of nodes. The agent
+	 * Public, idempotent widen of a source's target onto an explicit chunk of nodes. The agent
 	 * drives this per cursor chunk; $rootId is excluded defensively (its own row is the marker).
 	 *
 	 * @param array<string, int> $target subject => level

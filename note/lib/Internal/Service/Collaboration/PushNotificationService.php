@@ -46,7 +46,7 @@ class PushNotificationService
 			$params['cursor'] = $cursor;
 		}
 
-		// [EVENT-01] Patch continuity. The id alone cannot express it: b_note_document_updates.ID is a
+		// Patch continuity. The id alone cannot express it: b_note_document_updates.ID is a
 		// table-wide auto-increment, so the patches of one document are numbered with gaps whenever
 		// other documents are edited at the same time. prevPatchId names the previous patch OF THIS
 		// DOCUMENT, so a receiver knows it missed nothing exactly when prevPatchId equals its own
@@ -61,7 +61,7 @@ class PushNotificationService
 			$params['prevPatchId'] = $prevPatchId;
 		}
 
-		// [EVENT-01] Journal waterline: the id below which this document has no journal rows left. A zero
+		// Journal waterline: the id below which this document has no journal rows left. A zero
 		// prevPatchId alone says only "nothing precedes me in the journal", which reads the same whether
 		// the journal was cut below what the receiver had applied or below what it never received; taken
 		// for the former, the receiver advances its cursor over a hole and later persists that gap as the

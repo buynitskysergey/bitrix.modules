@@ -32,7 +32,13 @@ class TaskMapper
 	{
 	}
 
-	public function convertFromTranscribedMessage(array $taskData, Message $message, string $transcribedText): ?Task
+	public function convertFromTranscribedMessage(
+		array $taskData,
+		Message $message,
+		string $transcribedText,
+		int $initiatorId,
+		bool $isMultipleMessages = false,
+	): ?Task
 	{
 		if (!Loader::includeModule('tasks'))
 		{
@@ -45,29 +51,27 @@ class TaskMapper
 			return null;
 		}
 
-		$authorId = $message->getAuthorId();
+		$this->taskService->setContextUser($initiatorId);
 
-		$this->taskService->setContextUser($authorId);
-
-		$author = new User($authorId);
+		$creator = new User($initiatorId);
 
 		$chat = $message->getChat();
 
-		$responsible = $this->participantResolver->resolveResponsible($taskData['responsible'] ?? '', $chat, $authorId);
+		$responsible = $this->participantResolver->resolveResponsible($taskData['responsible'] ?? '', $chat, $initiatorId);
 
 		return new Task(
 			title: $title,
 			description: $this->prepareDescription($taskData['description'] ?? '', $message, $transcribedText),
-			creator: $author,
+			creator: $creator,
 			responsible: $responsible,
-			deadlineTs: $this->prepareDeadline($taskData['deadline'] ?? '', $message->getAuthor()->getTimeZone()),
+			deadlineTs: $this->prepareDeadline($taskData['deadline'] ?? '', \Bitrix\Im\V2\Entity\User\User::getInstance($initiatorId)->getTimezone()),
 			fileIds: !FormV2Feature::isOn() ? $this->taskService->getFileIdsByMessage($message) : [],
 			group: $this->prepareGroup($chat),
 			priority: ($taskData['importance'] ?? false) ? Priority::High : Priority::Average,
 			accomplices: $this->participantResolver->resolveAccomplices($taskData['accomplices'] ?? [], $chat),
 			auditors: $this->prepareAuditors($chat),
 			dependsOn: $this->prepareRelatedTasks($chat),
-			scenarios: $this->prepareScenarios($message),
+			scenarios: $this->prepareScenarios($message, $isMultipleMessages),
 		);
 	}
 
@@ -151,8 +155,14 @@ class TaskMapper
 		return [$taskId];
 	}
 
-	private function prepareScenarios(Message $message): ?Task\ScenarioCollection
+	private function prepareScenarios(Message $message, bool $isMultipleMessages = false): ?Task\ScenarioCollection
 	{
+		if ($isMultipleMessages)
+		{
+			// multiselect: the anchor message type must not mark the task as a voice/video one
+			return null;
+		}
+
 		if ($message->isVoiceNote())
 		{
 			return new Task\ScenarioCollection(Task\Scenario::Voice);

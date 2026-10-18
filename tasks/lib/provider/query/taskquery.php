@@ -3,8 +3,7 @@
 namespace Bitrix\Tasks\Provider\Query;
 
 use Bitrix\Main\ORM\Fields\ExpressionField;
-use Bitrix\Tasks\Access\ActionDictionary;
-use Bitrix\Tasks\Access\TaskAccessController;
+use Bitrix\Tasks\Access\Model\UserModel;
 use Bitrix\Tasks\Provider\Exception\InvalidGroupByException;
 use Bitrix\Tasks\Provider\Exception\InvalidOrderException;
 use Bitrix\Tasks\Provider\Exception\InvalidSelectException;
@@ -94,7 +93,7 @@ class TaskQuery
 			return false;
 		}
 
-		if (TaskAccessController::can($this->userId, ActionDictionary::ACTION_TASK_ADMIN))
+		if (UserModel::createFromId($this->userId)->isAdmin())
 		{
 			return false;
 		}

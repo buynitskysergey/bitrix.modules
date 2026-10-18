@@ -19,10 +19,10 @@ final class VersionCleanupAgent
 	/**
 	 * Deletes content-version snapshots (b_note_document_version) older than the
 	 * configured TTL. b_note_event / b_note_event_author are never touched here — they
-	 * outlive the version snapshot by design (see [P1.T4]); a content_changed event whose
+	 * outlive the version snapshot by design; a content_changed event whose
 	 * VERSION_ID now points at a deleted row simply becomes a non-interactive timeline node.
 	 *
-	 * [P4.T3] After each batch's version rows are gone, sweep the documents touched by that
+	 * After each batch's version rows are gone, sweep the documents touched by that
 	 * batch for files that are now unreachable (no version and no current content references
 	 * them) and delete them (link + CFile) post-commit — mirrors RecycleBinCleanupAgent's
 	 * transaction-then-post-commit-CFile pattern, except version deletion here is already a

@@ -6,6 +6,10 @@ use Bitrix\Mail\Internal\Async\Receiver\MailboxAccessNotificationReceiver;
 use Bitrix\Mail\Internal\Async\Receiver\MailboxMigrationNotificationReceiver;
 use Bitrix\Mail\Internal\Async\Receiver\OrphanedMailboxAutoDisconnectNotificationReceiver;
 use Bitrix\Mail\Internal\Async\Receiver\RepairConnectionRequestChatsReceiver;
+use Bitrix\Mail\Internal\Async\Receiver\ScheduledMessageFailedReceiver;
+use Bitrix\Mail\Internal\Async\Receiver\VacationAutoReplyReceiver;
+use Bitrix\Mail\Internal\Service\Draft\Contract\DraftServiceInterface;
+use Bitrix\Mail\Internal\Service\Draft\DraftService;
 use Bitrix\Mail\Integration\UI\EntitySelector\AddressBookProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailboxProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailCrmRecipientProvider;
@@ -25,6 +29,26 @@ return array(
 		),
 		'readonly' => true,
 	),
+	'services' => [
+		'value' => [
+			DraftServiceInterface::class => [
+				'className' => DraftService::class,
+			],
+		],
+		'readonly' => true,
+	],
+	'ui.uploader' => [
+		'value' => [
+			'allowUseControllers' => true,
+		],
+		'readonly' => true,
+	],
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Mail\\Public\\Features',
+		],
+		'readonly' => true,
+	],
 	'ui.selector' => [
 		'value' => [
 			'mail.selector'
@@ -91,6 +115,9 @@ return array(
 						'className' => MassConnectUserProvider::class,
 					],
 				],
+				'mail_scheduled_message_failed' => [
+					'handler' => ScheduledMessageFailedReceiver::class,
+				],
 			],
 		],
 		'readonly' => true,
@@ -119,12 +146,28 @@ return array(
 				'mail_connection_request_chats_repair' => [
 					'handler' => RepairConnectionRequestChatsReceiver::class,
 				],
+				'mail_scheduled_message_failed' => [
+					'handler' => ScheduledMessageFailedReceiver::class,
+				],
 				// The only queue of the module on a table of its own: it is the one whose volume
 				// grows with the incoming mail flow, and the one whose pass makes an outgoing
 				// HTTP call per message. The notification queues above stay on the shared table.
 				'mail_message_classify' => [
 					'broker' => 'mail_classify_db',
 					'handler' => ClassifyMailMessageReceiver::class,
+					'limit' => 10,
+					'total_processing_limit' => 500,
+				],
+				// A job per incoming letter of a mailbox on vacation, written inside the sync pass, so it
+				// goes to the queue table of the module and not to the shared one of the portal - the same
+				// reason the classify queue is there, and the broker above is that table.
+				// The budget is what a pass reads and sorts before it picks the new rows, and rows a dead
+				// pass left in "processing" sort ahead of them until they are requeued two days later. A
+				// job here sends a letter, the slowest work of the module, so it leaves the most of those
+				// behind: no less of a budget than the classify queue on the same table.
+				'mail_vacation_auto_reply' => [
+					'broker' => 'mail_classify_db',
+					'handler' => VacationAutoReplyReceiver::class,
 					'limit' => 10,
 					'total_processing_limit' => 500,
 				],

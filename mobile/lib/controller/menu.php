@@ -5,19 +5,25 @@ namespace Bitrix\Mobile\Controller;
 use Bitrix\Main\Engine\ActionFilter\CloseSession;
 use Bitrix\Main\Engine\Controller;
 
+use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Loader;
 use Bitrix\Mobile\Context;
 use Bitrix\Mobile\Menu\MenuList;
 use Bitrix\Mobile\Menu\AhaMoment;
 use Bitrix\Mobile\Menu\Service\MenuListCache;
 use Bitrix\Mobile\Menu\Service\SupportBanners;
+use Bitrix\Mobile\Menu\Service\IntegratorProvider;
+use Bitrix\Mobile\Internal\Dev\ImplementationSpecialistsSandbox;
+use Bitrix\Mobile\Menu\Promo\FloatingPromoProvider;
+use Bitrix\Mobile\Menu\Purchases\PurchasesCardProvider;
+use Bitrix\Mobile\Menu\Tariff\TariffPlateProvider;
 use Bitrix\Mobile\Internal\Integration\HumanResources\SalaryVacationService;
 use Bitrix\Mobile\Provider\CommonUserDto;
 use Bitrix\Mobile\Provider\UserRepository;
 use Bitrix\Mobile\Provider\ThemeProvider;
-use Bitrix\Timeman\Model\Schedule\Schedule;
-use Bitrix\Timeman\Model\Schedule\ScheduleTable;
 use Bitrix\Mobile\Config\Feature;
+use Bitrix\Mobile\Feature\BitrixAnswersFeature;
+use Bitrix\Mobile\Feature\ImplementationSpecialistsFeature;
 use Bitrix\Mobile\Feature\PersonalAccountFeature;
 use Bitrix\StaffTrackMobile\Public\Features\CheckInFeature;
 use Bitrix\StaffTrack\Public\Provider\CheckInProvider;
@@ -33,6 +39,11 @@ class Menu extends Controller
 				],
 			],
 			'getInitialMenuData' => [
+				'+prefilters' => [
+					new CloseSession(),
+				],
+			],
+			'getImplementationSpecialistsList' => [
 				'+prefilters' => [
 					new CloseSession(),
 				],
@@ -75,16 +86,6 @@ class Menu extends Controller
 
 		$canUseTimeMan = $this->canUseTimeMan($context);
 
-		$workTime = [];
-		$canManageWorkTimeOnMobile = !$user->isGuest;
-
-		if ($canUseTimeMan)
-		{
-			$workTime = $this->getWorkTime();
-
-			$canManageWorkTimeOnMobile = $this->canManageWorkTimeOnMobile($userId, $forceRefresh);
-		}
-
 		$checkInData = $this->getCheckInData($user);
 
 		$personalAccount = $this->getPersonalAccount($user);
@@ -93,14 +94,17 @@ class Menu extends Controller
 			'user' => $user,
 			'menuList' => $user->isGuest ? [] : (new MenuList($context, $cache))->build($forceRefresh),
 			'currentShift' => $this->getCurrentShift($user),
-			'workTime' => $workTime,
 			'company' => $this->getCompany($user),
+			'implementationSpecialists' => $this->getImplementationSpecialists($user),
+			'integrator' => $this->getIntegrator($user),
 			'personalAccount' => [
 				'companies' => $personalAccount['companies'],
 			],
 			'helpdeskUrl' => Loader::includeModule('ui') ? \Bitrix\UI\Util::getHelpdeskUrl(true) : null,
 			'supportBotId' => $supportBotId,
 			'supportBanners' => $this->getSupportBanners(),
+			'tariffPlate' => $this->getTariffPlate(),
+			'floatingPromo' => $this->getFloatingPromo($user),
 			'ahaMoment' => $this->getAhaMoment(),
 			'currentTheme' => $currentTheme,
 			'isNewCheckInEnabled' => $checkInData['isNewCheckInEnabled'],
@@ -114,9 +118,10 @@ class Menu extends Controller
 				'canUseSupport' => $supportBotId > 0,
 				'canInvite' => $this->canInvite(),
 				'canUsePersonalAccount' => $personalAccount['canUsePersonalAccount'],
+				'canUsePurchases' => $this->getCanUsePurchases($user),
 				'canUseTelephony' => \Bitrix\Main\Loader::includeModule('voximplant') && \Bitrix\Voximplant\Security\Helper::canCurrentUserPerformCalls(),
 				'shouldShowWhatsNew' => \Bitrix\Mobile\Config\Feature::isEnabled(\Bitrix\Mobile\Feature\WhatsNewFeature::class),
-				'canManageWorkTimeOnMobile' => $canManageWorkTimeOnMobile,
+				'shouldShowBitrixAnswers' => $this->shouldShowBitrixAnswers($user),
 				'canUseSecuritySettings' => $user->isGuest ? false : \Bitrix\Mobile\Config\Feature::isEnabled(\Bitrix\Mobile\Feature\SecuritySettingsFeature::class),
 				'canUseTabPresetSettings' => !$user->isGuest,
 				'canUseNotificationSettings' => !$user->isGuest,
@@ -137,7 +142,7 @@ class Menu extends Controller
 		{
 			$isNewCheckInEnabled =  Feature::isEnabled(CheckInFeature::class);
 			$manualCheckIns = $isNewCheckInEnabled
-				? CheckInProvider::getInstance()->getCurrentUserManualCheckInsByDate($user->id, time())
+				? (new CheckInProvider())->getCurrentUserManualCheckInsByDate($user->id, time())
 				: [];
 		}
 
@@ -197,7 +202,8 @@ class Menu extends Controller
 		}
 
 		return Loader::includeModule('stafftrack')
-			&& \Bitrix\StaffTrack\Feature::isCheckInEnabled();
+			&& \Bitrix\StaffTrack\Feature::isCheckInEnabled()
+			&& \Bitrix\StaffTrack\Feature::isGeoFeaturesAvailableByRegion();
 	}
 
 	private function getSupportBotId(): int
@@ -220,6 +226,16 @@ class Menu extends Controller
 		];
 	}
 
+	private function getTariffPlate(): array
+	{
+		return (new TariffPlateProvider())->getData();
+	}
+
+	private function getFloatingPromo(CommonUserDto $user): array
+	{
+		return (new FloatingPromoProvider($user))->getData();
+	}
+
 	private function canInvite(): bool
 	{
 		return (
@@ -231,6 +247,8 @@ class Menu extends Controller
 	private function canUseTimeMan(Context $context): bool
 	{
 		return !$context->extranet
+			&& Loader::includeModule('intranet')
+			&& ToolsManager::getInstance()->checkAvailabilityByToolId('worktime')
 			&& Loader::includeModule('timeman')
 			&& \CTimeMan::CanUse()
 		;
@@ -279,6 +297,128 @@ class Menu extends Controller
 		];
 	}
 
+	private function getImplementationSpecialists(CommonUserDto $user): ?array
+	{
+		if (!$this->passesImplementationSpecialistsGate($user))
+		{
+			return null;
+		}
+
+		// The dev sandbox substitutes the section flags and users, never the rollout gate above it.
+		$sandbox = new ImplementationSpecialistsSandbox($user->id);
+		if ($sandbox->isEnabled())
+		{
+			return $sandbox->getSection();
+		}
+
+		global $USER;
+
+		$canView = (bool)$USER->CanDoOperation('edit_all_users');
+		$canInvite = \Bitrix\Intranet\Invitation::canCurrentUserInvite();
+
+		if (!$canView && !$canInvite)
+		{
+			return null;
+		}
+
+		$provider = new \Bitrix\IntranetMobile\Provider\ImplementationSpecialistProvider();
+
+		$data = $canView
+			? $provider->getSpecialists()
+			: [
+				'users' => [],
+				'totalCount' => 0,
+				'canInviteMore' => $provider->canInviteMore(),
+			];
+
+		return [
+			'canView' => $canView,
+			'canInvite' => $canInvite,
+			'canInviteMore' => $data['canInviteMore'],
+			'canInviteNew' => $canInvite
+				&& $data['canInviteMore']
+				&& \Bitrix\Intranet\Invitation::isNewInvitationAvailable(),
+			'isRenamed' => \Bitrix\Intranet\Public\Service\IntegratorService::createByDefault()->isRenamedIntegrator(),
+			'totalCount' => $data['totalCount'],
+			'users' => $data['users'],
+		];
+	}
+
+	/**
+	 * Full specialists list data (users + per-user companion) fetched lazily when the list opens,
+	 * so the heavy per-user companion loop stays off the menu payload.
+	 *
+	 * @restMethod mobile.Menu.getImplementationSpecialistsList
+	 */
+	public function getImplementationSpecialistsListAction(): array
+	{
+		$empty = ['users' => [], 'extra' => []];
+
+		if (!Loader::includeModule('mobileapp'))
+		{
+			return $empty;
+		}
+
+		$userId = (int)$this->getCurrentUser()?->getId();
+		if (!$userId)
+		{
+			return $empty;
+		}
+
+		$user = $this->getUserData($userId);
+		if (!$user || !$this->passesImplementationSpecialistsGate($user))
+		{
+			return $empty;
+		}
+
+		// Same order as the section: the sandbox substitutes the list data, not the rollout gate.
+		$sandbox = new ImplementationSpecialistsSandbox($userId);
+		if ($sandbox->isEnabled())
+		{
+			return $sandbox->getListData();
+		}
+
+		global $USER;
+		if (!$USER->CanDoOperation('edit_all_users'))
+		{
+			return $empty;
+		}
+
+		return (new \Bitrix\IntranetMobile\Provider\ImplementationSpecialistProvider())->getListData();
+	}
+
+	private function passesImplementationSpecialistsGate(CommonUserDto $user): bool
+	{
+		if (Feature::isDisabled(ImplementationSpecialistsFeature::class))
+		{
+			return false;
+		}
+
+		if ($user->isExtranet || $user->isCollaber || $user->isGuest)
+		{
+			return false;
+		}
+
+		return Loader::includeModule('intranet')
+			&& Loader::includeModule('intranetmobile')
+			&& Loader::includeModule('bitrix24');
+	}
+
+	private function getIntegrator(CommonUserDto $user): ?array
+	{
+		if ($user->isExtranet || $user->isCollaber || $user->isGuest)
+		{
+			return null;
+		}
+
+		return (new IntegratorProvider())->getIntegrator($user);
+	}
+
+	private function getCanUsePurchases(CommonUserDto $user): bool
+	{
+		return (new PurchasesCardProvider())->isVisibleForCurrentUser($user);
+	}
+
 	/**
 	 * Personal account (salary/vacation) company list and its visibility flag.
 	 * A disabled feature flag short-circuits before any humanresources call.
@@ -310,29 +450,18 @@ class Menu extends Controller
 		];
 	}
 
-	private function getWorkTime()
+	/**
+	 * Bitrix.Answers card visibility. The card needs no data yet, so the menu ships the flag only.
+	 * The feature gate stays first, so a disabled feature costs nothing on top of the flag lookup.
+	 */
+	private function shouldShowBitrixAnswers(CommonUserDto $user): bool
 	{
-		if (!\CBXFeatures::IsFeatureEnabled('timeman')
-			|| !\CModule::IncludeModule('timeman')
-			|| !\CTimeMan::CanUse()
-		)
+		if (Feature::isDisabled(BitrixAnswersFeature::class))
 		{
-			return [];
+			return false;
 		}
 
-		if (abs(\CTimeZone::GetOffset()) > BX_TIMEMAN_WRONG_DATE_CHECK)
-		{
-			return ['ERROR' => 'WRONG_DATE'];
-		}
-
-		$runtimeInfo = \CTimeMan::GetRuntimeInfo(false);
-
-		if (empty($runtimeInfo) || !is_array($runtimeInfo))
-		{
-			return [];
-		}
-
-		return $runtimeInfo;
+		return !$user->isExtranet && !$user->isCollaber && !$user->isGuest;
 	}
 
 	private function getAhaMoment(): ?array
@@ -376,55 +505,4 @@ class Menu extends Controller
 		];
 	}
 
-	private function canManageWorkTimeOnMobile(int $userId, bool $forceRefresh = false): bool
-	{
-		$ttl = 60 * 60 * 24 * 7; // week
-		$cacheId = "canManage_workTime_on_mobile_{$userId}";
-		$cachePath = '/mobile/menu/canManageWorkTimeOnMobile/';
-		$cache = \Bitrix\Main\Data\Cache::createInstance();
-
-		if ($forceRefresh)
-		{
-			$cache->clean($cacheId, $cachePath);
-		}
-
-		if ($cache->initCache($ttl, $cacheId, $cachePath))
-		{
-			$vars = $cache->getVars();
-			if (isset($vars['result']))
-			{
-				return (bool)$vars['result'];
-			}
-
-			$cache->clean($cacheId, $cachePath);
-		}
-
-		$scheduleRepository = \Bitrix\Timeman\Service\DependencyManager::getInstance()->getScheduleRepository();
-		$schedules = $scheduleRepository->findSchedulesByUserId($userId);
-
-		if (empty($schedules))
-		{
-			$result = true;
-		}
-		else
-		{
-			$result = true;
-			foreach ($schedules as $schedule)
-			{
-				if (!Schedule::isDeviceAllowed(ScheduleTable::ALLOWED_DEVICES_MOBILE, $schedule))
-				{
-					$result = false;
-					break;
-				}
-			}
-		}
-
-		if ($cache->startDataCache())
-		{
-			$cache->endDataCache(['result' => $result]);
-		}
-
-
-		return $result;
-	}
 }

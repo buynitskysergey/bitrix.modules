@@ -17,7 +17,7 @@ use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 
 /**
- * [API-03] Server-side read of the pruned tree of documents a user can reach WITHOUT any
+ * Server-side read of the pruned tree of documents a user can reach WITHOUT any
  * collection-VIEW grant (document-level access only). Nodes carry just enough to rebuild the
  * hierarchy on the client (id, parentId, title, hasChildren), grouped by their container
  * collection. Access is decided through the shared source-aware DocumentAccessService formula
@@ -179,7 +179,7 @@ final class AccessibleTreeService
 	}
 
 	/**
-	 * [API-03b] ACL-aware direct children of one accessible document. The regular listByParent
+	 * ACL-aware direct children of one accessible document. The regular listByParent
 	 * endpoint cannot serve this section: it requires collection VIEW, which a document-grant
 	 * recipient by definition lacks. Ordering and cursor shape match the collection tree
 	 * (POSITION DESC, ID DESC / {position, id}) so both trees paginate identically, and access is
@@ -338,7 +338,7 @@ final class AccessibleTreeService
 	}
 
 	/**
-	 * [ALG-02] Which of these documents own at least one child this user may see. Same question the
+	 * Which of these documents own at least one child this user may see. Same question the
 	 * listing above answers for its own nodes, asked from outside: a surface that expands a document
 	 * through this namespace (the favorites block) must decide its chevron by what the branch will
 	 * actually hold, not by whether the document has children at all.
@@ -807,7 +807,7 @@ final class AccessibleTreeService
 	}
 
 	/**
-	 * [TPL-01] Star flag of the page: one batch read for every node, never one read per node.
+	 * Star flag of the page: one batch read for every node, never one read per node.
 	 *
 	 * @param int[] $documentIds
 	 * @return array<int, true>

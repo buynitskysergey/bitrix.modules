@@ -100,7 +100,7 @@ class Child extends BaseController
 	): array
 	{
 		return [
-			'tasks' => $subTaskProvider->getTasksWithSubTaskIds($taskIds),
+			'tasks' => $subTaskProvider->getTasksWithSubTaskIds($taskIds, $this->userId),
 		];
 	}
 

@@ -21,6 +21,13 @@ class WidgetVue
 	private const APP_DEBUG_OPTION_NAME = 'widgetvue_debug';
 
 	/**
+	 * The name of the application is written by its vendor and reaches the reader whole: it is the
+	 * accessible name of the frame and it opens every announcement the widget makes. Past a line of
+	 * text a name stops telling one widget from another, so it is cut to one.
+	 */
+	private const FRAME_TITLE_MAX_LENGTH = 100;
+
+	/**
 	 * Prepare manifest.
 	 * @param array $manifest Block's manifest.
 	 * @param Block|null $block Block instance.
@@ -160,6 +167,7 @@ class WidgetVue
 		if ($app && isset($app['ID']))
 		{
 			$vueParams['appId'] = (int)$app['ID'];
+			$vueParams['frameTitle'] = \truncateText((string)($app['APP_NAME'] ?? ''), self::FRAME_TITLE_MAX_LENGTH);
 
 			$vueParams['appAllowedByTariff'] = true;
 			if ($app['PAYMENT_ALLOW'] !== 'Y')

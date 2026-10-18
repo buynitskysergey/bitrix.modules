@@ -16,7 +16,7 @@ use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P2.T3 / API-01] Bulk archive of a tree selection in the
+ * Bulk archive of a tree selection in the
  * active section. Requires MANAGE on each document's owning collection — documents the user
  * cannot manage are reported as skippedByAccessCount, never as an error.
  *

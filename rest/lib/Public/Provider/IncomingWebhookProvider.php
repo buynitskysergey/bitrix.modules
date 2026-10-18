@@ -79,6 +79,7 @@ class IncomingWebhookProvider
 			dateCreate: $webhook->getDateCreate(),
 			dateLogin: $webhook->getDateLogin(),
 			lastIp: $webhook->getLastIp(),
+			dateExpire: $webhook->getDateExpire(),
 		);
 	}
 }

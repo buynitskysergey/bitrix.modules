@@ -78,7 +78,29 @@ class DownloadAttachmentsStep implements StepInterface
 				$attachmentId = $attachmentIds[$currentFileIndex];
 				$downloadResult = $source->downloadAttachment($attachmentId);
 
-				if ($downloadResult->success)
+				if ($downloadResult->success && ($downloadResult->data['inLanding'] ?? false))
+				{
+					$sourceFileId = (int)($downloadResult->data['fileId'] ?? 0);
+					$newFileId = $this->fileService->copyFromLanding($sourceFileId, $docId, $userId);
+					if ($newFileId !== null)
+					{
+						$meta = $this->fileService->describeLocalFile($newFileId);
+						$attachmentFileMap[$attachmentId] = [
+							'fileId' => $newFileId,
+							'name' => $meta['name'],
+							'size' => $meta['size'],
+							'mimeType' => $meta['mimeType'],
+						];
+						$option['doneAttachments'] = ($option['doneAttachments'] ?? 0) + 1;
+						$bytesInStep += $meta['size'];
+					}
+					else
+					{
+						ImportLogger::logError("Landing attachment copy failed: sourceFileId={$sourceFileId}, docId={$docId}");
+						$option['failedAttachments'][] = ['docId' => $docId, 'attachmentId' => $attachmentId];
+					}
+				}
+				elseif ($downloadResult->success)
 				{
 					$fileName = $downloadResult->data['fileName'];
 					$contentType = $downloadResult->data['contentType'];

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Bitrix\Tasks\V2\Infrastructure\Controller\Task;
 
 use Bitrix\Tasks\V2\Public\Command\Task\Status\ApproveTaskCommand;
-use Bitrix\Tasks\V2\Public\Command\Task\Status\CompleteTaskCommand;
 use Bitrix\Tasks\V2\Public\Command\Task\Status\DeferTaskCommand;
 use Bitrix\Tasks\V2\Public\Command\Task\Status\DisapproveTaskCommand;
 use Bitrix\Tasks\V2\Public\Command\Task\Status\PauseTaskCommand;
@@ -16,6 +15,7 @@ use Bitrix\Tasks\V2\Infrastructure\Controller\BaseController;
 use Bitrix\Tasks\V2\Internal\Entity;
 use Bitrix\Tasks\V2\Internal\Access\Task\Status\Permission;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\Config\UpdateConfig;
+use Bitrix\Tasks\V2\Internal\Service\Task\Completion\TaskCompletionService;
 use Bitrix\Tasks\V2\Public\Provider\Params\TaskParams;
 use Bitrix\Tasks\V2\Public\Provider\TaskProvider;
 
@@ -202,6 +202,8 @@ class Status extends BaseController
 		#[Permission\Complete]
 		Entity\Task $task,
 		TaskProvider $taskProvider,
+		TaskCompletionService $taskCompletionService,
+		bool $completeWithChecklist = false,
 	): ?Entity\EntityInterface
 	{
 		$config = new UpdateConfig(
@@ -209,10 +211,7 @@ class Status extends BaseController
 			useConsistency: true,
 		);
 
-		$result = (new CompleteTaskCommand(
-			taskId: $task->getId(),
-			config: $config,
-		))->run();
+		$result = $taskCompletionService->complete($task->getId(), $config, $completeWithChecklist);
 
 		if (!$result->isSuccess())
 		{
@@ -251,5 +250,13 @@ class Status extends BaseController
 		}
 
 		return $taskProvider->get(TaskParams::mapFromIds($task->getId(), $this->userId));
+	}
+
+	protected function getInjectionParameters(): array
+	{
+		return [
+			...parent::getInjectionParameters(),
+			$this->getInjectionParameter(TaskCompletionService::class),
+		];
 	}
 }

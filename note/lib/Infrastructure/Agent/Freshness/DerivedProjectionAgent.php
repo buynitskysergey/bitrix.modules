@@ -5,16 +5,19 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Agent\Freshness;
 
 use Bitrix\Main\Application;
+use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\File\DiskAttachmentSyncService;
 use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 /**
- * [P4.T1 / ALG-02 NORMATIVE] The one freshness agent for every derived projection: it drains the
- * per-document dirty flag IS_DERIVED_STALE='Y' and, in a single pass, recomputes both the full-text
- * search index and the outgoing-link index from the current MARKDOWN. Materialization and compaction
- * raise the flag but no longer index inline (see CompactDocumentCommand, P4.T2); create/update/import
- * and overwrite index inline and keep the flag 'N', so they are never picked up here.
+ * The one freshness agent for every derived projection: it drains the
+ * per-document dirty flag IS_DERIVED_STALE='Y' and, in a single pass, recomputes the full-text search
+ * index, the outgoing-link index and the Disk attachments from the current MARKDOWN. Materialization and
+ * compaction raise the flag but no longer index inline (see CompactDocumentCommand); create/update
+ * /import and overwrite rebuild every projection inline, Disk attachments included, and keep the flag
+ * 'N', so they are never picked up here.
  *
  * The flag is the queue — there is no persistent cursor. Processing is clear-then-work: a chunk's flags
  * are cleared BEFORE its documents are reindexed, so a write that lands mid-reindex re-raises 'Y' and is
@@ -131,7 +134,7 @@ final class DerivedProjectionAgent
 	}
 
 	/**
-	 * [P4.T2] Recompute both derived projections from the current MARKDOWN. Failures are absorbed (never
+	 * Recompute every derived projection from the current MARKDOWN. Failures are absorbed (never
 	 * rethrown): a throw would abort the whole tick and strand the rest of the chunk.
 	 *
 	 * A failure does put the document back into the queue, though. The flag was already cleared, so
@@ -142,22 +145,30 @@ final class DerivedProjectionAgent
 	private static function reindexDerived(int $id, DocumentRepository $repository): void
 	{
 		$failed = false;
+		// Whether the text is markdown at all. A legacy json document keeps an encoded TipTap tree in
+		// MARKDOWN, where the token parser finds nothing — the sync would read that as "the text mentions
+		// no files" and detach every attachment the document has. update() keeps such a document out of
+		// this queue, so this only guards the ways in that do not go through it (setMarkdown, a hand-raised
+		// flag), and it stays down until the format is actually known.
+		$attachmentsDerivable = false;
 
 		try
 		{
-			// One read serves both the archived check and the search body: MARKDOWN is a MEDIUMTEXT and
-			// indexDocument() would otherwise fetch it a second time. Uncached, because the archiving may
-			// have happened seconds ago, while this tick was already running.
+			// One read serves the archived check, the search body and the content format: MARKDOWN is a
+			// MEDIUMTEXT and indexDocument() would otherwise fetch it a second time. Uncached, because the
+			// archiving may have happened seconds ago, while this tick was already running.
 			$document = $repository->getMetaById(
 				$id,
-				['ID', 'IS_ARCHIVED', 'TITLE', 'MARKDOWN'],
+				['ID', 'IS_ARCHIVED', 'TITLE', 'MARKDOWN', 'CONTENT_FORMAT'],
 				useCache: false,
 			);
 			if ($document === null)
 			{
-				// Deleted since the claim; the delete cleans both projections itself.
+				// Deleted since the claim; the delete cleans every projection itself.
 				return;
 			}
+
+			$attachmentsDerivable = (string)$document->getContentFormat() !== DocumentTable::CONTENT_FORMAT_JSON;
 
 			// The flag says the text changed; it says nothing about what happened to the document
 			// afterwards. Archiving removes the document from the search index and leaves the flag
@@ -194,6 +205,34 @@ final class DerivedProjectionAgent
 		{
 			$failed = true;
 			self::logError('link rebuild failed for document ' . $id . ': ' . $e->getMessage());
+		}
+
+		if ($attachmentsDerivable)
+		{
+			try
+			{
+				// Disk attachments are a projection of the text too, and this pass keeps the projection from
+				// outliving the text: an attachment nothing mentions any more is dropped here.
+				//
+				// Dropped, but never made: the actor is 0 on purpose. Attaching is an act on the file, so Disk
+				// checks somebody's rights, and the agent has no user of its own to offer. The obvious stand-in
+				// — whoever the document says changed it last — is the wrong one, because materializing text
+				// does not move UPDATED_BY: the text can be written by one person while the field still names
+				// another, and attaching on the named person's rights would let the writer spend rights that
+				// are not theirs on a file they cannot read themselves. A picked file is attached the moment it
+				// is picked, and the editing session settles the rest (see MaterializeDocumentCommand), both
+				// with a real actor; a file that reached the text some other way stays unattached and the block
+				// keeps saying so until a write with an actor picks it up.
+				// Reads the stored text itself rather than reusing the snapshot above: that snapshot may be
+				// seconds old by now, and detaching a file the text mentions again is worse than a tick spent
+				// on a second read.
+				(new DiskAttachmentSyncService())->sync($id, actorId: 0);
+			}
+			catch (\Throwable $e)
+			{
+				$failed = true;
+				self::logError('disk attachment sync failed for document ' . $id . ': ' . $e->getMessage());
+			}
 		}
 
 		if ($failed)

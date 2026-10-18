@@ -15,6 +15,11 @@ final class TargetDocumentAccessGuard
 		int $actorId,
 	): ?bool
 	{
+		if (!self::isEnabled())
+		{
+			return null;
+		}
+
 		if ($rootDocumentId === $resolvedDocumentId)
 		{
 			return null;
@@ -27,5 +32,13 @@ final class TargetDocumentAccessGuard
 		}
 
 		return TaskAccessController::can($actorId, $action, $taskId);
+	}
+
+	/**
+	 * Temporarily disabled: tasks activities must behave as before the guard was introduced.
+	 */
+	private static function isEnabled(): bool
+	{
+		return false;
 	}
 }

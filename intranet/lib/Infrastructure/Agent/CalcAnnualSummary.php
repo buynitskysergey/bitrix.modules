@@ -72,6 +72,7 @@ class CalcAnnualSummary extends Stepper
 		if (count($userIds) < $provider->getUserIdLimit())
 		{
 			$option['providerIndex']++;
+			$option['lastId'] = 0;
 		}
 
 		return self::CONTINUE_EXECUTION;

@@ -385,6 +385,7 @@ class Event extends \IRestService
 			'=APP_ID' => $clientInfo["ID"],
 			'=EVENT_NAME' => $eventName,
 			'=EVENT_HANDLER' => $eventCallback,
+			'=VERSION' => \Bitrix\Rest\Internal\Entity\Event::VERSION_REST_V1,
 		);
 
 		if($eventType === EventTable::TYPE_OFFLINE)
@@ -444,6 +445,7 @@ class Event extends \IRestService
 
 		$filter = array(
 			"=APP_ID" => $clientInfo["ID"],
+			'=VERSION' => \Bitrix\Rest\Internal\Entity\Event::VERSION_REST_V1,
 		);
 
 		if(!\CRestUtil::isAdmin())

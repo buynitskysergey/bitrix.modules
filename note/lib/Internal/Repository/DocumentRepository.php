@@ -9,12 +9,14 @@ use Bitrix\Main\ORM\Data\Result as OrmResult;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\Result;
+use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
+use Bitrix\Note\Internal\Model\DocumentViewTable;
 use Bitrix\Note\Internal\Service\Document\MainDocumentFilter;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 
@@ -270,7 +272,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-01] Shared forward-only projection write used by both materialization and compaction. Runs
+	 * Shared forward-only projection write used by both materialization and compaction. Runs
 	 * under an already-held 'compact' lock (this method does not take the lock itself). Reads the current
 	 * cursor uncached: if the incoming cursor is not ahead of it, a stale writer is trying to overwrite a
 	 * fresher projection — leave MARKDOWN/date/cursor untouched and return false (no rollback). Otherwise
@@ -328,7 +330,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-01] Current materialization cursor, read uncached. NULL means the document has never been
+	 * Current materialization cursor, read uncached. NULL means the document has never been
 	 * materialized. Callers that need it as a lower bound treat NULL as 0.
 	 */
 	public function getMaterializedUptoId(int $id): ?int
@@ -347,7 +349,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-01] Ceiling for a client-supplied materialization cursor, shared by materialization and
+	 * Ceiling for a client-supplied materialization cursor, shared by materialization and
 	 * compaction so the two entry points cannot drift apart. Nothing but the client vouches for the
 	 * cursor: left unclamped, one inflated value lands in MATERIALIZED_UPTO_ID above every real patch id,
 	 * and the forward-only guard then refuses every later projection write, freezing MARKDOWN for good.
@@ -365,7 +367,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-01] The cursor for a writer that replaced the whole text rather than continuing it - overwrite,
+	 * The cursor for a writer that replaced the whole text rather than continuing it - overwrite,
 	 * import, restore of a version. There is nothing to clamp: every patch still in the journal describes
 	 * text that no longer exists, so all of them count as accounted for and the cursor goes straight to the
 	 * top of the range. That is what makes a late materialize from a tab unaware of the overwrite land
@@ -390,7 +392,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-02] Dirty queue for the freshness agent: ids of documents whose derived projections (search,
+	 * Dirty queue for the freshness agent: ids of documents whose derived projections (search,
 	 * links) need a rebuild, in ID order after $afterId, served by IX_NOTE_DOC_DERIVED_STALE. The flag
 	 * itself is the queue — there is no persistent cursor.
 	 *
@@ -416,7 +418,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-02] Clear the derived-stale flag for a whole chunk at once. Called BEFORE the reindex
+	 * Clear the derived-stale flag for a whole chunk at once. Called BEFORE the reindex
 	 * (clear-then-work): a write landing during the reindex re-raises 'Y' and is picked up on the next
 	 * agent tick.
 	 *
@@ -428,7 +430,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-02] Put documents back into the dirty queue — after a failed rebuild, or when the agent runs
+	 * Put documents back into the dirty queue - after a failed rebuild, or when the agent runs
 	 * out of time with part of its chunk untouched. Raising the flag is idempotent and cannot lose a
 	 * concurrent write, which raises the very same value.
 	 *
@@ -662,7 +664,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [P4.T2] One keyset chunk of the document table for the link-index backfill: the id and the
+	 * One keyset chunk of the document table for the link-index backfill: the id and the
 	 * content format, the only two values the pass needs to tell a document it must reindex from a
 	 * legacy json one it must count and leave alone.
 	 *
@@ -698,7 +700,234 @@ class DocumentRepository
 	}
 
 	/**
-	 * [P7.T1 / ALG-03] Batch documentId -> collectionId, the aggregation anchor
+	 * [ALG-01] Documents each of the given users created within the period, counted for the whole
+	 * batch in one grouped query - the annual summary walks users in batches, and a per-user query
+	 * would multiply the index range scans by the size of the batch.
+	 *
+	 * Period bounds are half-open: from is included, to is not. Neither the archive nor the recycle
+	 * bin subtracts from the count - "how many did I create this year" is a historical fact - and
+	 * leaving both joins out is also what keeps the query on IX_NOTE_DOC_AUTHOR alone.
+	 *
+	 * @param int[] $userIds
+	 * @return array<int, int> userId => count, users with no documents are absent
+	 */
+	public function countCreatedByAuthors(array $userIds, Date $from, Date $to): array
+	{
+		$normalizedIds = $this->normalizePositiveIds($userIds);
+		if (empty($normalizedIds))
+		{
+			return [];
+		}
+
+		// GROUP BY CREATED_BY is added by the core: Query::hasAggregation() sees the aggregate in
+		// the select list and groups the non-aggregate fields itself.
+		$query = DocumentTable::query()
+			->registerRuntimeField(new ExpressionField('CNT', 'COUNT(*)'))
+			->setSelect(['CREATED_BY', 'CNT'])
+			->whereIn('CREATED_BY', $normalizedIds)
+			->where('CREATED_AT', '>=', $this->toDateTime($from))
+			->where('CREATED_AT', '<', $this->toDateTime($to))
+		;
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		return $this->fetchCountsByAuthor($query);
+	}
+
+	/**
+	 * [ALG-01] Reads other employees left within the period on documents these users authored.
+	 * One read = one employee on one document: b_note_document_view keeps a single row per
+	 * (document, reader) with the time of the *last* view, so re-opening a document does not add
+	 * a row and the number of openings does not exist in the data at all.
+	 *
+	 * Consequence of keeping only the last view, accepted by the product: this counts employees whose
+	 * *last* view falls inside the period, not everyone who read within it. A reader who opened a
+	 * document in November and came back in December drops out - their single row moved past the upper
+	 * bound. There is no view history to correct this against.
+	 *
+	 * Deliberately NOT one join. A single query would leave the join order to the planner, and the
+	 * only index on the views table starts with DOCUMENT_ID, so "views within the period" alone
+	 * cannot be served by it: entering from the views side means reading almost the whole table on
+	 * every batch. So the documents of the batch are walked by keyset over IX_NOTE_DOC_AUTHOR, and
+	 * their views are counted per chunk of ids - a range scan per document, whatever the planner
+	 * thinks. Chunking also keeps the id list of a prolific author out of one giant IN.
+	 *
+	 * @param int[] $userIds
+	 * @return array<int, int> userId => count, authors with no reads are absent
+	 */
+	public function countReadsByAuthors(array $userIds, Date $from, Date $to): array
+	{
+		$normalizedIds = $this->normalizePositiveIds($userIds);
+		if (empty($normalizedIds))
+		{
+			return [];
+		}
+
+		$fromAt = $this->toDateTime($from);
+		$toAt = $this->toDateTime($to);
+		$counts = [];
+		$afterId = 0;
+
+		while (true)
+		{
+			$authorByDocument = $this->fetchAuthorsByDocumentChunk($normalizedIds, $afterId);
+			if (empty($authorByDocument))
+			{
+				break;
+			}
+
+			$documentIds = array_keys($authorByDocument);
+			$afterId = max($documentIds);
+
+			foreach ($this->countViewsByDocument($documentIds, $fromAt, $toAt) as $documentId => $views)
+			{
+				$author = $authorByDocument[$documentId] ?? null;
+				if ($author !== null)
+				{
+					$counts[$author] = ($counts[$author] ?? 0) + $views;
+				}
+			}
+
+			// The author reading their own document is not a read. The views table knows nothing
+			// about authorship, so own views are subtracted afterwards: the primary key allows one
+			// row per (document, reader), hence at most one subtraction per document.
+			foreach ($this->listOwnViews($documentIds, $normalizedIds, $fromAt, $toAt) as [$documentId, $viewer])
+			{
+				if (($authorByDocument[$documentId] ?? null) === $viewer)
+				{
+					// The key exists by then: an own view inside the period means the document was
+					// viewed inside the period, so the counting above created it. Written without
+					// relying on that anyway - the invariant holds only while both queries carry the
+					// same period, and each of them spells that period out separately.
+					$counts[$viewer] = max(0, ($counts[$viewer] ?? 0) - 1);
+				}
+			}
+
+			if (count($documentIds) < $this->readsChunkSize())
+			{
+				break;
+			}
+		}
+
+		return array_filter($counts, static fn(int $total): bool => $total > 0);
+	}
+
+	/**
+	 * One keyset chunk of the documents these users authored, as documentId => authorId. Period is
+	 * not applied here: a document written before the period still collects reads inside it.
+	 *
+	 * Main documents are cut out: opening the "About the knowledge base" tab physically writes a
+	 * view of that hidden document, and counting it as a read of "my document" would surprise the
+	 * author - they do not consider it a document of theirs.
+	 *
+	 * @param int[] $userIds
+	 * @return array<int, int> documentId => authorId
+	 */
+	private function fetchAuthorsByDocumentChunk(array $userIds, int $afterId): array
+	{
+		$query = DocumentTable::query()
+			->setSelect(['ID', 'CREATED_BY'])
+			->whereIn('CREATED_BY', $userIds)
+			->where('ID', '>', $afterId)
+			->setOrder(['ID' => 'ASC'])
+			->setLimit($this->readsChunkSize())
+		;
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		$authorByDocument = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$authorByDocument[(int)$row['ID']] = (int)$row['CREATED_BY'];
+		}
+
+		return $authorByDocument;
+	}
+
+	/**
+	 * @param int[] $documentIds
+	 * @return array<int, int> documentId => number of views within the period
+	 */
+	private function countViewsByDocument(array $documentIds, DateTime $from, DateTime $to): array
+	{
+		$rows = DocumentViewTable::query()
+			->registerRuntimeField(new ExpressionField('CNT', 'COUNT(*)'))
+			->setSelect(['DOCUMENT_ID', 'CNT'])
+			->whereIn('DOCUMENT_ID', $documentIds)
+			->where('VIEWED_AT', '>=', $from)
+			->where('VIEWED_AT', '<', $to)
+			->fetchAll()
+		;
+
+		$views = [];
+		foreach ($rows as $row)
+		{
+			$views[(int)$row['DOCUMENT_ID']] = (int)$row['CNT'];
+		}
+
+		return $views;
+	}
+
+	/**
+	 * Views these same users left on the documents of the chunk. Cross reads (one author of the
+	 * batch reading another one's document) come back too and are filtered by the caller, which is
+	 * the only place that knows who authored what.
+	 *
+	 * @param int[] $documentIds
+	 * @param int[] $userIds
+	 * @return array<int, array{0: int, 1: int}>
+	 */
+	private function listOwnViews(array $documentIds, array $userIds, DateTime $from, DateTime $to): array
+	{
+		$rows = DocumentViewTable::query()
+			->setSelect(['DOCUMENT_ID', 'USER_ID'])
+			->whereIn('DOCUMENT_ID', $documentIds)
+			->whereIn('USER_ID', $userIds)
+			->where('VIEWED_AT', '>=', $from)
+			->where('VIEWED_AT', '<', $to)
+			->fetchAll()
+		;
+
+		return array_map(
+			static fn(array $row): array => [(int)$row['DOCUMENT_ID'], (int)$row['USER_ID']],
+			$rows,
+		);
+	}
+
+	/**
+	 * Documents per chunk of the annual summary reads walk. Sized to keep the IN list of one chunk
+	 * comfortable for the MySQL 5.6 planner while a batch of ordinary authors still fits in a single
+	 * pass. A method rather than a constant so a test can shrink it and actually walk more than one
+	 * chunk.
+	 */
+	protected function readsChunkSize(): int
+	{
+		return 1000;
+	}
+
+	/**
+	 * @return array<int, int> CREATED_BY => CNT
+	 */
+	private function fetchCountsByAuthor(Query $query): array
+	{
+		$counts = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$counts[(int)$row['CREATED_BY']] = (int)$row['CNT'];
+		}
+
+		return $counts;
+	}
+
+	/**
+	 * The annual summary hands over plain Date bounds; converting them explicitly keeps the
+	 * comparison a datetime one on every driver instead of relying on implicit casting.
+	 */
+	private function toDateTime(Date $value): DateTime
+	{
+		return $value instanceof DateTime ? $value : DateTime::createFromTimestamp($value->getTimestamp());
+	}
+
+	/**
+	 * Batch documentId -> collectionId, the aggregation anchor
 	 * for the notification drainer (a bucket's "which collection is this a mass
 	 * operation on" key). One query for the whole set of unique ENTITY_ID in a
 	 * dedup'd batch — avoids N+1 across the plan.
@@ -895,6 +1124,29 @@ class DocumentRepository
 		;
 	}
 
+	/**
+	 * Sort weights of a branch, heaviest first - the two columns and nothing else.
+	 *
+	 * Same rows getDocumentMetaByParent() answers with, and deliberately not the same query: whoever
+	 * only needs to place a number among its neighbours has no use for eleven columns and a hydrated
+	 * entity per sibling, and a branch can be thousands of rows wide.
+	 *
+	 * @return array<int, array{id: int, position: int}>
+	 */
+	public function getBranchPositions(int $collectionId, ?int $parentId): array
+	{
+		$rows = $this->buildParentQuery($collectionId, $parentId, true)
+			->setSelect(['ID', 'POSITION'])
+			->setCacheTtl(self::ORM_CACHE_TTL)
+			->fetchAll()
+		;
+
+		return array_map(static fn(array $row): array => [
+			'id' => (int)$row['ID'],
+			'position' => (int)$row['POSITION'],
+		], $rows);
+	}
+
 	public function getBranchDocumentsMeta(int $collectionId, ?int $parentId): array
 	{
 		return $this->buildParentQuery($collectionId, $parentId, false)
@@ -951,7 +1203,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [P6.T2 / ALG-02] Full walk up PARENT_ID to the root, with NO archived or
+	 * Full walk up PARENT_ID to the root, with NO archived or
 	 * collection-boundary cutoffs — unlike getDocumentPathToRoot() (used for
 	 * breadcrumbs), a subtree subscriber on an ancestor above an archived branch,
 	 * or above a collection boundary, must still be resolvable. Cycle-safe via a
@@ -996,7 +1248,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [P2.T1] Batch form of getAncestorIds(): walks PARENT_ID level by level for a whole
+	 * Batch form of getAncestorIds(): walks PARENT_ID level by level for a whole
 	 * set of documents, one query per level, so the query count follows the deepest chain
 	 * instead of the size of the set. Same semantics as the single walk - no archived and
 	 * no collection-boundary cutoff, same $maxDepth backstop - and a per-source visited set,

@@ -9,6 +9,8 @@ use Bitrix\Mail\Helper;
 use Bitrix\Mail\Helper\LicenseManager;
 use Bitrix\Mail\Helper\Mailbox;
 use Bitrix\Mail\Helper\Dto\MailboxConnect\MailboxConnectDTO;
+use Bitrix\Mail\Helper\Dto\MailboxConnect\GeneralSettingsPatch;
+use Bitrix\Mail\Internal\Service\Mailbox\GeneralSettingsService;
 use Bitrix\Mail\Helper\Dto\Mailbox\BulkActionResult;
 use Bitrix\Mail\Helper\Mailbox\MailMassConnect;
 use Bitrix\Mail\Helper\Enum\MailboxStatus;
@@ -23,6 +25,7 @@ use Bitrix\Mail\Helper\OAuth;
 use Bitrix\Mail\Integration\HumanResources\NodeMemberService;
 use Bitrix\Mail\MailboxTable;
 use Bitrix\Mail\MailServicesTable;
+use Bitrix\Mail\Public\Service\Message\Conversation\ConversationSettingsService;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\UrlManager;
@@ -67,6 +70,10 @@ class MailboxConnecting extends Controller
 		$bulkActionsFilter = ['+prefilters' => [new MassConnectAccess(), new MailboxGridBulkActionsAccess()]];
 
 		return [
+			'updateGeneralSettings' => ['+prefilters' => [
+				new Main\Engine\ActionFilter\HttpMethod([Main\Engine\ActionFilter\HttpMethod::METHOD_POST]),
+				new Main\Engine\ActionFilter\Csrf(),
+			]],
 			'createPasswordlessRequest' => $massConnectFilter,
 			'validateConnectionSettings' => $massConnectFilter,
 			'resendPasswordlessRequest' => $massConnectFilter,
@@ -189,8 +196,7 @@ class MailboxConnecting extends Controller
 		$mailboxConnector = new MailboxConnector();
 		$result = $mailboxConnectDTO->crmOptions !== null
 			? $mailboxConnector->connectMailboxWithCustomCrm($mailboxConnectDTO)
-			: $mailboxConnector->connectMailboxWithDefaultCrm($mailboxConnectDTO)
-		;
+			: $mailboxConnector->connectMailboxWithDefaultCrm($mailboxConnectDTO);
 		$this->addErrors($mailboxConnector->getErrors());
 
 		$mailboxId = (int)($result['id'] ?? 0);
@@ -199,11 +205,28 @@ class MailboxConnecting extends Controller
 		{
 			if (empty($this->getErrors()))
 			{
+				$this->captureConversationOnboardingEligibility();
 				\CUserOptions::SetOption('mail', 'previous_seen_mailbox_id', $mailboxId);
 			}
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Captures the right to the conversation tour strictly before `previous_seen_mailbox_id` is
+	 * written: that value is the only trace of a visit to Mail made before the release, and the right
+	 * is decided by that trace alone. The capture writes once and never revises itself, so calling it
+	 * from every point that overwrites the trace is safe.
+	 */
+	private function captureConversationOnboardingEligibility(): void
+	{
+		$previousSeenMailboxId = (int)\CUserOptions::getOption('mail', 'previous_seen_mailbox_id', 0);
+
+		(new ConversationSettingsService())->captureOnboardingEligibility(
+			(int)CurrentUser::get()->getId(),
+			$previousSeenMailboxId > 0,
+		);
 	}
 
 	public function connectMailboxByConnectionRequestAction(
@@ -364,6 +387,14 @@ class MailboxConnecting extends Controller
 		return $result !== false;
 	}
 
+	public function updateGeneralSettingsAction(int $mailboxId, array $patch): array
+	{
+		$result = (new GeneralSettingsService(allowCanceled: true))->update($mailboxId, GeneralSettingsPatch::fromArray($patch));
+		$this->addErrors($result->getErrors());
+
+		return $result->isSuccess() ? $result->getData() : [];
+	}
+
 	public function updateMailboxAction(int $mailboxId, MailboxConnectDTO $dto): array
 	{
 		if (!MailboxAccess::hasCurrentUserAccessToEditMailbox($mailboxId))
@@ -374,7 +405,39 @@ class MailboxConnecting extends Controller
 		}
 
 		$mailboxConnector = new MailboxConnector();
-		$result = $mailboxConnector->updateMailbox($mailboxId, $dto);
+		$parameters = [];
+		foreach ($this->getSourceParametersList() ?? [] as $source)
+		{
+			$parameters += $source instanceof \Bitrix\Main\Type\Dictionary ? $source->toArray() : $source;
+		}
+		$parameters += $this->getRequest()->getPostList()->toArray();
+		$parameters += $this->getRequest()->getJsonList()->toArray();
+		$hasExpectedGeneration = array_key_exists('expectedSourceGenerationId', $parameters);
+		$expectedGeneration = $parameters['expectedSourceGenerationId'] ?? null;
+		if (is_string($expectedGeneration) && preg_match('/^(0|[1-9][0-9]*)$/D', $expectedGeneration))
+		{
+			$expectedGeneration = filter_var($expectedGeneration, FILTER_VALIDATE_INT);
+		}
+		if ($expectedGeneration !== null && (!is_int($expectedGeneration) || $expectedGeneration < 0))
+		{
+			$this->addError(new Error('Invalid source generation', GeneralSettingsPatch::ERROR_INVALID_PATCH));
+
+			return [];
+		}
+		$requestedFields = is_array($parameters['mailbox'] ?? null) ? $parameters['mailbox'] : $parameters;
+		if ($parameters !== [])
+		{
+			$dto = MailboxConnectDTO::createFromRequest(new Main\HttpRequest(
+				$this->getRequest()->getServer(), [], $parameters, [], [],
+			));
+		}
+		$result = $mailboxConnector->updateMailbox(
+			$mailboxId,
+			$dto,
+			expectedSourceGenerationId: $expectedGeneration,
+			hasExpectedSourceGenerationId: $hasExpectedGeneration,
+			requestedFields: $parameters === [] ? null : $requestedFields,
+		);
 		$this->addErrors($mailboxConnector->getErrors());
 
 		return $result;
@@ -484,6 +547,7 @@ class MailboxConnecting extends Controller
 		$replaceWithTheCurrentUserName = Loader::includeModule('humanresources');
 
 		$previousSeenMailboxId = (int)\CUserOptions::getOption('mail', 'previous_seen_mailbox_id', 0);
+		$this->captureConversationOnboardingEligibility();
 		$signaturesAvailable = Helper\Config\Feature::isMobileSignaturesAvailable();
 
 		foreach ($mailboxesFullData as $mailbox)
@@ -624,6 +688,7 @@ class MailboxConnecting extends Controller
 	public function getPendingPasswordlessRequestAction(): ?array
 	{
 		$currentUserId = (int)CurrentUser::get()->getId();
+
 		return (new PasswordlessConnectHelper())->getPendingRequestForUser($currentUserId);
 	}
 
@@ -689,14 +754,14 @@ class MailboxConnecting extends Controller
 
 		if($ignoreOld)
 		{
-			$oldIds = MailMessageUidTable::getList(array(
-				'select' => array('ID'),
-				'filter' => array(
+			$oldIds = MailMessageUidTable::getList([
+				'select' => ['ID'],
+				'filter' => [
 					'@ID' => $messIds,
 					'=MAILBOX_ID' => current($mailboxIds),
 					'=IS_OLD' => 'Y',
-				),
-			))->fetchAll();
+				],
+			])->fetchAll();
 
 			foreach ($oldIds as $item)
 			{
@@ -777,6 +842,7 @@ class MailboxConnecting extends Controller
 			if (!$guard->isSuccess())
 			{
 				$this->errorCollection->add($guard->getErrors());
+
 				continue;
 			}
 
@@ -852,6 +918,7 @@ class MailboxConnecting extends Controller
 			if ($id <= 0)
 			{
 				$bulkResult->addSkipped($id, 'Invalid mailbox id');
+
 				continue;
 			}
 
@@ -939,6 +1006,7 @@ class MailboxConnecting extends Controller
 			if ($id <= 0)
 			{
 				$bulkResult->addSkipped($id, 'Invalid mailbox id');
+
 				continue;
 			}
 
@@ -1020,6 +1088,7 @@ class MailboxConnecting extends Controller
 			if ($id <= 0)
 			{
 				$bulkResult->addSkipped($id, 'Invalid mailbox id');
+
 				continue;
 			}
 

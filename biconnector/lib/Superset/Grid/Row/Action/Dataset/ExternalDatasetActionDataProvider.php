@@ -22,13 +22,14 @@ class ExternalDatasetActionDataProvider extends DataProvider
 		$actions = [
 			new OpenDatasetAction(),
 			new ExportCsvDatasetAction(),
-			new DeleteDatasetAction(),
 		];
 
 		if (SupersetInitializer::isSupersetReady())
 		{
 			$actions[] = new CreateExternalDatasetAction();
 		}
+
+		$actions[] = new DeleteDatasetAction();
 
 		return $actions;
 	}

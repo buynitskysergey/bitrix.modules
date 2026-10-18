@@ -10,7 +10,6 @@ use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\EventResult;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\ErrorCollection;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\IO\File;
 use Bitrix\Main\Security\Random;
@@ -232,9 +231,9 @@ class Action
 				'APP_ID' => $appId,
 			]);
 
-			if ($resultSave instanceof ErrorCollection)
+			if (!$resultSave->isSuccess())
 			{
-				foreach ($resultSave->getValues() as $error)
+				foreach ($resultSave->getErrors() as $error)
 				{
 					if ($error instanceof \Bitrix\Main\Error)
 					{

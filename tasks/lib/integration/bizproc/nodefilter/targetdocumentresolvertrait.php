@@ -81,6 +81,17 @@ trait TargetDocumentResolverTrait
 		return $fallbackDocumentType;
 	}
 
+	protected function resolveTargetAccessActorId(): int
+	{
+		$modifiedBy = (int)\CBPHelper::ExtractUsers(
+			$this->ModifiedBy,
+			$this->getRootActivity()->getDocumentId(),
+			true,
+		);
+
+		return $modifiedBy > 0 ? $modifiedBy : (int)($this->workflow?->getStartedBy() ?? 0);
+	}
+
 	private function getTargetDocumentResolver(): ?TargetDocumentResolver
 	{
 		if (!method_exists(Container::class, 'getTargetDocumentResolverRegistry'))

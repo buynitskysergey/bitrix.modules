@@ -88,7 +88,7 @@ function stemming_stop_ru($sWord)
 			foreach (explode(',', STEMMING_STOP_RU) as $word)
 			{
 				$word = trim($word);
-				if ($word <> '')
+				if ($word !== '')
 				{
 					$stop_list[$word] = 0;
 				}
@@ -221,7 +221,7 @@ function stemming_ru($word, $flags = 0)
 	}
 
 	//Step 2: If the word ends with и (i), remove it.
-	if (mb_substr($rv, -1) == 'И')
+	if (mb_substr($rv, -1) === 'И')
 	{
 		$rv = mb_substr($rv, 0, -1);
 	}
@@ -254,11 +254,11 @@ function stemming_ru($word, $flags = 0)
 			$R2++;
 		}
 		//"ОСТЬ", "ОСТ"
-		if ((mb_substr($rv, -4) == 'ОСТЬ') && ($rv_len >= ($R2 + 4)))
+		if ((mb_substr($rv, -4) === 'ОСТЬ') && ($rv_len >= ($R2 + 4)))
 		{
 			$rv = mb_substr($rv, 0, $rv_len - 4);
 		}
-		elseif ((mb_substr($rv, -3) == 'ОСТ') && ($rv_len >= ($R2 + 3)))
+		elseif ((mb_substr($rv, -3) === 'ОСТ') && ($rv_len >= ($R2 + 3)))
 		{
 			$rv = mb_substr($rv, 0, $rv_len - 3);
 		}

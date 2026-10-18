@@ -213,7 +213,7 @@ abstract class AbstractRelationTaskProvider
 		return ['ids' => $taskIds, 'statuses' => $statuses];
 	}
 
-	public function getTasksWithSubTaskIds(array $ids): TaskCollection
+	public function getTasksWithSubTaskIds(array $ids, int $userId): TaskCollection
 	{
 		Collection::normalizeArrayValuesByInt($ids, false);
 
@@ -222,7 +222,15 @@ abstract class AbstractRelationTaskProvider
 			return new TaskCollection();
 		}
 
+		$ids = $this->filterByReadAccess($ids, $userId);
+
+		if (empty($ids))
+		{
+			return new TaskCollection();
+		}
+
 		$subTaskIds = $this->subTaskRepository->getSubTaskIdsByParentIds($ids);
+		$subTaskIds = $this->filterSubTaskIdsByReadAccess($subTaskIds, $userId);
 
 		return $this->relationTaskMapper->mapSubTaskIdsCollection(
 			ids: $ids,

@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 
 class SavePatchCommand extends AbstractCommand
 {
-	// [API-02] Server-side journal backstop: past this many rows the sender is told to compact. Sized
+	// Server-side journal backstop: past this many rows the sender is told to compact. Sized
 	// so normal editing (client compacts ~every 3 min) never trips it, only a stuck journal does; also
 	// caps the replay cost when the document is reopened. Server-owned — a client counter drifts on a
 	// lost pull message. Tuned by measurement.
@@ -56,12 +56,12 @@ class SavePatchCommand extends AbstractCommand
 			return $result;
 		}
 
-		// [EVENT-01] Id of the just-inserted row: pushed to peers so they can detect a gap, and returned
+		// Id of the just-inserted row: pushed to peers so they can detect a gap, and returned
 		// to the sender (who does not receive its own patch over pull) so it can advance its applied
 		// cursor and form the materialization uptoId.
 		$patchId = (int)($addResult->getData()['id'] ?? 0);
 
-		// [EVENT-01] The predecessor within THIS document is what a receiver compares against its own
+		// The predecessor within THIS document is what a receiver compares against its own
 		// cursor to tell "nothing missed" from "there is a gap" — the ids themselves cannot answer that,
 		// coming from a table-wide auto-increment shared with every other document being edited. Read
 		// AFTER the insert and anchored to the new id: taken before, two concurrent saves would both see
@@ -80,7 +80,7 @@ class SavePatchCommand extends AbstractCommand
 			$journalBaseId,
 		);
 
-		// [API-02] Journal size is measured server-side after the insert; the sender (guaranteed present
+		// Journal size is measured server-side after the insert; the sender (guaranteed present
 		// and write-capable) is the only actor that can build markdown, so it carries the compact hint.
 		// Asked as a threshold probe, not a full count: this runs on every patch, and counting a journal
 		// that keeps growing would make a long editing run cost more with every keystroke batch.
@@ -93,7 +93,7 @@ class SavePatchCommand extends AbstractCommand
 			// own write from here: a prevPatchId ahead of its cursor means it missed someone else's
 			// patch and must not report the new id as "everything applied up to".
 			'prevPatchId' => $prevPatchId,
-			// [EVENT-01] Journal waterline, see readJournalBaseId(). Meaningful only together with a
+			// Journal waterline, see readJournalBaseId(). Meaningful only together with a
 			// zero prevPatchId; 0 everywhere else, where the receiver has no use for it.
 			'journalBaseId' => $journalBaseId,
 			'compactSuggested' => $compactSuggested,
@@ -103,7 +103,7 @@ class SavePatchCommand extends AbstractCommand
 	}
 
 	/**
-	 * [EVENT-01] The id below which this document has no journal rows left, i.e. how far the journal has
+	 * The id below which this document has no journal rows left, i.e. how far the journal has
 	 * been cut away. A patch that continues nothing (prevPatchId 0) is ambiguous on its own: the receiver
 	 * cannot tell "the rows I had already applied were compacted away" from "the rows I never received
 	 * were", and reading it as the former makes it advance its applied cursor over a hole - after which

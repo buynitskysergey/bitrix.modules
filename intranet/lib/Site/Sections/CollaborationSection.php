@@ -323,6 +323,13 @@ class CollaborationSection
 				if ($item['id'] === 'notification') {
 					continue;
 				}
+
+				// the parent collaboration menu item is the messenger itself
+				if ($item['id'] === 'messenger')
+				{
+					continue;
+				}
+
 				if ($item['available'])
 				{
 					$menuData = $item['menuData'] ?? [];
@@ -401,6 +408,19 @@ class CollaborationSection
 				// 'counter_id' => 'calendar',
 				'sub_link' => $url . '?EVENT_ID=NEW',
 				'sub_menu' => $subMenu,
+			],
+		];
+	}
+
+	public static function getSync(): array
+	{
+		return [
+			'id' => 'sync',
+			'title' => (new \Bitrix\Intranet\UI\LeftMenu\Preset\Sync(SITE_ID))->getName(),
+			'available' => \Bitrix\Intranet\Internal\Integration\Call\Sync::isAvailable(),
+			'url' => SITE_DIR . 'sync/',
+			'menuData' => [
+				'menu_item_id' => 'menu_sync',
 			],
 		];
 	}

@@ -20,7 +20,7 @@ use Bitrix\Note\Internal\Service\History\EventVisibilityPolicy;
 use Bitrix\Note\Internal\Service\User\IdentityColor;
 
 /**
- * [P2.T2 / API-04] Reads the activity feed of one document. Role visibility
+ * Reads the activity feed of one document. Role visibility
  * (MTX-01, EventVisibilityPolicy) is applied BEFORE the caller-supplied type
  * filter — the filter can only narrow what the role already sees, it never
  * widens it. Keyset pagination on the (CREATED_AT, ID) pair via
@@ -228,7 +228,7 @@ final class FeedProvider
 	}
 
 	/**
-	 * [P2.T3] actor + co-authors resolved batched for the whole page (one query
+	 * actor + co-authors resolved batched for the whole page (one query
 	 * for users, one for co-author rows), plus a batched versionAvailable check.
 	 *
 	 * @param Event[] $events

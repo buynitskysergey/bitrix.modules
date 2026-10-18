@@ -6,6 +6,7 @@ use Bitrix\BIConnector\Access\AccessController;
 use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Access\Model\DashboardAccessItem;
 use Bitrix\BIConnector\Access\Service\DashboardGroupService;
+use Bitrix\BIConnector\Public\Command\Dashboard\InstallDashboardCommand;
 use Bitrix\BIConnector\Public\Command\DashboardChat\DashboardDiscussionChatResult;
 use Bitrix\BIConnector\Public\Command\DashboardChat\GetOrCreateDashboardDiscussionChatCommand;
 use Bitrix\BIConnector\Integration\Superset\Integrator\Request\IntegratorResponse;
@@ -17,15 +18,20 @@ use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetDashboardTagTable;
 use Bitrix\BIConnector\Integration\Superset\Model\SupersetTagTable;
 use Bitrix\BIConnector\Integration\Superset\SupersetController;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\BitrixGptBiAnnouncement;
 use Bitrix\BIConnector\Superset\ActionFilter\BIConstructorAccess;
 use Bitrix\BIConnector\Superset\Dashboard\EmbeddedFilter;
 use Bitrix\BIConnector\Superset\Dashboard\ExternalFilter\RlsRuleBuilder;
+use Bitrix\BIConnector\Superset\Demo\DemoService;
 use Bitrix\BIConnector\Public\Command\Share\CreateShareCommand;
 use Bitrix\BIConnector\Public\Command\Share\DeactivateShareCommand;
 use Bitrix\BIConnector\Integration\Superset\SupersetInitializer;
 use Bitrix\BIConnector\Superset\Dashboard\ScreenshotExporter;
 use Bitrix\BIConnector\Superset\Grid\DashboardGrid;
+use Bitrix\BIConnector\Superset\Grid\Row\Action\Dashboard\DemoAction;
 use Bitrix\BIConnector\Superset\Dashboard\UrlParameter;
+use Bitrix\BIConnector\Superset\Error\IntegrationErrorPresenter;
+use Bitrix\BIConnector\Superset\Error\UserFacingError;
 use Bitrix\BIConnector\Superset\Logger\Logger;
 use Bitrix\BIConnector\Superset\MarketAccessManager;
 use Bitrix\BIConnector\Superset\MarketDashboardManager;
@@ -50,6 +56,11 @@ class Dashboard extends Controller
 {
 	private const TOP_MENU_DASHBOARDS_OPTION_NAME = 'top_menu_dashboards';
 	private const PINNED_DASHBOARDS_OPTION_NAME = 'grid_pinned_dashboards';
+	private const DEMO_ERROR_UNAVAILABLE = 'DEMO_UNAVAILABLE';
+	private const DEMO_ERROR_INVALID_REPORT_CODE = 'DEMO_INVALID_REPORT_CODE';
+	private const DEMO_REPORT_CODE_MAX_LENGTH = 128;
+	private const BITRIXGPT_BI_ANNOUNCE_LOCK_PREFIX = 'biconnector.bitrixgpt-bi-announce.';
+	private const CONSTRUCTOR_WORKSPACE_PATH = '/dashboard/list/';
 
 	/**
 	 * @return array
@@ -79,6 +90,11 @@ class Dashboard extends Controller
 				BIConstructorAccess::class
 			],
 		];
+		$configureActions['getDemoEmbeddedCredentials'] = [
+			'-prefilters' => [
+				BIConstructorAccess::class,
+			],
+		];
 
 		return $configureActions;
 	}
@@ -93,7 +109,7 @@ class Dashboard extends Controller
 				$dashboardId = (int)$id;
 				if ($dashboardId <= 0)
 				{
-					$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND') ?? ''));
+					$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND')));
 
 					return null;
 				}
@@ -102,7 +118,7 @@ class Dashboard extends Controller
 				$dashboard = $superset->getDashboardRepository()->getById($dashboardId);
 				if (!$dashboard)
 				{
-					$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND') ?? ''));
+					$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND')));
 
 					return null;
 				}
@@ -116,7 +132,7 @@ class Dashboard extends Controller
 	{
 		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_COPY, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_COPY') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_COPY')));
 
 			return null;
 		}
@@ -127,7 +143,7 @@ class Dashboard extends Controller
 
 		if ($externalId <= 0)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND')));
 
 			return null;
 		}
@@ -139,7 +155,7 @@ class Dashboard extends Controller
 		$data = $response->getData();
 		if (!$data)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_COPY_ERROR') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_COPY_ERROR')));
 
 			return null;
 		}
@@ -172,7 +188,7 @@ class Dashboard extends Controller
 		$addResult = SupersetDashboardTable::add($addData);
 		if (!$addResult->isSuccess())
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_COPY_ERROR') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_COPY_ERROR')));
 
 			return null;
 		}
@@ -242,14 +258,14 @@ class Dashboard extends Controller
 	{
 		if (!MarketDashboardManager::getInstance()->isExportEnabled())
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EXPORT') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EXPORT')));
 
 			return null;
 		}
 
 		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_EXPORT, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EXPORT') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EXPORT')));
 
 			return null;
 		}
@@ -258,7 +274,7 @@ class Dashboard extends Controller
 		$externalDashboardId = (int)$dashboard->getExternalId();
 		if ($externalDashboardId <= 0)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ERROR_NOT_FOUND')));
 
 			return null;
 		}
@@ -309,7 +325,7 @@ class Dashboard extends Controller
 		$response = $integrator->exportDashboard($externalDashboardId, $dashboardSettings);
 		if ($response->hasErrors())
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_EXPORT_ERROR') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_EXPORT_ERROR')));
 
 			return null;
 		}
@@ -322,7 +338,7 @@ class Dashboard extends Controller
 			$filePath = $data['filePath'] ?? '';
 			if ((int)$contentSize <= 0)
 			{
-				$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_EXPORT_ERROR') ?? ''));
+				$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_EXPORT_ERROR')));
 
 				return null;
 			}
@@ -337,7 +353,7 @@ class Dashboard extends Controller
 	{
 		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_DELETE, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_DELETE') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_DELETE')));
 
 			return null;
 		}
@@ -352,7 +368,7 @@ class Dashboard extends Controller
 
 		if ($hasCopiedDashboards)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_COPIED') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_COPIED')));
 
 			return null;
 		}
@@ -362,7 +378,7 @@ class Dashboard extends Controller
 			&& $dashboard->isSystemDashboard()
 		)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_SYSTEM') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_SYSTEM')));
 
 			return null;
 		}
@@ -373,7 +389,10 @@ class Dashboard extends Controller
 			$relatedItemsResult = MarketDashboardManager::getInstance()->getMarketDashboardReusedEntities([$dashboardId]);
 			if (!$relatedItemsResult->isSuccess())
 			{
-				$this->addErrors($relatedItemsResult->getErrors());
+				$this->addError(IntegrationErrorPresenter::present(
+					$relatedItemsResult->getErrors(),
+					Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RELATED_ITEMS_ERROR'),
+				));
 
 				return null;
 			}
@@ -381,7 +400,7 @@ class Dashboard extends Controller
 			$relatedItems = $relatedItemsResult->getData();
 			if (!empty($relatedItems[$dashboardId]))
 			{
-				$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_HAS_RELATED_ENTITIES') ?? ''));
+				$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR_HAS_RELATED_ENTITIES')));
 
 				return null;
 			}
@@ -418,7 +437,7 @@ class Dashboard extends Controller
 
 					return true;
 				}
-				$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR') ?? ''));
+				$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DELETE_ERROR')));
 
 				return null;
 			}
@@ -440,7 +459,10 @@ class Dashboard extends Controller
 		$relatedItemsResult = MarketDashboardManager::getInstance()->getMarketDashboardReusedEntities([$dashboardId]);
 		if (!$relatedItemsResult->isSuccess())
 		{
-			$this->addErrors($relatedItemsResult->getErrors());
+			$this->addError(IntegrationErrorPresenter::present(
+				$relatedItemsResult->getErrors(),
+				Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RELATED_ITEMS_ERROR'),
+			));
 
 			return null;
 		}
@@ -458,7 +480,7 @@ class Dashboard extends Controller
 	{
 		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
 			return null;
 		}
@@ -466,7 +488,7 @@ class Dashboard extends Controller
 		$currentUserId = (int)$user->getId();
 		if ($currentUserId <= 0)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DISCUSSION_CHAT_OPEN_ERROR') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DISCUSSION_CHAT_OPEN_ERROR')));
 
 			return null;
 		}
@@ -487,7 +509,7 @@ class Dashboard extends Controller
 
 		if (!$commandResult instanceof DashboardDiscussionChatResult)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DISCUSSION_CHAT_OPEN_ERROR') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DISCUSSION_CHAT_OPEN_ERROR')));
 
 			return null;
 		}
@@ -495,7 +517,7 @@ class Dashboard extends Controller
 		$chatId = (int)$commandResult->getChatId();
 		if ($chatId <= 0)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DISCUSSION_CHAT_OPEN_ERROR') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DISCUSSION_CHAT_OPEN_ERROR')));
 
 			return null;
 		}
@@ -542,7 +564,7 @@ class Dashboard extends Controller
 		$accessController = AccessController::getCurrent();
 		if (!$accessController->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
 			return null;
 		}
@@ -624,6 +646,51 @@ class Dashboard extends Controller
 		];
 	}
 
+	public function getDemoEmbeddedCredentialsAction(string $reportCode): ?array
+	{
+		$demoService = new DemoService();
+		if (!$demoService->isAvailable())
+		{
+			$this->addError(new UserFacingError(
+				Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DEMO_ERROR_UNAVAILABLE'),
+				self::DEMO_ERROR_UNAVAILABLE
+			));
+
+			return null;
+		}
+
+		$reportCode = trim($reportCode);
+		if (
+			mb_strlen($reportCode) > self::DEMO_REPORT_CODE_MAX_LENGTH
+			|| !DemoAction::isReportCodeRoutable($reportCode)
+		)
+		{
+			$this->addError(new UserFacingError(
+				Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_DEMO_ERROR_INVALID_REPORT_CODE'),
+				self::DEMO_ERROR_INVALID_REPORT_CODE
+			));
+
+			return null;
+		}
+
+		$result = $demoService->getCredentials($reportCode);
+
+		$credentials = null;
+		if ($result->credentials !== null)
+		{
+			$credentials = [
+				'uuid' => $result->credentials->uuid,
+				'guestToken' => $result->credentials->guestToken,
+				'supersetDomain' => $result->credentials->supersetDomain,
+			];
+		}
+
+		return [
+			'state' => $result->state->value,
+			'credentials' => $credentials,
+		];
+	}
+
 	/**
 	 * @param Model\Dashboard $dashboard
 	 *
@@ -640,7 +707,7 @@ class Dashboard extends Controller
 		$accessController = AccessController::getCurrent();
 		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $accessItem))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
 			return null;
 		}
@@ -666,58 +733,10 @@ class Dashboard extends Controller
 	 */
 	public function installDashboardAction(Model\Dashboard $dashboard): ?bool
 	{
-		if ($dashboard->getStatus() !== SupersetDashboardTable::DASHBOARD_STATUS_NOT_INSTALLED)
+		$result = (new InstallDashboardCommand($dashboard->getId()))->run();
+		if (!$result->isSuccess())
 		{
-			return true;
-		}
-
-		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
-		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW') ?? ''));
-
-			return null;
-		}
-
-		if ($dashboard->isCustomDashboard())
-		{
-			$response = IntegratorFactory::getInstance()->createEmptyDashboard([
-				'name' => $dashboard->getTitle(),
-			]);
-
-			if ($response->getErrors())
-			{
-				$this->addError(new Error('Error creating dashboard'));
-
-				return null;
-			}
-
-			$responseData = $response->getData();
-			$externalId = (int)($responseData['body']['id'] ?? 0);
-
-			$dashboard
-				->getOrmObject()
-				->setExternalId($externalId)
-				->setStatus(SupersetDashboardTable::DASHBOARD_STATUS_DRAFT)
-				->save()
-			;
-
-			DashboardManager::notifyDashboardStatus($dashboard->getId(), SupersetDashboardTable::DASHBOARD_STATUS_DRAFT);
-
-			return true;
-		}
-
-		$appId = $dashboard->getAppId();
-		if (!$appId)
-		{
-			$this->addError(new Error('No app id in dashboard to install'));
-
-			return null;
-		}
-
-		$installResult = MarketDashboardManager::getInstance()->installApplication($appId);
-		if (!$installResult->isSuccess())
-		{
-			$this->addErrors($installResult->getErrors());
+			$this->addErrors($result->getErrors());
 
 			return null;
 		}
@@ -729,7 +748,7 @@ class Dashboard extends Controller
 	{
 		if (!AccessController::getCurrent()->check(ActionDictionary::ACTION_BIC_DASHBOARD_TAG_MODIFY))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_TAG_MODIFY') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_TAG_MODIFY')));
 
 			return null;
 		}
@@ -803,12 +822,42 @@ class Dashboard extends Controller
 		return $entityUrl;
 	}
 
+	public function getConstructorUrlAction(): ?string
+	{
+		$canEdit = AccessController::getCurrent()->check(
+			ActionDictionary::ACTION_BIC_DASHBOARD_EDIT,
+		);
+
+		if (!$canEdit)
+		{
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_CONSTRUCTOR')));
+
+			return null;
+		}
+
+		$loginUrl = (new SupersetController())->getLoginUrl();
+
+		if (!$loginUrl)
+		{
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_OPEN_CONSTRUCTOR_ERROR')));
+
+			return null;
+		}
+
+		$url = new Uri($loginUrl);
+		$url->addParams([
+			'next' => self::CONSTRUCTOR_WORKSPACE_PATH,
+		]);
+
+		return $url->getLocator();
+	}
+
 	public function getEditUrlAction(Model\Dashboard $dashboard, string $editUrl): ?string
 	{
 		$canEdit = AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $dashboard);
 		if (!$canEdit)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EDIT') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EDIT')));
 
 			return null;
 		}
@@ -833,7 +882,7 @@ class Dashboard extends Controller
 		$canEdit = AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $dashboard);
 		if (!$canEdit)
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EDIT') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EDIT')));
 
 			return;
 		}
@@ -841,7 +890,7 @@ class Dashboard extends Controller
 		$supersetController = new SupersetController();
 		if (!$supersetController->isSupersetEnabled() || SupersetInitializer::isSupersetUnavailable())
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_UNAVAILABLE') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_UNAVAILABLE')));
 
 			return;
 		}
@@ -863,28 +912,28 @@ class Dashboard extends Controller
 		{
 			$errorMsg = Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_CANNOT_EDIT_TITLE_NOT_FOUND') ?? '';
 
-			return $result->addError(new Error($errorMsg));
+			return $result->addError(new UserFacingError($errorMsg));
 		}
 
 		if (empty($newTitle))
 		{
 			$errorMsg = Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_CANNOT_EDIT_TITLE_NOT_EMPTY') ?? '';
 
-			return $result->addError(new Error($errorMsg));
+			return $result->addError(new UserFacingError($errorMsg));
 		}
 
 		if (!$dashboard->isAvailableDashboard())
 		{
 			$errorMsg = Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_CANNOT_EDIT_TITLE_NOT_READY') ?? '';
 
-			return $result->addError(new Error($errorMsg));
+			return $result->addError(new UserFacingError($errorMsg));
 		}
 
 		if ($dashboard->getType() !== SupersetDashboardTable::DASHBOARD_TYPE_CUSTOM)
 		{
 			$errorMsg = Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_CANNOT_EDIT_TITLE_ONLY_CUSTOM_MSGVER_1') ?? '';
 
-			return $result->addError(new Error($errorMsg));
+			return $result->addError(new UserFacingError($errorMsg));
 		}
 
 		$changeResult = $dashboard->changeTitle($newTitle);
@@ -901,7 +950,7 @@ class Dashboard extends Controller
 
 			$errorMsg = Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_RENAME_ERROR_CANNOT_EDIT_TITLE_UNHANDLED') ?? '';
 
-			return $result->addError(new Error($errorMsg));
+			return $result->addError(new UserFacingError($errorMsg));
 		}
 
 		return $result;
@@ -952,7 +1001,7 @@ class Dashboard extends Controller
 		$accessController = AccessController::getCurrent();
 		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_EDIT, $accessItem))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EDIT') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EDIT')));
 
 			return null;
 		}
@@ -1070,7 +1119,7 @@ class Dashboard extends Controller
 	{
 		if (!AccessController::getCurrent()->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_EXPORT, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EXPORT') ?? ''));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_EXPORT')));
 
 			return null;
 		}
@@ -1145,21 +1194,21 @@ class Dashboard extends Controller
 		$accessController = AccessController::getCurrent();
 		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_SHARE))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_SHARE')));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_SHARE')));
 
 			return null;
 		}
 
 		if (!$accessController->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
 			return null;
 		}
 
 		if (mb_strlen($password) < 8 || mb_strlen($password) > 32)
 		{
-			$this->addError(new Error('Password must be 8-32 characters.'));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_SHARE_PASSWORD_LENGTH_ERROR')));
 
 			return null;
 		}
@@ -1229,14 +1278,14 @@ class Dashboard extends Controller
 		$accessController = AccessController::getCurrent();
 		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_SHARE))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_SHARE')));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_SHARE')));
 
 			return null;
 		}
 
 		if (!$accessController->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
 			return null;
 		}
@@ -1263,14 +1312,14 @@ class Dashboard extends Controller
 		$accessController = AccessController::getCurrent();
 		if (!$accessController->check(ActionDictionary::ACTION_BIC_DASHBOARD_SHARE))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_SHARE')));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_SHARE')));
 
 			return null;
 		}
 
 		if (!$accessController->checkByEntity(ActionDictionary::ACTION_BIC_DASHBOARD_VIEW, $dashboard))
 		{
-			$this->addError(new Error(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_ACCESS_ERROR_VIEW')));
 
 			return null;
 		}
@@ -1292,7 +1341,11 @@ class Dashboard extends Controller
 		}
 		catch (\Exception $e)
 		{
-			$this->addError(new Error($e->getMessage(), $e->getCode()));
+			Logger::logErrors(
+				[new Error($e->getMessage())],
+				['EXCEPTION_CODE' => $e->getCode()],
+			);
+			$this->addError(new UserFacingError(Loc::getMessage('BICONNECTOR_CONTROLLER_DASHBOARD_SHARE_REVOKE_ERROR')));
 
 			return null;
 		}
@@ -1316,5 +1369,54 @@ class Dashboard extends Controller
 		return [
 			'filePath' => $filePath,
 		];
+	}
+
+	/**
+	 * Spends the single show of the BitrixGPT announcement for the current user.
+	 * Parallel tabs race for the same personal mark, so the check and the write go under a user lock.
+	 */
+	public function claimBitrixGptBiAnnouncementAction(CurrentUser $user): array
+	{
+		$userId = (int)$user->getId();
+		if ($userId <= 0)
+		{
+			return ['claimed' => false];
+		}
+
+		// A page rendered before the campaign ended could still be open: the server has the final
+		// say on the date, so a stale tab neither shows the announcement nor spends the show.
+		if (BitrixGptBiAnnouncement::isTerminated())
+		{
+			return ['claimed' => false];
+		}
+
+		$connection = Application::getConnection();
+		$lockKey = self::BITRIXGPT_BI_ANNOUNCE_LOCK_PREFIX . $userId;
+		if (!$connection->lock($lockKey, 0))
+		{
+			return ['claimed' => false];
+		}
+
+		try
+		{
+			if (BitrixGptBiAnnouncement::isShownForUser($userId))
+			{
+				return ['claimed' => false];
+			}
+
+			$saved = \CUserOptions::setOption(
+				category: BitrixGptBiAnnouncement::USER_OPTION_CATEGORY,
+				name: BitrixGptBiAnnouncement::USER_OPTION_NAME,
+				value: time(),
+				bCommon: false,
+				user_id: $userId,
+			);
+
+			return ['claimed' => $saved === true];
+		}
+		finally
+		{
+			$connection->unlock($lockKey);
+		}
 	}
 }

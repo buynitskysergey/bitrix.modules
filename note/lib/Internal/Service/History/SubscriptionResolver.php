@@ -10,11 +10,16 @@ use Bitrix\Note\Internal\Repository\SubscriptionRepository;
 use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
 
 /**
- * [P6.T2 / ALG-02] Recipient set for a document/collection event — used by the
- * Block 7 notification drainer. Only collects user ids; it does NOT check
- * per-user visibility of the event (role matrix, ACL) — that gate lives in
- * Block 7 at send time, same as "losing access does not delete the
- * subscription row".
+ * Recipient sets for a document/collection event. Only collects user ids; it does NOT check
+ * per-user visibility of the event (role matrix, ACL) — that gate lives at send time, same as
+ * "losing access does not delete the subscription row".
+ *
+ * Delivery reads exactly one of these methods: NotificationRecipientService asks
+ * resolveDirectDocumentSubscribers() for the article's own subscribers in the modes shipping
+ * declares. The wider resolvers beside it — inherited subtree coverage, the knowledge base scope
+ * and the mute that overrides both — have no caller outside their tests; the SDD keeps them as the
+ * point to extend the day those modes and scopes are shipped, so the rules stay written down in
+ * one place instead of being reconstructed then.
  */
 final class SubscriptionResolver
 {
@@ -76,6 +81,37 @@ final class SubscriptionResolver
 		foreach ($this->subscriptionRepository->findSubscriberUserIds(SubscriptionTable::SCOPE_DOCUMENT, [$documentId], SubscriptionTable::MODE_MUTED) as $userId)
 		{
 			unset($userIds[$userId]);
+		}
+
+		return array_keys($userIds);
+	}
+
+	/**
+	 * Subscribers of the document's own row, narrowed to the given modes — the shipping source of
+	 * recipients. Walks no ancestors and reads no collection row, so inherited coverage and the mute
+	 * that overrides it play no part; a mode absent from $modes reads as "not subscribed".
+	 *
+	 * One query per mode: the repository narrows by a single MODE, and shipping declares one
+	 * (MODES-01), so delivery pays a single query per group.
+	 *
+	 * @param string[] $modes
+	 * @return int[]
+	 */
+	public function resolveDirectDocumentSubscribers(int $documentId, array $modes): array
+	{
+		$userIds = [];
+		foreach ($modes as $mode)
+		{
+			foreach (
+				$this->subscriptionRepository->findSubscriberUserIds(
+					SubscriptionTable::SCOPE_DOCUMENT,
+					[$documentId],
+					$mode,
+				) as $userId
+			)
+			{
+				$userIds[$userId] = true;
+			}
 		}
 
 		return array_keys($userIds);

@@ -60,10 +60,37 @@ class DashboardActionDataProvider extends DataProvider
 	 */
 	public function prepareDashboardGroupActions(array $rawFields): array
 	{
-		$actions = $this->prepareDashboardActions();
+		return [
+			new DemoAction(),
+			...$this->prepareAllowedDashboardActions($rawFields),
+		];
+	}
 
-		$settings = $this->getSettings();
+	public function prepareControls(array $rawFields): array
+	{
+		if (!Feature::isBuilderEnabled())
+		{
+			return $this->buildControls($this->prepareBuilderDisabledActions(), $rawFields);
+		}
 
+		$actions = [];
+		if ($rawFields['ENTITY_TYPE'] === DashboardGroupRepository::TYPE_GROUP)
+		{
+			$actions = $this->prepareGroupActions();
+		}
+		elseif ($rawFields['ENTITY_TYPE'] === DashboardGroupRepository::TYPE_DASHBOARD)
+		{
+			$actions = $this->prepareDashboardGroupActions($rawFields);
+		}
+
+		return $this->buildControls($actions, $rawFields);
+	}
+
+	/**
+	 * @return BaseAction[]
+	 */
+	private function prepareAllowedDashboardActions(array $rawFields): array
+	{
 		if ($rawFields['STATUS'] === SupersetDashboardTable::DASHBOARD_STATUS_NOT_INSTALLED)
 		{
 			return [
@@ -84,7 +111,7 @@ class DashboardActionDataProvider extends DataProvider
 		}
 
 		if (
-			($settings !== null && !$settings->isSupersetAvailable())
+			!$this->getSettings()->isSupersetAvailable()
 			|| $rawFields['STATUS'] === SupersetDashboardTable::DASHBOARD_STATUS_LOAD
 			|| !$rawFields['IS_ACCESS_ALLOWED']
 		)
@@ -99,26 +126,24 @@ class DashboardActionDataProvider extends DataProvider
 			];
 		}
 
-		return $actions;
+		return $this->prepareDashboardActions();
 	}
 
-	public function prepareControls(array $rawFields): array
+	/**
+	 * @return BaseAction[]
+	 */
+	private function prepareBuilderDisabledActions(): array
 	{
-		$actions = [];
-		if (!Feature::isBuilderEnabled())
-		{
-			return $actions;
-		}
+		return [
+			new DemoAction(),
+		];
+	}
 
-		if ($rawFields['ENTITY_TYPE'] === DashboardGroupRepository::TYPE_GROUP)
-		{
-			$actions = $this->prepareGroupActions();
-		}
-		elseif ($rawFields['ENTITY_TYPE'] === DashboardGroupRepository::TYPE_DASHBOARD)
-		{
-			$actions = $this->prepareDashboardGroupActions($rawFields);
-		}
-
+	/**
+	 * @param BaseAction[] $actions
+	 */
+	private function buildControls(array $actions, array $rawFields): array
+	{
 		$result = [];
 		foreach ($actions as $actionsItem)
 		{

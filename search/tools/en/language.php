@@ -1,7 +1,7 @@
 <?php
 class CSearchLanguageEn extends CSearchLanguage
 {
-	function GetKeyboardLayout()
+	public function GetKeyboardLayout()
 	{
 		return [
 			'lo' => '`          - ' . 'qwertyuiop[]' . "asdfghjkl;'"
@@ -10,7 +10,7 @@ class CSearchLanguageEn extends CSearchLanguage
 		];
 	}
 
-	function GetBigrammLetterFreq()
+	public function GetBigrammLetterFreq()
 	{
 		return [
 			//         à,   â,   ñ,   d,   å,   f,   g,   í,   i,   j,   ê,   l,   ì,   n,   î,   ð,   q,   r,   s,   ò,   u,   v,   w,   x,   y,   z,

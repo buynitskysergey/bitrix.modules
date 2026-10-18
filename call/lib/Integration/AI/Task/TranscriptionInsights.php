@@ -111,14 +111,14 @@ class TranscriptionInsights extends AITask
 		$outcome = $this->task->getOutcome() ?? $this->task->fillOutcome();
 		if (!$outcome)
 		{
-			return $result->addError(new CallAIError(CallAIError::AI_EMPTY_PAYLOAD_ERROR));// Empty outcome content
+			return $result->addError(new CallAIError(CallAIError::EMPTY_PAYLOAD_ERROR));// Empty outcome content
 		}
 
 		$callId = $outcome->getCallId();
 		$call = \Bitrix\Call\Call\Registry::getCallWithId($callId);
 		if (!$call)
 		{
-			return $result->addError(new CallAIError(CallAIError::AI_EMPTY_PAYLOAD_ERROR));// Empty outcome content
+			return $result->addError(new CallAIError(CallAIError::EMPTY_PAYLOAD_ERROR));// Empty outcome content
 		}
 
 		$outcomeCollection = OutcomeCollection::getOutcomesByCallId($callId, [SenseType::TRANSCRIBE->value]);
@@ -128,7 +128,7 @@ class TranscriptionInsights extends AITask
 			|| !$transcription->hasContent()
 		)
 		{
-			return $result->addError(new CallAIError(CallAIError::AI_EMPTY_PAYLOAD_ERROR));// Empty outcome content
+			return $result->addError(new CallAIError(CallAIError::EMPTY_PAYLOAD_ERROR));// Empty outcome content
 		}
 
 		if (

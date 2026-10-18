@@ -26,6 +26,13 @@ class Installed extends BaseTemplate
 {
 	private const FILTER_UPDATES = 'updates';
 
+	private bool $toolbarInfoEnabled = false;
+
+	public function enableToolbarInfo(): void
+	{
+		$this->toolbarInfoEnabled = true;
+	}
+
 	public function setResult(bool $isAjax = false)
 	{
 		$title = Loc::getMessage('MARKETPLACE_INSTALLED');
@@ -143,7 +150,6 @@ class Installed extends BaseTemplate
 		$publishedApps = [];
 		if (!empty($appCodes)) {
 			$appsBuy = Client::getBuy($appCodes);
-			$this->setAdditionalInfo($appsBuy);
 			if (isset($appsBuy['ITEMS']) && is_array($appsBuy['ITEMS'])) {
 				foreach ($appsBuy['ITEMS'] as $key => $app) {
 					$publishedApps[] = $this->result['APPS'][$key]['CODE'];
@@ -176,10 +182,7 @@ class Installed extends BaseTemplate
 			}
 		}
 
-		if (empty($appCodes)) {
-			$response = Transport::instance()->call(Actions::METHOD_TOTAL_APPS);
-			$this->setAdditionalInfo($response);
-		}
+		$this->applyToolbarInfo();
 
 		$unpublishedApps = array_diff($appCodes, $publishedApps);
 
@@ -210,6 +213,15 @@ class Installed extends BaseTemplate
 		unset($appItem);
 
 		$this->result['APPS'] = array_values($this->result['APPS']);
+	}
+
+	private function applyToolbarInfo(): void
+	{
+		if (!$this->toolbarInfoEnabled) {
+			return;
+		}
+
+		$this->setAdditionalInfo(Transport::instance()->call(Actions::METHOD_TOTAL_APPS));
 	}
 
 	private function setAdditionalInfo($response)

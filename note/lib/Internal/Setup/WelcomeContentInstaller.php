@@ -92,7 +92,7 @@ final class WelcomeContentInstaller
 
 	private function buildMarkdown(): string
 	{
-		return (string)Loc::getMessage('NOTE_WELCOME_DOC_MARKDOWN');
+		return (string)Loc::getMessage('NOTE_WELCOME_DOC_MARKDOWN_MSGVER_1');
 	}
 
 	private static function logFailure(string $message): void

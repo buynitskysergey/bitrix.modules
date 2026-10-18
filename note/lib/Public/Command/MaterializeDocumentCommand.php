@@ -14,10 +14,11 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\DocumentUpdateRepository;
 use Bitrix\Note\Internal\Service\Collaboration\DocumentLockService;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
+use Bitrix\Note\Internal\Service\File\DiskAttachmentSyncService;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 
 /**
- * [API-01] Cheap, non-destructive projection refresh: writes the fresh MARKDOWN, content date and
+ * Cheap, non-destructive projection refresh: writes the fresh MARKDOWN, content date and
  * materialization cursor for a document without draining the patch log, snapshotting a version,
  * emitting a content-settled event or recording analytics. Shares the 'compact' lock and the
  * forward-only guard (materializeProjection) with compaction, so a stale write never rolls the
@@ -26,9 +27,14 @@ use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
  * Reports in `applied` whether the write actually landed, and alongside it the card preview of the
  * stored text, so a caller can refresh a document card without re-reading the projection.
  *
- * Takes no actor on purpose. Nothing here is attributed to anyone: the projection write moves neither
- * UPDATED_BY nor UPDATED_AT, and no version, event or analytics record is produced. Authorship of a text
- * edit is settled by compaction, which does take a user id.
+ * Attributes nothing to anyone: the projection write moves neither UPDATED_BY nor UPDATED_AT, and no
+ * version, event or analytics record is produced. Authorship of a text edit is settled by compaction,
+ * which does take a user id.
+ *
+ * The actor it does take is not authorship but the rights the Disk attachment sync is checked against
+ * (see the sync call below): making a file attached to the document is an act on that file, and Disk
+ * asks whose. Zero means nobody asked — attachments the text no longer mentions are still dropped, and
+ * new ones wait for a materialization that has an actor.
  */
 class MaterializeDocumentCommand extends AbstractCommand
 {
@@ -36,11 +42,13 @@ class MaterializeDocumentCommand extends AbstractCommand
 		private readonly int $documentId,
 		private readonly string $markdown,
 		private readonly int $uptoId,
+		private readonly int $actorId = 0,
 		private readonly DocumentRepository $documentRepository = new DocumentRepository(),
 		private readonly DocumentUpdateRepository $updateRepository = new DocumentUpdateRepository(),
 		private readonly DocumentLockService $lockService = new DocumentLockService(),
 		private readonly RecycleBinFilter $recycleBinFilter = new RecycleBinFilter(),
 		private readonly DocumentCardMetaResolver $cardMetaResolver = new DocumentCardMetaResolver(),
+		private readonly DiskAttachmentSyncService $diskAttachmentSyncService = new DiskAttachmentSyncService(),
 	) {}
 
 	protected function execute(): Result
@@ -135,6 +143,13 @@ class MaterializeDocumentCommand extends AbstractCommand
 		{
 			return null;
 		}
+
+		// Disk attachments are a projection of the text like the search and link indexes, so they are
+		// brought in line with the text that has just been stored. This is the frequent path — a
+		// collaborative document materializes while it is being edited, long before it compacts — and the
+		// only one where the person who picked the file is the one asking, so their rights are the right
+		// ones to check the attachment against.
+		$this->diskAttachmentSyncService->syncBestEffort($this->documentId, $this->actorId, $this->markdown);
 
 		// Pure computation over what was just written - no query of its own, no side effect.
 		return $this->cardMetaResolver->buildExcerpt((string)$document->getTitle(), $this->markdown);

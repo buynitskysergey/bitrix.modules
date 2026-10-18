@@ -24,6 +24,24 @@ use Bitrix\AI\Tuning\Defaults;
 
 class CallAISettings
 {
+	private static ?string $copilotName = null;
+
+	/**
+	 * Returns the AI assistant brand name ("BitrixGPT" or "CoPilot") according to the portal license region.
+	 * Use to substitute the "#COPILOT_NAME#" placeholder in localized phrases.
+	 */
+	public static function getCopilotName(): string
+	{
+		if (self::$copilotName === null)
+		{
+			self::$copilotName = Loader::includeModule('ui')
+				? (new \Bitrix\Ui\Public\Services\Copilot\CopilotNameService())->getCopilotName()
+				: 'CoPilot';
+		}
+
+		return self::$copilotName;
+	}
+
 	public const
 		CALL_COPILOT_ENABLE = 'call_copilot_enable',
 
@@ -402,16 +420,17 @@ class CallAISettings
 		$groups = [];
 		if (!empty(Engine::getListAvailable('call'))) /** @see \Bitrix\AI\Engine::CATEGORIES */
 		{
+			$copilotNameReplace = ['#COPILOT_NAME#' => self::getCopilotName()];
 			$groups['call_copilot'] = [
-				'title' => Loc::getMessage('CALL_SETTINGS_COPILOT_GROUP'),
-				'description' => Loc::getMessage('CALL_SETTINGS_COPILOT_DESCRIPTION'),
+				'title' => Loc::getMessage('CALL_SETTINGS_COPILOT_GROUP_MSGVER_1', $copilotNameReplace),
+				'description' => Loc::getMessage('CALL_SETTINGS_COPILOT_DESCRIPTION_MSGVER_1', $copilotNameReplace),
 				//todo: Add 'helpdesk' article here
 			];
 
 			$items[self::CALL_COPILOT_ENABLE] = [
 				'group' => 'call_copilot',
-				'title' => Loc::getMessage('CALL_SETTINGS_COPILOT_TITLE'),
-				'header' => Loc::getMessage('CALL_SETTINGS_COPILOT_HEADER'),
+				'title' => Loc::getMessage('CALL_SETTINGS_COPILOT_TITLE_MSGVER_1', $copilotNameReplace),
+				'header' => Loc::getMessage('CALL_SETTINGS_COPILOT_HEADER_MSGVER_1', $copilotNameReplace),
 				'type' => Type::BOOLEAN,
 				'default' => true,
 			];

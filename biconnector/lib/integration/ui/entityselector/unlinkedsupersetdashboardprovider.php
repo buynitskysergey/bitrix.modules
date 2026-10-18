@@ -105,7 +105,7 @@ class UnlinkedSupersetDashboardProvider extends BaseProvider
 	/**
 	 * @return int[]
 	 */
-	private function getLinkedExternalIds(): array
+	protected function getLinkedExternalIds(): array
 	{
 		$result = [];
 		$dbResult = SupersetDashboardTable::getList([

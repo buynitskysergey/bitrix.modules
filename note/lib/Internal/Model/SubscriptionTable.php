@@ -13,7 +13,7 @@ use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
 use Bitrix\Main\Type\DateTime;
 
 /**
- * [P6.T1 / SQL-05] One row per (user, scope, entityId) subscription. Upserted via
+ * One row per (user, scope, entityId) subscription. Upserted via
  * SubscriptionRepository::upsert() on the UNIQUE(USER_ID, SCOPE, ENTITY_ID) index —
  * Unsubscribe deletes the row instead of flipping a flag, so a subscriber
  * count is always just COUNT(*) and SubscriptionResolver never has to filter out

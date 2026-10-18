@@ -9,6 +9,12 @@ return [
 		],
 		'readonly' => true
 	],
+	'rest' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Landing\\Infrastructure\\Rest\\Controller'
+		],
+		'readonly' => true
+	],
 	'aiassistant.marta' => require __DIR__ . '/config/marta.php',
 	'ui.entity-selector' => [
 		'value' => [

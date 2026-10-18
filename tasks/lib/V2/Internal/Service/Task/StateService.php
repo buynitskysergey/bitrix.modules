@@ -21,12 +21,14 @@ class StateService
 
 	}
 
-	public function set(State $state, int $userId): void
+	public function set(State $state, int $userId): ?array
 	{
+		$deadlineUserOption = null;
+
 		if ($state->defaultDeadline !== null)
 		{
 			$state->defaultDeadline->userId = $userId;
-			$this->defaultDeadlineService->set($state->defaultDeadline);
+			$deadlineUserOption = $this->defaultDeadlineService->set($state->defaultDeadline);
 		}
 
 		$flags = new StateFlags(
@@ -37,6 +39,8 @@ class StateService
 		);
 
 		$this->stateFlagsService->set($flags, OptionDictionary::StateFlags, $userId);
+
+		return $deadlineUserOption;
 	}
 
 	public function get(int $userId): ?State

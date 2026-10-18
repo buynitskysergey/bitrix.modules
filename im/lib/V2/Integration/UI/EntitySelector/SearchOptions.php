@@ -18,6 +18,7 @@ class SearchOptions
 	public const EXCLUDE_OPTION = 'exclude';
 	public const SEARCH_CHAT_TYPES_OPTION = 'searchChatTypes';
 	public const EXCLUDE_CHAT_TYPES_OPTION = 'excludeChatTypes';
+	public const SEARCH_ALL_CHATS_OPTION = 'searchAllChats';
 
 	// Filters
 	public const FILL_DIALOG_BY_RECENT_OPTION = 'fillDialogByRecent';
@@ -31,6 +32,7 @@ class SearchOptions
 	public const EXCLUDE_IDS_OPTION = 'excludeIds';
 	public const CONTEXT_CHAT_ID = 'contextChatId';
 	public const EXCLUDE_GUESTS_OPTION = 'excludeGuests';
+	public const MENTION_SEARCH_OPTION = 'mentionSearch';
 
 	// Resolved state
 	private FlagOption $flagOption;
@@ -47,14 +49,20 @@ class SearchOptions
 	private bool $onlyWithNullEntityType = false;
 	private bool $fillDialogByRecent = false;
 	private bool $excludeGuests = false;
+	private bool $mentionSearch = false;
 	private array $excludeIds = [];
 	private ?int $parentId = null;
 
 	private readonly TypeRegistry $typeRegistry;
+	private readonly SearchAllChatsTypeConditionProvider $searchAllChatsTypeConditionProvider;
 
 	public function __construct(array $rawOptions)
 	{
 		$this->typeRegistry = ServiceLocator::getInstance()->get(TypeRegistry::class);
+		$this->searchAllChatsTypeConditionProvider =
+			ServiceLocator::getInstance()
+				->get(SearchAllChatsTypeConditionProvider::class)
+		;
 		$this->setDefaultState();
 		$this->resolve($rawOptions);
 	}
@@ -170,13 +178,33 @@ class SearchOptions
 		return $this->excludeGuests;
 	}
 
+	/**
+	 * Set by the mention list only: it is the single consumer allowed to search from a shorter query.
+	 * Kept apart from the chat context: that one marks participants of the chat and is read elsewhere.
+	 */
+	public function isMentionSearch(): bool
+	{
+		return $this->mentionSearch;
+	}
+
 	private function resolve(array $rawOptions): void
 	{
-		$isRecentSectionSearchEnabled = isset($rawOptions[self::SEARCH_RECENT_SECTION_OPTION]) && is_string($rawOptions[self::SEARCH_RECENT_SECTION_OPTION]);
-		$needToFillDialogByRecent = isset($rawOptions[self::FILL_DIALOG_BY_RECENT_OPTION]) && $rawOptions[self::FILL_DIALOG_BY_RECENT_OPTION] === true;
+		$isSearchAllChatsEnabled =
+			isset($rawOptions[self::SEARCH_ALL_CHATS_OPTION])
+			&& $rawOptions[self::SEARCH_ALL_CHATS_OPTION] === true
+		;
+		$isRecentSectionSearchEnabled =
+			isset($rawOptions[self::SEARCH_RECENT_SECTION_OPTION])
+			&& is_string($rawOptions[self::SEARCH_RECENT_SECTION_OPTION])
+		;
+		$needToFillDialogByRecent =
+			isset($rawOptions[self::FILL_DIALOG_BY_RECENT_OPTION])
+			&& $rawOptions[self::FILL_DIALOG_BY_RECENT_OPTION] === true
+		;
 
 		match (true)
 		{
+			$isSearchAllChatsEnabled => $this->resolveAsSearchAllChatsMode(),
 			$isRecentSectionSearchEnabled, $needToFillDialogByRecent => $this->resolveAsRecentSectionMode($rawOptions),
 			default => $this->resolveAsDefaultMode($rawOptions),
 		};
@@ -188,6 +216,12 @@ class SearchOptions
 		{
 			$this->flagOption->merge(FlagOption::byTypeCondition($this->chatTypeCondition));
 		}
+	}
+
+	private function resolveAsSearchAllChatsMode(): void
+	{
+		$this->shouldToFillDefaultItems = false;
+		$this->chatTypeCondition = $this->searchAllChatsTypeConditionProvider->getCondition();
 	}
 
 	private function resolveAsRecentSectionMode(array $rawOptions): void
@@ -211,6 +245,7 @@ class SearchOptions
 		$this->onlyWithNullEntityType = ($rawOptions[self::ONLY_WITH_NULL_ENTITY_TYPE_OPTION] ?? false) === true;
 		$this->fillDialogByRecent = ($rawOptions[self::FILL_DIALOG_BY_RECENT_OPTION] ?? false) === true;
 		$this->excludeGuests = ($rawOptions[self::EXCLUDE_GUESTS_OPTION] ?? false) === true;
+		$this->mentionSearch = ($rawOptions[self::MENTION_SEARCH_OPTION] ?? false) === true;
 		$this->contextChatId = isset($rawOptions[self::CONTEXT_CHAT_ID]) ? (int)$rawOptions[self::CONTEXT_CHAT_ID] : null;
 
 		if (isset($rawOptions[self::EXCLUDE_IDS_OPTION]) && is_array($rawOptions[self::EXCLUDE_IDS_OPTION]))

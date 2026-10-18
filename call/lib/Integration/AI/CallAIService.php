@@ -89,7 +89,7 @@ final class CallAIService
 
 		if ($track->getType() != Track::TYPE_TRACK_PACK)
 		{
-			return $result->addError(new CallAIError(CallAIError::AI_UNSUPPORTED_TRACK_ERROR, 'Unsupported track format'));
+			return $result->addError(new CallAIError(CallAIError::UNSUPPORTED_TRACK_ERROR, 'Unsupported track format'));
 		}
 
 		$task = new Task\TranscribeCallRecord();
@@ -195,7 +195,7 @@ final class CallAIService
 		{
 			$log && $logger->error('Empty payload for AI');
 
-			$error = new CallAIError(CallAIError::AI_EMPTY_PAYLOAD_ERROR);
+			$error = new CallAIError(CallAIError::EMPTY_PAYLOAD_ERROR);
 			$call = Registry::getCallWithId($task->getCallId());
 
 			(new FollowUpAnalytics($call))
@@ -389,7 +389,7 @@ final class CallAIService
 			if (!$trackPack)
 			{
 				// Explicit retry but track pack was never delivered — a delivery failure, not a wait timeout.
-				return $result->addError(new CallAIError(CallAIError::AI_TRACKPACK_NOT_RECEIVED));
+				return $result->addError(new CallAIError(CallAIError::TRACK_PACK_NOT_FOUND_ERROR));
 			}
 
 			return $this->processTrack($trackPack);
@@ -987,7 +987,7 @@ final class CallAIService
 		}
 		if ($taskCompleted == count($waitForTasks))
 		{
-			return $result;//ок
+			return $result;
 		}
 
 		// Check track_pack
@@ -1012,7 +1012,7 @@ final class CallAIService
 			]);
 		}
 
-		return $result->addError(new CallAIError(CallAIError::AI_TRACKPACK_NOT_RECEIVED));
+		return $result->addError(new CallAIError(CallAIError::TRACK_PACK_NOT_FOUND_TIMEOUT));
 	}
 	//endregion
 

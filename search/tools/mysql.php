@@ -6,24 +6,27 @@ class CSearchMysql extends CSearchFullText
 	protected $error = '';
 	protected $errorno = 0;
 
-	public function connect($connectionString = '')
+	public function connect($ignoreErrors = false)
 	{
 		global $APPLICATION;
 		$DB = CDatabase::GetModuleConnection('search');
 
-		if (!$DB->TableExists('b_search_content_text'))
+		if ($ignoreErrors)
 		{
-			$APPLICATION->ThrowException(GetMessage('SEARCH_MYSQL_OLD_SCHEMA'));
-			return false;
-		}
-
-		if (!$DB->IndexExists('b_search_content_text', ['SEARCHABLE_CONTENT']))
-		{
-			$r = $DB->Query('create fulltext index fti on b_search_content_text(SEARCHABLE_CONTENT)', true);
-			if (!$r)
+			if (!$DB->TableExists('b_search_content_text'))
 			{
-				$APPLICATION->ThrowException(GetMessage('SEARCH_MYSQL_INDEX_CREATE_ERROR', ['#ERRSTR#' => $DB->db_Error]));
+				$APPLICATION->ThrowException(GetMessage('SEARCH_MYSQL_OLD_SCHEMA'));
 				return false;
+			}
+
+			if (!$DB->IndexExists('b_search_content_text', ['SEARCHABLE_CONTENT']))
+			{
+				$r = $DB->Query('create fulltext index fti on b_search_content_text(SEARCHABLE_CONTENT)', true);
+				if (!$r)
+				{
+					$APPLICATION->ThrowException(GetMessage('SEARCH_MYSQL_INDEX_CREATE_ERROR', ['#ERRSTR#' => $DB->db_Error]));
+					return false;
+				}
 			}
 		}
 
@@ -73,7 +76,7 @@ class CSearchMysql extends CSearchFullText
 		$DB = CDatabase::GetModuleConnection('search');
 
 		$queryObject = $aParamsEx['QUERY_OBJECT'];
-		if ($queryObject->m_parsed_query == '( )' || $queryObject->m_parsed_query == '')
+		if ($queryObject->m_parsed_query === '( )' || $queryObject->m_parsed_query === '')
 		{
 			$this->error = GetMessage('SEARCH_ERROR3');
 			$this->errorno = 3;
@@ -81,7 +84,7 @@ class CSearchMysql extends CSearchFullText
 		}
 
 		$strQuery = $this->PrepareQuery($queryObject, $queryObject->m_parsed_query);
-		if ($strQuery == '(())' || $queryObject->m_parsed_query == '')
+		if ($strQuery === '(())')
 		{
 			$this->error = GetMessage('SEARCH_ERROR3');
 			$this->errorno = 3;
@@ -91,11 +94,18 @@ class CSearchMysql extends CSearchFullText
 		$strTags = '';
 		if (array_key_exists('TAGS', $arParams))
 		{
-			$this->strTagsText = $arParams['TAGS'];
 			$arTags = explode(',', $arParams['TAGS']);
 			foreach ($arTags as $i => $strTag)
 			{
-				$arTags[$i] = trim($strTag, '"');
+				$strTag = trim($strTag, '"');
+				if ($strTag)
+				{
+					$arTags[$i] = $strTag;
+				}
+				else
+				{
+					unset($arTags[$i]);
+				}
 			}
 
 			if ($arTags)
@@ -104,15 +114,13 @@ class CSearchMysql extends CSearchFullText
 			}
 		}
 
-		if (($strQuery == '') && ($strTags <> ''))
+		if (($strQuery === '') && ($strTags !== ''))
 		{
 			$strQuery = $strTags;
-			$bTagsSearch = true;
 		}
 		else
 		{
 			$strQuery = preg_replace_callback('/&#(\\d+);/', 'chr', $strQuery);
-			$bTagsSearch = false;
 		}
 
 		$query = "match sct.SEARCHABLE_CONTENT against('" . $DB->ForSql($strQuery) . "' in boolean mode)";
@@ -123,7 +131,7 @@ class CSearchMysql extends CSearchFullText
 			foreach ($aParamsEx as $aParamEx)
 			{
 				$strSqlWhere = CSearch::__PrepareFilter($aParamEx, $bIncSites);
-				if ($strSqlWhere != '')
+				if ($strSqlWhere !== '')
 				{
 					$arSqlWhere[] = $strSqlWhere;
 				}
@@ -137,14 +145,14 @@ class CSearchMysql extends CSearchFullText
 		}
 
 		$strSqlWhere = CSearch::__PrepareFilter($arParams, $bIncSites);
-		if ($strSqlWhere != '')
+		if ($strSqlWhere !== '')
 		{
 			array_unshift($arSqlWhere, $strSqlWhere);
 		}
 
 		$strSqlOrder = $this->__PrepareSort($aSort, 'sc.', $bTagsCloud);
 
-		if (!empty($arSqlWhere))
+		if ($arSqlWhere)
 		{
 			$strSqlWhere = "\n\t\t\t\tAND (\n\t\t\t\t\t(" . implode(")\n\t\t\t\t\tAND(", $arSqlWhere) . ")\n\t\t\t\t)";
 		}
@@ -200,7 +208,7 @@ class CSearchMysql extends CSearchFullText
 		return $result;
 	}
 
-	function searchTitle($phrase = '', $arPhrase = [], $nTopCount = 5, $arParams = [], $bNotFilter = false, $order = '')
+	public function searchTitle($phrase = '', $arPhrase = [], $nTopCount = 5, $arParams = [], $bNotFilter = false, $order = '')
 	{
 		return false;
 	}
@@ -215,12 +223,14 @@ class CSearchMysql extends CSearchFullText
 		return $this->errorno;
 	}
 
-	function getRowFormatter()
+	public function getRowFormatter()
 	{
 		return new CSearchMySqlFormatter();
 	}
 
-	function __PrepareSort($aSort = [], $strSearchContentAlias = 'sc.', $bTagsCloud = false)
+	protected int $flagsUseRatingSort = 0;
+
+	public function __PrepareSort($aSort = [], $strSearchContentAlias = 'sc.', $bTagsCloud = false)
 	{
 		$arOrder = [];
 		if (!is_array($aSort))
@@ -232,7 +242,7 @@ class CSearchMysql extends CSearchFullText
 		{
 			foreach ($aSort as $key => $ord)
 			{
-				$ord = mb_strtoupper($ord) <> 'ASC' ? 'DESC' : 'ASC';
+				$ord = mb_strtoupper($ord) !== 'ASC' ? 'DESC' : 'ASC';
 				$key = mb_strtoupper($key);
 				switch ($key)
 				{
@@ -255,17 +265,10 @@ class CSearchMysql extends CSearchFullText
 			$this->flagsUseRatingSort = 0;
 			foreach ($aSort as $key => $ord)
 			{
-				$ord = mb_strtoupper($ord) <> 'ASC' ? 'DESC' : 'ASC';
+				$ord = mb_strtoupper($ord) !== 'ASC' ? 'DESC' : 'ASC';
 				$key = mb_strtoupper($key);
 				switch ($key)
 				{
-				case 'DATE_CHANGE':
-					if (!($this->flagsUseRatingSort & 0x01))
-					{
-						$this->flagsUseRatingSort = 0x02;
-					}
-					$arOrder[] = $strSearchContentAlias . $key . ' ' . $ord;
-					break;
 				case 'RANK':
 					if (!($this->flagsUseRatingSort & 0x02))
 					{
@@ -280,6 +283,7 @@ class CSearchMysql extends CSearchFullText
 					$arOrder[] = $strSearchContentAlias . $key . ' ' . $ord;
 					break;
 				case 'ID':
+				case 'DATE_CHANGE':
 				case 'MODULE_ID':
 				case 'ITEM_ID':
 				case 'TITLE':
@@ -310,7 +314,7 @@ class CSearchMysql extends CSearchFullText
 		return ' ORDER BY ' . implode(', ', $arOrder);
 	}
 
-	function PrepareQuery($queryObject, $q)
+	public function PrepareQuery($queryObject, $q)
 	{
 		$state = 0;
 		$qu = [];
@@ -356,15 +360,15 @@ class CSearchMysql extends CSearchFullText
 					}
 					else
 					{
-						if (preg_match('/[^\w\d]/u', $t))
+						if (preg_match('/\W/u', $t))
 						{
-							$t = preg_replace('/[^\w\d]+$/u', '', $t);
-							$t = preg_replace('/^[^\w\d]+/u', '', $t);
+							$t = preg_replace('/\W+$/u', '', $t);
+							$t = preg_replace('/^\W+/u', '', $t);
 							if ($t === '')
 							{
 								continue;
 							}
-							$t = '(+' . preg_replace('/[^\w\d]+/u', ' +', $t) . ($queryObject->bStemming ? '*' : '') . ')';
+							$t = '(+' . preg_replace('/\W+/u', ' +', $t) . ($queryObject->bStemming ? '*' : '') . ')';
 						}
 						elseif ($queryObject->bStemming)
 						{
@@ -446,7 +450,7 @@ class CSearchMysql extends CSearchFullText
 
 class CSearchMySqlFormatter extends CSearchFormatter
 {
-	function format($r)
+	public function format($r)
 	{
 		if ($r)
 		{
@@ -461,7 +465,7 @@ class CSearchMySqlFormatter extends CSearchFormatter
 		}
 	}
 
-	function formatRow($r)
+	public function formatRow($r)
 	{
 		$DB = CDatabase::GetModuleConnection('search');
 

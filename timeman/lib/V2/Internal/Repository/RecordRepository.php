@@ -123,7 +123,7 @@ class RecordRepository
 	}
 
 	/**
-	 * Closed records of the user within the given UTC range, only the columns needed to average the
+	 * Closed records of the user within the given UTC range, only the columns needed to take the median
 	 * local start of the day: RECORDED_START_TIMESTAMP (unix UTC) and START_OFFSET (user utc offset).
 	 *
 	 * @return array<int, array{RECORDED_START_TIMESTAMP: int, START_OFFSET: int}>

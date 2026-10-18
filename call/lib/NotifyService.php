@@ -356,7 +356,14 @@ class NotifyService
 
 		$this->sendMessageDeferred($chat, $message, $sendingConfig, $context);
 
-		(new CloudRecordAnalytics($call))->addSendMessage($track);
+		(new CloudRecordAnalytics($call))
+			->addSendMessage($track)
+			->sendTelemetry(
+				source: $track,
+				status: 'success',
+				event: 'cloud_record_chat_sent',
+			)
+		;
 	}
 
 	public function sendAudioRecordMessage(Call $call): self

@@ -3,6 +3,8 @@
 namespace Bitrix\Mail;
 
 use Bitrix\Mail\Helper\Enum\MailboxStatus;
+use Bitrix\Mail\Internal\Agent\DeletedMailboxCleanupAgent;
+use Bitrix\Mail\Internal\Service\Message\Conversation\ConversationBackfill;
 use Bitrix\Mail\Internals\MailboxAccessTable;
 use Bitrix\Mail\Internals\Repository\MailboxAddressAliasRepository;
 use Bitrix\Mail\Internals\Service\Mailbox\AddressBindingResolver;
@@ -153,7 +155,11 @@ class MailboxTable extends Entity\DataManager
 			else
 			{
 				self::rollbackOwnTransaction($connection);
+
+				return $result;
 			}
+
+			DeletedMailboxCleanupAgent::ensureScheduled();
 
 			return $result;
 		}
@@ -212,6 +218,11 @@ class MailboxTable extends Entity\DataManager
 			self::rollbackOwnTransaction($connection);
 
 			throw $exception;
+		}
+
+		if ($mailboxIds !== [])
+		{
+			DeletedMailboxCleanupAgent::ensureScheduled();
 		}
 	}
 
@@ -355,6 +366,33 @@ class MailboxTable extends Entity\DataManager
 			self::cleanRuntimeCachesAfterIgnoredBatch($mailboxIds, $ignoreEvents);
 
 			throw $exception;
+		}
+	}
+
+	/**
+	 * Decides whether a mailbox that has just been connected may group its list.
+	 *
+	 * It stores no letter yet, so this is the whole pass of the backfill over it: the check counts
+	 * three empty sets instead of walking history. The rule stays the one of the feature: readiness
+	 * comes from the check and from nowhere else, and everything that can leave the projection behind
+	 * takes it back and arms the background pass.
+	 *
+	 * Never throws: connecting a mailbox must not fail because of a read model.
+	 */
+	private static function decideConversationProjectionReadiness(int $mailboxId): void
+	{
+		if ($mailboxId <= 0)
+		{
+			return;
+		}
+
+		try
+		{
+			(new ConversationBackfill())->completePass($mailboxId, 0);
+		}
+		catch (\Throwable)
+		{
+			// Readiness simply stays unset, and the background pass decides it later.
 		}
 	}
 
@@ -701,6 +739,11 @@ class MailboxTable extends Entity\DataManager
 		{
 			self::cleanOwnerCacheByUserId((int)$mailbox['USER_ID']);
 		}
+
+		if ((string)($mailbox['SERVER_TYPE'] ?? '') === 'imap')
+		{
+			self::decideConversationProjectionReadiness((int)$event->getParameter('id'));
+		}
 	}
 
 	public static function onBeforeAdd(Entity\Event $event): Entity\EventResult
@@ -763,6 +806,49 @@ class MailboxTable extends Entity\DataManager
 		}
 
 		return $mailbox;
+	}
+
+	private static function normalizeMailboxOptions(mixed $options): array
+	{
+		if (is_array($options))
+		{
+			return $options;
+		}
+
+		if (!is_string($options))
+		{
+			return [];
+		}
+
+		try
+		{
+			$options = @unserialize($options, ['allowed_classes' => false]);
+		}
+		catch (\Throwable)
+		{
+			return [];
+		}
+
+		if (is_array($options))
+		{
+			return $options;
+		}
+
+		if (!is_string($options))
+		{
+			return [];
+		}
+
+		try
+		{
+			$options = @unserialize($options, ['allowed_classes' => false]);
+		}
+		catch (\Throwable)
+		{
+			return [];
+		}
+
+		return is_array($options) ? $options : [];
 	}
 
 	public static function getMap()
@@ -904,7 +990,7 @@ class MailboxTable extends Entity\DataManager
 					return array(
 						function ($values)
 						{
-							return unserialize($values, ['allowed_classes' => false]);
+							return static::normalizeMailboxOptions($values);
 						},
 					);
 				},
@@ -1029,7 +1115,7 @@ class MailboxTable extends Entity\DataManager
 		}
 	}
 
-	private static function cleanRuntimeFullRowCachesByMailboxId(int $mailboxId): void
+	public static function cleanRuntimeFullRowCachesByMailboxId(int $mailboxId): void
 	{
 		foreach (self::$ownerCache as $userId => $mailboxes)
 		{

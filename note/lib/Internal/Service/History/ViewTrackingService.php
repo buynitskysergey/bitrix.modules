@@ -8,7 +8,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Repository\DocumentViewRepository;
 
 /**
- * [P3.T2] Records "who viewed the document, when" on awareness `join` — the only
+ * Records "who viewed the document, when" on awareness `join` - the only
  * awareness message that is guaranteed to reach the server (see
  * CollaborationSyncController::sendAwarenessAction). Best-effort by design: a
  * failure here must never break awareness delivery or document opening, so

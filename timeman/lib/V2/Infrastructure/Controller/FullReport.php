@@ -15,6 +15,7 @@ use Bitrix\Timeman\V2\Infrastructure\Dto\FullReport\Create;
 use Bitrix\Timeman\V2\Infrastructure\Dto\FullReport\Update;
 use Bitrix\Timeman\V2\Public\Command\FullReport\AddCommand;
 use Bitrix\Timeman\V2\Public\Command\FullReport\ApproveCommand;
+use Bitrix\Timeman\V2\Public\Command\FullReport\DisapproveCommand;
 use Bitrix\Timeman\V2\Public\Command\FullReport\PostponeCommand;
 use Bitrix\Timeman\V2\Public\Command\FullReport\RejectCommand;
 use Bitrix\Timeman\V2\Public\Command\FullReport\SendCommand;
@@ -489,6 +490,48 @@ class FullReport extends BaseController
 		}
 
 		$command = new RejectCommand(
+			reportId: $reportId,
+			approverId: (int)$this->getCurrentUser()->getId(),
+		);
+
+		$result = $command->run();
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * @ajaxAction timeman.V2.FullReport.disapprove
+	 */
+	public function disapproveAction(
+		#[PositiveNumber]
+		int $reportId,
+		FullReportProvider $provider,
+	): bool
+	{
+		$accessManager = $this->getAccessManager();
+
+		$report = $provider->getById($reportId);
+		if (!$report)
+		{
+			$this->addError(new Error('Report not found.'));
+
+			return false;
+		}
+
+		if (!$accessManager->canUpdateWorktime($report->userId))
+		{
+			$this->addError(new Error('Access denied.'));
+
+			return false;
+		}
+
+		$command = new DisapproveCommand(
 			reportId: $reportId,
 			approverId: (int)$this->getCurrentUser()->getId(),
 		);

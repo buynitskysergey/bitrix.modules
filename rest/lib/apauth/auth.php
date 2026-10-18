@@ -21,6 +21,7 @@ use Bitrix\Rest\Engine\Access\HoldEntity;
 use Bitrix\Rest\Internal\Entity\SystemUser\ResourceType;
 use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface;
 use Bitrix\Rest\Internal\Repository\SystemUser\SystemUserRepository;
+use Bitrix\Rest\Internal\Service;
 use Throwable;
 
 class Auth
@@ -34,6 +35,10 @@ class Auth
 	protected static $integrationScope = array('crm', 'telephony', 'imopenlines');
 
 	protected static $scopeCache = array();
+
+	protected static ?Service\IncomingWebhook\ExpirationChecker $webhookExpirationChecker = null;
+
+	protected static ?Service\IncomingWebhook\Invalidator $webhookInvalidator = null;
 
 	public static function onRestCheckAuth(array $query, $scope, &$res)
 	{
@@ -261,7 +266,7 @@ class Auth
 					'=PASSWORD' => $auth[static::$authQueryParams['PASSWORD']],
 					'=ACTIVE' => PasswordTable::ACTIVE,
 				],
-				'select' => ['ID'],
+				'select' => ['ID', 'DATE_EXPIRE'],
 				'cache' => ['ttl' => 86400],
 			])->fetch();
 			if (!$passwordInfo)
@@ -283,6 +288,13 @@ class Auth
 
 			if ($passwordInfo)
 			{
+				if (static::getWebhookExpirationChecker()->isExpired($passwordInfo))
+				{
+					static::getWebhookInvalidator()->invalidateByPasswordId((int)$passwordInfo['ID']);
+
+					return $result;
+				}
+
 				if (static::checkPermission($passwordInfo['ID'], $scope) === true)
 				{
 					$result = [
@@ -301,6 +313,16 @@ class Auth
 		}
 
 		return $result;
+	}
+
+	protected static function getWebhookExpirationChecker(): Service\IncomingWebhook\ExpirationChecker
+	{
+		return static::$webhookExpirationChecker ??= new Service\IncomingWebhook\ExpirationChecker();
+	}
+
+	protected static function getWebhookInvalidator(): Service\IncomingWebhook\Invalidator
+	{
+		return static::$webhookInvalidator ??= new Service\IncomingWebhook\Invalidator();
 	}
 
 	protected static function checkOldPassword($userId, $password)

@@ -35,7 +35,7 @@ class ChatTaskLinkService
 			return;
 		}
 
-		(new AutoTaskStatus($message, Status::TaskCreationCompleted, true))->send();
+		(new AutoTaskStatus($message, $userId, Status::TaskCreationCompleted, true))->send();
 
 		Application::getInstance()->addBackgroundJob(
 			static function() use ($chatId, $messageId, $taskId, $userId, $taskType)

@@ -72,6 +72,7 @@ final class Send implements Contract\Operation
 		private readonly ?DocumentBlankReplacementConfig $blankReplacementConfig = null,
 		private readonly ?string $externalId = null,
 		private readonly ?string $externalDate = null,
+		private readonly ?string $inviteMessage = null,
 		?DocumentService $documentService = null,
 		?ProfileProvider $profileProvider = null,
 		?MemberDynamicFieldInfoProvider $dynamicFieldProvider = null,
@@ -145,12 +146,22 @@ final class Send implements Contract\Operation
 			}
 		}
 
+		// The message the sender attached to the invitation is stored by the write that creates the
+		// document, which happens before configureAndStart schedules the configure agent: the invitation
+		// is built asynchronously from the stored document. Hence the validation before any write.
+		$validateMessageResult = (new Operation\Document\Validation\ValidateInviteMessage($this->inviteMessage))->launch();
+		if (!$validateMessageResult->isSuccess())
+		{
+			return $validateMessageResult;
+		}
+
 		$createResult = (new CreateDocumentFromTemplate(
 			template: $this->template,
 			templateDocument: $document,
 			createdByUserId: $this->responsibleUserId,
 			bindings: $this->bindings,
 			blankReplacementConfig: $this->blankReplacementConfig,
+			inviteMessage: $this->inviteMessage,
 		))->launch();
 		if (!$createResult instanceof CreateDocumentResult)
 		{

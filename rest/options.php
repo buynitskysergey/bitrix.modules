@@ -2,8 +2,10 @@
 $module_id = 'rest';
 
 use Bitrix\Main\Application;
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Rest\Internal\Integration\Main\Web\NationalTrustStore;
 use Bitrix\Rest\Public\Command;
 use Bitrix\Rest\Public\Provider;
 use Bitrix\Rest\Tools\Diagnostics\LoggerManager;
@@ -48,6 +50,14 @@ $allOptions = [
 	[
 		'CODE' => 'enable_mod_zip',
 		'NAME' => Loc::getMessage('REST_OPT_ENABLE_MOD_ZIP') . ':',
+		'PARAMS' => [
+			'TYPE' => 'checkbox'
+		]
+	],
+	[
+		'CODE' => NationalTrustStore::OPTION_NAME,
+		'NAME' => Loc::getMessage('REST_OPT_TRUST_NATIONAL_CA') . ':',
+		'DEFAULT' => (new NationalTrustStore())->isEnabledByDefault() ? 'Y' : 'N',
 		'PARAMS' => [
 			'TYPE' => 'checkbox'
 		]
@@ -198,6 +208,8 @@ if (($request->isPost() || $restoreDefaults !== '') && \check_bitrix_sessid())
 				\COption::setOptionString($module_id, $option, $value);
 			}
 		}
+
+		Option::delete($module_id, ['name' => NationalTrustStore::OPTION_NAME]);
 	}
 	else
 	{

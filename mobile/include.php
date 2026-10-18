@@ -13,6 +13,18 @@ CModule::AddAutoloadClasses(
 	]
 );
 
+// Dev/QA tools live outside the shipped module tree, so they exist only in a developer checkout.
+if (is_dir(__DIR__ . '/dev/public/integrator'))
+{
+	CModule::AddAutoloadClasses(
+		'mobile',
+		[
+			'Bitrix\\Mobile\\Dev\\Integrator\\IntegratorMock' => 'dev/public/integrator/IntegratorMock.php',
+			'Bitrix\\Mobile\\Controller\\IntegratorDev' => 'dev/public/integrator/IntegratorDevController.php',
+		]
+	);
+}
+
 CJSCore::RegisterExt('mobile_voximplant', [
 	'js' => '/bitrix/js/mobile/mobile_voximplant.js',
 ]);

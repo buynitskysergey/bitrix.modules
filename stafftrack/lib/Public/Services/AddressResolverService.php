@@ -19,7 +19,12 @@ class AddressResolverService
 		}
 		catch (\Throwable $exception)
 		{
-
+			// the only caller is a background job of a request already answered, so the failure has
+			// nowhere to be reported to: without this record the points stay addressless silently
+			AddMessage2Log(
+				'AddressResolverService::enqueue error: '
+				. $exception->getMessage() . "\n" . $exception->getTraceAsString(),
+			);
 		}
 	}
 
@@ -29,8 +34,8 @@ class AddressResolverService
 
 		foreach ($checkIns as $checkIn)
 		{
-			$latitude = (float)($checkIn['latitude'] ?? 0);
-			$longitude = (float)($checkIn['longitude'] ?? 0);
+			$latitude = (float)($checkIn['latitude'] ?? $checkIn['lat'] ?? 0);
+			$longitude = (float)($checkIn['longitude'] ?? $checkIn['lon'] ?? 0);
 
 			if (!empty($checkIn['address']) || ($latitude == 0 && $longitude == 0))
 			{

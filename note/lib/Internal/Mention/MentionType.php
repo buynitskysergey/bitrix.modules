@@ -10,6 +10,7 @@ enum MentionType: string
     case Document = 'document';
     case Collection = 'collection';
     case Task = 'task';
+    case DiskFolder = 'diskfolder';
 
     // Returns the entity-selector entityId for this mention type.
     public function entityId(): string
@@ -19,6 +20,7 @@ enum MentionType: string
             self::Collection => 'note-collection',
             self::User       => 'user',
             self::Task       => 'task',
+            self::DiskFolder => 'note-disk-folder',
         };
     }
 
@@ -28,7 +30,7 @@ enum MentionType: string
         return match($this) {
             self::Document   => "/note/document/$id/",
             self::Collection => "/note/collection/$id/",
-            self::User, self::Task => null,
+            self::User, self::Task, self::DiskFolder => null,
         };
     }
 }

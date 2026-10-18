@@ -20,11 +20,19 @@ return [
 					'batch' => \Bitrix\Rest\V3\Documentation\BatchMethodProvider::class,
 				],
 			],
+			'events' => [
+				'providers' => [
+					\Bitrix\Rest\V3\Event\Provider\SubscribableEventProvider::class,
+				],
+			],
 		]
 	],
 	'controllers' => [
 		'value' => [
 			'defaultNamespace' => '\\Bitrix\\Rest\\Controller',
+			'namespaces' => [
+				'\\Bitrix\\Rest\\Infrastructure\\Controller' => 'v2',
+			],
 			'restIntegration' => [
 				'enabled' => true,
 				'hideModuleScope' => true,

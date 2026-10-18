@@ -7,7 +7,7 @@ namespace Bitrix\Note\Internal\Service\Favorite;
 use Bitrix\Main\Application;
 
 /**
- * [P3.T3] Serialises the two writes that share one invariant: a positive subscription exists only while
+ * Serialises the two writes that share one invariant: a positive subscription exists only while
  * the object sits in the caller's favorites. Each side reads the state the other one writes, and a plain
  * SELECT is no barrier here - under REPEATABLE READ it does not even see a row committed since the
  * transaction began, so the check can pass on a favorite that is already gone.

@@ -1,0 +1,10 @@
+{
+    "defaultTableName": "b_tasks",
+    "installDirectoriesMapping": {
+        "install/activities": "activities",
+        "install/components": "components",
+        "install/images": "images",
+        "install/js": "js",
+        "install/public/js": "js"
+    }
+}

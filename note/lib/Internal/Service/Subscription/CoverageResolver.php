@@ -7,16 +7,24 @@ namespace Bitrix\Note\Internal\Service\Subscription;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\SubscriptionRepository;
+use Bitrix\Note\Internal\Service\Notification\NotificationShippingPolicy;
 
 /**
- * [P2.T2 / ALG-01] The single implementation of "is this object covered by notifications for this
+ * The single implementation of "is this object covered by notifications for this
  * user, and how". Serves the bell of one document, a whole page of rows and the recipient walk of
  * SubscriptionResolver, so the inheritance rule exists in one place only.
  *
  * Priority of sources: direct row > "with nested" row on an ancestor > subscription on the
  * knowledge base. A direct row in MODE_MUTED is a negative override: it is reported alongside the
- * inherited coverage it suppresses (the bell shows both), and it wins over every positive source
- * in `notified`.
+ * inherited coverage it suppresses, so the bell can show both.
+ *
+ * `notified` answers a narrower question than the rest of the state: not "is this object covered"
+ * but "does anything actually reach this user here". Delivery resolves its recipients from the
+ * direct rows of the article in the modes NotificationShippingPolicy ships and walks no
+ * inheritance, so the flag says exactly that. A `subtree` row, an `all` row and coverage from an
+ * ancestor or from the knowledge base are still reported as they are - the interface needs them to
+ * draw a legacy subscription - but they promise nothing and read as `notified` false. The
+ * knowledge-base scope ships no mode at all, so there `notified` is never true.
  *
  * Rights are not checked here - visibility is the calling layer's job, same split as
  * SubscriptionResolver: losing access must not silently delete a subscription row.
@@ -44,7 +52,7 @@ final class CoverageResolver
 	) {}
 
 	/**
-	 * [DTO-02] Coverage state per document.
+	 * Coverage state per document.
 	 *
 	 * $items maps a document id to the collection the coverage question is asked about - normally
 	 * the document's own knowledge base. The ancestor walk is skipped for documents whose
@@ -113,7 +121,7 @@ final class CoverageResolver
 				'muted' => $muted,
 				'inherited' => $inherited,
 				'inheritedSource' => $inheritedSource,
-				'notified' => ($subscribed || $inherited) && !$muted,
+				'notified' => self::isDelivered(SubscriptionTable::SCOPE_DOCUMENT, $mode),
 			];
 		}
 
@@ -121,8 +129,9 @@ final class CoverageResolver
 	}
 
 	/**
-	 * [DTO-02] Coverage state per knowledge base. A knowledge base is only ever subscribed
-	 * directly (MODE_ALL) - there is nothing above it to inherit from and no mute on it.
+	 * Coverage state per knowledge base. A knowledge base is only ever subscribed
+	 * directly (MODE_ALL) - there is nothing above it to inherit from and no mute on it - and
+	 * MODE_ALL is not shipped, so `notified` is false on every row this method answers.
 	 *
 	 * @param int[] $collectionIds
 	 * @return array<int, array{
@@ -155,11 +164,22 @@ final class CoverageResolver
 				'muted' => false,
 				'inherited' => false,
 				'inheritedSource' => null,
-				'notified' => $subscribed,
+				'notified' => self::isDelivered(SubscriptionTable::SCOPE_COLLECTION, $mode),
 			];
 		}
 
 		return $states;
+	}
+
+	/**
+	 * Whether delivery reaches a user through a row of this mode, asked of the DIRECT row alone:
+	 * NotificationRecipientService reads direct rows in the shipped modes and walks nothing above
+	 * them, so a mode outside that list and coverage that has no row of its own deliver nothing
+	 * whatever the rest of the state looks like.
+	 */
+	private static function isDelivered(string $scope, ?string $mode): bool
+	{
+		return $mode !== null && in_array($mode, NotificationShippingPolicy::shippedModes($scope), true);
 	}
 
 	/**

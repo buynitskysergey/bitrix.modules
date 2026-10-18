@@ -12,8 +12,10 @@ use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsStats;
 use Bitrix\Note\Internal\Service\Document\DocumentService;
+use Bitrix\Note\Internal\Service\Document\MainDocumentService;
 use Bitrix\Note\Internal\Service\Import\ImportLogger;
 use Bitrix\Note\Internal\Service\Import\Source\SourceInterface;
+use Bitrix\Note\Internal\Service\Import\SourceReadableSnapshot;
 use Bitrix\Note\Internal\Service\Import\Transformer\MdTransformerFactory;
 use Bitrix\Note\Internal\Service\Import\Transformer\MentionTransformerFactory;
 use Bitrix\Note\Internal\Service\Import\UnresolvedMentionService;
@@ -26,6 +28,7 @@ class FillContentStep implements StepInterface
 		private readonly DocumentService $documentService,
 		private readonly UnresolvedMentionService $unresolvedMentionService,
 		private readonly ImportMapRepository $mapRepository,
+		private readonly MainDocumentService $mainDocumentService = new MainDocumentService(),
 	)
 	{
 	}
@@ -37,6 +40,8 @@ class FillContentStep implements StepInterface
 		$currentCollectionId = $collectionIds[$collectionIndex];
 		$offset = $option['documentOffset'] ?? 0;
 		$userId = (int)$option['userId'];
+
+		$this->assertSourceReadable($option, (string)$currentCollectionId);
 
 		$result = $source->getDocumentsPage($currentCollectionId, $offset, self::BATCH_SIZE);
 		if (!$result->success)
@@ -105,14 +110,29 @@ class FillContentStep implements StepInterface
 					continue;
 				}
 
-				$docId = $mappings[$externalId]['documentId'] ?? null;
+				// A source page the source declares to be the description of the whole base
+				// (the home page of a landing knowledge base) has no document of its own.
+				$isDescription = !empty($doc['isCollectionDescription']);
+
+				$docId = $isDescription
+					? $this->resolveDescriptionDocument($option, $externalId, $doc['urlId'] ?? null, $userId)
+					: $mappings[$externalId]['documentId'] ?? null
+				;
+
+				if ($docId === null && !$isDescription)
+				{
+					$docId = $this->createMissingDocument(
+						$option,
+						$externalId,
+						$doc['urlId'] ?? null,
+						$title,
+						$userId,
+					);
+				}
+
 				if ($docId === null)
 				{
-					$docId = $this->createMissingDocument($option, $externalId, $title, $userId);
-					if ($docId === null)
-					{
-						continue;
-					}
+					continue;
 				}
 
 				$mentionResult = $mentionTransformer->transform($text);
@@ -125,7 +145,9 @@ class FillContentStep implements StepInterface
 
 				$this->documentService->update(
 					id: $docId,
-					title: $title,
+					// The main document keeps its own title: it names the description of the base
+					// for every reader, while the source page title names just that page.
+					title: $isDescription ? null : $title,
 					markdown: $transformedText,
 					userId: $userId,
 					contentFormat: DocumentTable::CONTENT_FORMAT_MD,
@@ -181,9 +203,10 @@ class FillContentStep implements StepInterface
 			$this->unresolvedMentionService->addBatch($unresolvedRowsToInsert);
 		}
 
-		$option['documentOffset'] = $offset + count($documents);
+		$itemsRead = $this->sourceItemsRead($result->data, count($documents));
+		$option['documentOffset'] = $offset + $itemsRead;
 
-		if (count($documents) < self::BATCH_SIZE)
+		if ($itemsRead < $this->sourceWindow($result->data))
 		{
 			$option['step'] = 'downloadAttachments';
 			$option['attachmentDocIndex'] = 0;
@@ -191,7 +214,115 @@ class FillContentStep implements StepInterface
 		}
 	}
 
-	private function createMissingDocument(array &$option, string $externalId, string $title, int $userId): ?int
+	/**
+	 * How far down its own listing the source got in this batch - the number the window moves by and
+	 * the one that says whether the source is exhausted. It is not the number of documents the batch
+	 * produced: an element the source listed but could not read afterwards yields no document, and
+	 * counting documents instead would move the window back onto elements already imported and take
+	 * the short batch for the end of the source, leaving the rest of it unread without a word.
+	 *
+	 * A source that states nothing is paged by the documents it returned, as before: for such a
+	 * source a batch is short only when there is nothing left to give.
+	 */
+	private function sourceItemsRead(array $data, int $documentCount): int
+	{
+		return (int)($data['consumed'] ?? $documentCount);
+	}
+
+	/**
+	 * The window the source answered with, which is the length a full batch has - and so the number a
+	 * short batch, the end of the source, is short against. A source with a page ceiling of its own
+	 * hands out less than {@see self::BATCH_SIZE} and says so; measured against the size asked for, its every
+	 * batch would be short, and the source would be called finished after the first one.
+	 *
+	 * A source that names no window of its own was given the whole one it was asked for.
+	 */
+	private function sourceWindow(array $data): int
+	{
+		$window = (int)($data['windowLimit'] ?? self::BATCH_SIZE);
+
+		return $window > 0 ? $window : self::BATCH_SIZE;
+	}
+
+	/**
+	 * Refuses to read the content of a base the initiator could not read when they started the
+	 * conversion (ALG-03). A background job cannot ask landing about their rights - it would be told
+	 * about whoever is logged in - so the snapshot their own request left behind is the only source of
+	 * truth here. The request refuses such a conversion before a session exists
+	 * ({@see \Bitrix\Note\Public\Command\Import\StartImportCommand}); this is the line for a state
+	 * that names such a base anyway.
+	 */
+	private function assertSourceReadable(array $option, string $sourceCollectionId): void
+	{
+		if (SourceReadableSnapshot::allows($option, $sourceCollectionId))
+		{
+			return;
+		}
+
+		$userId = (int)($option['userId'] ?? 0);
+		ImportLogger::logError(
+			"fillContent: {$sourceCollectionId} was not readable by user {$userId} when the "
+			. 'conversion started - nothing of it is read'
+		);
+
+		throw new SystemException('Source collection is not readable by the initiator');
+	}
+
+	/**
+	 * The document that carries the knowledge base description: the collection's main document.
+	 * As a rule it already exists - it is created together with the collection - but a repeat
+	 * import into a collection older than the main document itself, one the backfill agent has not
+	 * reached yet, would otherwise have no receiver and lose the home page content silently.
+	 * Creation is idempotent, so an existing document is returned as is and never duplicated.
+	 * The author is the initiator of the import, taken from the step state rather than from the
+	 * current user: the steps run in a background job, outside the initiator's session.
+	 *
+	 * The mapping of the source page is written onto it: the page becomes no document of its own,
+	 * and without the mapping the address it used to live at would resolve to nothing.
+	 * The description also joins the imported ids, because its attachments are downloaded by the
+	 * same step that walks that list.
+	 */
+	private function resolveDescriptionDocument(
+		array &$option,
+		string $externalId,
+		?string $urlId,
+		int $userId,
+	): ?int
+	{
+		$collectionId = (int)($option['resultCollectionId'] ?? 0);
+		$documentId = $collectionId > 0
+			? $this->mainDocumentService->ensureMainDocument($collectionId, $userId)
+			: null
+		;
+
+		if ($documentId === null)
+		{
+			ImportLogger::logError(
+				"fillContent: no main document in collection {$collectionId} to describe externalId={$externalId}"
+			);
+
+			return null;
+		}
+
+		$this->mapRepository->saveDocumentMapping($option['sourceType'], $externalId, $documentId, $urlId);
+		$option['importedDocIds'][] = $documentId;
+
+		return $documentId;
+	}
+
+	/**
+	 * Recreates a document that has no mapping yet (e.g. deleted between the structure and the
+	 * content step). The anchor is written together with the key: every converted element must be
+	 * reachable from its source address, and a document restored here is no exception - without it
+	 * the element drops out of the reverse links from the source.
+	 */
+	private function createMissingDocument(
+		array &$option,
+		string $externalId,
+		?string $urlId,
+		string $title,
+		int $userId,
+	): ?int
 	{
 		$collectionId = $option['resultCollectionId'] ?? null;
 		if ($collectionId === null)
@@ -215,7 +346,7 @@ class FillContentStep implements StepInterface
 			);
 
 			$docId = (int)$savedDoc->getId();
-			$this->mapRepository->saveDocumentMapping($option['sourceType'], $externalId, $docId);
+			$this->mapRepository->saveDocumentMapping($option['sourceType'], $externalId, $docId, $urlId);
 			$option['importedDocIds'][] = $docId;
 
 			return $docId;

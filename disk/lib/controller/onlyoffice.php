@@ -7,6 +7,9 @@ use Bitrix\Disk\Document;
 use Bitrix\Disk\Document\Models;
 use Bitrix\Disk\Document\Models\DocumentSession;
 use Bitrix\Disk\Driver;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
+use Bitrix\Disk\Internal\Service\DocumentHeader\RenameService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\User;
 use Bitrix\Main\Analytics\AnalyticsEvent;
@@ -19,6 +22,7 @@ use Bitrix\Main\Engine\ActionFilter\ContentType;
 use Bitrix\Main\Engine\ActionFilter\Csrf;
 use Bitrix\Main\Engine\ActionFilter\HttpMethod;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\JsonPayload;
 use Bitrix\Main\Engine\Response;
 use Bitrix\Main\Engine\Router;
@@ -26,6 +30,7 @@ use Bitrix\Main\Engine\UrlManager;
 use Bitrix\Main\Error;
 use Bitrix\Main\HttpResponse;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Request;
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\MimeType;
@@ -68,9 +73,20 @@ final class OnlyOffice extends Engine\Controller
 	protected const ACTION_TYPE_CONNECT = 1;
 	protected const ACTION_TYPE_FORCE_SAVE = 2;
 
+	protected UnifiedLinkAccessService $unifiedLinkAccessService;
+	protected UnifiedLinkUrl $unifiedLinkUrl;
 	/** @var array */
 	protected $documentSessions;
 	private $addExtendedErrorInfo = false;
+
+	public function __construct(?Request $request = null)
+	{
+		parent::__construct($request);
+
+		$serviceLocator = ServiceLocator::getInstance();
+		$this->unifiedLinkAccessService = $serviceLocator->get(UnifiedLinkAccessService::class);
+		$this->unifiedLinkUrl = $serviceLocator->get(UnifiedLinkUrl::class);
+	}
 
 	public function getAutoWiredParameters()
 	{
@@ -270,49 +286,30 @@ final class OnlyOffice extends Engine\Controller
 		]);
 	}
 
-	public function renameDocumentAction(Models\DocumentSession $documentSession, string $newName): ?array
+	/**
+	 * The rename requested by the editor interface and the one requested by the header are the same
+	 * operation, so both go through {@see RenameService} - including its rule that the right on the
+	 * object decides, not the kind of the session.
+	 */
+	public function renameDocumentAction(
+		Models\DocumentSession $documentSession,
+		CurrentUser $currentUser,
+		RenameService $renameService,
+		string $newName,
+	): ?array
 	{
-		if (!$documentSession->isEdit())
-		{
-			$this->addError(new Error('Could not rename document by view session.'));
-
-			return null;
-		}
-
-		if (!$documentSession->canUserRename($this->getCurrentUser()))
-		{
-			$this->addError(new Error('Could not rename due to lack of rights.'));
-
-			return null;
-		}
-
-		$file = $documentSession->getFile();
-		if (!$file)
-		{
-			$this->addError(new Error('Could not find file.'));
-
-			return null;
-		}
-
-		$newName .= ".{$file->getExtension()}";
-		$newName = Disk\Ui\Text::correctFilename($newName);
-		if (!$file->rename($newName, true))
-		{
-			$this->addErrors($this->getErrors());
-
-			return null;
-		}
-
-		$result = Document\OnlyOffice\OnlyOfficeHandler::renameDocument($documentSession->getExternalHash(), $newName);
+		$result = $renameService->rename($documentSession, $newName, (int)$currentUser->getId());
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
+
+			return null;
 		}
 
 		return [
 			'file' => [
-				'name' => $file->getName(),
-			]
+				'name' => $result->getData()['name'],
+			],
 		];
 	}
 
@@ -478,6 +475,8 @@ final class OnlyOffice extends Engine\Controller
 
 		$this->logUsageMetrics($documentSession, $payloadData, $userDocumentSessions);
 
+		$wasDocumentWritten = false;
+
 		switch ($status)
 		{
 			case self::STATUS_IS_BEING_EDITED:
@@ -486,7 +485,8 @@ final class OnlyOffice extends Engine\Controller
 
 			case self::STATUS_IS_READY_FOR_SAVE:
 			case self::STATUS_ERROR_WHILE_SAVING:
-				if ($this->saveDocument($documentSession, $payloadData))
+				$wasDocumentWritten = $this->saveDocument($documentSession, $payloadData);
+				if ($wasDocumentWritten)
 				{
 					$this->deactivateDocumentSessions($documentSession->getExternalHash());
 					$this->commentAttachedObjectsOnBackground($documentSession);
@@ -504,9 +504,10 @@ final class OnlyOffice extends Engine\Controller
 		}
 
 		$this->processStatusToInfoModel($documentSession, $status);
-		if ($documentSession->getInfo() && $documentSession->getInfo()->wasFinallySaved())
+		$sessionEndReport = $this->makeSessionEndReportForChannel($documentSession->getInfo(), $wasDocumentWritten);
+		if ($sessionEndReport !== null)
 		{
-			$this->sendEventToDocumentChannel($documentSession);
+			$this->sendEventToDocumentChannel($documentSession, $sessionEndReport);
 		}
 
 		if ($this->getErrors())
@@ -776,10 +777,45 @@ final class OnlyOffice extends Engine\Controller
 		return false;
 	}
 
-	protected function sendEventToDocumentChannel(Models\DocumentSession $documentSession): void
+	/**
+	 * What the channel of the document learns from the hook, or null when it learns nothing. The event
+	 * means the end of the session and the page waiting for the document navigates by it, so a final
+	 * save which never reached Disk has to release it all the same; whether the document was written is
+	 * told apart, by the report the header reads. An intermediate save leaves the session going.
+	 */
+	private function makeSessionEndReportForChannel(
+		?Models\DocumentInfo $documentInfo,
+		bool $wasDocumentWritten,
+	): ?array
 	{
-		$documentInfo = $documentSession->getInfo();
-		$objectEvent = $documentSession->getObject()->makeObjectEvent(
+		if (!$documentInfo || !$documentInfo->isFinished())
+		{
+			return null;
+		}
+
+		return [
+			'contentStatus' => $documentInfo->getContentStatus(),
+			'wasFinallySaved' => $wasDocumentWritten && $documentInfo->wasFinallySaved(),
+		];
+	}
+
+	/**
+	 * The object may be gone by the time the session ends - moved to the recycle bin while the editing
+	 * went on - and the channel of the document is the channel of that object, so there is nowhere left
+	 * to report to. The hook of the document server is answered all the same.
+	 */
+	protected function sendEventToDocumentChannel(
+		Models\DocumentSession $documentSession,
+		array $sessionEndReport,
+	): void
+	{
+		$object = $documentSession->getObject();
+		if (!$object)
+		{
+			return;
+		}
+
+		$objectEvent = $object->makeObjectEvent(
 			'onlyoffice',
 			[
 				'object' => [
@@ -788,10 +824,7 @@ final class OnlyOffice extends Engine\Controller
 				'documentSession' => [
 					'hash' => $documentSession->getExternalHash(),
 				],
-				'documentSessionInfo' => [
-					'contentStatus' => $documentInfo->getContentStatus(),
-					'wasFinallySaved' => $documentInfo->wasFinallySaved(),
-				],
+				'documentSessionInfo' => $sessionEndReport,
 			]
 		);
 
@@ -855,7 +888,8 @@ final class OnlyOffice extends Engine\Controller
 		array $analytics = [],
 	): ?array
 	{
-		$newFile = $this->createDocument($typeFile, $targetFolder, $analytics);
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
+		$newFile = $this->createDocument($typeFile, $targetFolder, $analytics, $uls);
 
 		if (!$newFile)
 		{
@@ -880,7 +914,8 @@ final class OnlyOffice extends Engine\Controller
 		array $analytics = [],
 	): ?HttpResponse
 	{
-		$newFile = $this->createDocument($typeFile, $targetFolder, $analytics);
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
+		$newFile = $this->createDocument($typeFile, $targetFolder, $analytics, $uls);
 
 		if (!$newFile)
 		{
@@ -894,6 +929,7 @@ final class OnlyOffice extends Engine\Controller
 		string $typeFile,
 		?\Bitrix\Disk\Folder $targetFolder = null,
 		array $analytics = [],
+		?string $uls = null,
 	): ?Disk\File
 	{
 		$createBlankDocumentScenario = new Document\OnlyOffice\CreateBlankDocumentScenario(
@@ -903,7 +939,20 @@ final class OnlyOffice extends Engine\Controller
 
 		if ($targetFolder)
 		{
-			$result = $createBlankDocumentScenario->createBlank($typeFile, $targetFolder, $analytics);
+			$shouldCheckUnifiedLink =
+				is_string($uls)
+				&& $this->unifiedLinkAccessService->validateUlsForObjectId(
+					objectId: $targetFolder->getId(),
+					uls: $uls,
+				)
+			;
+
+			$result = $createBlankDocumentScenario->createBlank(
+				typeFile: $typeFile,
+				targetFolder: $targetFolder,
+				analytics: $analytics,
+				shouldCheckUnifiedLink: $shouldCheckUnifiedLink,
+			);
 		}
 		else
 		{
@@ -991,9 +1040,14 @@ final class OnlyOffice extends Engine\Controller
 			$object = null;
 		}
 
+		$uls = $object ? $this->getUnifiedLinkSignatureForFile($object) : null;
+
 		if ($object && !$canEdit)
 		{
-			$securityContext = $object->getStorage()->getCurrentUserSecurityContext();
+			$securityContext = $object->getStorage()->getCurrentUserSecurityContext(
+				shouldCheckUnifiedLink: is_string($uls),
+			);
+
 			if ($object->canUpdate($securityContext))
 			{
 				$canEdit = true;
@@ -1005,7 +1059,29 @@ final class OnlyOffice extends Engine\Controller
 			return $this->showNotFoundPageAction();
 		}
 
-		return $this->loadDocumentEditor($object, null, $attachedObject, DocumentSession::TYPE_EDIT, $editorMode);
+		return $this->loadDocumentEditor($object, null, $attachedObject, DocumentSession::TYPE_EDIT, $editorMode, $uls);
+	}
+
+	private function getUnifiedLinkSignatureForFile(Disk\File $object): ?string
+	{
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
+
+		if (!is_string($uls))
+		{
+			return null;
+		}
+
+		if (
+			!$this->unifiedLinkAccessService->validateUlsForObjectId(
+				objectId: $object->getId(),
+				uls: $uls,
+			)
+		)
+		{
+			return null;
+		}
+
+		return $uls;
 	}
 
 	public function loadDocumentViewerAction(
@@ -1062,7 +1138,8 @@ final class OnlyOffice extends Engine\Controller
 		?Disk\Version $version,
 		?Disk\AttachedObject $attachedObject,
 		int $type,
-		int $editorMode = Document\OnlyOffice\Editor\ConfigBuilder::VISUAL_MODE_USUAL
+		int $editorMode = Document\OnlyOffice\Editor\ConfigBuilder::VISUAL_MODE_USUAL,
+		?string $uls = null,
 	): ?HttpResponse
 	{
 		if (!$object && !$attachedObject && !$version)
@@ -1125,14 +1202,21 @@ final class OnlyOffice extends Engine\Controller
 		}
 		$sessionManager->unlock();
 
-		/** @see \DiskFileEditorOnlyOfficeController::getSliderContentAction */
-		$link = UrlManager::getInstance()->create('getSliderContent', [
+		$sliderContentParams = [
 			'c' => 'bitrix:disk.file.editor-onlyoffice',
 			'mode' => Router::COMPONENT_MODE_AJAX,
 			'documentSessionId' => $documentSession->getId(),
 			'documentSessionHash' => $documentSession->getExternalHash(),
 			'editorMode' => $editorMode,
-		]);
+		];
+
+		if (is_string($uls))
+		{
+			$sliderContentParams = $this->unifiedLinkUrl->addUlsToParams($sliderContentParams, $uls);
+		}
+
+		/** @see \DiskFileEditorOnlyOfficeController::getSliderContentAction */
+		$link = UrlManager::getInstance()->create('getSliderContent', $sliderContentParams);
 
 		return $this->redirectTo($link);
 	}

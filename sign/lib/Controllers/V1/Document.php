@@ -11,6 +11,7 @@ use Bitrix\Sign\Access\ActionDictionary;
 use Bitrix\Sign\Access\DocumentAnnulPermission;
 use Bitrix\Sign\Attribute;
 use Bitrix\Sign\Attribute\ActionAccess;
+use Bitrix\Sign\Config\Feature;
 use Bitrix\Sign\Config\Storage;
 use Bitrix\Sign\Engine\Controller;
 use Bitrix\Sign\FeatureResolver;
@@ -692,6 +693,52 @@ class Document extends Controller
 		}
 
 		return [];
+	}
+
+	#[Attribute\Access\LogicOr(
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_DOCUMENT_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		)
+	)]
+	public function modifyInviteMessageAction(string $uid, ?string $message = null): array
+	{
+		if (!Feature::instance()->isDocumentMessageEnabled())
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_CONTROLLER_DOCUMENT_MESSAGE_FEATURE_DISABLED'),
+				'FEATURE_DISABLED',
+			));
+
+			return [];
+		}
+
+		$document = $this->documentService->getByUid($uid);
+		if ($document === null)
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_CONTROLLER_DOCUMENT_NOT_FOUND'),
+				'DOCUMENT_NOT_FOUND',
+			));
+
+			return [];
+		}
+
+		$result = $this->documentService->modifyInviteMessage($document, $message);
+		if (!$result->isSuccess())
+		{
+			$this->addErrorsFromResult($result);
+
+			return [];
+		}
+
+		return ['success' => true];
 	}
 
 	#[Attribute\ActionAccess(

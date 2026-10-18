@@ -204,7 +204,9 @@ class Message extends BaseController
 		$messageService = new MessageService($chat->getLoadContextMessage($this->convertCharToBool($ignoreMark)));
 		$messages = $messageService->getMessageContext($limit, \Bitrix\Im\V2\Message::REST_FIELDS)->getResult();
 
-		return $messageService->fillContextPaginationData($this->toRestFormat($messages), $messages, $limit);
+		return $this->enrichCopilotVotes(
+			$messageService->fillContextPaginationData($this->toRestFormat($messages), $messages, $limit)
+		);
 	}
 
 	/**
@@ -215,7 +217,9 @@ class Message extends BaseController
 		$messageService = new MessageService($message);
 		$messages = $messageService->getMessageContext($range, \Bitrix\Im\V2\Message::REST_FIELDS)->getResult();
 
-		return $messageService->fillContextPaginationData($this->toRestFormat($messages), $messages, $range);
+		return $this->enrichCopilotVotes(
+			$messageService->fillContextPaginationData($this->toRestFormat($messages), $messages, $range)
+		);
 	}
 
 	/**
@@ -275,7 +279,7 @@ class Message extends BaseController
 	/**
 	 * @restMethod im.v2.Chat.Message.delete
 	 */
-	public function deleteAction(\Bitrix\Im\V2\MessageCollection $messages): ?bool
+	public function deleteAction(\Bitrix\Im\V2\MessageCollection $messages): ?array
 	{
 		if ($messages->count() > MessageService::getMultipleActionMessageLimit())
 		{
@@ -294,7 +298,7 @@ class Message extends BaseController
 			return null;
 		}
 
-		return true;
+		return ['result' => true];
 	}
 
 	/**
@@ -353,11 +357,18 @@ class Message extends BaseController
 		$fields['SKIP_USER_CHECK'] = 'Y';
 		$fields['WAIT_FULL_EXECUTION'] = 'N';
 
+		$sentFromUi = $restServer === null;
+
+		if ($sentFromUi)
+		{
+			$fields['SENT_FROM_UI'] = true;
+		}
+
 		$messageId = \CIMMessenger::Add($fields);
 
 		if (isset($forwardMessages) && $forwardMessages->count() > 0)
 		{
-			$forwardResult = $this->sendForwardMessages($chat, $forwardMessages);
+			$forwardResult = $this->sendForwardMessages($chat, $forwardMessages, $sentFromUi);
 			if (!$forwardResult->isSuccess())
 			{
 				$this->addErrors($forwardResult->getErrors());
@@ -393,7 +404,7 @@ class Message extends BaseController
 		array $fields = [],
 		string $urlPreview = 'Y',
 		int $botId = 0
-	): ?bool
+	): ?array
 	{
 		$fields['message'] = $this->getRawValue('fields')['message'] ?? $fields['message'] ?? null;
 		$fields = $this->prepareFields($fields, self::ALLOWED_FIELDS_UPDATE);
@@ -410,7 +421,7 @@ class Message extends BaseController
 			return null;
 		}
 
-		return true;
+		return ['result' => true];
 	}
 
 	/**
@@ -509,10 +520,10 @@ class Message extends BaseController
 		//todo: refactor. Change to popup data.
 		$rest['hasNextPage'] = !$wasFilteredByTariffRestrictions && $messages->count() >= $limit;
 
-		return $rest;
+		return $this->enrichCopilotVotes($rest);
 	}
 
-	private function sendForwardMessages(Chat $chat, MessageCollection $messages): Result
+	private function sendForwardMessages(Chat $chat, MessageCollection $messages, bool $sentFromUi): Result
 	{
 		$result = new Result();
 
@@ -521,7 +532,7 @@ class Message extends BaseController
 			return $result->addError(new MessageError(MessageError::TOO_MANY_MESSAGES));
 		}
 
-		$service = new ForwardService($chat);
+		$service = new ForwardService($chat, $sentFromUi);
 		$result = $service->createMessages($messages);
 
 		if (!$result->hasResult())

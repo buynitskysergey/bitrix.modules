@@ -6,6 +6,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Security;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\EventTable;
+use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
 use Bitrix\Rest\Public;
 use Bitrix\Rest;
 use Bitrix\Main;
@@ -770,13 +771,15 @@ class CRestUtil
 
 				if($installResult['result'])
 				{
+					$installCompletionMode = self::resolveInstallCompletionMode($appDetailInfo);
 					$appFields = array(
 						'CLIENT_ID' => $installResult['result']['client_id'],
 						'CODE' => $appDetailInfo['CODE'],
 						'ACTIVE' => \Bitrix\Rest\AppTable::ACTIVE,
-						'INSTALLED' => ($appDetailInfo['OPEN_API'] === 'Y' || empty($appDetailInfo['INSTALL_URL']))
+						'INSTALLED' => $installCompletionMode === AppInstallCompletionMode::Immediate
 							? \Bitrix\Rest\AppTable::INSTALLED
 							: \Bitrix\Rest\AppTable::NOT_INSTALLED,
+						'INSTALL_COMPLETION_MODE' => $installCompletionMode->value,
 						'URL' => $appDetailInfo['URL'],
 						'URL_DEMO' => $appDetailInfo['DEMO_URL'],
 						'URL_INSTALL' => $appDetailInfo['INSTALL_URL'],
@@ -848,37 +851,16 @@ class CRestUtil
 							}
 						}
 
-						if($appDetailInfo["OPEN_API"] === "Y" && !empty($appFields["URL_INSTALL"]))
-						{
-							// checkCallback is already called inside checkFields
-							$result = \Bitrix\Rest\EventTable::add(array(
-								"APP_ID" => $appId,
-								"EVENT_NAME" => "ONAPPINSTALL",
-								"EVENT_HANDLER" => $appFields["URL_INSTALL"],
-							));
-							if($result->isSuccess())
-							{
-								\Bitrix\Rest\Event\Sender::bind('rest', 'OnRestAppInstall');
-							}
-						}
+						\Bitrix\Rest\EventTable::syncInstallEventHandlers(
+							(int)$appId,
+							$installCompletionMode,
+							(string)($appFields['URL_INSTALL'] ?? '')
+						);
 
-						if (!empty($appFields['URL_INSTALL']))
+						if ($installCompletionMode === AppInstallCompletionMode::Immediate)
 						{
-							// checkCallback is already called inside checkFields
-							$result = EventTable::add(
-								[
-									'APP_ID' => $appId,
-									'EVENT_NAME' => 'ONAPPUSERREADY',
-									'EVENT_HANDLER' => $appFields['URL_INSTALL'],
-								]
-							);
-							if ($result->isSuccess())
-							{
-								Sender::bind('rest', 'OnRestAppUserReady');
-							}
+							\Bitrix\Rest\AppTable::install($appId);
 						}
-
-						\Bitrix\Rest\AppTable::install($appId);
 
 						$result = true;
 					}
@@ -1147,6 +1129,28 @@ class CRestUtil
 	public static function isSlider()
 	{
 		return (isset($_REQUEST['IFRAME']) && $_REQUEST['IFRAME'] === 'Y' && $_REQUEST['IFRAME_TYPE'] == 'SIDE_SLIDER');
+	}
+
+	private static function resolveInstallCompletionMode(array $appDetailInfo): AppInstallCompletionMode
+	{
+		// configurations and BIC dashboards are always completed by their own import flow
+		if (
+			(
+				($appDetailInfo['TYPE'] ?? null) === \Bitrix\Rest\AppTable::TYPE_CONFIGURATION
+				&& ($appDetailInfo['MODE'] ?? null) !== \Bitrix\Rest\AppTable::MODE_SITE
+			)
+			|| ($appDetailInfo['TYPE'] ?? null) === \Bitrix\Rest\AppTable::TYPE_BIC_DASHBOARD
+		)
+		{
+			return AppInstallCompletionMode::Deferred;
+		}
+
+		if ($appDetailInfo['OPEN_API'] === 'Y' || empty($appDetailInfo['INSTALL_URL']))
+		{
+			return AppInstallCompletionMode::Immediate;
+		}
+
+		return AppInstallCompletionMode::Deferred;
 	}
 
 }

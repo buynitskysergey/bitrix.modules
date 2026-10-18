@@ -141,7 +141,7 @@ class Template extends Base
 		return new Response\DataType\Page(
 			'task_templates',
 			$list, function () use ($params) {
-			return TaskTemplate::getCount((array)$params['filter']);
+			return TaskTemplate::getCount(['filter' => $params['filter'] ?? []]);
 		}
 		);
 	}

@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Rest\V3\Exceptions;
 
 use Bitrix\Rest\V3\Exception\RestException;
+use Bitrix\Rest\V3\Exception\SkipWriteToLogException;
 
-class FileTypeNotAllowedException extends RestException
+class FileTypeNotAllowedException extends RestException implements SkipWriteToLogException
 {
 	public function getRegistryCode(): string
 	{

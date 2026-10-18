@@ -90,6 +90,7 @@ final class ViewerBuilder
 		if (
 			$this->type === BIConnector\ExternalSource\Type::Mysql
 			|| $this->type === BIConnector\ExternalSource\Type::Pgsql
+			|| $this->type === BIConnector\ExternalSource\Type::Clickhouse
 		)
 		{
 			$provider = new Provider\ExternalSql($this->type);

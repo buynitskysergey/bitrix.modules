@@ -166,6 +166,39 @@ return [
 		],
 		'readonly' => true,
 	],
+	'service.b2e.document-message.publicity' => [
+		'value' => [
+			'ru' => true,
+			'by' => false,
+			'eu' => true,
+			'de' => true,
+			'fr' => true,
+			'it' => true,
+			'pl' => true,
+			'uk' => true,
+			'ur' => true,
+			'us' => true,
+			'en' => true,
+			'br' => true,
+			'la' => true,
+			'tr' => true,
+			'jp' => true,
+			'tc' => true,
+			'sc' => true,
+			'hi' => true,
+			'vn' => true,
+			'id' => true,
+			'ms' => true,
+			'th' => true,
+			'cn' => true,
+			'in' => true,
+			'co' => true,
+			'mx' => true,
+			'ar' => true,
+			'ae' => true,
+		],
+		'readonly' => true,
+	],
 	'service.b2e.robot.publicity' => [
 		'value' => [
 			'ru' => true,
@@ -271,6 +304,12 @@ return [
 			],
 			'sign.service.integration.im' => [
 				'className' => Service\Integration\Im\ImService::class,
+			],
+			'sign.service.integration.im.messageTextSanitizer' => [
+				'className' => Service\Integration\Im\MessageTextSanitizer::class,
+			],
+			'sign.service.integration.im.inviteCard' => [
+				'className' => Service\Integration\Im\InviteCardService::class,
 			],
 			'sign.service.hrbotmessage' => [
 				'className' => Service\HrBotMessageService::class,

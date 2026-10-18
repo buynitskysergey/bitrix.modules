@@ -92,7 +92,7 @@ class MessageUserType
 		}
 	}
 
-	public static function onBeforeSave($userField, $mailMessageId, $userId)
+	public static function onBeforeSave($userField, $mailMessageId, $userId = null)
 	{
 		$previousMailsIds = (array) $userField['VALUE'];
 		if (!in_array($mailMessageId, $previousMailsIds))

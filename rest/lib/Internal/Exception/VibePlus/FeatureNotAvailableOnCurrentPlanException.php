@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Bitrix\Rest\Internal\Exception\VibePlus;
 
 use Bitrix\Main\SystemException;
+use Bitrix\Rest\Internal\Exception\Admission\RestAccessDenialExceptionInterface;
 
 final class FeatureNotAvailableOnCurrentPlanException extends SystemException implements
-	FeatureNotAvailableOnCurrentPlanExceptionInterface
+	FeatureNotAvailableOnCurrentPlanExceptionInterface,
+	RestAccessDenialExceptionInterface
 {
 	public function __construct(?\Throwable $previous = null)
 	{

@@ -439,7 +439,7 @@ class Signature extends Base
 			$raw = $signature;
 		}
 
-		$sanitized = $this->sanitize($raw);
+		$sanitized = $this->sanitizeSignature($raw);
 		if ($sanitized === '')
 		{
 			$this->addValidationError(

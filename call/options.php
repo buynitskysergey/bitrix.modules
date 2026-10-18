@@ -13,6 +13,7 @@ use Bitrix\Call\JwtCall;
 use Bitrix\Call\Signaling;
 use Bitrix\Call\Library;
 use Bitrix\Call\NotifyService;
+use Bitrix\Call\Integration\AI\CallAISettings;
 
 /**
  * @global \CMain $APPLICATION
@@ -298,9 +299,10 @@ $portalHasRegistered  = ((int)Option::get('call', 'call_portal_id', 0) > 0);
 		<td colspan="2">
 			<div class="adm-info-message-wrap" style="text-align:center">
 				<div class="adm-info-message">
+					<?php $copilotNameReplace = ['#COPILOT_NAME#' => CallAISettings::getCopilotName()]; ?>
 					<?= $isJwtSchemeEnabled
-						? Loc::getMessage("CALL_OPTIONS_JWT_SCHEME_ENABLE_NOTE")
-						: Loc::getMessage("CALL_OPTIONS_JWT_SCHEME_DISABLE_NOTE")
+						? Loc::getMessage("CALL_OPTIONS_JWT_SCHEME_ENABLE_NOTE_MSGVER_1", $copilotNameReplace)
+						: Loc::getMessage("CALL_OPTIONS_JWT_SCHEME_DISABLE_NOTE_MSGVER_1", $copilotNameReplace)
 					?>
 				</div>
 			</div>

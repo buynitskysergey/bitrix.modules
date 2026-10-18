@@ -15,6 +15,9 @@ use Bitrix\Tasks\V2\Public\Provider\Params\Result\TaskResultParams;
 
 class TaskResultProvider
 {
+	/** Mirrors JS Limit.Results (tasks/install/js/tasks/v2/const/src/dictionary/limit.js) */
+	public const CURRENT_USER_RESULT_MESSAGE_MAP_WINDOW = 3;
+
 	public function __construct(
 		private readonly ResultRightService $resultRightService,
 		private readonly TaskResultRepositoryInterface $repository,
@@ -86,6 +89,15 @@ class TaskResultProvider
 	{
 		return $this->repository->getResultMessageMap(
 			taskId: $taskId,
+		);
+	}
+
+	public function getCurrentUserResultMessageMap(int $taskId, int $userId): array
+	{
+		return $this->repository->getCurrentUserResultMessageMap(
+			taskId: $taskId,
+			userId: $userId,
+			limit: self::CURRENT_USER_RESULT_MESSAGE_MAP_WINDOW,
 		);
 	}
 

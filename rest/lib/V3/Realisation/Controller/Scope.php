@@ -41,6 +41,10 @@ final class Scope extends RestController
 
 			foreach ($methodDescriptions as $methodDescription)
 			{
+				if ($methodDescription->isHidden)
+				{
+					continue;
+				}
 				if (!Loader::includeModule($methodDescription->module))
 				{
 					continue;
@@ -60,13 +64,13 @@ final class Scope extends RestController
 								'description' => $dtoField->getDescription() instanceof LocalizableMessage ? $dtoField->getDescription()->localize($this->responseLanguage) : $dtoField->getDescription(),
 							];
 
-							$dtoFields[$methodDescription->controllerFqcn][$dtoField->getPropertyName()] = $dtoFieldData;
+							$dtoFields[$methodDescription->dtoFqcn][$dtoField->getPropertyName()] = $dtoFieldData;
 						}
-						$dtoFields[$methodDescription->controllerFqcn] = array_values($dtoFields[$methodDescription->controllerFqcn]);
+						$dtoFields[$methodDescription->dtoFqcn] = array_values($dtoFields[$methodDescription->dtoFqcn]);
 					}
 				}
 
-				$scopeFields = $methodDescription->controllerFqcn && isset($dtoFields[$methodDescription->controllerFqcn]) ? $dtoFields[$methodDescription->controllerFqcn] : null;
+				$scopeFields = $methodDescription->dtoFqcn && isset($dtoFields[$methodDescription->dtoFqcn]) ? $dtoFields[$methodDescription->dtoFqcn] : null;
 
 				foreach ($methodDescription->scopes as $scope)
 				{

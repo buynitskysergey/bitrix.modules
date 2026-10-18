@@ -276,12 +276,19 @@ class MemberService
 		return new Main\Result();
 	}
 
+	/**
+	 * @param bool $keepSavedReminderTypes members are recreated here, so a member that comes without a
+	 * reminder frequency inherits the one its role already has on the document. Only the parties step
+	 * of the wizard asks for it: it edits a document whose settings the user has already seen, while
+	 * sending a document composes its members anew and starts from the defaults.
+	 */
 	public function setupB2eMembers(
 		string $documentUid,
 		Item\MemberCollection $memberCollection,
 		int $representativeId,
 		bool $skipPermissionCheck = false,
 		bool $excludeRejected = true,
+		bool $keepSavedReminderTypes = false,
 	): Main\Result
 	{
 		$document = $this->documentRepository->getByUid($documentUid);
@@ -396,6 +403,11 @@ class MemberService
 			$assignee->presetId ??= $savedAssignee->presetId;
 		}
 
+		if ($keepSavedReminderTypes)
+		{
+			$this->applySavedReminderTypes($document->id, $memberCollection);
+		}
+
 		$result = $this->cleanByDocumentId($document->id);
 		if (!$result->isSuccess())
 		{
@@ -486,6 +498,38 @@ class MemberService
 		}
 
 		return new Main\Result();
+	}
+
+	/**
+	 * Setting up the parties recreates the members, and the wizard sends no reminder frequency with
+	 * them: it is chosen per role on a later step. Without carrying the stored frequency over, a
+	 * document that already has one (a copy of a template) loses it. A frequency that did come from
+	 * the wizard is an explicit choice and stays untouched.
+	 */
+	private function applySavedReminderTypes(int $documentId, Item\MemberCollection $memberCollection): void
+	{
+		$savedReminderTypes = $this->memberRepository->listReminderTypesByDocumentIdIndexedByRole($documentId);
+		if ($savedReminderTypes === [])
+		{
+			return;
+		}
+
+		foreach ($memberCollection as $member)
+		{
+			if (
+				$member->role === null
+				|| $member->reminder->type !== Type\Member\Notification\ReminderType::NONE
+			)
+			{
+				continue;
+			}
+
+			$savedReminderType = $savedReminderTypes[$member->role] ?? null;
+			if ($savedReminderType !== null)
+			{
+				$member->reminder->type = $savedReminderType;
+			}
+		}
 	}
 
 	public function getUniqueSignersCount(Item\Hr\EntitySelector\EntityCollection $entityCollection, bool $excludeRejected = true): Main\Result

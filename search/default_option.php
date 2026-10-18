@@ -20,4 +20,5 @@ $search_default_option = [
 	'full_text_engine' => 'bitrix',
 	'sphinx_connection' => '127.0.0.1:9306',
 	'sphinx_index_name' => 'bitrix',
+	'full_text_delay_index' => 'N',
 ];

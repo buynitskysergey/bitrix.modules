@@ -13,7 +13,7 @@ use Bitrix\Note\Internal\Service\Collaboration\DocumentLockService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 
 /**
- * [P2.T2 / ALG-01] The only writer of b_note_document_link. One source's whole target set is
+ * The only writer of b_note_document_link. One source's whole target set is
  * rewritten from its current content; every write path — compaction, REST overwrite, import,
  * hard delete — arrives here and nowhere else.
  *
@@ -27,10 +27,11 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
  */
 final class DocumentLinkIndexService
 {
-	// [EVENT-01] Addressed to the channel of the TARGET whose incoming set changed. No payload
+	// Addressed to the channel of the TARGET whose incoming set changed. No payload
 	// beyond the id: the counter is personal (it is filtered by the reader's own permissions) while
 	// the document channel is shared by everyone watching, so the client re-reads its own value.
 	public const COMMAND_BACKLINKS_CHANGED = 'documentBacklinksChanged';
+	public const COMMAND_MENTION_TARGET_CHANGED = 'documentMentionTargetChanged';
 
 	// [B2] Rebuilds of one source are serialized under this lock scope. Two saves of the same document
 	// could otherwise apply their target sets in reverse of the order their content was written, both
@@ -259,6 +260,175 @@ final class DocumentLinkIndexService
 	}
 
 	/**
+	 * Tells open source documents that metadata or availability of one of their link targets changed.
+	 * The signal carries ids only; each viewer re-resolves mention data through their own server request.
+	 *
+	 * @param int[] $targetIds
+	 */
+	public function notifyMentionTargetsChanged(array $targetIds): void
+	{
+		$normalized = $this->normalizeIds($targetIds);
+		if (empty($normalized))
+		{
+			return;
+		}
+		if (count($normalized) > PushNotificationService::REALTIME_BATCH_THRESHOLD)
+		{
+			$this->pushService->dispatchAfterCommit(function () use ($normalized): void {
+				$sourceIds = $this->collectMentionSourceIdsBatched($normalized);
+				if (count($sourceIds) > PushNotificationService::REALTIME_BATCH_THRESHOLD)
+				{
+					$this->logError(
+						'DocumentLinkIndexService: mention target fan-out skipped, more than '
+						. PushNotificationService::REALTIME_BATCH_THRESHOLD . ' sources',
+					);
+
+					return;
+				}
+
+				$this->notifyMentionSources($sourceIds, ['requestRefetch' => true]);
+			});
+
+			return;
+		}
+
+		$this->notifyMentionTargetBatch($normalized);
+	}
+
+	/**
+	 * Resolve incoming sources before hard-delete removes their link rows.
+	 *
+	 * @param int[] $targetIds
+	 * @return int[]
+	 */
+	public function collectMentionSourceIds(array $targetIds): array
+	{
+		$normalized = $this->normalizeIds($targetIds);
+		if (empty($normalized))
+		{
+			return [];
+		}
+		if (count($normalized) > PushNotificationService::REALTIME_BATCH_THRESHOLD)
+		{
+			$this->logError(
+				'DocumentLinkIndexService: synchronous mention source probe skipped, '
+				. count($normalized) . ' targets',
+			);
+
+			return [];
+		}
+
+		return $this->collectMentionSourceIdsBatched($normalized);
+	}
+
+	/**
+	 * The caller either supplied a realtime-sized input or already moved the work to a background job.
+	 *
+	 * @param int[] $targetIds
+	 * @return int[]
+	 */
+	private function collectMentionSourceIdsBatched(array $targetIds): array
+	{
+		$limit = PushNotificationService::REALTIME_BATCH_THRESHOLD + 1;
+		$sourceIds = [];
+		foreach (array_chunk($targetIds, PushNotificationService::REALTIME_BATCH_THRESHOLD) as $chunk)
+		{
+			foreach ($this->linkRepository->collectExistingSourceIdsByTargets($chunk, $limit) as $sourceId)
+			{
+				$sourceIds[(int)$sourceId] = true;
+			}
+			if (count($sourceIds) >= $limit)
+			{
+				break;
+			}
+		}
+
+		$ids = array_keys($sourceIds);
+		sort($ids, SORT_NUMERIC);
+
+		return array_slice($ids, 0, $limit);
+	}
+
+	/**
+	 * @param int[] $sourceIds
+	 * @param int[] $targetIds
+	 */
+	public function notifyPreparedMentionTargetsChanged(array $sourceIds, array $targetIds): void
+	{
+		$sourceIds = $this->normalizeIds($sourceIds);
+		$targetIds = $this->normalizeIds($targetIds);
+		if (count($sourceIds) > PushNotificationService::REALTIME_BATCH_THRESHOLD)
+		{
+			$this->logError(
+				'DocumentLinkIndexService: mention target fan-out skipped, more than '
+				. PushNotificationService::REALTIME_BATCH_THRESHOLD . ' sources',
+			);
+
+			return;
+		}
+		if (empty($sourceIds) || empty($targetIds))
+		{
+			return;
+		}
+
+		$params = count($targetIds) === 1
+			? ['documentId' => $targetIds[0]]
+			: (
+				count($targetIds) > PushNotificationService::REALTIME_BATCH_THRESHOLD
+					? ['requestRefetch' => true]
+					: ['documentIds' => $targetIds]
+			)
+		;
+
+		$this->notifyMentionSources($sourceIds, $params);
+	}
+
+	public function notifyMentionTargetCollectionChanged(int $collectionId): void
+	{
+		if ($collectionId <= 0)
+		{
+			return;
+		}
+
+		// A collection-wide ACL change can affect sources in any collection, including a newly granted
+		// user's documents before that user starts watching the target collection. One title-free global
+		// signal is both complete and bounded; open editors re-resolve only mentions present in their text.
+		$this->pushService->dispatchAfterCommit(function () use ($collectionId): void {
+			$this->pushService->sendGlobal(self::COMMAND_MENTION_TARGET_CHANGED, [
+				'collectionId' => $collectionId,
+				'requestRefetch' => true,
+			]);
+		});
+	}
+
+	/**
+	 * @param int[] $targetIds
+	 * @param array<string, mixed>|null $params
+	 */
+	private function notifyMentionTargetBatch(array $targetIds, ?array $params = null): void
+	{
+		$sourceIds = $this->collectMentionSourceIds($targetIds);
+		if (count($sourceIds) > PushNotificationService::REALTIME_BATCH_THRESHOLD)
+		{
+			$this->logError(
+				'DocumentLinkIndexService: mention target fan-out skipped, more than '
+				. PushNotificationService::REALTIME_BATCH_THRESHOLD . ' sources',
+			);
+
+			return;
+		}
+		if ($params === null)
+		{
+			$params = count($targetIds) === 1
+				? ['documentId' => $targetIds[0]]
+				: ['documentIds' => $targetIds]
+			;
+		}
+
+		$this->notifyMentionSources($sourceIds, $params);
+	}
+
+	/**
 	 * @param int[] $targetIds
 	 */
 	private function notifyTargets(array $targetIds): void
@@ -289,6 +459,25 @@ final class DocumentLinkIndexService
 					self::COMMAND_BACKLINKS_CHANGED,
 					['documentId' => $targetId],
 				);
+			}
+		});
+	}
+
+	/**
+	 * @param int[] $sourceIds
+	 * @param array<string, mixed> $params
+	 */
+	private function notifyMentionSources(array $sourceIds, array $params): void
+	{
+		if (empty($sourceIds))
+		{
+			return;
+		}
+
+		$this->pushService->dispatchAfterCommit(function () use ($sourceIds, $params): void {
+			foreach ($sourceIds as $sourceId)
+			{
+				$this->pushService->sendToDocument($sourceId, self::COMMAND_MENTION_TARGET_CHANGED, $params);
 			}
 		});
 	}
@@ -326,6 +515,18 @@ final class DocumentLinkIndexService
 		sort($right);
 
 		return $left === $right;
+	}
+
+	/**
+	 * @param mixed[] $ids
+	 * @return int[]
+	 */
+	private function normalizeIds(array $ids): array
+	{
+		return array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $ids),
+			static fn(int $id): bool => $id > 0,
+		)));
 	}
 
 	private function logError(string $message): void

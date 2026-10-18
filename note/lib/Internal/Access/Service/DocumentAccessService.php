@@ -24,6 +24,7 @@ use Bitrix\Note\Infrastructure\Agent\Access\SubtreeAclReconcileScheduler;
 use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\History\EventLogService;
+use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
 
 final class DocumentAccessService
 {
@@ -43,7 +44,7 @@ final class DocumentAccessService
 
 	private const ALLOWED_LEVELS = [self::LEVEL_NONE, self::LEVEL_VIEW, self::LEVEL_EDIT];
 
-	// [EVENT-01] Single pull command for both cascade delivery paths (collection + personal channel).
+	// Single pull command for both cascade delivery paths (collection + personal channel).
 	private const COMMAND_ACCESS_CASCADE = PushNotificationService::COMMAND_ACCESS_CASCADE;
 
 	// Bounds the personal-channel fan-out when a subtree grant targets a huge group/department.
@@ -124,7 +125,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [ALG-01] Aggregates one subject's ACL rows on a single document into its document-level.
+	 * Aggregates one subject's ACL rows on a single document into its document-level.
 	 * Single source of truth for the formula — shared by getDocumentLevel() and
 	 * batchGetEffectiveLevels().
 	 *
@@ -267,24 +268,41 @@ final class DocumentAccessService
 
 	public static function currentUserHasLevel(int $documentId, int $collectionId, int $requiredLevel): bool
 	{
+		return self::userHasLevel(
+			$documentId,
+			$collectionId,
+			(int)CurrentUser::get()->getId(),
+			$requiredLevel,
+		);
+	}
+
+	/**
+	 * Whether a user holds at least the given level on a document — including the main-document write
+	 * rule, which a bare getEffectiveLevel() comparison would miss.
+	 *
+	 * Takes the user explicitly because the question does not always come from the request's own user:
+	 * Disk asks the document connector on behalf of whoever is opening an attachment. There is
+	 * deliberately no second copy of this for the current user — one rule, one place, or the two drift
+	 * apart on the next change to it.
+	 */
+	public static function userHasLevel(int $documentId, int $collectionId, int $userId, int $requiredLevel): bool
+	{
 		if ($requiredLevel <= self::LEVEL_NONE)
 		{
 			return true;
 		}
-
-		$userId = (int)CurrentUser::get()->getId();
 
 		if ($userId <= 0 || $documentId <= 0)
 		{
 			return false;
 		}
 
-		if (PortalAdmin::isCurrentUserAdmin())
+		if (PortalAdmin::isAdmin($userId))
 		{
 			return true;
 		}
 
-		$accessCodes = self::getCurrentUserAccessCodes($userId);
+		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
 		$levels = self::getAccessLevels($documentId, $collectionId, $userId, $accessCodes);
 
 		if ($requiredLevel >= self::LEVEL_EDIT)
@@ -341,7 +359,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [P3.T1 / API-01] Source-aware full replacement of a document's manageable ACL.
+	 * Source-aware full replacement of a document's manageable ACL.
 	 *
 	 * The incoming list is the complete desired state of the two MUTABLE row kinds on this
 	 * document — ordinary explicit grants (scope 'document', SOURCE_NONE) and subtree markers
@@ -356,7 +374,8 @@ final class DocumentAccessService
 		int $documentId,
 		array $permissions,
 		int $actorId,
-		?PushNotificationService $pushService = null
+		?PushNotificationService $pushService = null,
+		?DocumentLinkIndexService $linkIndexService = null,
 	): Result
 	{
 		$result = new Result();
@@ -508,6 +527,22 @@ final class DocumentAccessService
 
 			if ($grantsChanged && $collectionId > 0)
 			{
+				try
+				{
+					$linkService = $linkIndexService ?? new DocumentLinkIndexService();
+					$affectedDocumentIds = array_values(array_unique($affectedDocumentIds));
+					if (count($affectedDocumentIds) > PushNotificationService::REALTIME_BATCH_THRESHOLD)
+					{
+						$linkService->notifyMentionTargetCollectionChanged($collectionId);
+					}
+					else
+					{
+						$linkService->notifyMentionTargetsChanged($affectedDocumentIds);
+					}
+				}
+				catch (\Throwable)
+				{
+				}
 				self::dispatchAccessCascade(
 					$collectionId,
 					array_values(array_unique($affectedDocumentIds)),
@@ -570,7 +605,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [ALG-03] Converge subtree markers on the root to the desired set: drop markers whose subject
+	 * Converge subtree markers on the root to the desired set: drop markers whose subject
 	 * left the set, UPSERT the rest (cross-DB, LEVEL-only on conflict).
 	 *
 	 * @param array<string, int> $newMarkers subjectCode => level
@@ -659,7 +694,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [EVENT-01] Publish the cascade pull after commit over two paths:
+	 * Publish the cascade pull after commit over two paths:
 	 *   1. collection channel — reaches viewers already subscribed to NOTE_COLLECTION_{cid};
 	 *   2. personal channel of every affected recipient — a subtree grantee has no collection access
 	 *      (not subscribed to the collection tag) and would otherwise miss the change on first grant
@@ -703,7 +738,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [P4.T6] Cascade pull for rows the background reconciler materialised. A widen past the sync
+	 * Cascade pull for rows the background reconciler materialised. A widen past the sync
 	 * threshold has no request behind it, so without this the grantee keeps seeing a partial subtree
 	 * until a full reload: the rows arrive, but nobody tells the open client. Emitted per agent tick,
 	 * not per chunk, so a huge source converges visibly without a push storm.
@@ -1034,7 +1069,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [API-02] One entry per ACL row (excluding the legacy '*' policy row). Scope/source read
+	 * One entry per ACL row (excluding the legacy '*' policy row). Scope/source read
 	 * straight from SOURCE_DOCUMENT_ID — there is no separate scope store:
 	 *   - source = SOURCE_NONE   → explicit grant on this document (scope 'document', mutable).
 	 *   - source = $documentId   → subtree-scope marker on this document itself (scope 'subtree',
@@ -1376,7 +1411,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [ALG-02] Visibility predicate for a document reached through document-level grants, as an ORM
+	 * Visibility predicate for a document reached through document-level grants, as an ORM
 	 * condition tree — the single source of truth for every query that asks it (/shared/ listing,
 	 * archive listing, search filter). Keeping one builder is not cosmetic: a second copy could drift
 	 * and make one surface show what another hides.
@@ -1427,7 +1462,7 @@ final class DocumentAccessService
 	}
 
 	/**
-	 * [ALG-05] Full visibility predicate of a LISTING: the document-grant core above OR the
+	 * Full visibility predicate of a LISTING: the document-grant core above OR the
 	 * collection-VIEW branch. This is what list queries put in their WHERE instead of fetching a
 	 * window and dropping rows in PHP afterwards; the caller supplies the two field names of its
 	 * own query, so the same builder serves backlinks (SOURCE_ID / SOURCE.COLLECTION_ID) and
@@ -2023,15 +2058,4 @@ final class DocumentAccessService
 		return $row !== false;
 	}
 
-	private static function getCurrentUserAccessCodes(int $userId): array
-	{
-		if ($userId <= 0 || !class_exists('\CAccess'))
-		{
-			return [];
-		}
-
-		$codes = \CAccess::getUserCodesArray($userId);
-
-		return is_array($codes) ? $codes : [];
-	}
 }

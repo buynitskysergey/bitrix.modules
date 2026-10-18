@@ -286,11 +286,27 @@ class ChatAnalytics extends AbstractAnalytics
 		return self::$blockSingleUserEvents[$this->chat->getId()] ?? false;
 	}
 
+	protected function isChatTypeAllowed(Chat $chat, ?string $event = null): bool
+	{
+		// A project chat is an ExternalChat descendant, but its creation is a user action and stays in analytics.
+		if ($event === self::SUBMIT_CREATE_NEW && $chat instanceof CollabChat)
+		{
+			return $this->checkChatEntityTypeAvailability($chat, $event);
+		}
+
+		return parent::isChatTypeAllowed($chat, $event);
+	}
+
 	protected function getUnavailableChatTypesForEvent(?string $event = null): array
 	{
 		$unavailableTypes = match ($event)
 		{
-			self::SUBMIT_CREATE_NEW => [Chat\PrivateChat::class, Chat\ExternalChat::class],
+			self::SUBMIT_CREATE_NEW => [
+				Chat\PrivateChat::class,
+				Chat\ExternalChat::class,
+				// created lazily on the first notification, not by a user action
+				Chat\NotifyChat::class,
+			],
 			default => [],
 		};
 

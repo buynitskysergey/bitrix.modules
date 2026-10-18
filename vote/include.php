@@ -61,6 +61,13 @@ CModule::AddAutoloadClasses("vote", array(
 	"bitrix\\vote\\vote" => "lib/vote.php"
 ));
 
+// developer mode. Controller\Dev, not Dev: the action resolver only routes to classes under the module's controller
+// namespaces from .settings.php. Each controller under it guards itself in processBeforeAction.
+if (is_dir(__DIR__ . '/dev'))
+{
+	\Bitrix\Main\Loader::registerNamespace('Bitrix\\Vote\\Controller\\Dev', __DIR__ . '/dev');
+}
+
 $voteCache = new CVoteCacheManager();
 
 function VoteVoteEditFromArray($CHANNEL_ID, $VOTE_ID = false, $arFields = array(), $params = array())

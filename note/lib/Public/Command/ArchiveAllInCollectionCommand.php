@@ -17,7 +17,7 @@ use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P2.T5 / API-06] "Select all": archive every live document of
+ * "Select all": archive every live document of
  * a collection. The affected set is computed server-side over the whole collection structure
  * (getLiveCollectionDocumentIds), not from the rows the client happened to load. The
  * collection entity itself is never touched — only its documents.

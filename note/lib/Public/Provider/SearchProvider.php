@@ -38,10 +38,15 @@ final class SearchProvider
 	 * @throws ObjectPropertyException
 	 * @throws SystemException
 	 */
+	/**
+	 * @param int|null $collectionId restricts the search to one collection; a collection the caller
+	 *                               cannot see yields an empty answer rather than a refusal
+	 */
 	public function search(
 		SearchQuery $query,
 		Pager $pager,
 		bool $withSnippets = true,
+		?int $collectionId = null,
 	): SearchResultCollection
 	{
 		$boolean = $this->queryBuilder->prepareBooleanQuery($query->getQuery());
@@ -53,7 +58,20 @@ final class SearchProvider
 		$userId = (int)CurrentUser::get()->getId();
 		$accessCodes = $userId > 0 ? CollectionAccessService::buildUserAccessCodes($userId) : [];
 		$allowedCollectionIds = $this->resolveAllowedCollections();
-		$hasDocumentGrants = !empty($accessCodes) && !PortalAdmin::isCurrentUserAdmin()
+		if ($collectionId !== null)
+		{
+			// Narrowing to one collection also narrows the grant branch away: a document reachable only
+			// through a personal grant is not "in this collection" as far as the caller is concerned.
+			$allowedCollectionIds = in_array($collectionId, $allowedCollectionIds, true) ? [$collectionId] : [];
+			if (empty($allowedCollectionIds))
+			{
+				return new SearchResultCollection();
+			}
+		}
+
+		$hasDocumentGrants = $collectionId === null
+			&& !empty($accessCodes)
+			&& !PortalAdmin::isCurrentUserAdmin()
 			&& DocumentAccessService::userHasAnyGrant($accessCodes);
 
 		if (empty($allowedCollectionIds) && !$hasDocumentGrants)

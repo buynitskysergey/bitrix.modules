@@ -272,24 +272,6 @@ final class TariffAccessService
 			&& ($method === null || in_array($method, $systemMethods, true));
 	}
 
-	public function ensureAPAuthAvailable(
-		bool $isSystemPassword,
-		?string $method,
-		array $systemMethods,
-		?bool $restAccessAvailability = null,
-	): void
-	{
-		if ($this->getAPAuthAvailability(
-			$isSystemPassword,
-			$method,
-			$systemMethods,
-			$restAccessAvailability,
-		) === false)
-		{
-			throw new FeatureNotAvailableOnCurrentPlanException();
-		}
-	}
-
 	public function isOutgoingEventHandlerAvailable(
 		bool $isPublishedApplication,
 		bool $isSystemHandler,

@@ -2,6 +2,7 @@
 
 namespace Bitrix\Mobile\AppTabs;
 
+use Bitrix\BIConnectorMobile\Service\ScopeVisibilityService;
 use Bitrix\Extranet\Service\ServiceContainer;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Config\Option;
@@ -22,6 +23,11 @@ use Bitrix\Mobile\Menu\Analytics;
 
 class Task implements Tabable
 {
+	private const ANALYTICS_COMPONENT_CODE = 'biconnector.dashboard.list';
+	private const ANALYTICS_COMPONENT = 'biconnector:' . self::ANALYTICS_COMPONENT_CODE;
+	// Scope code of the BI zone of the tasks section, spelled out to keep biconnector constants out of the core.
+	private const ANALYTICS_SCOPE_CODE = 'tasks';
+
 	private Context $context;
 
 	/**
@@ -129,7 +135,12 @@ class Task implements Tabable
 			}
 		}
 
-		return 'tasks_tabs_' . hash('sha256', implode('_', $enabledTools));
+		// Visibility of the analytics tab does not follow from the tools alone, so it goes into the key on its own:
+		// otherwise the native layer reuses the cached layout with a stale set of tabs.
+		$cacheKeyParts = $enabledTools;
+		$cacheKeyParts[] = 'analytics_' . (int)$this->isAnalyticsTabVisible();
+
+		return 'tasks_tabs_' . hash('sha256', implode('_', $cacheKeyParts));
 	}
 
 	/**
@@ -391,9 +402,21 @@ class Task implements Tabable
 		];
 	}
 
+	/**
+	 * The BI report list of the tasks zone. Visibility of the zone - feature flag, tool, right and a non-empty
+	 * list of the zone - is owned by biconnectormobile; without the module the tab is simply absent.
+	 */
+	private function isAnalyticsTabVisible(): bool
+	{
+		return (
+			Loader::includeModule('biconnectormobile')
+			&& ScopeVisibilityService::isScopeVisible(self::ANALYTICS_SCOPE_CODE)
+		);
+	}
+
 	private function getAnalyticsTab(): ?array
 	{
-		if (!$this->isToolAvailable('crm_bi'))
+		if (!$this->isAnalyticsTabVisible())
 		{
 			return null;
 		}
@@ -405,8 +428,8 @@ class Task implements Tabable
 			'component' => [
 				'name' => 'JSStackComponent',
 				'title' => Loc::getMessage('TAB_TASKS_NAVIGATION_TAB_ANALYTICS'),
-				'componentCode' => 'tasks.analytics.empty-state',
-				'scriptPath' => Manager::getComponentPath('tasks:tasks.analytics.empty-state'),
+				'componentCode' => self::ANALYTICS_COMPONENT_CODE,
+				'scriptPath' => Manager::getComponentPath(self::ANALYTICS_COMPONENT),
 				'rootWidget' => [
 					'name' => 'layout',
 					'settings' => [
@@ -415,7 +438,8 @@ class Task implements Tabable
 					],
 				],
 				'params' => [
-					'COMPONENT_CODE' => 'tasks.analytics.empty-state',
+					'COMPONENT_CODE' => self::ANALYTICS_COMPONENT_CODE,
+					'SCOPE_CODE' => self::ANALYTICS_SCOPE_CODE,
 				],
 			],
 		];

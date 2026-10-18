@@ -1,0 +1,7 @@
+{
+    "defaultTableName": "b_vote_channel",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js"
+    }
+}

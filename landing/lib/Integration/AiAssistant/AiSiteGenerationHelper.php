@@ -192,6 +192,24 @@ final class AiSiteGenerationHelper
 		return self::resolveErroredStepId((int)($generation->getId() ?? 0)) === self::MODERATION_STEP_ID;
 	}
 
+	/**
+	 * The reason a generation was stopped by topic moderation, or null when it stopped for any other
+	 * reason. Answers from the id alone, for a caller that holds the failure of a generation rather
+	 * than the generation itself.
+	 *
+	 * An empty string means the block is there but carries no verdict text of its own: the caller
+	 * still knows it was the topic, and says so in its own words.
+	 */
+	public static function resolveModerationBlockReason(int $generationId): ?string
+	{
+		if (self::resolveErroredStepId($generationId) !== self::MODERATION_STEP_ID)
+		{
+			return null;
+		}
+
+		return self::resolveModerationBlockMessage($generationId, self::MODERATION_STEP_ID);
+	}
+
 	private static function resolveErroredStepId(int $generationId): int
 	{
 		if ($generationId <= 0)

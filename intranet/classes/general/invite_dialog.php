@@ -446,6 +446,12 @@ class CIntranetInviteDialog
 		}
 	}
 
+	public static function isExtranetInvitationAvailable(): bool
+	{
+		return ModuleManager::isModuleInstalled('extranet')
+			&& Option::get('extranet', 'extranet_site') !== '';
+	}
+
 	public static function RegisterNewUser($SITE_ID, $arFields, &$arError)
 	{
 		global $APPLICATION;
@@ -459,10 +465,7 @@ class CIntranetInviteDialog
 
 		$arEmailExist = array();
 		$bExtranetUser = false;
-		$bExtranetInstalled = (
-			ModuleManager::isModuleInstalled('extranet')
-			&& Option::get('extranet', 'extranet_site') !== ''
-		);
+		$bExtranetInstalled = self::isExtranetInvitationAvailable();
 
 		if (!empty($arFields['EMAIL']) || !empty($arFields['PHONE']))
 		{

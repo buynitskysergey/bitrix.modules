@@ -41,6 +41,7 @@ class ProxyIntegrator implements IntegratorInterface
 	private const PROXY_ACTION_LIST_DASHBOARD = '/dashboard/list';
 	private const PROXY_ACTION_DASHBOARD_DETAIL = '/dashboard/get';
 	private const PROXY_ACTION_GET_EMBEDDED_DASHBOARD_CREDENTIALS = '/dashboard/embedded/get';
+	private const PROXY_ACTION_GET_DEMO_EMBEDDED_CREDENTIALS = '/dashboard/demo/embedded/get';
 	private const PROXY_ACTION_COPY_DASHBOARD = '/dashboard/copy';
 	private const PROXY_ACTION_EXPORT_DASHBOARD = '/dashboard/export';
 	private const PROXY_ACTION_DELETE_DASHBOARD = '/dashboard/delete';
@@ -58,10 +59,19 @@ class ProxyIntegrator implements IntegratorInterface
 	private const PROXY_ACTION_GET_DATASET = '/dataset/get';
 	private const PROXY_ACTION_GET_DATASET_BY_NAME = '/dataset/getByName';
 	private const PROXY_ACTION_CREATE_DATASET = '/dataset/create';
+	private const PROXY_ACTION_CREATE_VIRTUAL_DATASET = '/dataset/createVirtual';
+	private const PROXY_ACTION_CREATE_DATASET_FROM_SQL = '/dataset/createFromSql';
 	private const PROXY_ACTION_UPDATE_DATASET = '/dataset/update';
 	private const PROXY_ACTION_DELETE_DATASET = '/dataset/delete';
 	private const PROXY_ACTION_GET_DATASET_URL = '/dataset/getUrl';
 	private const PROXY_ACTION_GET_DATASET_CREATE_URL = '/dataset/getCreateUrl';
+	private const PROXY_ACTION_LIST_TABLES = '/table/list';
+	private const PROXY_ACTION_GET_TABLE_METADATA = '/table/getMetadata';
+	private const PROXY_ACTION_SQLLAB_EXECUTE = '/sqllab/execute';
+	private const PROXY_ACTION_GET_CHART = '/chart/get';
+	private const PROXY_ACTION_CREATE_CHART = '/chart/create';
+	private const PROXY_ACTION_UPDATE_CHART = '/chart/update';
+	private const PROXY_ACTION_DELETE_CHART = '/chart/delete';
 	private const PROXY_ACTION_GET_UNUSED_ELEMENTS = '/unusedElements/get';
 	private const PROXY_ACTION_DELETE_UNUSED_ELEMENTS = '/unusedElements/delete';
 	private const PROXY_ACTION_GET_DASHBOARD_DATASETS = '/dashboard/datasets';
@@ -76,6 +86,7 @@ class ProxyIntegrator implements IntegratorInterface
 	private const PROXY_ACTION_LIST_DATASET = '/dataset/list';
 
 	private const PROXY_EXTENDED_STREAM_TIMEOUT = 90;
+	private const PROXY_DEMO_STREAM_TIMEOUT = 8;
 	static private self $instance;
 
 	private Sender $sender;
@@ -276,6 +287,7 @@ class ProxyIntegrator implements IntegratorInterface
 				published: $dashboardData['published'] ?? true,
 				nativeFilterConfig: $jsonMetadata['native_filter_configuration'] ?? [],
 				dateModify: $dateModify,
+				jsonMetadata: $jsonMetadata,
 			);
 		}
 
@@ -315,6 +327,55 @@ class ProxyIntegrator implements IntegratorInterface
 
 		$credentialsData = $response->getData();
 		if ($credentialsData)
+		{
+			$response->setData(new Dto\DashboardEmbeddedCredentials(
+				uuid: $credentialsData['uuid'],
+				guestToken: $credentialsData['guest_token'],
+				supersetDomain: $credentialsData['domain'],
+			));
+		}
+
+		return $response;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getDemoEmbeddedCredentials(string $reportCode, string $lang): IntegratorResponse
+	{
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_GET_DEMO_EMBEDDED_CREDENTIALS)
+				->setParams([
+					'reportCode' => $reportCode,
+					'lang' => $lang,
+				])
+				->setSenderHttpClientParams([
+					'streamTimeout' => self::PROXY_DEMO_STREAM_TIMEOUT,
+				])
+				->removeBefore(Middleware\TariffRestriction::getMiddlewareId())
+				->removeBefore(Middleware\Registrar::getMiddlewareId())
+				->removeBefore(Middleware\DomainLinkGate::getMiddlewareId())
+				->removeBefore(Middleware\ReadyGate::getMiddlewareId())
+				->removeBefore(Middleware\UserAccess::getMiddlewareId())
+				->removeBefore(Middleware\RequiredDatasetSync::getMiddlewareId())
+				->removeAfter(Middleware\Registrar::getMiddlewareId())
+				->removeAfter(Middleware\DomainLinkGate::getMiddlewareId())
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->removeAfter(Middleware\Logger::getMiddlewareId())
+				->perform()
+		;
+
+		if (
+			$response->getStatus() === IntegratorResponse::STATUS_TOO_MANY_REQUESTS
+			|| $response->hasErrors()
+		)
+		{
+			return $response;
+		}
+
+		$credentialsData = $response->getData();
+		if (isset($credentialsData['uuid'], $credentialsData['guest_token'], $credentialsData['domain']))
 		{
 			$response->setData(new Dto\DashboardEmbeddedCredentials(
 				uuid: $credentialsData['uuid'],
@@ -965,6 +1026,64 @@ class ProxyIntegrator implements IntegratorInterface
 	/**
 	 * @inheritDoc
 	 */
+	public function listDatasets(
+		array $ids = [],
+		array $neqIds = [],
+		?int $page = null,
+		?int $pageSize = null
+	): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$requestParams = [];
+		if (!empty($ids))
+		{
+			$requestParams['ids'] = array_values(array_map('intval', $ids));
+		}
+		if (!empty($neqIds))
+		{
+			$requestParams['neqIds'] = array_values(array_map('intval', $neqIds));
+		}
+		if ($page !== null)
+		{
+			$requestParams['page'] = $page;
+		}
+		if ($pageSize !== null)
+		{
+			$requestParams['pageSize'] = $pageSize;
+		}
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_DATASET)
+				->setParams($requestParams)
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $response->getData();
+
+		// Bounded mode keeps the full {datasets, count} envelope so the caller can
+		// read the total; legacy mode returns a flat array for the by-ids /
+		// idempotency callers that iterate the list directly.
+		if ($pageSize !== null)
+		{
+			return $response->setData(is_array($resultData) ? $resultData : []);
+		}
+
+		return $response->setData($resultData['datasets'] ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
 	public function createDataset(array $fields): IntegratorResponse
 	{
 		$parameters = [
@@ -979,6 +1098,164 @@ class ProxyIntegrator implements IntegratorInterface
 				->setParams(['fields' => $parameters])
 				->perform()
 			;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function createVirtualDataset(
+		string $datasetName,
+		string $sourceTable,
+		array $columns,
+		?string $sourceSchema = null,
+	): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$parameters = [
+			'datasetName' => $datasetName,
+			'sourceTable' => $sourceTable,
+			'columns' => array_values($columns),
+		];
+		if ($sourceSchema !== null && $sourceSchema !== '')
+		{
+			$parameters['sourceSchema'] = $sourceSchema;
+		}
+
+		return
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_CREATE_VIRTUAL_DATASET)
+				->removeBefore(Middleware\ReadyGate::getMiddlewareId())
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->setParams($parameters)
+				->perform()
+			;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function createDatasetFromSql(string $datasetName, string $sql): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$parameters = [
+			'datasetName' => $datasetName,
+			'sql' => $sql,
+		];
+
+		return
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_CREATE_DATASET_FROM_SQL)
+				->removeBefore(Middleware\ReadyGate::getMiddlewareId())
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->setParams($parameters)
+				->perform()
+			;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function executeSql(string $sql, ?int $limit = null): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$params = ['sql' => $sql];
+		if ($limit !== null)
+		{
+			$params['limit'] = $limit;
+		}
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_SQLLAB_EXECUTE)
+				->setParams($params)
+				->setSenderHttpClientParams([
+					'streamTimeout' => self::PROXY_EXTENDED_STREAM_TIMEOUT,
+				])
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		return $response->setData($response->getData() ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function listTables(?string $schema = null): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$params = [];
+		if ($schema !== null && $schema !== '')
+		{
+			$params['schema'] = $schema;
+		}
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_TABLES)
+				->setParams($params)
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		return $response->setData($response->getData() ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getTableMetadata(string $tableName, ?string $schema = null): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$params = [
+			'name' => $tableName,
+		];
+		if ($schema !== null && $schema !== '')
+		{
+			$params['schema'] = $schema;
+		}
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_GET_TABLE_METADATA)
+				->setParams($params)
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		return $response->setData($response->getData() ?? []);
 	}
 
 	/**
@@ -1339,6 +1616,137 @@ class ProxyIntegrator implements IntegratorInterface
 			;
 	}
 
+	/**
+	 * @inheritDoc
+	 */
+	public function listCharts(
+		array $ids = [],
+		?string $nameFilter = null,
+		?int $page = null,
+		?int $pageSize = null
+	): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		$requestParams = [];
+		if (!empty($ids))
+		{
+			$requestParams['ids'] = array_values(array_map('intval', $ids));
+		}
+		if ($nameFilter !== null && $nameFilter !== '')
+		{
+			$requestParams['nameFilter'] = $nameFilter;
+		}
+		if ($page !== null)
+		{
+			$requestParams['page'] = $page;
+		}
+		if ($pageSize !== null)
+		{
+			$requestParams['pageSize'] = $pageSize;
+		}
+
+		$response =
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_LIST_CHART)
+				->setParams($requestParams)
+				->perform()
+		;
+
+		if ($response->hasErrors())
+		{
+			return $response;
+		}
+
+		$resultData = $response->getData();
+
+		return $response->setData($resultData ?? []);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getChartById(int $id): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		return
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_GET_CHART)
+				->setParams(['id' => $id])
+				->perform()
+			;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function createChart(array $payload): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		return
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_CREATE_CHART)
+				->removeBefore(Middleware\ReadyGate::getMiddlewareId())
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->setParams(['payload' => $payload])
+				->perform()
+			;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function updateChart(int $id, array $fields): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		return
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_UPDATE_CHART)
+				->removeBefore(Middleware\ReadyGate::getMiddlewareId())
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->setParams([
+					'id' => $id,
+					'fields' => $fields,
+				])
+				->perform()
+			;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function deleteChart(int $id): IntegratorResponse
+	{
+		if (!self::isAiToolsFeatureEnabled())
+		{
+			return self::aiToolsDisabledResponse();
+		}
+
+		return
+			$this
+				->createDefaultRequest(self::PROXY_ACTION_DELETE_CHART)
+				->removeBefore(Middleware\ReadyGate::getMiddlewareId())
+				->removeAfter(Middleware\StatusArbiter::getMiddlewareId())
+				->setParams(['id' => $id])
+				->perform()
+			;
+	}
+
 	// endregion
 
 	// region Self-hosted license
@@ -1467,6 +1875,7 @@ class ProxyIntegrator implements IntegratorInterface
 				published: $dashboardData['published'] ?? true,
 				nativeFilterConfig: $jsonMetadata['native_filter_configuration'] ?? [],
 				dateModify: $dateModify,
+				jsonMetadata: $jsonMetadata,
 			);
 		}
 

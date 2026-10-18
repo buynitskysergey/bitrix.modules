@@ -55,6 +55,19 @@ class TimeManagementService
 		bool $canRenew = false,
 	): ?Timer
 	{
+		if (!$canStart && !$canRenew)
+		{
+			$existingTimer = $this->timerRepository->get($userId);
+			if (
+				$existingTimer !== null
+				&& (int)$existingTimer->startedAtTs > 0
+				&& (int)$existingTimer->taskId === $taskId
+			)
+			{
+				return $existingTimer;
+			}
+		}
+
 		$this->stopTimer($userId);
 
 		$task = $this->taskRepository->getById($taskId);

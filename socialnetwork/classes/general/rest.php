@@ -33,6 +33,8 @@ class CSocNetLogRestService extends IRestService
 	public const PERM_READ = 'R';
 	public const PERM_WRITE = 'W';
 
+	private const CURSOR_LIMIT_MAX = 200;
+
 	private static $arAllowedOperations = array('', '!', '<', '<=', '>', '>=', '><', '!><', '?', '=', '!=', '%', '!%', '');
 
 	public static function OnRestServiceBuildDescription(): array
@@ -138,6 +140,178 @@ class CSocNetLogRestService extends IRestService
 		return $logCommentEventIdList;
 	}
 
+	/**
+	 * A blank value means the bound has not been given: the selection is not narrowed by it.
+	 *
+	 * @return int|null timestamp of the bound, null for a bound that has not been given
+	 */
+	private static function parseWindowBound($value, string $fieldName): ?int
+	{
+		if ($value === '')
+		{
+			return null;
+		}
+
+		$timestamp = is_string($value) ? strtotime($value) : false;
+		if ($timestamp === false)
+		{
+			throw new RestException(
+				"Wrong date format in {$fieldName}",
+				RestException::ERROR_ARGUMENT,
+				CRestServer::STATUS_WRONG_REQUEST
+			);
+		}
+
+		return $timestamp;
+	}
+
+	/**
+	 * CSocNetLog::GetList takes a LOG_DATE filter value as user time and shifts it to server time itself,
+	 * so the bound has to be given in user time.
+	 */
+	private static function formatWindowBound(int $timestamp): string
+	{
+		return ConvertTimeStamp($timestamp + CTimeZone::getOffset(), 'FULL');
+	}
+
+	/**
+	 * @return array LOG_DATE conditions of the window, to be merged into the selection filter
+	 */
+	private static function getDateWindowFilter(array $fields): array
+	{
+		$upperTimestamp = isset($fields['LOG_DATE_TO'])
+			? self::parseWindowBound($fields['LOG_DATE_TO'], 'LOG_DATE_TO')
+			: null;
+		$lowerTimestamp = isset($fields['LOG_DATE_FROM'])
+			? self::parseWindowBound($fields['LOG_DATE_FROM'], 'LOG_DATE_FROM')
+			: null;
+
+		if (
+			$lowerTimestamp !== null
+			&& $upperTimestamp !== null
+			&& $lowerTimestamp > $upperTimestamp
+		)
+		{
+			throw new RestException(
+				'LOG_DATE_FROM is later than LOG_DATE_TO',
+				RestException::ERROR_ARGUMENT,
+				CRestServer::STATUS_WRONG_REQUEST
+			);
+		}
+
+		$filter = [];
+
+		if (
+			$upperTimestamp !== null
+			&& $upperTimestamp < time()
+		)
+		{
+			$filter['<=LOG_DATE'] = self::formatWindowBound($upperTimestamp);
+		}
+
+		if ($lowerTimestamp !== null)
+		{
+			$filter['>=LOG_DATE'] = self::formatWindowBound($lowerTimestamp);
+		}
+
+		return $filter;
+	}
+
+	private static function getCursorLimit(array $fields): int
+	{
+		// a non-numeric or non-positive value is treated the same way as a missing one
+		$value = $fields['LIMIT'] ?? null;
+		$limit = is_numeric($value) ? (int)$value : 0;
+		if ($limit <= 0)
+		{
+			return static::LIST_LIMIT;
+		}
+
+		return min($limit, self::CURSOR_LIMIT_MAX);
+	}
+
+	/**
+	 * A blank value and a zero alike mean the walk starts from the edge of the selection.
+	 */
+	private static function parseCursorBound($value, string $fieldName): int
+	{
+		if (
+			$value === ''
+			|| $value === []
+		)
+		{
+			return 0;
+		}
+
+		if (
+			!is_numeric($value)
+			|| (float)$value < 0
+		)
+		{
+			throw new RestException(
+				"Wrong {$fieldName} value",
+				RestException::ERROR_ARGUMENT,
+				CRestServer::STATUS_WRONG_REQUEST
+			);
+		}
+
+		return (int)$value;
+	}
+
+	/**
+	 * @return array{order: array, navParams: array, filter: array} sorting and paging of the chosen mode;
+	 *   filter holds the cursor condition and has to be merged into the selection filter
+	 */
+	private static function getSelectionParams(array $fields, $offset, bool $cursorMode): array
+	{
+		if (!$cursorMode)
+		{
+			return [
+				'order' => ['LOG_UPDATE' => 'DESC'],
+				'navParams' => self::getNavData($offset),
+				'filter' => [],
+			];
+		}
+
+		$navParams = ['nTopCount' => self::getCursorLimit($fields)];
+
+		if (isset($fields['FIRST_ID']))
+		{
+			$firstId = self::parseCursorBound($fields['FIRST_ID'], 'FIRST_ID');
+
+			return [
+				'order' => ['ID' => 'ASC'],
+				'navParams' => $navParams,
+				'filter' => $firstId > 0 ? ['>ID' => $firstId] : [],
+			];
+		}
+
+		$lastId = self::parseCursorBound($fields['LAST_ID'], 'LAST_ID');
+
+		return [
+			'order' => ['ID' => 'DESC'],
+			'navParams' => $navParams,
+			'filter' => $lastId > 0 ? ['<ID' => $lastId] : [],
+		];
+	}
+
+	/**
+	 * Returns published blog posts of the livefeed the current user has access to.
+	 *
+	 * @param array $fields selection parameters:
+	 *   POST_ID, LOG_RIGHTS narrow the selection to a single post or to right codes;
+	 *   LOG_DATE_FROM, LOG_DATE_TO are window bounds in user time, ISO-8601, a blank bound means a missing
+	 *   one and LOG_DATE_FROM later than LOG_DATE_TO is rejected;
+	 *   LAST_ID and FIRST_ID turn the cursor mode on, a zero and a blank value alike open a walk,
+	 *   FIRST_ID wins when both are passed;
+	 *   LIMIT is the page size of the cursor mode, clamped to CURSOR_LIMIT_MAX, a non-numeric and
+	 *   a non-positive value falls back to the default page size.
+	 * @param int $n offset of the paged mode, ignored in the cursor mode
+	 * @param CRestServer|null $server
+	 * @return array posts plus the key next: the offset of the following page in the paged mode, the ID of
+	 *   the last read log entry in the cursor mode. Sorting is LOG_UPDATE DESC without a cursor,
+	 *   ID DESC with LAST_ID and ID ASC with FIRST_ID.
+	 */
 	public static function getBlogPost($fields, $n, $server): array
 	{
 		global $USER_FIELD_MANAGER;
@@ -149,7 +323,6 @@ class CSocNetLogRestService extends IRestService
 		}
 
 		$tzOffset = CTimeZone::getOffset();
-		$arOrder = [ 'LOG_UPDATE' => 'DESC' ];
 
 		$res = CUser::getById(self::getCurrentUserId());
 		if ($userFields = $res->Fetch())
@@ -192,6 +365,8 @@ class CSocNetLogRestService extends IRestService
 			"<=LOG_DATE" => "NOW"
 		];
 
+		$filter = array_merge($filter, self::getDateWindowFilter($fields));
+
 		if (
 			isset($fields['POST_ID'])
 			&& (int)$fields['POST_ID'] > 0
@@ -213,19 +388,28 @@ class CSocNetLogRestService extends IRestService
 			"USE_SUBSCRIBE" => "N"
 		);
 
+		$cursorMode = isset($fields['LAST_ID']) || isset($fields['FIRST_ID']);
+
+		$selectionParams = self::getSelectionParams($fields, $n, $cursorMode);
+		$arOrder = $selectionParams['order'];
+		$navParams = $selectionParams['navParams'];
+		$filter = array_merge($filter, $selectionParams['filter']);
+
 		$dbLog = CSocNetLog::GetList(
 			$arOrder,
 			$filter,
 			false,
-			self::getNavData($n),
+			$navParams,
 			array("ID", "SOURCE_ID"),
 			$arListParams
 		);
 
 		$arPostId = $arPostIdToGet = array();
+		$lastLogId = 0;
 
 		while ($arLog = $dbLog->Fetch())
 		{
+			$lastLogId = (int)$arLog["ID"];
 			$arPostId[] = $arLog["SOURCE_ID"];
 		}
 
@@ -332,7 +516,22 @@ class CSocNetLogRestService extends IRestService
 
 		ksort($result);
 
-		return self::setNavData($result, $dbLog);
+		if (!$cursorMode)
+		{
+			return self::setNavData($result, $dbLog);
+		}
+
+		$result = array_values($result);
+
+		// an incremental walk has to be resumable after an incomplete page, so the end of the
+		// selection is reported by the next empty page instead of a missing cursor.
+		// The cursor comes from the last read log entry even when its post has been dropped.
+		if ($lastLogId > 0)
+		{
+			$result['next'] = $lastLogId;
+		}
+
+		return $result;
 	}
 
 	public static function getUserBlogPost($arParams, $offset, CRestServer $server): array

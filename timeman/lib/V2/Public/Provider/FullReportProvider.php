@@ -194,6 +194,20 @@ final class FullReportProvider
 	}
 
 	/**
+	 * Path of the livefeed entry the report was published to, or null when the report has no entry,
+	 * when the viewer may not read it, or when the viewer is not the current user.
+	 */
+	public function getDiscussionUrl(int $reportId, int $viewerId): ?string
+	{
+		// Resolved on call: the livefeed side is not part of reading reports, so the other callers of this
+		// provider are not made to build it.
+		return Container::getInstance()
+			->getFullReportLivefeedService()
+			->getEntryPath($reportId, $viewerId)
+		;
+	}
+
+	/**
 	 * @param iterable<Entity\FullReport\FullReport> $reports
 	 */
 	private function mapEntityReports(iterable $reports): FullReportCollection

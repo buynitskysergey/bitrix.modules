@@ -11,7 +11,7 @@ use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P2.T1 / ALG-02] Re-hangs a node's direct live children onto
+ * Re-hangs a node's direct live children onto
  * the node's own parent (its grandparent), or onto the collection root when the node is a
  * root. Applied when a node is archived / trashed WITHOUT its subtree, so its children keep
  * living one level up instead of vanishing with the node.
@@ -20,7 +20,7 @@ use Bitrix\Note\Internal\Service\Document\Position\PositionService;
  * on PositionService. The repository contributes only primitives (listDirectChildren read,
  * updateMulti write); this service sequences them and the follow-up position recompute.
  *
- * [P4.T5] This is also one of the reparent entries that MUST route through the ACL choke-point
+ * This is also one of the reparent entries that MUST route through the ACL choke-point
  * {@see SubtreeAclReconciler::syncOnMove()} — see the call below for why.
  */
 final class ReparentService
@@ -77,7 +77,7 @@ final class ReparentService
 		{
 			$this->documentRepository->updateMulti($childIds, ['PARENT_ID' => $newParentId]);
 
-			// [P4.T5] A reparent is a reparent no matter which command triggered it: archiving or
+			// A reparent is a reparent no matter which command triggered it: archiving or
 			// trashing $nodeId WITHOUT its subtree lifts these children out of $nodeId's subtree, so
 			// every derived row pushed by $nodeId (or by any other source that no longer covers them)
 			// has to go.

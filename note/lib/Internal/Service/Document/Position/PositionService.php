@@ -18,7 +18,7 @@ final class PositionService
 {
 	private const LOCK_TIMEOUT = 5;
 
-	// [P4.T2] Distinct from a generic access-denied so the client can explain that the move would open
+	// Distinct from a generic access-denied so the client can explain that the move would open
 	// the branch to a subtree-share audience and needs moderator level.
 	public const ERROR_MOVE_ACCESS_ESCALATION = 'NOTE_MOVE_ACCESS_ESCALATION';
 
@@ -78,7 +78,7 @@ final class PositionService
 				return $this->createErrorResult('Target parent belongs to moved subtree.');
 			}
 
-			// [P4.T2] Block a silent escalation: a reparent into a subtree-shared branch that would
+			// Block a silent escalation: a reparent into a subtree-shared branch that would
 			// hand new positive access to a share audience needs moderator level, not just manage.
 			if ($this->movementEscalatesAccess($targetParentId, $targetCollectionId, $subtreeIds, $userId))
 			{
@@ -261,7 +261,7 @@ final class PositionService
 			return $result;
 		}
 
-		// [P4.T2/T5] Re-align derived rows of the moved subtree inside the move transaction so the
+		// Re-align derived rows of the moved subtree inside the move transaction so the
 		// narrowing DELETE is atomic with the reparent. Uses the source-collection subtree ids
 		// (stable across the reparent) computed in move().
 		$subtreeIds = $precomputedSubtreeIds
@@ -341,7 +341,7 @@ final class PositionService
 	}
 
 	/**
-	 * [P4.T2] True when the reparent would grant new positive access AND the actor lacks moderator
+	 * True when the reparent would grant new positive access AND the actor lacks moderator
 	 * level on the target collection. Admins bypass; a target branch with no covering source never
 	 * escalates, so ordinary moves stay at manage-level authorisation.
 	 *

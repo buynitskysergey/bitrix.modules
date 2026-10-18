@@ -37,7 +37,10 @@ class MessageBlockElementAppend extends BaseMessageEvent
 			'chatId' => $this->message->getChatId(),
 			'text' => $this->message->getParsedMessage(),
 			'element' => $this->block?->jsonSerialize(),
-			'files' => FileCollection::initByDiskFilesIds($this->block?->getFiles() ?? [])->toRestFormat(),
+			'files' => FileCollection::initByDiskFilesIds(
+				$this->block?->getFiles() ?? [],
+				$this->message->getChatId(),
+			)->toRestFormat(),
 		];
 	}
 

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\Bulk;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P3.T1 / ALG-03] Topologically orders a bulk restore
+ * Topologically orders a bulk restore
  * selection so an ancestor within the selection is applied before its descendant.
  *
  * This is the single guarantee bulk restore adds over single restore: when a parent and

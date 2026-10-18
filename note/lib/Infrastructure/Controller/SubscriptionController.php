@@ -12,16 +12,18 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
+use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\Notification\NotificationShippingPolicy;
 use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
 use Bitrix\Note\Public\Command\RemoveSubscriptionCommand;
 use Bitrix\Note\Public\Command\SetSubscriptionCommand;
 use Bitrix\Note\Public\Provider\SubscriptionProvider;
 
 /**
- * [P6.T3 / API-07..09] Bell control: subscribe/change scope, unsubscribe, and
+ * Bell control: subscribe/change scope, unsubscribe, and
  * read state. No auto-subscription anywhere in the module — every row here is
  * created by an explicit user action.
  */
@@ -35,10 +37,6 @@ class SubscriptionController extends Controller
 	// number in STATES_BATCH_SIZE), because a branch is read whole on every page it grows by and a
 	// silently trimmed tail would draw rows with no bell where a bell belongs.
 	private const MAX_STATES_BATCH = 200;
-	private const ALLOWED_MODES_BY_SCOPE = [
-		SubscriptionTable::SCOPE_DOCUMENT => [SubscriptionTable::MODE_SELF, SubscriptionTable::MODE_SUBTREE, SubscriptionTable::MODE_MUTED],
-		SubscriptionTable::SCOPE_COLLECTION => [SubscriptionTable::MODE_ALL],
-	];
 
 	protected function getDefaultPreFilters(): array
 	{
@@ -51,11 +49,21 @@ class SubscriptionController extends Controller
 	}
 
 	/**
-	 * [API-07] Subscribe / change scope. Idempotent upsert; requires LEVEL_VIEW on
+	 * Subscribe / change scope. Idempotent upsert; requires LEVEL_VIEW on
 	 * the target (you can only subscribe to something you can see).
 	 */
 	public function setAction(string $scope, int $entityId, string $mode): ?array
 	{
+		// The bell offering this is hidden while the option is off, so a call arriving here is not one
+		// the interface can make. Refused rather than stored: a row written now would start delivering
+		// the moment the option goes on, without the user ever having asked for it.
+		if (!Configuration::isNotificationsEnabled())
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_SUBSCRIPTION_SET_ERROR')));
+
+			return null;
+		}
+
 		$scope = mb_strtolower(trim($scope));
 		$mode = mb_strtolower(trim($mode));
 
@@ -81,7 +89,7 @@ class SubscriptionController extends Controller
 			return null;
 		}
 
-		// [API-05] The invariant refuses through Result data, not an exception: AbstractCommand::run()
+		// The invariant refuses through Result data, not an exception: AbstractCommand::run()
 		// wraps every exception of execute() into CommandException, so a typed catch cannot tell the
 		// reasons apart.
 		if (($result->getData()['errorCode'] ?? null) === SetSubscriptionCommand::ERROR_FAVORITE_REQUIRED)
@@ -98,7 +106,7 @@ class SubscriptionController extends Controller
 	}
 
 	/**
-	 * [API-08] Unsubscribe — removes the caller's own subscription. No
+	 * Unsubscribe - removes the caller's own subscription. No
 	 * target-access check: a user must be able to unsubscribe even after losing
 	 * view rights on the target.
 	 */
@@ -129,7 +137,7 @@ class SubscriptionController extends Controller
 	}
 
 	/**
-	 * [API-09] State for the bell control. `collectionId` is normally the
+	 * State for the bell control. `collectionId` is normally the
 	 * document's own collection and only needs passing when the caller wants to
 	 * confirm it explicitly (e.g. a stale client-side breadcrumb).
 	 */
@@ -157,7 +165,7 @@ class SubscriptionController extends Controller
 	}
 
 	/**
-	 * [P4.T6 / API-06] Coverage states of a whole branch in one call. The tree endpoints carry no
+	 * Coverage states of a whole branch in one call. The tree endpoints carry no
 	 * notification state (the main tree draws no bells), yet the nested rows of an expanded favorites
 	 * row have to show coverage and mute - hence this batch read.
 	 *
@@ -234,7 +242,9 @@ class SubscriptionController extends Controller
 			return false;
 		}
 
-		if (!in_array($mode, self::ALLOWED_MODES_BY_SCOPE[$scope], true))
+		// Which modes exist at all is a shipping decision, not the transport's own: the whitelist
+		// comes from the policy so that widening delivery never leaves the endpoint behind.
+		if (!in_array($mode, NotificationShippingPolicy::shippedModes($scope), true))
 		{
 			$this->addError(new Error(Loc::getMessage('NOTE_SUBSCRIPTION_INVALID_MODE'), 'INVALID_MODE'));
 

@@ -65,8 +65,6 @@ final class Field
 		'POSTAL_CODE',
 	];
 
-	private const SNILS_FIELD_CODE = 'UF_LEGAL_SNILS';
-
 	// Legal name parts a full name field is assembled from downstream. Their values feed the
 	// name resolver on the service side; the full name field itself carries only a flat string.
 	public const FULL_NAME_PART_TYPES = [
@@ -344,15 +342,7 @@ final class Field
 			return new Item\FieldCollection();
 		}
 
-		$fieldType = match ($sourceFieldType)
-		{
-			FieldType::DATE, FieldType::DATETIME => FieldType::DATE,
-			FieldType::LIST => FieldType::LIST,
-			FieldType::DOUBLE => FieldType::DOUBLE,
-			FieldType::INTEGER => FieldType::INTEGER,
-			FieldType::ADDRESS => FieldType::ADDRESS,
-			default => FieldType::STRING,
-		};
+		$fieldType = $this->fieldService->convertCrmFieldType($sourceFieldType);
 		$itemsDescription = $fieldDescription['ITEMS'] ?? null;
 		$items = null;
 		if ($itemsDescription !== null)
@@ -424,15 +414,7 @@ final class Field
 			$fieldCode = new CRM\FieldCode($requisiteField->name);
 			$fieldDescription = $fieldCode->getDescription() ?? [];
 
-			$fieldType = match ($fieldDescription['TYPE'] ?? null)
-			{
-				FieldType::DATE, FieldType::DATETIME => FieldType::DATE,
-				FieldType::LIST => FieldType::LIST,
-				FieldType::DOUBLE => FieldType::DOUBLE,
-				FieldType::INTEGER => FieldType::INTEGER,
-				FieldType::ADDRESS => FieldType::ADDRESS,
-				default => FieldType::STRING,
-			};
+			$fieldType = $this->fieldService->convertCrmFieldType((string)($fieldDescription['TYPE'] ?? ''));
 			$itemsDescription = $fieldDescription['ITEMS'] ?? null;
 			$items = null;
 			if ($itemsDescription !== null)
@@ -556,14 +538,7 @@ final class Field
 			return new Item\FieldCollection();
 		}
 
-		$fieldType = $isVirtualFullName
-			? FieldType::FULL_NAME
-			: $this->fieldService->convertUserFieldType($sourceFieldType);
-
-		if ($fieldCodeForCheck === self::SNILS_FIELD_CODE)
-		{
-			$fieldType = FieldType::SNILS;
-		}
+		$fieldType = $this->fieldService->resolveProfileFieldType($fieldCodeForCheck, $sourceFieldType);
 
 		if ($isVirtualFullName)
 		{

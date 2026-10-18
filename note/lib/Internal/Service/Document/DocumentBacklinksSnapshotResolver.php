@@ -10,7 +10,7 @@ use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Public\Provider\BacklinkProvider;
 
 /**
- * [P3.T2 / DTO-01] Bundles the backlinks counter into the document bootstrap payload, the way
+ * Bundles the backlinks counter into the document bootstrap payload, the way
  * DocumentViewsSnapshotResolver does it for views: the widget adopts the number instead of asking
  * for it on mount.
  *

@@ -48,4 +48,9 @@ final class AllOpenChannelFolder extends SystemFolder
 			return false;
 		}
 	}
+
+	public function shouldMigrateLegacyPins(): bool
+	{
+		return false;
+	}
 }

@@ -2,10 +2,13 @@
 IncludeModuleLangFile($_SERVER['DOCUMENT_ROOT'] . BX_ROOT . '/modules/main/options.php');
 IncludeModuleLangFile(__FILE__);
 require_once $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/search/prolog.php';
-/** @global CMain $APPLICATION */
+/** @var CMain $APPLICATION */
 global $APPLICATION;
-/** @var CAdminMessage $message */
-require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/classes/general/backup.php");
+/** @var CAdminMessage|null $message */
+require_once $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/classes/general/backup.php';
+
+/** @var \Bitrix\Main\HttpRequest $request */
+$request = \Bitrix\Main\Context::getCurrent()->getRequest();
 
 $openSearchAnalyzers = CSearchOpenSearch::getLanguageAnalyzers();
 
@@ -33,33 +36,48 @@ $aTabs = [
 			'use_stemming' => [GetMessage('SEARCH_OPTIONS_USE_STEMMING'), ['checkbox', 'N']],
 			'agent_stemming' => [GetMessage('SEARCH_OPTIONS_AGENT_STEMMING'), ['checkbox', 'N']],
 			'agent_duration' => [GetMessage('SEARCH_OPTIONS_AGENT_DURATION'), ['text', 6]],
-			'full_text_engine' => [GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE'), ['select', [
-				'bitrix' => GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE_BITRIX'),
-				'sphinx' => GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE_SPHINX'),
-				'opensearch' => GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE_OPENSEARCH'),
-			]]],
+			'full_text_engine' => [
+				GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE'),
+				[
+					'select',
+					[
+						'bitrix' => GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE_BITRIX'),
+						'sphinx' => GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE_SPHINX'),
+						'opensearch' => GetMessage('SEARCH_OPTIONS_FULL_TEXT_ENGINE_OPENSEARCH'),
+					],
+				],
+			],
 			'letters' => [GetMessage('SEARCH_OPTIONS_LETTERS'), ['text', 45], 'bitrix'],
 			'sphinx_connection' => [GetMessage('SEARCH_OPTIONS_SPHINX_CONNECTION'), ['text', 45], 'sphinx'],
 			'sphinx_index_name' => [GetMessage('SEARCH_OPTIONS_SPHINX_INDEX_NAME'), ['text', 45], 'sphinx'],
-			'sphinx_note' => ['', ['note', '
+			'sphinx_note' => [
+				'',
+				[
+					'note',
+					'
 <pre>
 # sphinx.conf - for 3.X
 index bitrix
 {
-	#main settings
+	# main settings
 		type = rt
-	#choose appropriate type of morphology to use
-		#morphology = lemmatize_ru_all, lemmatize_en_all, lemmatize_de_all, stem_enru
+	# choose appropriate type of morphology to use
+		# morphology = lemmatize_ru_all, lemmatize_en_all, lemmatize_de_all, stem_enru
 		morphology = stem_enru, soundex
-	#these settings are used by bitrix:search.title component
+	# these settings are used by bitrix:search.title component
 		min_prefix_len = 2
-	#all fields must be defined exactly as followed
+	# all fields must be defined exactly as followed
 		field = title
 		field = body
 		attr_uint = module_id
 		attr_string = module
 		attr_uint = item_id
 		attr_string = item
+		attr_uint = user_id
+		attr_string = entity_type
+		attr_uint = entity_type_id
+		attr_string = entity
+		attr_uint = entity_id
 		attr_uint = param1_id
 		attr_string = param1
 		attr_uint = param2_id
@@ -77,26 +95,31 @@ index bitrix
 # sphinx.conf - for 2.X
 index bitrix
 {
-	#main settings
+	# main settings
 		type = rt
 		path = /var/lib/sphinxsearch/data/bitrix
 		docinfo = inline
-	#choose appropriate type of morphology to use
+	# choose appropriate type of morphology to use
 		#morphology = lemmatize_ru_all, lemmatize_en_all, lemmatize_de_all, stem_enru
 		morphology = stem_enru, soundex
-	#these settings are used by bitrix:search.title component
+	# these settings are used by bitrix:search.title component
 		dict = keywords
 		prefix_fields = title
 		infix_fields=
 		min_prefix_len = 2
 		enable_star = 1
-	#all fields must be defined exactly as followed
+	# all fields must be defined exactly as followed
 		rt_field = title
 		rt_field = body
 		rt_attr_uint = module_id
 		rt_attr_string = module
 		rt_attr_uint = item_id
 		rt_attr_string = item
+		rt_attr_uint = user_id
+		rt_attr_string = entity_type
+		rt_attr_uint = entity_type_id
+		rt_attr_string = entity
+		rt_attr_uint = entity_id
 		rt_attr_uint = param1_id
 		rt_attr_string = param1
 		rt_attr_uint = param2_id
@@ -113,8 +136,12 @@ index bitrix
 }
 </pre>
 			'
-	], 'sphinx'],
+				],
+				'sphinx',
+			],
 			'mysql_note' => ['', ['note', GetMessage('SEARCH_OPTIONS_MYSQL_NOTE')], 'mysql'],
+			'full_text_delay_index' => [GetMessage('SEARCH_OPTIONS_FULL_TEXT_DELAY_INDEX'), ['checkbox', 'N'], 'opensearch'],
+			'delay_index_note' => ['', ['note', GetMessage('SEARCH_OPTIONS_DELAY_INDEX_NOTE')], 'opensearch'],
 			'opensearch_connection' => [GetMessage('SEARCH_OPTIONS_OPENSEARCH_CONNECTION'), ['text', 45], 'opensearch'],
 			'opensearch_user' => [GetMessage('SEARCH_OPTIONS_OPENSEARCH_USER'), ['text', 45], 'opensearch'],
 			'opensearch_password' => [GetMessage('SEARCH_OPTIONS_OPENSEARCH_PASSWORD'), ['password', 45], 'opensearch'],
@@ -178,9 +205,17 @@ while ($site = $langs->Fetch())
 
 $tabControl = new CAdminTabControl('tabControl', $aTabs);
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults <> '' && check_bitrix_sessid())
+if (
+	$request->isPost()
+	&& (
+		(string)$request['Update'] !== ''
+		|| (string)$request['Apply'] !== ''
+		|| (string)$request['RestoreDefaults'] !== ''
+	)
+	&& check_bitrix_sessid()
+)
 {
-	if ($RestoreDefaults <> '')
+	if ((string)$request['RestoreDefaults'] !== '')
 	{
 		COption::RemoveOption('search');
 	}
@@ -188,8 +223,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 	{
 		if ($_POST['full_text_engine'] === 'sphinx')
 		{
-			$search = new CSearchSphinx();
-			if (!$search->connect($_POST['sphinx_connection'], $_POST['sphinx_index_name'], true))
+			$search = new CSearchSphinx([
+				'connection' => $_POST['sphinx_connection'],
+				'index_name' => $_POST['sphinx_index_name'],
+			]);
+			if (!$search->connect(true))
 			{
 				$e = $APPLICATION->GetException();
 				if (is_object($e))
@@ -209,9 +247,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 					$siteAnalyzerMap[explode('_', $key, 3)[2]] = $value;
 				}
 			}
-			$search = new CSearchOpenSearch();
-			$opensearch_password = $_POST['opensearch_password'] ?: CPasswordStorage::Get('search@opensearch_password');
-			if (!$search->connect($_POST['opensearch_connection'], $_POST['opensearch_user'], $opensearch_password, $_POST['opensearch_index'], true, $siteAnalyzerMap))
+			$search = new CSearchOpenSearch([
+				'connection' => $_POST['opensearch_connection'],
+				'user' => $_POST['opensearch_user'],
+				'password' => $_POST['opensearch_password'] ?: CPasswordStorage::Get('search@opensearch_password'),
+				'index_name' => $_POST['opensearch_index'],
+				'analyzers' => $siteAnalyzerMap,
+			]);
+			if (!$search->connect(true))
 			{
 				$e = $APPLICATION->GetException();
 				if (is_object($e))
@@ -224,7 +267,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 		elseif ($_POST['full_text_engine'] === 'mysql')
 		{
 			$search = new CSearchMysql();
-			if (!$search->connect())
+			if (!$search->connect(true))
 			{
 				$e = $APPLICATION->GetException();
 				if (is_object($e))
@@ -237,7 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 		elseif ($_POST['full_text_engine'] === 'pgsql')
 		{
 			$search = new CSearchPgsql();
-			if (!$search->connect())
+			if (!$search->connect(true))
 			{
 				$e = $APPLICATION->GetException();
 				if (is_object($e))
@@ -254,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 			$old_max_result_size = COption::GetOptionInt('search', 'max_result_size');
 			$old_full_text_engine = COption::GetOptionString('search', 'full_text_engine');
 
-			foreach ($aTabs as $i => $aTab)
+			foreach ($aTabs as $aTab)
 			{
 				foreach ($aTab['OPTIONS'] as $name => $arOption)
 				{
@@ -289,7 +332,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 			if ($old_full_text_engine != COption::GetOptionString('search', 'full_text_engine'))
 			{
 				$error = [
-					'MESSAGE' => GetMessage("SEARCH_OPTIONS_FULL_REINDEX", ['#LINK#' => '/bitrix/admin/search_reindex.php?lang=' . LANGUAGE_ID]),
+					'MESSAGE' => GetMessage('EARCH_OPTIONS_FULL_REINDEX', ['#LINK#' => '/bitrix/admin/search_reindex.php?lang=' . LANGUAGE_ID]),
 					'TAG' => 'SEARCH_REINDEX',
 					'MODULE_ID' => 'SEARCH',
 					'NOTIFY_TYPE' => CAdminNotify::TYPE_ERROR,
@@ -303,13 +346,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && $Update . $Apply . $RestoreDefaults 
 
 	if (!$bVarsFromForm)
 	{
-		if ($Update <> '' && $_REQUEST['back_url_settings'] <> '')
+		if ((string)$request['Update'] !== '' && (string)$request['back_url_settings'] !== '')
 		{
 			LocalRedirect($_REQUEST['back_url_settings']);
 		}
 		else
 		{
-			LocalRedirect($APPLICATION->GetCurPage() . '?mid=' . urlencode($mid) . '&lang=' . urlencode(LANGUAGE_ID) . '&back_url_settings=' . urlencode($_REQUEST['back_url_settings']) . '&' . $tabControl->ActiveTabParam());
+			LocalRedirect($APPLICATION->GetCurPage() . '?mid=' . urlencode((string)$request['mid']) . '&lang=' . urlencode(LANGUAGE_ID) . '&back_url_settings=' . urlencode($request['back_url_settings']) . '&' . $tabControl->ActiveTabParam());
 		}
 	}
 }
@@ -336,7 +379,7 @@ $context->Show();
 
 $tabControl->Begin();
 ?>
-<form method="post" action="<?php echo $APPLICATION->GetCurPage()?>?mid=<?=urlencode($mid)?>&amp;lang=<?=LANGUAGE_ID?>" id="options">
+<form method="post" action="<?php echo $APPLICATION->GetCurPage()?>?mid=<?=urlencode((string)$request['mid'])?>&amp;lang=<?=LANGUAGE_ID?>" id="options">
 <?php
 foreach ($aTabs as $aTab):
 	$tabControl->BeginNextTab();
@@ -405,7 +448,7 @@ endforeach;?>
 		<input type="button" name="Cancel" value="<?=GetMessage('MAIN_OPT_CANCEL')?>" title="<?=GetMessage('MAIN_OPT_CANCEL_TITLE')?>" onclick="window.location='<?php echo htmlspecialcharsbx(CUtil::addslashes($_REQUEST['back_url_settings']))?>'">
 		<input type="hidden" name="back_url_settings" value="<?=htmlspecialcharsbx($_REQUEST['back_url_settings'])?>">
 	<?php endif?>
-	<input type="submit" name="RestoreDefaults" title="<?php echo GetMessage('MAIN_HINT_RESTORE_DEFAULTS')?>" OnClick="return confirm('<?php echo AddSlashes(GetMessage('MAIN_HINT_RESTORE_DEFAULTS_WARNING'))?>')" value="<?php echo GetMessage('MAIN_RESTORE_DEFAULTS')?>">
+	<input type="submit" name="RestoreDefaults" title="<?php echo GetMessage('MAIN_HINT_RESTORE_DEFAULTS')?>" OnClick="return confirm('<?php echo addslashes(GetMessage('MAIN_HINT_RESTORE_DEFAULTS_WARNING'))?>')" value="<?php echo GetMessage('MAIN_RESTORE_DEFAULTS')?>">
 	<?=bitrix_sessid_post();?>
 <?php $tabControl->End();?>
 </form>

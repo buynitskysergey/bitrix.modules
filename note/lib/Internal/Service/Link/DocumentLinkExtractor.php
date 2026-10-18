@@ -8,7 +8,7 @@ use Bitrix\Main\Engine\UrlManager;
 use Bitrix\Note\Internal\Configuration;
 
 /**
- * [P2.T1] The only place on the backend that decides what counts as a link from one document to
+ * The only place on the backend that decides what counts as a link from one document to
  * another. A pure function of the stored markdown: nothing here reads the database, so an id it
  * returns is a written intent, not a document that is known to exist.
  *

@@ -9,7 +9,6 @@ use Bitrix\Im\Model\RecentTable;
 use Bitrix\Im\V2\Chat;
 use Bitrix\Im\V2\Folder\Cache\FolderCache;
 use Bitrix\Im\V2\Folder\Pin\PinCache;
-use Bitrix\Im\V2\Folder\System\AllOpenChannelFolder;
 use Bitrix\Im\V2\Folder\System\DefaultFolder;
 use Bitrix\Im\V2\Folder\System\SystemFolder;
 use Bitrix\Im\V2\Folder\System\SystemFolderRegistry;
@@ -130,8 +129,7 @@ class FolderBootstrapper
 	 *
 	 * Idempotent through UIX_B_IM_FOLDER_PIN_1 (FOLDER_ID, CHAT_ID).
 	 *
-	 * AllOpenChannelFolder is skipped via instanceof check —
-	 * b_im_folder_pin(allOpenChannelFolderId, *) is contractually empty.
+	 * Folders without a matching legacy recent section opt out before pinned rows are loaded.
 	 *
 	 * TODO: remove this legacy/global pin migration branch after clients
 	 * switch from global pins to scoped folder pins.
@@ -140,7 +138,7 @@ class FolderBootstrapper
 	 */
 	private function migrateLegacyPinsToSystemFolder(int $userId, int $folderId, SystemFolder $systemFolder): bool
 	{
-		if ($systemFolder instanceof AllOpenChannelFolder)
+		if (!$systemFolder->shouldMigrateLegacyPins())
 		{
 			return false;
 		}

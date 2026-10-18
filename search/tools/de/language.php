@@ -1,7 +1,7 @@
 <?php
 class CSearchLanguageDe extends CSearchLanguage
 {
-	function GetKeyboardLayout()
+	public function GetKeyboardLayout()
 	{
 		return [
 			'lo' => '           ß ' . 'qwertzuiopü ' . 'asdfghjklöä' . 'yxcvbnm   ',
@@ -9,7 +9,7 @@ class CSearchLanguageDe extends CSearchLanguage
 		];
 	}
 
-	function removed_GetBigrammLetterFreq()
+	public function removed_GetBigrammLetterFreq()
 	{
 		return [
 			//         a,   b,   c,   d,   e,   f,   g,   h,   i,   j,   k,   l,   m,   n,   o,   p,   q,   r,   s,   t,   u,   v,   w,   x,   y,   z,   ß,   ä,   ö,   ü,

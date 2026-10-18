@@ -17,15 +17,21 @@ use Bitrix\Disk\Document\Vibeoffice\Clients\ProtocolClientInterface;
 use Bitrix\Disk\Document\Vibeoffice\EditorConfigResponse;
 use Bitrix\Disk\Document\Vibeoffice\Filters\EgressUrlSignatureCheck;
 use Bitrix\Disk\Document\Vibeoffice\Filters\WebhookSignatureCheck;
+use Bitrix\Disk\Document\Vibeoffice\HostDocumentKey;
+use Bitrix\Disk\Document\Vibeoffice\OpenRetryPolicy;
+use Bitrix\Disk\Document\Vibeoffice\SessionRegistry;
+use Bitrix\Disk\Document\Vibeoffice\TerminalSessionFinalizer;
 use Bitrix\Disk\Document\Vibeoffice\Webhook\WebhookProcessor;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessLevel;
+use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkOpenPolicy;
 use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkPasswordService;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internals\Engine;
 use Bitrix\Disk\User;
 use Bitrix\Main\Context;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Engine\ActionFilter\ContentType;
 use Bitrix\Main\Engine\ActionFilter\Csrf;
 use Bitrix\Main\Engine\ActionFilter\HttpMethod;
@@ -63,6 +69,38 @@ final class Vibeoffice extends Engine\Controller
 	 * batch version load and the platform sign-urls payload.
 	 */
 	private const MAX_VERSIONS_PER_REQUEST = 100;
+
+	/** Logger id of the open journal (ALG-RETRY); `.settings.php` configures its sink by this id. */
+	private const OPEN_LOGGER_ID = 'disk.vibeoffice.open';
+
+	/** The stable code the shell of the component picks the screen of the branch of saving by. */
+	private const IN_PROGRESS_ERROR_CODE = 'ERR-IN-PROGRESS';
+
+	/** A named-lock timeout of {@see Document\Vibeoffice\DocumentStateRepository}. */
+	private const LOCK_TIMEOUT_ERROR_CODE = 'vibeoffice_lock_timeout';
+
+	/**
+	 * The temporary class of the host half of the open path, the counterpart of
+	 * {@see OpenRetryPolicy::TEMPORARY_PLATFORM_CODES}: a timeout of the named lock of the document, a
+	 * state transaction that did not go through, and a write of the metadata of the open that lost to a
+	 * save of the same document. Every one of them means the document is busy right now, so the reader
+	 * gets the screen of the branch of saving with a button of retry - the same answer the temporary
+	 * refusals of the platform earn. A refusal of the registry that repeating cannot cure - a UUID bound
+	 * to another session, a reservation that expired - keeps its own code and the generic screen.
+	 */
+	private const TEMPORARY_HOST_CODES = [
+		self::LOCK_TIMEOUT_ERROR_CODE,
+		'vibeoffice_state_failed',
+		SessionRegistry::ERROR_CODE_BUSY,
+	];
+
+	private ?DocumentSession $openedDocumentSession = null;
+	private ?UnifiedLinkAccessLevel $unifiedLinkAccessLevel = null;
+
+	public function getOpenedDocumentSession(): ?DocumentSession
+	{
+		return $this->openedDocumentSession;
+	}
 
 	public function getAutoWiredParameters()
 	{
@@ -103,8 +141,8 @@ final class Vibeoffice extends Engine\Controller
 				'-prefilters' => [Csrf::class],
 				// The hash is shared by every participant of the document, so it alone must not
 				// authorize the view→edit transformation: only the owner of the view session may
-				// turn it into an edit session (createEditSession attributes the edit session to
-				// the session's user). Same owner+hash guard as OnlyOffice.
+				// turn it into an edit session (the manager attributes the edit session to the
+				// current user). Same owner+hash guard as OnlyOffice.
 				'+prefilters' => [
 					(new Document\OnlyOffice\Filters\DocumentSessionCheck())
 						->enableOwnerCheck()
@@ -544,12 +582,35 @@ final class Vibeoffice extends Engine\Controller
 			return null;
 		}
 
-		$createdSession = $documentSession->createEditSession();
-		if (!$createdSession)
+		$sessionManager = $this->getSessionManager();
+		$sessionManager
+			->setUserId($this->getCurrentUser()->getId())
+			->setSessionType(DocumentSession::TYPE_EDIT)
+			->setSessionContext($documentSession->getContext())
+			->setFile($documentSession->getFile())
+			->setVersion($documentSession->getVersion())
+			->setAttachedObject($documentSession->getContext()?->getAttachedObject())
+		;
+		if (!$sessionManager->lock())
 		{
-			$this->addErrors($documentSession->getErrors());
+			$this->addError(new Error('Could not getting lock for the session.'));
 
 			return null;
+		}
+
+		try
+		{
+			$createdSession = $sessionManager->findOrCreateSession();
+			if (!$createdSession)
+			{
+				$this->addErrors($sessionManager->getErrors());
+
+				return null;
+			}
+		}
+		finally
+		{
+			$sessionManager->unlock();
 		}
 
 		if ($createdSession->getId() !== $documentSession->getId())
@@ -567,7 +628,7 @@ final class Vibeoffice extends Engine\Controller
 
 		// The platform `open`/join and the DTO-EDITORCONFIG delivery happen in
 		// `getEditorConfig` once the shell-component resolves; see loadDocumentEditor().
-		return $this->redirectToShell($createdSession);
+		return $this->redirectToShell($createdSession, $sessionManager->getRestrictionOutcome());
 	}
 
 	protected function loadDocumentEditor(
@@ -623,7 +684,6 @@ final class Vibeoffice extends Engine\Controller
 			->setVersion($version)
 			->setAttachedObject($attachedObject)
 		;
-
 		if (!$sessionManager->lock())
 		{
 			$this->addError(new Error('Could not getting lock for the session.'));
@@ -645,6 +705,8 @@ final class Vibeoffice extends Engine\Controller
 		{
 			$sessionManager->unlock();
 		}
+
+		$restrictionOutcome = $sessionManager->getRestrictionOutcome();
 
 		// Point #4 (messenger-call, compact editor): the config channel (getEditorConfigAction)
 		// resolves the session by hash alone, so the editorMode of this load* action cannot reach
@@ -671,7 +733,7 @@ final class Vibeoffice extends Engine\Controller
 		// OnlyOffice does). The platform `open`/join and DTO-EDITORCONFIG delivery are deferred
 		// to `getEditorConfig` (below), called lazily by the shell once it loads: the `open` runs
 		// once and is idempotent for a live session (platform returns `joined:true`, no re-pull).
-		return $this->redirectToShell($documentSession);
+		return $this->redirectToShell($documentSession, $restrictionOutcome);
 	}
 
 	/**
@@ -696,6 +758,8 @@ final class Vibeoffice extends Engine\Controller
 	 */
 	public function getEditorConfigAction(Models\DocumentSession $documentSession): ?array
 	{
+		$this->openedDocumentSession = null;
+
 		if (!$documentSession->getId())
 		{
 			return $this->showNotFoundConfig();
@@ -737,6 +801,8 @@ final class Vibeoffice extends Engine\Controller
 	 */
 	public function getEditorConfigForExternalLinkAction(Models\DocumentSession $documentSession): ?array
 	{
+		$this->openedDocumentSession = null;
+
 		if (!$documentSession->getId())
 		{
 			return $this->showNotFoundConfig();
@@ -760,7 +826,11 @@ final class Vibeoffice extends Engine\Controller
 		// so the anonymous visitor never gets an edit config wider than the link.
 		if ($documentSession->isEdit() && !$link->allowEdit())
 		{
-			$documentSession->transformToView();
+			$documentSession = $this->findViewSession($documentSession);
+			if (!$documentSession)
+			{
+				return null;
+			}
 		}
 
 		return $this->buildEditorConfig($documentSession);
@@ -771,7 +841,7 @@ final class Vibeoffice extends Engine\Controller
 	 * unified link. This is the vibeoffice analog of the OnlyOffice unified-link shell, which builds
 	 * its config inline while relying on the same {@see UnifiedLinkAccessService} for the edit/view
 	 * decision ({@see \CDiskFileEditorOnlyOfficeComponent::isEditAllowed()}) and on the upstream
-	 * {@see \Bitrix\Disk\Internal\Service\UnifiedLink\Render\UnifiedLinkFileRenderer} gate.
+	 * {@see \Bitrix\Disk\Internal\Service\UnifiedLink\Render\UnifiedLinkRenderer} gate.
 	 *
 	 * Unlike {@see self::getEditorConfigAction()}, authorization here is NOT the direct
 	 * `canUserRead/canUserEdit` on the object: a user whose access to the file comes ONLY through the
@@ -787,6 +857,8 @@ final class Vibeoffice extends Engine\Controller
 	 */
 	public function getEditorConfigForUnifiedLinkAction(Models\DocumentSession $documentSession): ?array
 	{
+		$this->openedDocumentSession = null;
+
 		if (!$documentSession->getId())
 		{
 			return $this->showNotFoundConfig();
@@ -811,16 +883,28 @@ final class Vibeoffice extends Engine\Controller
 		// never gets an edit config wider than the unified link.
 		if ($documentSession->isEdit() && !$accessLevel->canEdit())
 		{
-			$documentSession->transformToView();
+			$documentSession = $this->findViewSession($documentSession);
+			if (!$documentSession)
+			{
+				return null;
+			}
 		}
 
-		return $this->buildEditorConfig($documentSession);
+		$this->unifiedLinkAccessLevel = $accessLevel;
+		try
+		{
+			return $this->buildEditorConfig($documentSession);
+		}
+		finally
+		{
+			$this->unifiedLinkAccessLevel = null;
+		}
 	}
 
 	/**
 	 * Resolves the unified-link access level of the current user on the session's file, delegating to
 	 * the shared {@see UnifiedLinkAccessService} (the same service the OnlyOffice/vibeoffice shells and
-	 * the {@see \Bitrix\Disk\Internal\Service\UnifiedLink\Render\UnifiedLinkFileRenderer} use). The
+	 * the {@see \Bitrix\Disk\Internal\Service\UnifiedLink\Render\UnifiedLinkRenderer} use). The
 	 * check honours the double File + AttachedObject context. A session without a resolvable object is
 	 * treated as Denied (fail-closed).
 	 */
@@ -833,8 +917,18 @@ final class Vibeoffice extends Engine\Controller
 		}
 
 		$attachedObject = $documentSession->getContext()?->getAttachedObject();
+		$version = $documentSession->getVersion();
+		if ($documentSession->isVersion() && $version === null)
+		{
+			return UnifiedLinkAccessLevel::Denied;
+		}
 
-		return $this->getUnifiedLinkAccessService()->check($object, $attachedObject);
+		$accessLevel = $this->getUnifiedLinkAccessService()->check($object, $attachedObject, version: $version);
+
+		return $version !== null && $accessLevel === UnifiedLinkAccessLevel::Edit
+			? UnifiedLinkAccessLevel::Read
+			: $accessLevel
+		;
 	}
 
 	private function getUnifiedLinkAccessService(): UnifiedLinkAccessService
@@ -845,14 +939,17 @@ final class Vibeoffice extends Engine\Controller
 	/**
 	 * Shared open flow behind both config channels ({@see self::getEditorConfigAction()} and
 	 * {@see self::getEditorConfigForExternalLinkAction()}): the file guard, the fresh-open vs.
-	 * version-stream decision, the 409-only downgrade retry and the restriction payload. It runs on
-	 * an already-authorized session, so authorization (a `CurrentUser` re-check vs. an ExternalLink
-	 * check) and the pre-open edit→view downgrade stay in the callers; the open-body itself is built
-	 * from whichever identity the session carries ({@see self::buildOpenBody()} branches on the
-	 * session's external link, never forcing a `CurrentUser`).
+	 * version-stream decision, the open retry cycle with the downgrade after it and the restriction
+	 * payload. It runs on an already-authorized session, so authorization (a `CurrentUser` re-check
+	 * vs. an ExternalLink check) and the pre-open edit->view downgrade stay in the callers; the
+	 * open-body itself is built from whichever identity the session carries
+	 * ({@see self::buildOpenBody()} branches on the session's external link, never forcing
+	 * a `CurrentUser`).
 	 */
 	private function buildEditorConfig(DocumentSession $documentSession): ?array
 	{
+		$this->openedDocumentSession = null;
+
 		// Engine isolation: this shared choke-point may be reached without the SERVICE auto-wire
 		// filter (the component path resolves a DocumentSession by id and calls the action directly).
 		// Refuse any non-vibeoffice session so the owner of an OnlyOffice session cannot open their
@@ -882,14 +979,24 @@ final class Vibeoffice extends Engine\Controller
 		{
 			if ($documentSession->isEdit() && $this->shouldDowngradeToView($openResult))
 			{
-				$documentSession->transformToView();
+				$documentSession = $this->findViewSession($documentSession);
+				if (!$documentSession)
+				{
+					return null;
+				}
 
-				$openResult = $this->openDocumentSession($documentSession, $file, $withDocumentSource);
+				// A separate VIEW opens once, without another retry budget.
+				$openResult = $this->openDocumentSession(
+					$documentSession,
+					$file,
+					$withDocumentSource,
+					OpenRetryPolicy::singleAttempt(),
+				);
 			}
 
 			if (!$openResult->isSuccess())
 			{
-				$this->addErrors($openResult->getErrors());
+				$this->addOpenErrors($openResult->getErrors());
 
 				return null;
 			}
@@ -901,12 +1008,68 @@ final class Vibeoffice extends Engine\Controller
 			return null;
 		}
 
+		$this->openedDocumentSession = $documentSession;
+
 		// P4.T2 (API-RESTRICT): hand the frontend the data it needs to repeat the
 		// OnlyOffice-style limit cycle in the vibeoffice editor component. The global
 		// counter is shared with OnlyOffice (no SERVICE split); no promo/boost upsell.
 		return $editorConfig->toArray() + [
 			'restriction' => $this->buildRestrictionData(),
 		];
+	}
+
+	private function findViewSession(DocumentSession $documentSession): ?DocumentSession
+	{
+		if ($documentSession->getService() !== Models\DocumentService::Vibeoffice)
+		{
+			$this->showNotFoundConfig();
+
+			return null;
+		}
+
+		$context = $documentSession->getContext();
+		$file = $documentSession->getFile();
+		if (!$context || !$file)
+		{
+			$this->showNotFoundConfig();
+
+			return null;
+		}
+
+		$manager = $this->getSessionManager();
+		$manager
+			->setSessionType(DocumentSession::TYPE_VIEW)
+			->setUserId($documentSession->getUserId())
+			->setFile($file)
+			->setVersion($documentSession->getVersion())
+			->setAttachedObject($context->getAttachedObject())
+			->setSessionContext($context)
+		;
+		$viewSession = $manager->findOrCreateSession(true);
+		if (!$viewSession)
+		{
+			$this->addErrors($manager->getErrors());
+
+			return null;
+		}
+
+		$editorModeKey = Document\Vibeoffice\DocumentSessionManager::CONTEXT_VO_EDITOR_MODE_KEY;
+		$editorMode = Document\Vibeoffice\DocumentSessionManager::extractVoMetadata($documentSession)[$editorModeKey] ?? null;
+		if ($editorMode !== null)
+		{
+			if (!$manager->persistSessionMetadata($viewSession, [$editorModeKey => $editorMode]))
+			{
+				$this->addOpenErrors([
+					new Error('Could not persist the Vibeoffice view mode.', SessionRegistry::ERROR_CODE_BUSY),
+				]);
+
+				return null;
+			}
+
+			$viewSession = DocumentSession::loadById($viewSession->getId());
+		}
+
+		return $viewSession;
 	}
 
 	/**
@@ -929,10 +1092,7 @@ final class Vibeoffice extends Engine\Controller
 			return false;
 		}
 
-		if (
-			($link->isAutomatic() && !Disk\Configuration::isEnabledAutoExternalLink())
-			|| (!$link->isAutomatic() && !Disk\Configuration::isEnabledManualExternalLink())
-		)
+		if (!$this->canOpenExternalLinkByPortalPolicy($link))
 		{
 			return false;
 		}
@@ -948,6 +1108,18 @@ final class Vibeoffice extends Engine\Controller
 		}
 
 		return true;
+	}
+
+	/**
+	 * The portal policy of opening the link (ALG-02): the same decision the public external-link
+	 * page makes, so both entry points answer identically for every kind of link.
+	 */
+	private function canOpenExternalLinkByPortalPolicy(ExternalLink $link): bool
+	{
+		return ServiceLocator::getInstance()
+			->get(ExternalLinkOpenPolicy::class)
+			->canOpenByPortalPolicy($link)
+		;
 	}
 
 	/**
@@ -1016,62 +1188,426 @@ final class Vibeoffice extends Engine\Controller
 
 	/**
 	 * P3.T2: builds the open body, performs the server-to-server
-	 * `POST /v1/documents/{docKey}/open` and extracts `session_id`/`editor_key`/`rev`
-	 * (persisting them into the session CONTEXT is the P4.T1 / Q-3 seam). The signed
+	 * `POST /v1/documents/{docKey}/open` and registers `session_id`/`editor_key`/`rev`. The signed
 	 * `config` is returned verbatim to the browser via {@see EditorConfigResponse} and
 	 * is NOT rebuilt by the host.
 	 *
 	 * @param bool $withDocumentSource whether to send `document.url`/`document.filetype`.
 	 *        On a join of a live session (joined:true) the platform ignores them.
+	 * @param OpenRetryPolicy|null $policy the retry policy of the cycle; null resolves the one of the
+	 *        portal configuration. {@see OpenRetryPolicy::singleAttempt()} for an open that must not
+	 *        be repeated.
 	 */
 	protected function openDocumentSession(
 		DocumentSession $documentSession,
 		Disk\File $file,
 		bool $withDocumentSource,
+		?OpenRetryPolicy $policy = null,
 	): Result
 	{
-		$result = new Result();
-
 		try
 		{
 			$client = $this->getProtocolClient();
-			$docKey = $documentSession->getExternalHash();
 			// buildOpenBody signs the egress URL; with an empty api-secret signing
 			// throws (defense-in-depth, alongside EgressUrlSignatureCheck denial).
+			// The body is assembled once and reused by every attempt of the cycle: the signed egress
+			// URL outlives the budget, and an open without a document source is refused by the
+			// platform with `409 session_closing`.
 			$body = $this->buildOpenBody($documentSession, $file, $withDocumentSource);
 		}
 		catch (\Throwable $e)
 		{
-			return $result->addError(new Error($e->getMessage()));
+			return (new Result())->addError(new Error($e->getMessage()));
 		}
 
-		$openResult = $client->open($docKey, $body);
-		if (!$openResult->isSuccess())
+		return $this->openRegisteredDocumentSession($documentSession, $client, $body, $policy);
+	}
+
+	/**
+	 * The clock and the delay are parameters for the same reason the cycle of `open` has them: a case
+	 * states the time it means instead of waiting for it.
+	 */
+	protected function openRegisteredDocumentSession(
+		DocumentSession $documentSession,
+		ProtocolClientInterface $client,
+		array $body,
+		?OpenRetryPolicy $policy = null,
+		?SessionRegistry $registry = null,
+		?callable $clock = null,
+		?callable $lockSleeper = null,
+	): Result
+	{
+		$registry ??= new SessionRegistry();
+		$policy ??= OpenRetryPolicy::createFromConfiguration($this->getConfiguration());
+		$clock ??= static fn(): float => microtime(true);
+		$lockSleeper ??= static function (int $microseconds): void
 		{
-			return $result->addErrors($this->mapOpenErrors($openResult->getErrors()));
+			usleep($microseconds);
+		};
+
+		$deadline = $clock() + $policy->getBudgetSeconds();
+		$hostDocKey = HostDocumentKey::resolve($documentSession);
+		$beginResult = $this->beginOpenWithRetries(
+			$registry,
+			$documentSession,
+			$hostDocKey,
+			$policy,
+			$clock,
+			$lockSleeper,
+			$deadline,
+		);
+		if (!$beginResult->isSuccess())
+		{
+			return $beginResult;
 		}
 
+		$openToken = $beginResult->getData()['openToken'];
+		try
+		{
+			$openResult = $this->openDocumentSessionWithRetries(
+				$documentSession,
+				$client,
+				$body,
+				$policy,
+				$clock,
+				deadline: $deadline,
+			);
+			if ($openResult->isSuccess())
+			{
+				$openResult = $this->completeOpenedSession($documentSession, $registry, $openToken, $openResult);
+				if ($openResult->isSuccess() || ($openResult->getData()['terminal'] ?? false))
+				{
+					return $openResult;
+				}
+			}
+		}
+		catch (\Throwable $exception)
+		{
+			$openResult = (new Result())->addError(new Error($exception->getMessage(), 'vibeoffice_open_failed'));
+		}
+
+		return $this->cancelRegisteredOpen($registry, $openToken, $hostDocKey, $openResult);
+	}
+
+	/**
+	 * The reservation of the open, asked for again while the named lock of the document is the only
+	 * thing in the way: a save running in a neighbouring tab holds that lock for as long as it writes
+	 * the version, and letting it fail the open here is exactly the trouble the retry cycle was added
+	 * to cure. Every other refusal of the registry is handed back untouched - repeating a UUID already
+	 * bound elsewhere buys nothing.
+	 *
+	 * The repeats live inside the budget of the whole open and cost no request to the platform, so the
+	 * cap of ALG-RETRY on the requests of an open stands as it is.
+	 */
+	private function beginOpenWithRetries(
+		SessionRegistry $registry,
+		DocumentSession $documentSession,
+		string $hostDocKey,
+		OpenRetryPolicy $policy,
+		callable $clock,
+		callable $lockSleeper,
+		float $deadline,
+	): Result
+	{
+		$attempt = 0;
+		while (true)
+		{
+			$attempt++;
+			$beginResult = $registry->beginOpen($documentSession, $hostDocKey);
+			if ($beginResult->isSuccess() || !$this->isDocumentLockTimeout($beginResult))
+			{
+				return $beginResult;
+			}
+
+			if (
+				!$policy->hasBeginOpenAttemptsLeft($attempt)
+				|| !$policy->fitsBeginOpenIntoBudget($clock(), $deadline)
+			)
+			{
+				return $beginResult;
+			}
+
+			$lockSleeper(OpenRetryPolicy::BEGIN_OPEN_PAUSE_MICROSECONDS);
+		}
+	}
+
+	private function isDocumentLockTimeout(Result $result): bool
+	{
+		foreach ($result->getErrors() as $error)
+		{
+			if ($error->getCode() === self::LOCK_TIMEOUT_ERROR_CODE)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function cancelRegisteredOpen(
+		SessionRegistry $registry,
+		string $openToken,
+		string $hostDocKey,
+		Result $openResult,
+	): Result
+	{
+		try
+		{
+			$finalizer = new TerminalSessionFinalizer();
+			$cancelResult = $finalizer->withDocumentTransaction(
+				$hostDocKey,
+				static function () use ($registry, $openToken, $finalizer): Result {
+					$cancel = $registry->cancelOpen($openToken);
+					if (!$cancel->isSuccess())
+					{
+						return $cancel;
+					}
+					$finalize = $finalizer->finalizeSessions($registry->getTerminatedSessionIds($cancel->getData()['sessionIds']));
+
+					return $finalize->isSuccess() ? $cancel : $finalize;
+				},
+			);
+		}
+		catch (\Throwable $exception)
+		{
+			$cancelResult = (new Result())->addError(new Error($exception->getMessage(), 'vibeoffice_registry_failed'));
+		}
+		if (!$cancelResult->isSuccess())
+		{
+			return $cancelResult->setData(['openErrors' => $openResult->getErrorMessages()]);
+		}
+
+		return $openResult->setData($cancelResult->getData() + ['hostDocKey' => $hostDocKey]);
+	}
+
+	/**
+	 * ALG-RETRY: repeats `open` while the platform answers with a temporary refusal carrying a
+	 * `Retry-After`, within one wall-clock budget of the whole cycle. The deadline limits the start
+	 * of a new attempt, never the completion of one already running: an interrupted read leaves a
+	 * live session on the platform and an error for the user, and no repeat cures that.
+	 *
+	 * The session type is untouched here - the decision on the outcome ({@see shouldDowngradeToView()})
+	 * is taken by the caller once the cycle is over.
+	 *
+	 * The clock and the delay are parameters so that a test can drive the cycle without real pauses;
+	 * the protocol client comes in already resolved for the same reason. The deadline is a parameter
+	 * too: the caller has been spending the very same budget since it reserved the open, and a fresh
+	 * one here would hand the cycle time the open no longer has.
+	 */
+	protected function openDocumentSessionWithRetries(
+		DocumentSession $documentSession,
+		ProtocolClientInterface $client,
+		array $body,
+		?OpenRetryPolicy $policy = null,
+		?callable $clock = null,
+		?callable $sleeper = null,
+		?float $deadline = null,
+	): Result
+	{
+		$policy ??= OpenRetryPolicy::createFromConfiguration($this->getConfiguration());
+		$clock ??= static fn(): float => microtime(true);
+		$sleeper ??= static function (int $seconds) use ($policy): void
+		{
+			usleep($policy->scatterPauseMicroseconds($seconds));
+		};
+
+		$docKey = HostDocumentKey::resolve($documentSession);
+		$deadline ??= $clock() + $policy->getBudgetSeconds();
+		$attempt = 0;
+
+		while (true)
+		{
+			$attempt++;
+			$startedAt = $clock();
+
+			$openResult = $client->open($docKey, $body);
+			if ($openResult->isSuccess())
+			{
+				$this->logOpenOutcome($documentSession, $attempt, null, true);
+
+				return $openResult;
+			}
+
+			$errors = $this->mapOpenErrors($openResult->getErrors());
+			$pause = $this->resolveRetryPause($errors, $policy, $attempt, $clock() - $startedAt);
+			if ($pause === null || !$policy->fitsIntoBudget($clock(), $deadline, $pause))
+			{
+				$error = $this->firstOpenError($errors);
+				$this->logOpenOutcome(
+					$documentSession,
+					$attempt,
+					$error !== null ? $this->splitErrorCode($error)[1] : null,
+					false,
+				);
+
+				return (new Result())->addErrors($errors);
+			}
+
+			$sleeper($pause);
+		}
+	}
+
+	/**
+	 * The pause before repeating the refusal, or null when the cycle must stop: the attempt cap is
+	 * reached, the platform code is not a temporary one, the platform asked for no delay, or it had
+	 * already spent its own waiting on this attempt.
+	 *
+	 * @param Error[] $errors errors of the failed attempt, already mapped by {@see mapOpenErrors()}
+	 */
+	private function resolveRetryPause(
+		array $errors,
+		OpenRetryPolicy $policy,
+		int $madeAttempts,
+		float $attemptDurationSec,
+	): ?int
+	{
+		if (!$policy->hasAttemptsLeft($madeAttempts))
+		{
+			return null;
+		}
+
+		$error = $this->firstOpenError($errors);
+		if ($error === null)
+		{
+			return null;
+		}
+
+		if (!$policy->isRetryablePlatformCode($this->splitErrorCode($error)[1]))
+		{
+			return null;
+		}
+
+		$retryAfter = $this->extractRetryAfter($error);
+		if ($retryAfter === null)
+		{
+			return null;
+		}
+
+		if ($policy->isLongAttempt($attemptDurationSec))
+		{
+			return null;
+		}
+
+		return $policy->resolvePauseSeconds($retryAfter);
+	}
+
+	/**
+	 * @param Error[] $errors
+	 */
+	private function firstOpenError(array $errors): ?Error
+	{
+		$error = $errors[0] ?? null;
+
+		return $error instanceof Error ? $error : null;
+	}
+
+	/**
+	 * Extracts `session_id`/`editor_key`/`rev` of the attempt that succeeded and packs the signed
+	 * config for the browser. Metadata of a failed attempt is never persisted.
+	 */
+	private function completeOpenedSession(
+		DocumentSession $documentSession,
+		SessionRegistry $registry,
+		string $openToken,
+		Result $openResult,
+	): Result
+	{
 		$openConfig = $openResult->getData();
-		if (!is_array($openConfig))
+		$finalizer = new TerminalSessionFinalizer();
+		$completeResult = $finalizer->withDocumentTransaction(
+			HostDocumentKey::resolve($documentSession),
+			function () use ($registry, $openToken, $openConfig, $finalizer): Result {
+				$complete = $registry->completeOpen($openToken, $this->extractSessionMetadata($openConfig));
+				if (!$complete->isSuccess() || !$complete->getData()['terminal'])
+				{
+					return $complete;
+				}
+				$finalize = $finalizer->finalizeSessions($complete->getData()['sessionIds']);
+
+				return $finalize->isSuccess() ? $complete : $finalize;
+			},
+		);
+		if (!$completeResult->isSuccess())
 		{
-			$openConfig = [];
+			return $completeResult;
+		}
+		if ($completeResult->getData()['terminal'])
+		{
+			return $completeResult->addError(new Error(
+				'The Vibeoffice session was closed while opening.',
+				'vibeoffice_session_closed',
+			));
 		}
 
-		// P4.T1 (Q-3): persist the minimal metadata subset (session_id/editor_key/rev)
-		// into the session CONTEXT (under the reserved `vo` key) so it survives for
-		// re-issuing the config and for drain. Best-effort: a failed persist must not
-		// fail the open (the config is already valid and returned below).
-		$metadata = $this->extractSessionMetadata($openConfig);
-		if ($metadata)
-		{
-			$this->getSessionManager()->persistSessionMetadata($documentSession, $metadata);
-		}
-
-		$result->setData([
-			'editorConfig' => new EditorConfigResponse($openConfig, $docKey),
+		return (new Result())->setData([
+			'editorConfig' => new EditorConfigResponse($openConfig, $documentSession->getExternalHash()),
 		]);
+	}
 
-		return $result;
+	/**
+	 * Keeps the number of attempts and the final platform code in the module log: the frequency of
+	 * the temporary codes on a live portal is measurable only from there. A first-attempt success -
+	 * every ordinary open - writes nothing.
+	 *
+	 * The record is written past the logger registry: the portal whose frequency is worth measuring is
+	 * the one nobody has turned diagnostics on for. `.settings.php` still redirects it by the id.
+	 */
+	private function logOpenOutcome(
+		DocumentSession $documentSession,
+		int $attempts,
+		?string $platformCode,
+		bool $success,
+	): void
+	{
+		if ($success && $attempts === 1)
+		{
+			return;
+		}
+
+		(new LoggerFactory())
+			->createById(self::OPEN_LOGGER_ID, isCheckEnabledFromRegistry: false)
+			?->warning(
+				'Vibeoffice open: sessionId={sessionId}, attempts={attempts},'
+				. ' outcome={outcome}, platformCode={platformCode}.',
+				$this->describeOpenOutcome($documentSession, $attempts, $platformCode, $success),
+			)
+		;
+	}
+
+	/**
+	 * The session is named by its id: the hash addressing it is the second factor of access to the
+	 * document - for a session reached through a public link it is the whole of it - while the log of
+	 * the module outlives the session row and is read by more people than the table of sessions.
+	 *
+	 * @return array<string, int|string>
+	 */
+	private function describeOpenOutcome(
+		DocumentSession $documentSession,
+		int $attempts,
+		?string $platformCode,
+		bool $success,
+	): array
+	{
+		return [
+			'sessionId' => (int)$documentSession->getId(),
+			'attempts' => $attempts,
+			'outcome' => $success ? 'success' : 'failure',
+			'platformCode' => $this->normalizePlatformCode($platformCode),
+		];
+	}
+
+	/**
+	 * The code comes from the body of the platform answer as it was written there: a line break in it
+	 * would forge the boundary of a record, and a long one would inflate the file.
+	 */
+	private function normalizePlatformCode(?string $platformCode): string
+	{
+		if ($platformCode === null || $platformCode === '')
+		{
+			return '-';
+		}
+
+		return preg_match('/^[a-z0-9_]{1,64}$/D', $platformCode) === 1 ? $platformCode : 'unknown';
 	}
 
 	/**
@@ -1104,10 +1640,12 @@ final class Vibeoffice extends Engine\Controller
 					'id' => (string)$currentUser->getId(),
 					'name' => $currentUser->getFormattedName(),
 				],
-				// P4.T3 (GRANT-MAP): the grant role is resolved by the GrantMapper from the
-				// Disk rights (double File + AttachedObject check via the session model).
 				'grant' => [
-					'mode' => (new Document\Vibeoffice\GrantMapper())->resolveForSession($documentSession, $currentUser),
+					'mode' => $this->unifiedLinkAccessLevel === null
+						? (new Document\Vibeoffice\GrantMapper())->resolveForSession($documentSession, $currentUser)
+						: (new Document\Vibeoffice\GrantMapper())->mapFromRights(
+							$documentSession->isEdit() && $this->unifiedLinkAccessLevel->canEdit(),
+						),
 				],
 			];
 		}
@@ -1348,7 +1886,7 @@ final class Vibeoffice extends Engine\Controller
 			return null;
 		}
 
-		$signResult = $client->signVersionUrls($documentSession->getExternalHash(), ['items' => $items]);
+		$signResult = $client->signVersionUrls(HostDocumentKey::resolve($documentSession), ['items' => $items]);
 		if (!$signResult->isSuccess())
 		{
 			$this->addErrors($signResult->getErrors());
@@ -1480,7 +2018,7 @@ final class Vibeoffice extends Engine\Controller
 	 * Redirects into the vibeoffice editor shell-component (frontend), carrying the
 	 * session id/hash exactly as OnlyOffice redirects to its own shell.
 	 */
-	protected function redirectToShell(DocumentSession $documentSession): HttpResponse
+	protected function redirectToShell(DocumentSession $documentSession, ?string $restrictionOutcome = null): HttpResponse
 	{
 		/** @see \DiskFileEditorVibeofficeController::getSliderContentAction */
 		$link = UrlManager::getInstance()->create('getSliderContent', [
@@ -1488,6 +2026,7 @@ final class Vibeoffice extends Engine\Controller
 			'mode' => Router::COMPONENT_MODE_AJAX,
 			'documentSessionId' => $documentSession->getId(),
 			'documentSessionHash' => $documentSession->getExternalHash(),
+			'restrictionOutcome' => $restrictionOutcome,
 		]);
 
 		return $this->redirectTo($link);
@@ -1548,13 +2087,15 @@ final class Vibeoffice extends Engine\Controller
 	/**
 	 * Whether an open-conflict for an edit session should fall back to a view session.
 	 *
-	 * Only HTTP 409 conflicts (`*_in_progress` / `doc_full`) warrant a downgrade
-	 * (SDD P3.md: «409 *_in_progress / doc_full»). A `403 no_grant` is NOT downgraded
-	 * here — it surfaces as ERR-NO-GRANT so the frontend can decide; re-opening a
-	 * view session would in many cases just fail again without a read grant.
+	 * The verdict is taken by the platform code, not by the HTTP status: `doc_full` is the only
+	 * refusal a view session is a meaningful answer to. A temporary refusal never downgrades, not
+	 * even once the retries are spent: a view opens through the very same `open` call and would hit
+	 * the same refusal, while the session type would already be changed irreversibly. An unknown
+	 * `409` (a body-less answer among them) counts as temporary for the same reason. A `403 no_grant`
+	 * is NOT downgraded either: it surfaces as ERR-NO-GRANT so the frontend can decide.
 	 *
-	 * The errors are already mapped by {@see mapOpenErrors()} at this point, so the
-	 * original HTTP status lives in the error custom data.
+	 * Called once the retry cycle is over; the errors are already mapped by {@see mapOpenErrors()},
+	 * so the platform code lives in the error custom data.
 	 */
 	private function shouldDowngradeToView(Result $openResult): bool
 	{
@@ -1565,8 +2106,7 @@ final class Vibeoffice extends Engine\Controller
 				continue;
 			}
 
-			$customData = $error->getCustomData();
-			if (is_array($customData) && (int)($customData['httpStatus'] ?? 0) === 409)
+			if ($this->splitErrorCode($error)[1] === 'doc_full')
 			{
 				return true;
 			}
@@ -1581,9 +2121,14 @@ final class Vibeoffice extends Engine\Controller
 	 * platform code (`doc_full`/`no_grant`/`pull_failed`/…) and the HTTP status in
 	 * the error custom data so nothing is lost for diagnostics/logging.
 	 *
-	 * The protocol-client (P2) puts the HTTP status into Error::getCode() and the
-	 * platform code into the message; we re-key by HTTP status (reliable) and carry
-	 * the parsed platform code along.
+	 * The protocol-client reports the status, the platform code and the retry delay
+	 * in the error custom data (DTO-OPENERR); we re-key by HTTP status and carry all
+	 * three along, so the retry policy works with the already mapped error.
+	 *
+	 * The temporary class comes from {@see OpenRetryPolicy}: a code the cycle repeats is a code the
+	 * "still saving" screen is chosen by, whatever HTTP status the platform sends it with. The
+	 * temporary refusals of the host half of the path ({@see self::TEMPORARY_HOST_CODES}) are read the
+	 * same way: they carry no HTTP status, and the document they name is busy just as literally.
 	 *
 	 * @param Error[] $errors
 	 *
@@ -1604,8 +2149,14 @@ final class Vibeoffice extends Engine\Controller
 			[$httpStatus, $platformCode] = $this->splitErrorCode($error);
 			if ($httpStatus === null)
 			{
-				// Transport/local error (no HTTP status) — keep as is.
-				$mapped[] = $error;
+				// A refusal of the host itself (no HTTP status): temporary ones join the platform ones on
+				// the screen of the branch of saving, the rest are kept as they are.
+				$mapped[] = in_array($error->getCode(), self::TEMPORARY_HOST_CODES, true)
+					? new Error($error->getMessage(), self::IN_PROGRESS_ERROR_CODE, [
+						'hostCode' => $error->getCode(),
+					])
+					: $error
+				;
 
 				continue;
 			}
@@ -1613,10 +2164,8 @@ final class Vibeoffice extends Engine\Controller
 			$errCode = match (true)
 			{
 				$platformCode === 'doc_full' => 'ERR-DOC-FULL',
-				$platformCode === 'open_in_progress',
-				$platformCode === 'saving_in_progress',
-				$platformCode === 'failover_in_progress' => 'ERR-IN-PROGRESS',
-				$httpStatus === 409 => 'ERR-IN-PROGRESS',
+				OpenRetryPolicy::isTemporaryPlatformCode($platformCode) => self::IN_PROGRESS_ERROR_CODE,
+				$httpStatus === 409 => self::IN_PROGRESS_ERROR_CODE,
 				$httpStatus === 403 => 'ERR-NO-GRANT',
 				$httpStatus === 413 => 'ERR-FILE-TOO-LARGE',
 				$httpStatus === 422 => 'ERR-UNSUPPORTED-FILETYPE',
@@ -1632,6 +2181,7 @@ final class Vibeoffice extends Engine\Controller
 				[
 					'httpStatus' => $httpStatus,
 					'platformCode' => $platformCode,
+					'retryAfter' => $this->extractRetryAfter($error),
 				],
 			);
 		}
@@ -1640,21 +2190,37 @@ final class Vibeoffice extends Engine\Controller
 	}
 
 	/**
+	 * The errors of the open as the shell of the component reads them: mapped onto the stable `ERR-*`
+	 * codes it picks the screen by, whichever half of the path - the platform or the host - refused.
+	 *
+	 * @param Error[] $errors
+	 */
+	private function addOpenErrors(array $errors): void
+	{
+		$this->addErrors($this->mapOpenErrors($errors));
+	}
+
+	/**
 	 * Splits a protocol-client open-error into [httpStatus, platformCode].
 	 *
-	 * httpStatus comes from Error::getCode() (the client stores the HTTP status
-	 * there); platformCode is parsed from the trailing `Code: <code>.` the client
-	 * appends to the message, or null when absent.
+	 * The structured DTO-OPENERR custom data is the source of truth. Producers that
+	 * do not fill it in yet fall back to the legacy pair: the HTTP status from
+	 * Error::getCode() and the platform code parsed out of the trailing
+	 * `Code: <code>.` suffix of the message.
 	 *
 	 * @return array{0: int|null, 1: string|null}
 	 */
 	private function splitErrorCode(Error $error): array
 	{
-		$rawCode = $error->getCode();
-		$httpStatus = is_numeric($rawCode) ? (int)$rawCode : null;
-		if ($httpStatus !== null && ($httpStatus < 100 || $httpStatus > 599))
+		$customData = $error->getCustomData();
+		if (is_array($customData) && isset($customData['httpStatus']))
 		{
-			$httpStatus = null;
+			$platformCode = $customData['platformCode'] ?? null;
+
+			return [
+				$this->normalizeHttpStatus($customData['httpStatus']),
+				is_string($platformCode) && $platformCode !== '' ? $platformCode : null,
+			];
 		}
 
 		$platformCode = null;
@@ -1663,6 +2229,30 @@ final class Vibeoffice extends Engine\Controller
 			$platformCode = $matches[1];
 		}
 
-		return [$httpStatus, $platformCode];
+		return [$this->normalizeHttpStatus($error->getCode()), $platformCode];
+	}
+
+	private function normalizeHttpStatus(mixed $rawStatus): ?int
+	{
+		if (!is_numeric($rawStatus))
+		{
+			return null;
+		}
+
+		$status = (int)$rawStatus;
+
+		return $status >= 100 && $status <= 599 ? $status : null;
+	}
+
+	/**
+	 * Retry delay the platform asked for, as reported by the protocol client in the
+	 * DTO-OPENERR custom data.
+	 */
+	private function extractRetryAfter(Error $error): ?int
+	{
+		$customData = $error->getCustomData();
+		$retryAfter = is_array($customData) ? ($customData['retryAfter'] ?? null) : null;
+
+		return is_int($retryAfter) && $retryAfter > 0 ? $retryAfter : null;
 	}
 }

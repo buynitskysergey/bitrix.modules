@@ -12,6 +12,7 @@ use Bitrix\Note\Internal\Service\Document\DocumentService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 use Bitrix\Note\Internal\Service\Import\ImportLogger;
 use Bitrix\Note\Internal\Service\Import\Source\SourceInterface;
+use Bitrix\Note\Internal\Service\Import\SourceReadableSnapshot;
 
 class CreateStructureStep implements StepInterface
 {
@@ -32,6 +33,8 @@ class CreateStructureStep implements StepInterface
 			$collectionIds = $option['collectionIds'];
 			$collectionIndex = $option['collectionIndex'] ?? 0;
 			$currentCollectionId = $collectionIds[$collectionIndex];
+
+			$this->assertSourceReadable($option, (string)$currentCollectionId);
 
 			$result = $source->getDocumentTree($currentCollectionId);
 			if (!$result->success)
@@ -216,6 +219,30 @@ class CreateStructureStep implements StepInterface
 			$option['step'] = 'fillContent';
 			$option['documentOffset'] = 0;
 		}
+	}
+
+	/**
+	 * Refuses to read the structure of a base the initiator could not read when they started the
+	 * conversion (ALG-03). A background job cannot ask landing about their rights - it would be told
+	 * about whoever is logged in - so the snapshot their own request left behind is the only source of
+	 * truth here. The request refuses such a conversion before a session exists
+	 * ({@see \Bitrix\Note\Public\Command\Import\StartImportCommand}); this is the line for a state
+	 * that names such a base anyway.
+	 */
+	private function assertSourceReadable(array $option, string $sourceCollectionId): void
+	{
+		if (SourceReadableSnapshot::allows($option, $sourceCollectionId))
+		{
+			return;
+		}
+
+		$userId = (int)($option['userId'] ?? 0);
+		ImportLogger::logError(
+			"createStructure: {$sourceCollectionId} was not readable by user {$userId} when the "
+			. 'conversion started - nothing of it is read'
+		);
+
+		throw new SystemException('Source collection is not readable by the initiator');
 	}
 
 	private function flattenTree(array $nodes, ?string $parentExternalId = null): array

@@ -198,17 +198,20 @@ class Reader
 			return ReadResult::error(new ReadingError(ReadingError::CHAT_NOT_READABLE));
 		}
 
-		$lastMessage = new Message($chat->getLastMessageId());
-		if (!$lastMessage->getId())
-		{
-			return new ReadResult(0, new MessageCollection());
-		}
-
 		$this->counterUpdater->delete()->byChat($chatId)->forUser($userId)->execute();
 		$counter = 0;
 		$previousLastId = $chat->getRelationByUserId($userId)?->getLastId() ?? 0;
+		$lastId = $previousLastId;
 
-		$lastId = $chat->getRelationByUserId($userId)?->updateLastId($lastMessage->getId()) ?? 0;
+		// a chat without a single message of its own still has read-state to clear (the manual
+		// unread mark in recent, sync/pull fan-out) and descendants to cascade into; skip only
+		// the LAST_ID move, which needs an existing last message
+		$lastMessage = new Message($chat->getLastMessageId());
+		if ($lastMessage->getId())
+		{
+			$lastId = $chat->getRelationByUserId($userId)?->updateLastId($lastMessage->getId()) ?? 0;
+		}
+
 		$this->recentReader->read($userId, $chat->getChatId());
 		$this->anchorReadService->readByChatId($chatId, $userId);
 		$chat->onAfterAllMessagesRead($userId);

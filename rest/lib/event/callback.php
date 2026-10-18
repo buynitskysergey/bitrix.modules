@@ -107,6 +107,7 @@ class Callback
 					'APP_INSTALLED' => 'REST_APP.INSTALLED',
 				])
 				->where('EVENT_NAME', mb_strtoupper($event['EVENT_REST']['EVENT']))
+				->where('VERSION', 1)
 				->where(
 					(Main\ORM\Query\Query::filter()
 						->logic('or')

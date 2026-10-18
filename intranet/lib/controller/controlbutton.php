@@ -16,6 +16,7 @@ use Bitrix\Intranet;
 use Bitrix\Main\Security\Sign\Signer;
 use Bitrix\Main\Web\Json;
 use Bitrix\Main\Web\Uri;
+use Bitrix\Socialnetwork\Helper;
 use Bitrix\Socialnetwork\Integration\Im\Chat\Workgroup;
 use Bitrix\Socialnetwork\UserToGroupTable;
 
@@ -64,7 +65,7 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		{
 			if (!in_array($user['EXTERNAL_AUTH_ID'], $externalUserTypes, true))
 			{
-				$newUserIds[] = $user['ID'];
+				$newUserIds[] = (int)$user['ID'];
 			}
 		}
 
@@ -187,6 +188,7 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 
 		$res = [
 			'ID' => $entry['ID'],
+			'PARENT_ID' => $entry['PARENT_ID'] ?? 0,
 			'TITLE' => $entry['NAME'],
 			'DESCRIPTION' => $entry['DESCRIPTION'],
 			'CREATED_BY' => $entry['CREATED_BY'],
@@ -276,7 +278,7 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 			return $chatId;
 		}
 
-		$userId = $USER->GetId();
+		$userId = (int)$USER->GetId();
 		$calendarData = $this->getCalendarData($entityId, $entityData);
 
 		if (
@@ -287,6 +289,20 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 			return $chatId;
 		}
 
+		$canonicalEntityId = (int)($calendarData['PARENT_ID'] ?: $calendarData['ID']);
+		if ($canonicalEntityId !== (int)$calendarData['ID'])
+		{
+			$calendarData = $this->getCalendarData($canonicalEntityId);
+			if (
+				empty($calendarData['ID'])
+				|| !is_array($calendarData['USER_IDS'] ?? null)
+				|| !in_array($userId, $calendarData['USER_IDS'], true)
+			)
+			{
+				return $chatId;
+			}
+		}
+
 		if ($calendarData['MEETING']['CHAT_ID'] > 0)
 		{
 			$chatId = $calendarData['MEETING']['CHAT_ID'];
@@ -294,8 +310,25 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		}
 		else
 		{
-			$lockName = "chat_create_calendar_event_{$entityId}";
-			if (!Application::getConnection()->lock($lockName))
+			if (class_exists(\Bitrix\Calendar\Internal\GuestLink\GuestLinkResolver::class))
+			{
+				$lockName = \Bitrix\Calendar\Internal\GuestLink\GuestLinkResolver::getChatCreateLockName(
+					$canonicalEntityId,
+					(int)($calendarData['RECURRENCE_ID'] ?? 0),
+				);
+				$locked = Application::getConnection()->lock(
+					$lockName,
+					\Bitrix\Calendar\Internal\GuestLink\GuestLinkResolver::CHAT_CREATE_LOCK_TIMEOUT,
+				);
+			}
+			else
+			{
+				// calendar without the guest link feature never takes this lock, so the name needs no sharing
+				$lockName = "chat_create_calendar_event_{$canonicalEntityId}";
+				$locked = Application::getConnection()->lock($lockName);
+			}
+
+			if (!$locked)
 			{
 				$this->addError(new Error(
 					Loc::getMessage('INTRANET_CONTROL_BUTTON_CREATE_CHAT_LOCK_ERROR'), 'lock_error')
@@ -303,15 +336,38 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 				return null;
 			}
 
-			$parentCalendarData = [];
-			if ($calendarData['RECURRENCE_ID'])
+			try
 			{
-				$parentCalendarData = $this->getCalendarData($calendarData['RECURRENCE_ID']);
+				$calendarData = $this->getCalendarData($canonicalEntityId);
+				if (
+					empty($calendarData['ID'])
+					|| !is_array($calendarData['USER_IDS'] ?? null)
+					|| !in_array($userId, $calendarData['USER_IDS'], true)
+				)
+				{
+					return $chatId;
+				}
+
+				$chatId = (int)($calendarData['MEETING']['CHAT_ID'] ?? 0);
+				if ($chatId > 0)
+				{
+					Intranet\ControlButton::addUserToChat($chatId, $userId);
+				}
+				else
+				{
+					$parentCalendarData = [];
+					if ($calendarData['RECURRENCE_ID'])
+					{
+						$parentCalendarData = $this->getCalendarData($calendarData['RECURRENCE_ID']);
+					}
+
+					$chatId = Intranet\ControlButton::createCalendarChat($calendarData, $userId, $parentCalendarData);
+				}
 			}
-
-			$chatId = Intranet\ControlButton::createCalendarChat($calendarData, $userId, $parentCalendarData);
-
-			Application::getConnection()->unlock($lockName);
+			finally
+			{
+				Application::getConnection()->unlock($lockName);
+			}
 		}
 
 		return $chatId;
@@ -327,6 +383,20 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		)
 		{
 			return $chatId;
+		}
+
+		$groupId = (int)$groupId;
+
+		if ($groupId <= 0)
+		{
+			$this->addError(new Error(Loc::getMessage('INTRANET_CONTROL_BUTTON_ENTITY_ERROR')));
+
+			return null;
+		}
+
+		if (!$this->ensureWorkgroupChatAccess($groupId))
+		{
+			return null;
 		}
 
 		$chatData = Workgroup::getChatData(
@@ -349,6 +419,47 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		}
 
 		return $chatId;
+	}
+
+	private function ensureWorkgroupChatAccess(int $groupId): bool
+	{
+		global $USER;
+		$userId = (is_object($USER) ? (int)$USER->getId() : 0);
+
+		if ($this->canAccessWorkgroupChat($groupId, $userId))
+		{
+			return true;
+		}
+
+		$this->addError(new Error(
+			Loc::getMessage('INTRANET_CONTROL_BUTTON_WORKGROUP_ACCESS_ERROR'),
+			'access_denied'
+		));
+
+		return false;
+	}
+
+	/**
+	 * Group chat belongs to group members only, so UserCanViewGroup is not enough here:
+	 * it is also true for a non-member of a visible open group.
+	 * UserCanModifyGroup covers the owner, the scrum master and the portal admin.
+	 *
+	 * Membership is resolved for $userId, but the portal admin flag inside
+	 * CSocNetUserToGroup::InitUserPerms always comes from the current session, not from $userId.
+	 */
+	protected function canAccessWorkgroupChat(int $groupId, int $userId): bool
+	{
+		if ($groupId <= 0 || $userId <= 0)
+		{
+			return false;
+		}
+
+		$permissions = Helper\Workgroup::getPermissions([
+			'groupId' => $groupId,
+			'userId' => $userId,
+		]);
+
+		return !empty($permissions['UserIsMember']) || !empty($permissions['UserCanModifyGroup']);
 	}
 
 	public function getChatAction($entityType, $entityId, $entityData = [])
@@ -419,7 +530,14 @@ class ControlButton extends \Bitrix\Main\Engine\Controller
 		}
 		elseif ($entityType === 'workgroup' && Loader::includeModule('socialnetwork'))
 		{
-			$userCount = Workgroup::getNumberOfMembers($entityId);
+			$groupId = (int)$entityId;
+
+			if (!$this->ensureWorkgroupChatAccess($groupId))
+			{
+				return null;
+			}
+
+			$userCount = Workgroup::getNumberOfMembers($groupId);
 		}
 
 		if ($userCount > \Bitrix\Call\Call::getMaxParticipants())

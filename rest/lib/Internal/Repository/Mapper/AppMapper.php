@@ -7,6 +7,7 @@ namespace Bitrix\Rest\Internal\Repository\Mapper;
 use Bitrix\Rest\Internal\Entity\Application\AppAttributeCollection;
 use Bitrix\Rest\Internal\Entity\Application\AppCollection;
 use Bitrix\Rest\Internal\Entity\Application\AppExternalAttribute;
+use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
 use Bitrix\Rest\Internal\Entity\Application\AppLang;
 use Bitrix\Rest\Internal\Model\AppStatus;
 use Bitrix\Rest\Internal\Model\AppLangTable;
@@ -41,6 +42,8 @@ class AppMapper
 			licenseState: $status->getLicenseState(),
 			active: $ormModel->getActive(),
 			installed: $ormModel->getInstalled(),
+			installCompletionMode: AppInstallCompletionMode::tryFrom((string)$ormModel->getInstallCompletionMode())
+				?? AppInstallCompletionMode::Deferred,
 			urlDemo: $ormModel->getUrlDemo(),
 			urlInstall: $ormModel->getUrlInstall(),
 			urlSettings: $ormModel->getUrlSettings(),
@@ -106,6 +109,7 @@ class AppMapper
 			->setCode($entity->getCode())
 			->setActive($entity->isActive())
 			->setInstalled($entity->isInstalled())
+			->setInstallCompletionMode($entity->getInstallCompletionMode()->value)
 			->setUrl($entity->getUrl())
 			->setScope(implode(',', $entity->getScope()))
 			->setStatus(AppStatus::fromComponents(

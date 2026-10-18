@@ -274,6 +274,8 @@ class Permission
 			Action::Mute->value => Chat::ROLE_NONE,
 			Action::PinChat->value => Chat::ROLE_NONE,
 			Action::HideChat->value => Chat::ROLE_NONE,
+			Action::UserList->value => Chat::ROLE_GUEST,
+			Action::OpenSidebarMenu->value => Chat::ROLE_GUEST,
 		];
 	}
 
@@ -312,6 +314,7 @@ class Permission
 			Action::DetachFromParent->value => Chat::ROLE_NONE,
 			Action::UpdateSharingLink->value => Chat::ROLE_NONE,
 			Action::ManageGuestLink->value => Chat::ROLE_NONE,
+			Action::OpenSidebarMenu->value => Chat::ROLE_MEMBER,
 		];
 	}
 

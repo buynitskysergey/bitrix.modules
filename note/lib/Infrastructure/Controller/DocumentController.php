@@ -381,7 +381,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-08] Read-only pre-count of the documents a bulk
+	 * Read-only pre-count of the documents a bulk
 	 * action would touch. Runs only the selection resolver (no access check, no mutation,
 	 * no side effects) so the frontend can confirm the volume before acting.
 	 *
@@ -487,7 +487,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-01] Bulk archive of a tree selection (active section).
+	 * Bulk archive of a tree selection (active section).
 	 * Per-document MANAGE is decided inside the command; undeletable rows land in
 	 * skippedByAccessCount, they are not an endpoint error.
 	 *
@@ -513,7 +513,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-02] Bulk soft-delete of a tree selection from the
+	 * Bulk soft-delete of a tree selection from the
 	 * active or archive section.
 	 *
 	 * @param int[] $documentIds
@@ -545,7 +545,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-03] Bulk restore of a tree selection from the archive
+	 * Bulk restore of a tree selection from the archive
 	 * section. Per-document MANAGE is decided inside the command; documents the user cannot
 	 * manage land in skippedByAccessCount, they are not an endpoint error. Jointly selected
 	 * parent/child pairs are restored top-down so the child re-attaches under its parent.
@@ -574,7 +574,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-05] Bulk move of selected roots (each with its subtree)
+	 * Bulk move of selected roots (each with its subtree)
 	 * into a target collection/parent. Requires MANAGE on the target collection (checked here)
 	 * AND on every source document's collection (checked per document inside the command).
 	 *
@@ -661,7 +661,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-06] "Select all": archive every document of the
+	 * "Select all": archive every document of the
 	 * active collection. The count is taken server-side over the whole collection structure.
 	 */
 	public function archiveAllInCollectionAction(int $collectionId): ?array
@@ -670,7 +670,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-07] "Select all": soft-delete every document of the
+	 * "Select all": soft-delete every document of the
 	 * active collection. The count is taken server-side over the whole collection structure.
 	 */
 	public function deleteAllInCollectionAction(int $collectionId): ?array
@@ -854,7 +854,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P2.T4 / API-03] Pruned tree of documents reachable purely via document-level grants
+	 * Pruned tree of documents reachable purely via document-level grants
 	 * (no collection VIEW), grouped by container collection. Flat keyset pagination over the
 	 * whole accessible set, ordered (COLLECTION_ID ASC, ID DESC); the client rebuilds the
 	 * hierarchy from parentId.
@@ -874,7 +874,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [API-03b] Direct children of one document inside the accessible tree. listByParent cannot be
+	 * Direct children of one document inside the accessible tree. listByParent cannot be
 	 * reused: it gates on collection VIEW, which a document-grant recipient lacks by definition.
 	 */
 	public function listAccessibleChildrenAction(
@@ -994,7 +994,7 @@ class DocumentController extends Controller
 
 		return [
 			'documentId' => $id,
-			// Hide collection id when the user has no document access — same privacy rule as DocumentReadDto.
+			// Hide collection id when the user has no document access - same privacy rule as the REST read model.
 			'collectionId' => ($snapshot['canView'] ?? false) ? $collectionId : null,
 			'canView' => (bool)($snapshot['canView'] ?? false),
 			'canEdit' => (bool)($snapshot['canEdit'] ?? false),
@@ -1011,7 +1011,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P1.T3 / API-02] Lazy body fetch for the version-preview popup. IDOR: rights and
+	 * Lazy body fetch for the version-preview popup. IDOR: rights and
 	 * body are resolved by the version's own DOCUMENT_ID (VersionProvider), never by the
 	 * $documentId passed in — a mismatch is treated the same as "does not exist" (404).
 	 */
@@ -1057,7 +1057,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P1.T2 / API-03] Restores document content to a past version's snapshot. Requires
+	 * Restores document content to a past version's snapshot. Requires
 	 * LEVEL_EDIT (server-checked, not just a disabled button). If the patch window is
 	 * non-empty, rejects with 409 NOTE_RESTORE_DIRTY_WINDOW instead of silently discarding
 	 * unsaved patches — the client is expected to compact() then retry (see SDD P1.T2).
@@ -1117,7 +1117,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P2.T2 / API-04] Activity feed of one document. Role visibility (MTX-01) is
+	 * Activity feed of one document. Role visibility (MTX-01) is
 	 * enforced by FeedProvider itself, before the caller's $types filter — the
 	 * pre-filter narrows what is already visible, it never widens it.
 	 */
@@ -1148,7 +1148,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P3.T3 / API-06] "Who viewed the document" — list + unique counter. Plain
+	 * "Who viewed the document" - list + unique counter. Plain
 	 * LEVEL_VIEW, no role matrix (unlike listFeedAction): every viewer sees every
 	 * other viewer.
 	 */
@@ -1174,7 +1174,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P3.T3 / API-01] Documents linking to this one, keyset page. A missing document and a
+	 * Documents linking to this one, keyset page. A missing document and a
 	 * forbidden one answer alike — the list itself would otherwise tell the caller that some
 	 * document exists behind the id.
 	 *
@@ -1198,7 +1198,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P3.T3 / API-02] Backlinks counter for the widget badge, capped at BacklinkProvider::COUNT_CAP.
+	 * Backlinks counter for the widget badge, capped at BacklinkProvider::COUNT_CAP.
 	 */
 	public function getBacklinksCountAction(int $documentId): ?array
 	{
@@ -1290,7 +1290,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [P3.T1 / API-01] Full replacement of a document's manageable permissions.
+	 * Full replacement of a document's manageable permissions.
 	 * Each entry: { subjectCode, level: none|view|edit, scope?: document|subtree }. `scope` defaults
 	 * to 'document'; 'subtree' is valid only with a positive level. Scope/level and feature-flag
 	 * validation live in the service and surface here as error-collection entries.
@@ -1500,10 +1500,10 @@ class DocumentController extends Controller
 			'lastChange' => (new DocumentLastChangeResolver())->resolve($documentId),
 			// Bell state — bundled so the bell skips its own getState request on mount.
 			'subscription' => (new DocumentSubscriptionStateResolver())->resolve($documentId, $userId),
-			// [TPL-01] Star state, bundled next to the bell for the same reason: the header adopts it
+			// Star state, bundled next to the bell for the same reason: the header adopts it
 			// instead of asking for it on mount.
 			'isFavorite' => $this->isFavorite($documentId, $userId),
-			// [DTO-01] Backlinks counter — same bundling; neutral while the feature flag is off.
+			// Backlinks counter - same bundling; neutral while the feature flag is off.
 			'backlinks' => (new DocumentBacklinksSnapshotResolver())->resolve($documentId),
 		];
 
@@ -1646,7 +1646,7 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * [TPL-01] Star state of one document for the bootstrap payload. Unknown means not starred, the
+	 * Star state of one document for the bootstrap payload. Unknown means not starred, the
 	 * same safe default the bundled bell state degrades to.
 	 */
 	private function isFavorite(int $documentId, int $userId): bool

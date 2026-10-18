@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\History;
 
 /**
- * [P2.T1 / MTX-01] Role-based visibility over b_note_event. Must be applied
+ * Role-based visibility over b_note_event. Must be applied
  * server-side BEFORE the caller's category filter (see FeedProvider) — the
  * filter can only narrow what a role already sees, never widen it (a reader
  * must never get `moved`/`access_changed` even via an explicit request).
@@ -57,7 +57,7 @@ final class EventVisibilityPolicy
 	}
 
 	/**
-	 * [MTX-01] Whether the type is visible to every role that can read the feed (reader and up).
+	 * Whether the type is visible to every role that can read the feed (reader and up).
 	 * The live-push channel (HistoryPullGateway) has no per-recipient role context, so it may
 	 * broadcast only these types; role-restricted ones (moved/access_changed) must stay off the
 	 * live channel and reach privileged roles solely via the ACL-filtered listFeed fetch.

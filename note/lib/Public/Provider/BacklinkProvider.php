@@ -16,7 +16,7 @@ use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\DocumentLinkRepository;
 
 /**
- * [P3.T1 / ALG-05] Incoming links of a document: the counter for the widget badge and the paged
+ * Incoming links of a document: the counter for the widget badge and the paged
  * list behind it. Both walk the same chain — right on the target, then ONE keyset query over the
  * link index carrying the visibility predicate in its WHERE. A knowledge base description is
  * reported as a source of its own, flagged by `isCollectionDescription`.

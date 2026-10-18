@@ -27,25 +27,27 @@ function stemming_init($sLang='ru')
 			{
 				@include $strFileName;
 			}
-			if (!function_exists('stemming_' . $sLang))
+		}
+
+		if (!function_exists('stemming_' . $sLang))
+		{
+			$strFileName = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/search/tools/' . $sLang . '/stemming.php';
+			if (file_exists($strFileName))
 			{
-				$strFileName = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/search/tools/' . $sLang . '/stemming.php';
-				if (file_exists($strFileName))
+				if (\Bitrix\Main\Localization\Translation::allowConvertEncoding())
 				{
-					if (\Bitrix\Main\Localization\Translation::allowConvertEncoding())
-					{
-						\Bitrix\Main\Localization\StreamConverter::include($strFileName, $sLang);
-					}
-					else
-					{
-						@include $strFileName;
-					}
+					\Bitrix\Main\Localization\StreamConverter::include($strFileName, $sLang);
 				}
-				if (!function_exists('stemming_' . $sLang))
+				else
 				{
-					$stemming_function_suf = 'default';
+					@include $strFileName;
 				}
 			}
+		}
+
+		if (!function_exists('stemming_' . $sLang))
+		{
+			$stemming_function_suf = 'default';
 		}
 
 		$stemming_stop_function = 'stemming_stop_' . $sLang;
@@ -205,7 +207,7 @@ function stemming($sText, $sLang='ru', $bIgnoreStopWords = false, $bReturnPositi
 				{
 					$pos += 5; //Sentence distance
 				}
-				if ($word == '')
+				if ($word === '')
 				{
 					continue;
 				}

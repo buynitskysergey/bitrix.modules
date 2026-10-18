@@ -13,6 +13,7 @@ use Bitrix\Disk\Internals\ObjectTable;
 use Bitrix\Disk\Internals\RightTable;
 use Bitrix\Disk\Internals\SharingTable;
 use Bitrix\Disk\Internals\SimpleRightTable;
+use Bitrix\Disk\Internals\UniqueCode;
 use Bitrix\Disk\Internals\VersionTable;
 use Bitrix\Disk\Internal\Service\Folder\DeletionRestriction;
 use Bitrix\Disk\ProxyType\Group;
@@ -43,6 +44,9 @@ class Folder extends BaseObject
 	const CODE_FOR_CREATED_FILES  = SpecificFolder::CODE_FOR_CREATED_FILES;
 	const CODE_FOR_SAVED_FILES    = SpecificFolder::CODE_FOR_SAVED_FILES;
 	const CODE_FOR_UPLOADED_FILES = SpecificFolder::CODE_FOR_UPLOADED_FILES;
+
+	/** Operations of \CSQLWhere holding a field to a value or a set of them: "FIELD", "=FIELD", "==FIELD", "@FIELD". */
+	private const NARROWING_OPERATIONS = ['E', 'I', 'SE', 'IN'];
 
 	/** @var bool */
 	protected $hasSubFolders;
@@ -138,6 +142,11 @@ class Folder extends BaseObject
 	 */
 	public static function add(array $data, ErrorCollection $errorCollection)
 	{
+		if (!isset($data['UNIQUE_CODE']))
+		{
+			$data['UNIQUE_CODE'] = (new UniqueCode())->generateForNewFile();
+		}
+
 		/** @var Folder $folder */
 		$folder = parent::add($data, $errorCollection);
 		if($folder && !$folder->isDeleted())
@@ -335,7 +344,7 @@ class Folder extends BaseObject
 		$data['PARENT'] = $this;
 
 		/** @var File $fileModel */
-		$fileModel = $this->processAdd($data, $this->errorCollection, $generateUniqueName);
+		$fileModel = $this->processAdd($data, $this->errorCollection, ObjectTable::TYPE_FILE, $generateUniqueName);
 		if ($fileModel)
 		{
 			Driver::getInstance()->getRightsManager()->setAsNewLeaf($fileModel, $rights);
@@ -359,10 +368,19 @@ class Folder extends BaseObject
 		return $fileModel;
 	}
 
-	private function processAdd(array $data, ErrorCollection $errorCollection, bool $generateUniqueName = false, int $countStepsToGenerateName = 0): File|null
+	private function processAdd(
+		array $data,
+		ErrorCollection $errorCollection,
+		int $type,
+		bool $generateUniqueName = false,
+		int $countStepsToGenerateName = 0
+	): BaseObject|null
 	{
 		$connection = Application::getConnection();
-		$shouldUseTransaction = $generateUniqueName && $connection->getType() === 'pgsql';
+		// a duplicate swallowed here (by the retry, or by the domain error of addSubFolder()) leaves an outer
+		// pgsql transaction aborted, so such an attempt runs in a transaction of its own
+		$swallowsDuplicateEntry = $generateUniqueName || $type === ObjectTable::TYPE_FOLDER;
+		$shouldUseTransaction = $swallowsDuplicateEntry && $connection->getType() === 'pgsql';
 		if ($shouldUseTransaction)
 		{
 			$connection->startTransaction();
@@ -370,7 +388,12 @@ class Folder extends BaseObject
 
 		try
 		{
-			$fileModel = File::add($data, $errorCollection);
+			$objectModel = match ($type)
+			{
+				ObjectTable::TYPE_FOLDER => Folder::add($data, $errorCollection),
+				ObjectTable::TYPE_FILE => File::add($data, $errorCollection),
+				default => throw new ArgumentException("Unknown object type {$type}"),
+			};
 		}
 		catch (DuplicateEntryException $exception)
 		{
@@ -389,7 +412,7 @@ class Folder extends BaseObject
 					);
 				}
 
-				$nameService = new ObjectNameService($data['NAME'], $this->id, ObjectTable::TYPE_FILE);
+				$nameService = new ObjectNameService($data['NAME'], $this->id, $type);
 				$nameService->requireUniqueName();
 
 				$result = $nameService->prepareName();
@@ -401,6 +424,7 @@ class Folder extends BaseObject
 				return $this->processAdd(
 					$data,
 					$errorCollection,
+					$type,
 					$generateUniqueName,
 					$countStepsToGenerateName
 				);
@@ -423,12 +447,17 @@ class Folder extends BaseObject
 			$connection->commitTransaction();
 		}
 
-		if (!$fileModel)
+		if (!$objectModel)
 		{
 			return null;
 		}
 
-		return $fileModel;
+		return $objectModel;
+	}
+
+	private function createNonUniqueNameError(): Error
+	{
+		return new Error(Loc::getMessage('DISK_FOLDER_MODEL_ERROR_NON_UNIQUE_NAME'), self::ERROR_NON_UNIQUE_NAME);
 	}
 
 	/**
@@ -607,7 +636,23 @@ class Folder extends BaseObject
 		$data['PARENT_ID'] = $this->id;
 		$data['STORAGE_ID'] = $this->storageId;
 
-		$folderModel = Folder::add($data, $this->errorCollection);
+		try
+		{
+			/** @var Folder $folderModel */
+			$folderModel = $this->processAdd(
+				$data,
+				$this->errorCollection,
+				ObjectTable::TYPE_FOLDER,
+				$generateUniqueName
+			);
+		}
+		catch (DuplicateEntryException)
+		{
+			$this->errorCollection[] = $this->createNonUniqueNameError();
+
+			return null;
+		}
+
 		if(!$folderModel)
 		{
 			return null;
@@ -711,7 +756,7 @@ class Folder extends BaseObject
 			$data['NAME'] = Ui\Text::appendTrashCanSuffix($data['NAME']);
 			if (!static::isUniqueName($data['NAME'], $this->id))
 			{
-				$this->errorCollection[] = new Error(Loc::getMessage('DISK_FOLDER_MODEL_ERROR_NON_UNIQUE_NAME'), self::ERROR_NON_UNIQUE_NAME);
+				$this->errorCollection[] = $this->createNonUniqueNameError();
 
 				return null;
 			}
@@ -816,7 +861,10 @@ class Folder extends BaseObject
 	/**
 	 * Gets all descendants objects by the folder.
 	 * @param SecurityContext $securityContext Security context.
-	 * @param array           $parameters Parameters.
+	 * @param array           $parameters Parameters. Key "subtree_check" selects how membership in the
+	 *                        subtree is checked, see ObjectTable::SUBTREE_CHECK_*. With
+	 *                        ObjectTable::SUBTREE_CHECK_EXISTS objects come without DEPTH_LEVEL and
+	 *                        are not ordered by it.
 	 * @param int             $orderDepthLevel Order for depth level (default asc).
 	 * @throws \Bitrix\Main\ArgumentOutOfRangeException
 	 * @return BaseObject[]
@@ -845,11 +893,35 @@ class Folder extends BaseObject
 		{
 			$parameters['filter']['DELETED_TYPE'] = ObjectTable::DELETED_TYPE_NONE;
 		}
-		$parameters['select']['DEPTH_LEVEL'] = 'PATH_CHILD.DEPTH_LEVEL';
+
+		$useSubtreeCheckByExists = $this->useSubtreeCheckByExists($parameters);
+		$parameters['subtree_check'] = $useSubtreeCheckByExists
+			? ObjectTable::SUBTREE_CHECK_EXISTS
+			: ObjectTable::SUBTREE_CHECK_JOIN
+		;
+
+		if ($useSubtreeCheckByExists)
+		{
+			// storage of a descendant always matches the storage of its container, so the condition
+			// narrows candidates by an index on the object table before the subtree is checked
+			if (!static::hasNarrowingConditionOnField($parameters['filter'], 'STORAGE_ID'))
+			{
+				$parameters['filter']['=STORAGE_ID'] = $this->storageId;
+			}
+
+			// the cheap subtree condition is written ahead of the expensive rights check below: the
+			// database promises no order of evaluation, but the plans seen here keep the one written
+			$parameters = ObjectTable::addSubtreeCheckByExists($parameters, (int)$this->id);
+		}
+		else
+		{
+			$parameters['select']['DEPTH_LEVEL'] = 'PATH_CHILD.DEPTH_LEVEL';
+		}
+
 		$parameters = Driver::getInstance()->getRightsManager()->addRightsCheck($securityContext, $parameters, array('ID', 'CREATED_BY'));
 
 		$data = FolderTable::getDescendants($this->id, static::prepareGetListParameters($parameters))->fetchAll();
-		if($orderDepthLevel !== null)
+		if(!$useSubtreeCheckByExists && $orderDepthLevel !== null)
 		{
 			Collection::sortByColumn($data, array('DEPTH_LEVEL' => $orderDepthLevel));
 		}
@@ -862,6 +934,52 @@ class Folder extends BaseObject
 		unset($item);
 
 		return $modelData;
+	}
+
+	/**
+	 * The mode is requested by the caller and may be switched off portal wide: it relies on an object
+	 * keeping the storage of its container, and the option is the way back to the join if it does not.
+	 */
+	private function useSubtreeCheckByExists(array $parameters): bool
+	{
+		return
+			($parameters['subtree_check'] ?? null) === ObjectTable::SUBTREE_CHECK_EXISTS
+			&& Configuration::isEnabledSubtreeCheckByExists()
+		;
+	}
+
+	/**
+	 * Tells whether the filter already holds the field to a value or a set of them.
+	 *
+	 * Such a condition of the caller is left alone: a second one beside it either says the same thing twice
+	 * or contradicts it. An operation holding the field to nothing ("!=", ">", "%=") is not that condition
+	 * and gets a condition of the mode next to it, so the index the mode counts on stays in the plan.
+	 *
+	 * The key is read by the parser the ORM itself reads it with, so the set of operations understood here
+	 * is the one understood there. Keys of the top level are the whole question: a condition of a nested
+	 * block belongs to a key of its own and is never the one overwritten by an assignment to the top level.
+	 */
+	private static function hasNarrowingConditionOnField(array $filter, string $field): bool
+	{
+		$sqlWhere = new \CSQLWhere();
+		foreach (array_keys($filter) as $key)
+		{
+			if (!is_string($key))
+			{
+				continue;
+			}
+
+			$condition = $sqlWhere->makeOperation($key);
+			if (
+				$condition['FIELD'] === $field
+				&& in_array($condition['OPERATION'], self::NARROWING_OPERATIONS, true)
+			)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

@@ -9,6 +9,7 @@ use Bitrix\Sign\Operation\Result\ConfigureResult;
 use Bitrix\Sign\Operation\Result\FillFieldsResult;
 use Bitrix\Sign\Repository\DocumentRepository;
 use Bitrix\Sign\Service\Container;
+use Bitrix\Sign\Service\Sign\DocumentAgentService;
 use Bitrix\Sign\Service\Sign\PlaceholderBlockService;
 use Bitrix\Sign\Type\DocumentStatus;
 
@@ -17,16 +18,19 @@ class ConfigureFillAndStart implements Operation
 	private readonly Document $document;
 	private readonly DocumentRepository $documentRepository;
 	private readonly PlaceholderBlockService $placeholderBlockService;
+	private readonly DocumentAgentService $documentAgentService;
 
 	public function __construct(
 		private readonly string $uid,
 		?DocumentRepository $documentRepository = null,
 		?PlaceholderBlockService $placeholderBlockService = null,
+		?DocumentAgentService $documentAgentService = null,
 	)
 	{
 		$container = Container::instance();
 		$this->documentRepository = $documentRepository ?? $container->getDocumentRepository();
 		$this->placeholderBlockService = $placeholderBlockService ?? $container->getPlaceholderBlockService();
+		$this->documentAgentService = $documentAgentService ?? $container->getDocumentAgentService();
 	}
 
 	public function launch(): Main\Result|ConfigureResult
@@ -90,9 +94,34 @@ class ConfigureFillAndStart implements Operation
 			{
 				return true;
 			}
+
+			// The blank goes to the signing service in a background agent, so a document of a
+			// freshly created batch can still be waiting for its turn. The sending is not broken by
+			// it: the configure agent comes back to the document once the blank is there.
+			if ($this->isWaitingForBlankUpload($error))
+			{
+				return true;
+			}
 		}
 
 		return false;
+	}
+
+	private function isWaitingForBlankUpload(Main\Error $error): bool
+	{
+		if (
+			$error->getCode() !== 'SIGN_DOCUMENT_INCORRECT_STATUS'
+			|| ($error->getCustomData()['has'] ?? null) !== DocumentStatus::NEW
+		)
+		{
+			return false;
+		}
+
+		// Waiting is justified only while somebody is still sending the blanks of this group. A
+		// chain that gave up removes itself, and a document outside a group never had one: the
+		// sending there happens inside the request, so `new` means a failure to report. Without
+		// this the configure agent would reschedule itself for good on a blank the service refuses.
+		return $this->documentAgentService->hasUploadGroupBlanksChain((int)$this->document->groupId);
 	}
 
 	private function startOrProgress(FillFieldsResult $fillResult): Main\Result|ConfigureResult

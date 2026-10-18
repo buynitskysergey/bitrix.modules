@@ -73,6 +73,7 @@ class Document implements Contract\Item, Contract\Item\ItemWithOwner, Contract\I
 		public ?int $hcmLinkDocumentTypeSettingId = null,
 		public ?Main\Type\DateTime $dateSignUntil = null,
 		public ?string $configuredDateFormat = null,
+		public ?string $inviteMessage = null,
 	)
 	{
 		$this->initOriginal();

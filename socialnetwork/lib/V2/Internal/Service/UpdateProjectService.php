@@ -57,6 +57,15 @@ class UpdateProjectService
 			return (new Result())->addError(new Error('Base feature is invalid'));
 		}
 
+		if ($project->tagNames !== null)
+		{
+			$tagValidation = $this->projectTagRepository->validate($project->tagNames);
+			if (!$tagValidation->isSuccess())
+			{
+				return (new Result())->addErrors($tagValidation->getErrors());
+			}
+		}
+
 		$data = ['id' => $projectId];
 
 		if ($project->name !== null)
@@ -160,7 +169,11 @@ class UpdateProjectService
 
 		if ($project->tagNames !== null)
 		{
-			$this->projectTagRepository->save($projectId, $project->tagNames);
+			$tagResult = $this->projectTagRepository->save($projectId, $project->tagNames);
+			if (!$tagResult->isSuccess())
+			{
+				return (new Result())->addErrors($tagResult->getErrors());
+			}
 		}
 
 		if ($featureStates !== [])

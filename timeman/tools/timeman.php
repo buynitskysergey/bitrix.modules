@@ -1,6 +1,8 @@
 <?php
+use Bitrix\Timeman\Integration\Intranet\Settings;
 use Bitrix\Timeman\Model\Schedule\ScheduleTable;
 use Bitrix\Timeman\Monitor\Report\Status;
+use Bitrix\Timeman\V2\Infrastructure\Controller\ActionFilter\ToolEnabledFilter;
 
 define('BX_SECURITY_SHOW_MESSAGE', 1);
 if (!defined('NO_KEEP_STATISTIC'))
@@ -29,6 +31,16 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 	}
 	else
 	{
+		if (!(new Settings())->isToolAvailable(Settings::TOOLS['worktime']))
+		{
+			$APPLICATION->RestartBuffer();
+			echo CUtil::PhpToJsObject([
+				'error' => ToolEnabledFilter::getErrorMessage(),
+				'error_id' => ToolEnabledFilter::ERROR_CODE,
+			]);
+			\Bitrix\Main\Application::getInstance()->end();
+		}
+
 		$device = null;
 		if (!empty($_REQUEST['mobile_action']) && $_REQUEST['mobile_action'] === 'timeman')
 		{
@@ -209,36 +221,34 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 		{
 			$report = null;
 			$report_id = intval($_POST["report_id"]);
+			$bCanManageAttachments = $report_id <= 0;
 			if ($report_id > 0)
 			{
-				$user_id = intval($_REQUEST['user_id'] ?? null);
-				if ($user_id <= 0)
+				$dbReport = CTimeManReportFull::GetByID($report_id);
+				$report = $dbReport->fetch();
+				if ($report)
 				{
-					$user_id = $USER->GetID();
-				}
+					$reportOwnerId = (int)$report['USER_ID'];
+					$currentUserId = (int)$USER->GetID();
+					$writeAccess = [];
+					if ($reportOwnerId !== $currentUserId)
+					{
+						$arAccessUsers = CTimeMan::GetAccess();
+						$writeAccess = $arAccessUsers['WRITE'] ?? [];
+					}
 
-				$bCanReadUser = $user_id == $USER->GetID();
-				if (!$bCanReadUser)
-				{
-					$arAccessUsers = CTimeMan::GetAccess();
-					$bCanReadAll = in_array('*', $arAccessUsers['READ']);
-					$bCanReadUser = $bCanReadAll || in_array($user_id, $arAccessUsers["READ"]);
-				}
-
-				if ($bCanReadUser)
-				{
-					$dbreport = CTimeManReportFull::GetList(
-						["ID" => "asc"],
-						["ID" => $report_id, "USER_ID" => $user_id]
+					$bCanManageAttachments = (new \Bitrix\Timeman\Security\ReportAttachmentPermission())->canManage(
+						$reportOwnerId,
+						$currentUserId,
+						$writeAccess,
 					);
-					$report = $dbreport->fetch();
 				}
 			}
 
 			if ($_POST["mode"] == "upload")
 			{
 				$arResult = [];
-				$count = sizeof($_FILES["report-attachments"]["name"]);
+				$count = $bCanManageAttachments ? sizeof($_FILES["report-attachments"]["name"]) : 0;
 
 				for ($i = 0; $i < $count; $i++)
 				{
@@ -284,7 +294,7 @@ if (check_bitrix_sessid() && $USER->IsAuthorized())
 				</script>
 				<?
 			}
-			elseif ($_POST["mode"] == "delete")
+			elseif ($_POST["mode"] == "delete" && $bCanManageAttachments)
 			{
 				$reportFiles = CUserReportFull::getReportFiles();
 

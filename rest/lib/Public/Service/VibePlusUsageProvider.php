@@ -60,13 +60,7 @@ final class VibePlusUsageProvider
 
 	public function hasUserRestUsage(): bool
 	{
-		return $this->incomingWebhookProvider->hasAny(
-			new IncomingWebhookFilter(
-				excludeAttributes: [self::VIBECODE_ATTRIBUTE => self::ENABLED_ATTRIBUTE_VALUE],
-				type: PasswordType::User,
-				active: true,
-			),
-		) || ($this->hasUserIntegrationProvider)();
+		return ($this->hasUserIntegrationProvider)();
 	}
 
 	public function getMarketApplicationCount(): int
@@ -112,12 +106,7 @@ final class VibePlusUsageProvider
 
 	public function hasVibecodeUsage(): bool
 	{
-		return $this->incomingWebhookProvider->hasAny(
-			new IncomingWebhookFilter(
-				attributes: [self::VIBECODE_ATTRIBUTE => self::ENABLED_ATTRIBUTE_VALUE],
-				active: true,
-			),
-		) || $this->appRepository->exists(
+		return $this->appRepository->exists(
 			(new AppFilter())
 				->installed()
 				->attributes([
@@ -230,6 +219,7 @@ final class VibePlusUsageProvider
 		return $this->incomingWebhookProvider->getCount(
 			new IncomingWebhookFilter(
 				attributes: [self::VIBECODE_ATTRIBUTE => self::ENABLED_ATTRIBUTE_VALUE],
+				type: PasswordType::User,
 				active: true,
 			),
 		);

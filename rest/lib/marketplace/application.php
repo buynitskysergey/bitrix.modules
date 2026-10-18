@@ -12,12 +12,12 @@ use Bitrix\Rest\Internal\Service\Application\ApplicationInstallationFinalizer;
 use Bitrix\Rest\PlacementTable;
 use Bitrix\Rest\Engine\Access;
 use Bitrix\Rest\AppLangTable;
-use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\AppLogTable;
 use Bitrix\Rest\EventTable;
 use Bitrix\Rest\Analytic;
 use Bitrix\Rest\AppTable;
+use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
 use Bitrix\Rest\Internal\Repository\Application\AppRepository;
 use Bitrix\Rest\Public\Command\Application\Access\SetAppAccessCommand;
 use CRestUtil;
@@ -40,6 +40,34 @@ class Application
 	public static function getContextUserId(): ?int
 	{
 		return self::$contextUserId;
+	}
+
+	private static function resolveInstallCompletionMode(array $appDetailInfo): AppInstallCompletionMode
+	{
+		if ($appDetailInfo['OPEN_API'] === 'Y' || empty($appDetailInfo['INSTALL_URL']))
+		{
+			return AppInstallCompletionMode::Immediate;
+		}
+
+		return AppInstallCompletionMode::Deferred;
+	}
+
+	private static function hasMenuTitle(array $appDetailInfo): bool
+	{
+		if (!isset($appDetailInfo['MENU_TITLE']) || !is_array($appDetailInfo['MENU_TITLE']))
+		{
+			return false;
+		}
+
+		foreach ($appDetailInfo['MENU_TITLE'] as $langName)
+		{
+			if (trim((string)$langName) !== '')
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	public static function install($code, $version = false, $checkHash = false, $installHash = false, $from = null) : array
@@ -149,13 +177,15 @@ class Application
 					}
 					elseif ($installResult['result'])
 					{
+						$installCompletionMode = self::resolveInstallCompletionMode($appDetailInfo);
 						$appFields = [
 							'CLIENT_ID' => $installResult['result']['client_id'],
 							'CODE' => $appDetailInfo['CODE'],
 							'ACTIVE' => AppTable::ACTIVE,
-							'INSTALLED' => ($appDetailInfo['OPEN_API'] === 'Y' || empty($appDetailInfo['INSTALL_URL']))
+							'INSTALLED' => $installCompletionMode === AppInstallCompletionMode::Immediate
 								? AppTable::INSTALLED
 								: AppTable::NOT_INSTALLED,
+							'INSTALL_COMPLETION_MODE' => $installCompletionMode->value,
 							'URL' => $appDetailInfo['URL'],
 							'URL_DEMO' => $appDetailInfo['DEMO_URL'],
 							'URL_INSTALL' => $appDetailInfo['INSTALL_URL'],
@@ -191,7 +221,9 @@ class Application
 							|| $appDetailInfo['TYPE'] === AppTable::TYPE_BIC_DASHBOARD
 						)
 						{
+							$installCompletionMode = AppInstallCompletionMode::Deferred;
 							$appFields['INSTALLED'] = AppTable::NOT_INSTALLED;
+							$appFields['INSTALL_COMPLETION_MODE'] = $installCompletionMode->value;
 						}
 
 						$shouldFinalizeInstallation = $appFields['INSTALLED'] === AppTable::INSTALLED;
@@ -280,39 +312,16 @@ class Application
 								}
 							}
 
-							if ($appDetailInfo['OPEN_API'] === 'Y' && !empty($appFields['URL_INSTALL']))
-							{
-								// checkCallback is already called inside checkFields
-								$result = EventTable::add(
-									[
-										'APP_ID' => $appId,
-										'EVENT_NAME' => 'ONAPPINSTALL',
-										'EVENT_HANDLER' => $appFields['URL_INSTALL'],
-									]
-								);
-								if ($result->isSuccess())
-								{
-									Sender::bind('rest', 'OnRestAppInstall');
-								}
-							}
+							EventTable::syncInstallEventHandlers(
+								(int)$appId,
+								$installCompletionMode,
+								(string)($appFields['URL_INSTALL'] ?? '')
+							);
 
-							if (!empty($appFields['URL_INSTALL']))
+							if ($installCompletionMode === AppInstallCompletionMode::Immediate)
 							{
-								// checkCallback is already called inside checkFields
-								$result = EventTable::add(
-									[
-										'APP_ID' => $appId,
-										'EVENT_NAME' => 'ONAPPUSERREADY',
-										'EVENT_HANDLER' => $appFields['URL_INSTALL'],
-									]
-								);
-								if ($result->isSuccess())
-								{
-									Sender::bind('rest', 'OnRestAppUserReady');
-								}
+								AppTable::install($appId);
 							}
-
-							AppTable::install($appId);
 
 							$redirect = false;
 							$open = false;
@@ -333,7 +342,8 @@ class Application
 									]
 								);
 								$redirect = $uri->getUri();
-								$open = $appDetailInfo['OPEN_API'] !== 'Y';
+								$open = !empty($appDetailInfo['URL'])
+									&& ($appDetailInfo['OPEN_API'] !== 'Y' || self::hasMenuTitle($appDetailInfo));
 							}
 							else
 							{
@@ -366,7 +376,7 @@ class Application
 								'installed' => AppTable::isInstalled($appId),
 								'redirect' => $redirect,
 								'openSlider' => $sliderUrl,
-								'canShowForm' => $appDetailInfo['OPEN_API'] === 'Y' && !empty($appFields['URL_SETTINGS'])
+								'canShowForm' => !empty($appFields['URL_SETTINGS'])
 							];
 
 							Analytic::logToFile(
@@ -590,23 +600,60 @@ class Application
 				// delete user application params to trigger installation event
 				\CUserOptions::DeleteOption('app_options', 'params_' . $appInfo['CLIENT_ID'] . '_' . $appInfo['VERSION']);
 
-				if (empty($appInfo['MENU_NAME']) && empty($appInfo['MENU_NAME_DEFAULT']))
+				$installCompletionMode = AppInstallCompletionMode::tryFrom(
+					(string)($appInfo['INSTALL_COMPLETION_MODE'] ?? '')
+				) ?? (
+					empty($appInfo['URL_INSTALL'])
+						? AppInstallCompletionMode::Immediate
+						: AppInstallCompletionMode::Deferred
+				);
+
+				if ($installCompletionMode === AppInstallCompletionMode::Immediate)
 				{
-					AppTable::install($appInfo['ID']);
-					$result = ['success' => 1];
+					$updateResult = AppTable::update(
+						$appInfo['ID'],
+						[
+							'INSTALLED' => AppTable::INSTALLED,
+						]
+					);
+					if ($updateResult->isSuccess())
+					{
+						AppTable::install($appInfo['ID']);
+						$result = ['success' => 1];
+					}
+					else
+					{
+						$result = ['error' => Loc::getMessage('RMP_INSTALL_ERROR')];
+					}
 				}
-				elseif (!empty($appInfo['URL_INSTALL']))
+				else
 				{
-					$appFields = [
-						'INSTALLED' => 'N',
-					];
+					$updateResult = AppTable::update(
+						$appInfo['ID'],
+						[
+							'INSTALLED' => AppTable::NOT_INSTALLED,
+						]
+					);
+					if ($updateResult->isSuccess())
+					{
+						$result = ['success' => 1];
 
-					AppTable::update($appInfo['ID'], $appFields);
-
-					$result = [
-						'success' => 1,
-						'redirect' => CRestUtil::getApplicationPage($appInfo['ID']),
-					];
+						// deferred completion happens inside the application page, so an application
+						// without a page has nowhere to send the admin to
+						$hasApplicationPage = !AppInstallCompletionMode::isApiOnly([
+							$appInfo['MENU_NAME'],
+							$appInfo['MENU_NAME_DEFAULT'],
+							$appInfo['MENU_NAME_LICENSE'],
+						]);
+						if ($hasApplicationPage)
+						{
+							$result['redirect'] = CRestUtil::getApplicationPage($appInfo['ID']);
+						}
+					}
+					else
+					{
+						$result = ['error' => Loc::getMessage('RMP_INSTALL_ERROR')];
+					}
 				}
 			}
 			else

@@ -816,7 +816,8 @@ class DeleteService
 			$triggerMessageId = (int)($messageForEvent['PARAMS'][Message\Params::AI_TASK_TRIGGER_MESSAGE_ID] ?? 0);
 			if ($triggerMessageId > 0)
 			{
-				$taskService->deleteLinkedAutoTask($triggerMessageId);
+				$taskId = (int)($messageForEvent['PARAMS'][Message\Params::AI_TASK_ID] ?? 0);
+				$taskService->deleteLinkedAutoTask($triggerMessageId, $taskId > 0 ? $taskId : null);
 			}
 		}
 	}

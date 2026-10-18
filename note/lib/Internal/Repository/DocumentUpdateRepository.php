@@ -197,7 +197,7 @@ class DocumentUpdateRepository
 	}
 
 	/**
-	 * [EVENT-01] The patch that precedes $beforeId within one document: the highest id of this document
+	 * The patch that precedes $beforeId within one document: the highest id of this document
 	 * below it, or NULL when the patch is the first one left in the journal.
 	 *
 	 * Asked AFTER the insert, never before. Two concurrent saves for the same document would otherwise
@@ -219,7 +219,7 @@ class DocumentUpdateRepository
 	}
 
 	/**
-	 * [API-02] Threshold probe for the backstop, which only ever asks "is the journal at least this
+	 * Threshold probe for the backstop, which only ever asks "is the journal at least this
 	 * long?". Counting the whole journal after every single patch makes each save in a long editing run
 	 * more expensive than the last, because COUNT visits every entry the document has.
 	 *

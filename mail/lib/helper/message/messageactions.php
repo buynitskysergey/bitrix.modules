@@ -43,13 +43,14 @@ final class MessageActions
 		$grouped = [];
 		foreach ($ids as $id)
 		{
-			$parts = explode('-', $id, 2);
-			if (count($parts) !== 2)
+			$separatorPosition = strrpos($id, '-');
+			if ($separatorPosition === false)
 			{
 				continue;
 			}
 
-			[$messId, $mailboxId] = $parts;
+			$messId = substr($id, 0, $separatorPosition);
+			$mailboxId = substr($id, $separatorPosition + 1);
 			$grouped[$mailboxId]['compositeIds'][] = $id;
 			$grouped[$mailboxId]['messageIds'][] = $messId;
 		}

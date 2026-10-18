@@ -715,6 +715,7 @@ class Workgroup implements Main\Type\Contract\Arrayable, Main\Type\Contract\Json
 			'fields' => $fields,
 		));
 
+		$content = Main\Text\Emoji::encode($content);
 		$content = self::prepareToken($content);
 
 		$event = new Main\Event(
@@ -748,6 +749,7 @@ class Workgroup implements Main\Type\Contract\Arrayable, Main\Type\Contract\Json
 						$eventContent
 					));
 
+					$eventContent = Main\Text\Emoji::encode($eventContent);
 					$eventContent = self::prepareToken($eventContent);
 					if (!empty($eventContent))
 					{
@@ -779,6 +781,25 @@ class Workgroup implements Main\Type\Contract\Arrayable, Main\Type\Contract\Json
 	public static function prepareToken($str)
 	{
 		return str_rot13($str);
+	}
+
+	/**
+	 * Prepare a user query so it matches SEARCH_INDEX built by setIndex().
+	 */
+	public static function prepareSearchIndexQuery(string $query): string
+	{
+		$query = Main\Text\Emoji::encode(trim($query));
+		if ($query === '')
+		{
+			return '';
+		}
+
+		if (Main\Search\Content::isIntegerToken($query))
+		{
+			return Main\Search\Content::prepareIntegerToken($query);
+		}
+
+		return self::prepareToken($query);
 	}
 
 	public static function getInitiatePermOptionsList(array $params = []): array

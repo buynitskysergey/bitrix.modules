@@ -12,11 +12,15 @@ use Bitrix\Call\Signaling;
 use Bitrix\Call\CallUser;
 use Bitrix\Call\Integration\EntityType;
 use Bitrix\Call\Call\Registry;
+use Bitrix\Call\Model\CallTable;
 use Bitrix\Call\Util;
 use Bitrix\Call\CallFactory;
 use Bitrix\Call\Error;
 use Bitrix\Call\DTO;
 use Bitrix\Call\JwtCall;
+use Bitrix\Call\Idempotence;
+use Bitrix\Call\ControllerClient;
+use Bitrix\Call\Logger\Logger;
 use Bitrix\Call\Integration\AI\CallAISettings;
 use Bitrix\Call\Controller\Filter\UniqueRequestFilter;
 use Bitrix\Im\V2\Guest\GuestLinkService;
@@ -27,6 +31,14 @@ use Bitrix\Im\V2\Chat;
  */
 class Call extends JwtController
 {
+	// Short-lived marker "this room uuid was finished before the startCall
+	// webhook arrived": set by finish entry points when the call entity is
+	// not found, consumed by startCallAction (see quick hangup race guard).
+	public const FINISHED_ROOM_MARKER_PREFIX = 'finish_room_';
+	public const FINISHED_ROOM_MARKER_TTL = 60; // in seconds
+
+	public const UUID_V4_PATTERN = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i';
+
 	protected const LOCK_TTL = 10; // in seconds
 
 	protected const CHILD_CHAT_CACHE_TTL = 3600; // in seconds
@@ -248,6 +260,91 @@ class Call extends JwtController
 
 			try
 			{
+				// Quick hangup race guard: the client already finished this room
+				// before the startCall webhook arrived. Register the call directly
+				// as FINISHED without any invites or chat messages. Checked first,
+				// before the busy branch and stuck-call cleanup: this webhook is
+				// about an already dead room and must not touch other calls of
+				// the initiator (e.g. a fresh repeat call created in between).
+				// The whole branch is idempotent for webhook redelivery: the
+				// result=false response releases the requestId in
+				// UniqueRequestFilter, so the marker is kept for its full TTL
+				// and an already registered record short-circuits the retry.
+				if (
+					$callRequest->provider === \Bitrix\Call\Call::PROVIDER_PLAIN
+					&& Idempotence::hasKey(
+						static::FINISHED_ROOM_MARKER_PREFIX . $roomId,
+						static::FINISHED_ROOM_MARKER_TTL,
+					)
+				)
+				{
+					if (Registry::getCallWithUuid($roomId))
+					{
+						// A previous delivery of this webhook already registered
+						// the technical FINISHED record; do not insert a second
+						// one (the uuid index is not unique).
+						return [
+							'result' => false,
+							'errorCode' => 'call_already_finished',
+							'errorMessage' => 'Call was finished before start completed',
+						];
+					}
+
+					$targetUserId = (int)$entityId;
+					$chat = \Bitrix\Im\V2\Chat\ChatFactory::getInstance()->getPrivateChat($userId, $targetUserId);
+					if (!$chat || !$chat->getId())
+					{
+						// No private chat to bind the technical record to; the
+						// room is already killed, nothing to register.
+						return [
+							'result' => false,
+							'errorCode' => 'call_already_finished',
+							'errorMessage' => 'Call was finished before start completed',
+						];
+					}
+
+					$callFields = [
+						'TYPE' => $callRequest->callType,
+						'PROVIDER' => $callRequest->provider,
+						'ENTITY_TYPE' => EntityType::CHAT,
+						'ENTITY_ID' => $chat->getId(),
+						'INITIATOR_ID' => $userId,
+						'UUID' => $roomId,
+						'SCHEME' => \Bitrix\Call\Call::SCHEME_JWT,
+						'STATE' => \Bitrix\Call\Call::STATE_FINISHED,
+						// The record is born terminal, so finish()/updateState()
+						// never runs for it: set the end date explicitly, or the
+						// call log would compute an ever-growing duration.
+						'END_DATE' => new DateTime(),
+					];
+					$callObject = CallFactory::getCallInstance($callRequest->provider, $callFields);
+
+					$callObject->save();
+
+					$participants = [
+						['id' => $userId, 'state' => CallUser::STATE_READY],
+						['id' => $targetUserId, 'state' => CallUser::STATE_IDLE],
+					];
+
+					foreach ($participants as $user)
+					{
+						CallUser::create([
+							'CALL_ID' => $callObject->getId(),
+							'USER_ID' => $user['id'],
+							'STATE' => $user['state'],
+							'LAST_SEEN' => null,
+						])->save();
+					}
+
+					$callObject->getSignaling()->sendFinishToInitiator($userId);
+
+					return [
+						'result' => false,
+						'errorCode' => 'call_already_finished',
+						'errorMessage' => 'Call was finished before start completed',
+					];
+				}
+
 				if ($callRequest->provider == \Bitrix\Call\Call::PROVIDER_PLAIN)
 				{
 					if (CallFactory::hasUserActiveCalls((int)$entityId, $userId))
@@ -567,6 +664,44 @@ class Call extends JwtController
 
 		$callUuid = $callRequest->roomId ?: $callRequest->callUuid;
 
+		// Lightweight pre-lock probe: read only ID + STATE by UUID, without building the
+		// Call (and its associated Chat/roster). The full object is hydrated once — here
+		// only when the already-FINISHED fast-path is taken, or under the lock for a
+		// normal finish — so a normal finish no longer loads the call twice. The lookup
+		// rides the UUID index (present on MySQL and, after the migration, PostgreSQL).
+		$preCheck = $this->probeCallStateByUuid($callUuid);
+		$preCheckId = $preCheck['id'] ?? null;
+		if ($preCheck && $preCheck['state'] === \Bitrix\Call\Call::STATE_FINISHED)
+		{
+			// FINISHED is terminal, so the state cannot regress between the probe and this
+			// load; hydrate the full object by PK for the response and recovery.
+			$finishedCall = Registry::getCallWithId((int)$preCheck['id']);
+			if ($finishedCall)
+			{
+				$preCheckUserId = (int)($callRequest->userId ?: $finishedCall->getInitiatorId());
+				if (!$finishedCall->checkAccessClosedForm($preCheckUserId))
+				{
+					$this->addError(new Error('access_denied', 'You do not have access to the call'));
+
+					return [
+						'result' => false,
+						'errorCode' => 'access_denied',
+						'errorMessage' => 'You do not have access to the call',
+					];
+				}
+
+				// Recovery for a repeat finish on an already-FINISHED call, seen before the
+				// lock. See recoverFinishedCall() for why it runs unconditionally.
+				$this->recoverFinishedCall($finishedCall);
+
+				return [
+					'call' => $finishedCall->toArray($preCheckUserId),
+					'connectionData' => $finishedCall->getConnectionData($preCheckUserId),
+					'logToken' => $finishedCall->getLogToken($preCheckUserId),
+				];
+			}
+		}
+
 		// Lock to prevent race conditions with startCall
 		$lockName = static::getLockNameWithCallId('call_state', $callUuid);
 		if (!Application::getConnection()->lock($lockName, static::LOCK_TTL))
@@ -579,11 +714,24 @@ class Call extends JwtController
 			];
 		}
 
+		$committedHere = false;
+		// Set to the requesting user id when a concurrent finish committed FINISHED
+		// while this request waited for the lock; drives the post-unlock recovery.
+		$recoverFinishedUserId = null;
 		try
 		{
-			$call = Registry::getCallWithUuid($callUuid);
+			$call = $this->reloadCallUnderLock($preCheckId, $callUuid);
 			if (!$call)
 			{
+				// Quick hangup race: the client finished the call before the
+				// startCall webhook created it on the portal. Mark the room as
+				// finished and kill it on the controller side. Plain only: the
+				// marker consumer in startCallAction is PLAIN-scoped.
+				if (!$callRequest->provider || $callRequest->provider === \Bitrix\Call\Call::PROVIDER_PLAIN)
+				{
+					$this->markRoomFinished($callUuid, (int)$callRequest->userId);
+				}
+
 				$this->addError(new Error('call_not_found', 'Call not found'));
 				return [
 					'result' => false,
@@ -592,36 +740,82 @@ class Call extends JwtController
 				];
 			}
 
-			$currentUserId = (int)($callRequest->userId ?: $call->getInitiatorId());
-			if (!$call->checkAccess($currentUserId))
+			// Backstop under the lock: a concurrent finish may have committed FINISHED
+			if ($call->getState() === \Bitrix\Call\Call::STATE_FINISHED)
 			{
-				$this->addError(new Error('access_denied', 'You do not have access to the call'));
-				return [
-					'result' => false,
-					'errorCode' => 'access_denied',
-					'errorMessage' => 'You do not have access to the call',
-				];
+				$finishedUserId = (int)($callRequest->userId ?: $call->getInitiatorId());
+				if (!$call->checkAccessClosedForm($finishedUserId))
+				{
+					$this->addError(new Error('access_denied', 'You do not have access to the call'));
+					return [
+						'result' => false,
+						'errorCode' => 'access_denied',
+						'errorMessage' => 'You do not have access to the call',
+					];
+				}
+
+				// The winner may have committed the CAS but died before finishSideEffects(),
+				// leaving siblings and the recent cache un-torn-down. This waiter is the last
+				// chance to re-run the recovery — same as the pre-lock fast-path. Deferred
+				// until after unlock so the heavy teardown never extends the critical section.
+				$recoverFinishedUserId = $finishedUserId;
 			}
-
-			$userId = $callRequest->userId ?: $call->getInitiatorId();
-			$call->setActionUserId($userId);
-
-			if ($call->isAudioRecordEnabled())
+			else
 			{
-				$call->disableAudioRecord();
+				$currentUserId = (int)($callRequest->userId ?: $call->getInitiatorId());
+				// Closed-form access keeps the critical section to the atomic transition;
+				// finishSideEffects() loads the roster after unlock.
+				if (!$call->checkAccessClosedForm($currentUserId))
+				{
+					$this->addError(new Error('access_denied', 'You do not have access to the call'));
+					return [
+						'result' => false,
+						'errorCode' => 'access_denied',
+						'errorMessage' => 'You do not have access to the call',
+					];
+				}
+
+				$userId = $callRequest->userId ?: $call->getInitiatorId();
+				$call->setActionUserId($userId);
+
+				if ($call->isAudioRecordEnabled())
+				{
+					$call->disableAudioRecord();
+					// Persist ONLY the record flag. A full $call->save() here would write
+					// back every field including STATE and could resurrect a FINISHED
+					// committed by a lock-free teardown path (Recent sibling/stuck-call
+					// cleanup) between the re-read above and the write — breaking the
+					// exactly-once guarantee of commitFinish().
+					CallTable::update($call->getId(), ['RECORD_AUDIO' => false]);
+				}
+
+				// Only the atomic FINISHED transition is held under the lock.
+				$committedHere = $call->commitFinish();
 			}
-
-			$call->save();
-			$call->finish();
-
-			// Terminate all other active calls in the same chat after this call finishes
-			Recent::terminateAllCallsInChat($call->getChatId(), $call->getId());
-
-			Recent::scheduleUpdateCallCache($call->getId());
 		}
 		finally
 		{
 			Application::getConnection()->unlock($lockName);
+		}
+
+		// Race recovery for a FINISHED observed under the lock: run the same teardown
+		// the pre-lock fast-path uses, but outside the critical section.
+		if ($recoverFinishedUserId !== null)
+		{
+			$this->recoverFinishedCall($call);
+
+			return [
+				'call' => $call->toArray($recoverFinishedUserId),
+				'connectionData' => $call->getConnectionData($recoverFinishedUserId),
+				'logToken' => $call->getLogToken($recoverFinishedUserId),
+			];
+		}
+
+		// Side effects run after unlock and only when this request performed the
+		// transition (exactly-once); a lost race returns the cached finish result.
+		if ($committedHere)
+		{
+			$call->finishSideEffects();
 		}
 
 		return [
@@ -629,6 +823,74 @@ class Call extends JwtController
 			'connectionData' => $call->getConnectionData($userId),
 			'logToken' => $call->getLogToken($userId)
 		];
+	}
+
+	/**
+	 * Scalar pre-lock probe by UUID: returns only ['id' => int, 'state' => string] (or
+	 * null when no row), without constructing the Call or touching its associated Chat.
+	 * Keeps the pre-lock decision cheap and lets the full hydration happen exactly once.
+	 *
+	 * @return array{id: int, state: string}|null
+	 */
+	private function probeCallStateByUuid(string $callUuid): ?array
+	{
+		$row = CallTable::getList([
+			'select' => ['ID', 'STATE'],
+			'filter' => ['=UUID' => $callUuid],
+			'limit' => 1,
+		])->fetch();
+
+		return $row ? ['id' => (int)$row['ID'], 'state' => (string)$row['STATE']] : null;
+	}
+
+	/**
+	 * Re-reads the call fresh from the DB under the lock so a transition committed while
+	 * this request waited for the lock is observed. Reloads by the PK captured by the
+	 * pre-lock probe (indexed) when available, dropping any cached instance first; falls
+	 * back to a UUID lookup when the probe saw no row (a concurrent startCall may have
+	 * created it since). Extracted as a seam so tests can force the "FINISHED committed
+	 * while waiting for the lock" race.
+	 */
+	protected function reloadCallUnderLock(?int $preCheckId, string $callUuid): ?\Bitrix\Call\Call
+	{
+		if ($preCheckId !== null)
+		{
+			Registry::clearCache($preCheckId);
+			$call = Registry::getCallWithId($preCheckId);
+			if ($call)
+			{
+				return $call;
+			}
+		}
+
+		return Registry::getCallWithUuid($callUuid);
+	}
+
+	/**
+	 * Re-runs the durable teardown for a repeat finish on an already-FINISHED call:
+	 * recent-cache rebuild plus sibling cleanup. These normally fire once from
+	 * onCallFinished, inline in finishSideEffects() during the ORIGINAL finish. If
+	 * that finish committed the CAS but died before firing the event, the effects are
+	 * lost, so every later finish that observes FINISHED re-runs them — both the
+	 * pre-lock fast-path and the under-lock backstop (a request that saw FINISHED only
+	 * after acquiring the lock).
+	 *
+	 * Both re-runs are storm-coalesced and deferred off the request clock: under a
+	 * finish-storm many requests observe FINISHED at once, but scheduleUpdateCallCache
+	 * and scheduleTerminateAllCallsInChat collapse to a single cache rebuild and a
+	 * single sibling teardown via their shared-KV token, so the redundant IM-chat load
+	 * and active-calls SELECT no longer run per request. The primary onCallFinished
+	 * teardown stays inline — only this recovery re-run is coalesced.
+	 */
+	private function recoverFinishedCall(\Bitrix\Call\Call $call): void
+	{
+		Recent::scheduleUpdateCallCache((int)$call->getId());
+
+		$chatId = (int)$call->getChatId();
+		if ($chatId > 0)
+		{
+			Recent::scheduleTerminateAllCallsInChat($chatId, (int)$call->getId());
+		}
 	}
 
 	protected function inviteUsers(
@@ -919,7 +1181,9 @@ class Call extends JwtController
 			];
 		}
 
-		if (!$call->checkAccess($currentUserId))
+		// Closed-form pre-lock checks: authorize the caller and confirm membership
+		$isCallMember = $call->hasUserClosedForm($currentUserId);
+		if (!$isCallMember && !$call->getAssociatedEntity()?->checkAccess($currentUserId))
 		{
 			return [
 				'result' => false,
@@ -928,24 +1192,13 @@ class Call extends JwtController
 			];
 		}
 
-		$callUser = $call->getUser($currentUserId);
-		if (!$callUser)
+		if (!$isCallMember)
 		{
 			$this->addError(new Error("unknown_call_user", "User is not part of the call"));
 			return [
 				'result' => false,
 				'errorCode' => 'unknown_call_user',
 				'errorMessage' => 'User is not part of the call',
-			];
-		}
-
-		if ($callUser->getState() === CallUser::STATE_READY)
-		{
-			$this->addError(new Error("wrong_user_state", "Can not decline in {$callUser->getState()} user state"));
-			return [
-				'result' => false,
-				'errorCode' => 'wrong_user_state',
-				'errorMessage' => "Can not decline in {$callUser->getState()} user state",
 			];
 		}
 
@@ -960,45 +1213,24 @@ class Call extends JwtController
 			];
 		}
 
-		// Re-load from DB after lock to get fresh state
-		Registry::clearCache($call->getId());
-		$call = Registry::getCallWithUuid($callUuid);
-
-		if ($call->getState() === \Bitrix\Call\Call::STATE_FINISHED)
+		// Critical section under the named lock. Wrapped in try/finally so the lock
+		// is released on every path — including an exception from the DB re-read or
+		// the state writes inside applyDeclineUnderLock() — instead of leaking until
+		// the DB session ends (matches finishAction). The off-lock broadcast/finish
+		// runs after the block.
+		try
+		{
+			$earlyResult = $this->applyDeclineUnderLock($callUuid, $currentUserId, $userRequest, $call);
+		}
+		finally
 		{
 			Application::getConnection()->unlock($lockName);
-			return ['result' => true];
 		}
 
-		$callUser = $call->getUser($currentUserId);
-		if (!$callUser)
+		if ($earlyResult !== null)
 		{
-			Application::getConnection()->unlock($lockName);
-			return ['result' => true];
+			return $earlyResult;
 		}
-
-		if ($callUser->getState() === CallUser::STATE_READY)
-		{
-			Application::getConnection()->unlock($lockName);
-			$this->addError(new Error("wrong_user_state", "Can not decline in {$callUser->getState()} user state"));
-			return [
-				'result' => false,
-				'errorCode' => 'wrong_user_state',
-				'errorMessage' => "Can not decline in {$callUser->getState()} user state",
-			];
-		}
-
-		if ($userRequest->code === 486)
-		{
-			$callUser->updateState(CallUser::STATE_BUSY);
-		}
-		else
-		{
-			$callUser->updateState(CallUser::STATE_DECLINED);
-		}
-
-		$callUser->updateLastSeen(new DateTime());
-		Application::getConnection()->unlock($lockName);
 
 		// Smart-targeted broadcast: only initiator + sender + active (READY)
 		// peers receive Call::hangup. Ringing (STATE_CALLING) peers are
@@ -1019,6 +1251,71 @@ class Call extends JwtController
 		Recent::scheduleUpdateUsersActiveCallsCache([$currentUserId]);
 
 		return ['result' => true];
+	}
+
+	/**
+	 * Critical section of {@see self::declineAction()} executed under the named lock.
+	 * Re-loads the call under the lock, validates its state and settles the caller's
+	 * CallUser state. Returns a ready-to-send response array when the action must stop
+	 * here (call gone/finished, caller not a call user, wrong user state); returns null
+	 * when the caller should proceed with the off-lock broadcast/finish. $call is
+	 * updated by reference with the freshly reloaded instance.
+	 */
+	protected function applyDeclineUnderLock(
+		string $callUuid,
+		int $currentUserId,
+		DTO\UserRequest $userRequest,
+		?\Bitrix\Call\Call &$call
+	): ?array
+	{
+		// Re-load from DB after lock to get fresh state
+		Registry::clearCache($call->getId());
+		$call = Registry::getCallWithUuid($callUuid);
+
+		if (!$call)
+		{
+			// Call vanished between the pre-lock fetch and this under-lock re-read;
+			// nothing left to decline — consistent with the FINISHED / no-call-user branches.
+			return ['result' => true];
+		}
+
+		if ($call->getState() === \Bitrix\Call\Call::STATE_FINISHED)
+		{
+			return ['result' => true];
+		}
+
+		// Targeted single-row read under the lock: decline only needs the caller's
+		// own fresh CallUser to validate and settle its state. getUser() would call
+		// loadUsers() and materialize the whole roster (O(N)) while holding the lock;
+		// the unavoidable full load for the off-lock hangup broadcast happens after unlock.
+		$callUser = $call->getUserClosedForm($currentUserId);
+		if (!$callUser)
+		{
+			return ['result' => true];
+		}
+
+		if ($callUser->getState() === CallUser::STATE_READY)
+		{
+			$this->addError(new Error("wrong_user_state", "Can not decline in {$callUser->getState()} user state"));
+			return [
+				'result' => false,
+				'errorCode' => 'wrong_user_state',
+				'errorMessage' => "Can not decline in {$callUser->getState()} user state",
+			];
+		}
+
+		if ($userRequest->code === 486)
+		{
+			$callUser->updateState(CallUser::STATE_BUSY);
+		}
+		else
+		{
+			$callUser->updateState(CallUser::STATE_DECLINED);
+		}
+
+		$callUser->updateLastSeen(new DateTime());
+
+		return null;
 	}
 
 	/**
@@ -1053,7 +1350,14 @@ class Call extends JwtController
 		}
 
 		$currentUserId = (int)$callUserRequest->userId;
-		if ($currentUserId > 0 && !$call->checkAccess($currentUserId))
+		// Authorize the caller. When this request will settle participant states
+		$needsRoster = $call->getState() !== \Bitrix\Call\Call::STATE_FINISHED
+			&& (!empty($callUserRequest->connectedUsers) || !empty($callUserRequest->disconnectedUsers));
+
+		if (
+			$currentUserId > 0
+			&& !($needsRoster ? $call->checkAccess($currentUserId) : $call->checkAccessClosedForm($currentUserId))
+		)
 		{
 			return null;
 		}
@@ -1681,6 +1985,45 @@ class Call extends JwtController
 		return array_merge(
 			['success' => true],
 			$this->formatCallResponse($call)
+		);
+	}
+
+	/**
+	 * Sets the finished-room marker for the uuid and finishes the media room
+	 * on the controller side. Used when a finish request arrives before the
+	 * startCall webhook has created the call entity on the portal.
+	 *
+	 * @param string $callUuid
+	 * @param int $userId
+	 * @return void
+	 */
+	protected function markRoomFinished(string $callUuid, int $userId): void
+	{
+		if (!preg_match(static::UUID_V4_PATTERN, $callUuid))
+		{
+			return;
+		}
+
+		if (!Idempotence::addKey(static::FINISHED_ROOM_MARKER_PREFIX . $callUuid, static::FINISHED_ROOM_MARKER_TTL))
+		{
+			// The marker is already claimed: the room finish is scheduled by the
+			// first caller, repeats must not multiply outbound HTTP requests.
+			return;
+		}
+
+		// The marker must be set under the caller's lock, but the room-finish
+		// HTTP goes out after the response, outside the lock (perf).
+		Application::getInstance()->addBackgroundJob(
+			static function () use ($callUuid, $userId) {
+				$result = (new ControllerClient())->finishPlainByUuid($callUuid, $userId);
+				if (!$result->isSuccess())
+				{
+					Logger::getInstance()->error(
+						static::class . "::markRoomFinished: controller finishPlainByUuid failed for call uuid:{$callUuid}: "
+						. implode('; ', $result->getErrorMessages()),
+					);
+				}
+			},
 		);
 	}
 

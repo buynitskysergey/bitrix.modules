@@ -116,7 +116,7 @@ class RecycleBinController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-03] Bulk restore of a selection from the recycle bin.
+	 * Bulk restore of a selection from the recycle bin.
 	 * canRestore is decided per record inside the command; records the user cannot restore land
 	 * in skippedByAccessCount. Jointly selected parent/child pairs are restored top-down so the
 	 * child re-attaches under its parent.
@@ -311,7 +311,7 @@ class RecycleBinController extends Controller
 	}
 
 	/**
-	 * [FEAT-kb2-tree-bulk-archive / API-04] Bulk hard-delete of a selection from the recycle bin.
+	 * Bulk hard-delete of a selection from the recycle bin.
 	 * canHardDelete is decided per record inside the command (live collection -> MANAGE, orphan ->
 	 * trashedBy / portal admin); records the user cannot hard-delete land in skippedByAccessCount,
 	 * they are not an endpoint error. Files and the search index are cleaned up after each chunk's

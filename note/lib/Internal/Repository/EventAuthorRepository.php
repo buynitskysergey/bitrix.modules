@@ -38,7 +38,7 @@ class EventAuthorRepository
 	}
 
 	/**
-	 * [P2.T3] Batch read for feed enrichment — one query per feed page instead of
+	 * Batch read for feed enrichment - one query per feed page instead of
 	 * one per event, so the client gets the co-author stack without a second request.
 	 *
 	 * @param int[] $eventIds

@@ -86,6 +86,7 @@ class InvitationWidget extends Engine\Controller
 			'isCurrentUserAdmin' => $intranetUser->isAdmin(),
 			'isInvitationAvailable' => Intranet\Integration\HumanResources\PermissionInvitation::createByCurrentUser()->canInvite(),
 			'structureLink' => '/company/vis_structure.php',
+			'userListLink' => SITE_DIR . 'company/',
 			'invitationLink' => Intranet\CurrentUser::get()->isAdmin() || Intranet\Integration\HumanResources\PermissionInvitation::createByCurrentUser()->canInvite()
 				? Engine\UrlManager::getInstance()->create('getSliderContent', [
 					'c' => 'bitrix:intranet.invitation',

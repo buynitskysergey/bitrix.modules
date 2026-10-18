@@ -36,12 +36,12 @@ class RecordIntentService
 	public const MAX_DISMISSES = 4;
 	public const RETRY_INTERVAL_SECONDS = 3600;
 	public const SHIFT_LEAD_SECONDS = 1200;
+	public const HISTORY_LEAD_SECONDS = 1200;
 	public const DATA_COLLECTION_START = 18000; // 05:00
 	public const FALLBACK_START = 32400; // 09:00
 	public const HISTORY_DAYS = 7;
 
 	private const SECONDS_PER_DAY = 86400;
-	private const SECONDS_PER_HOUR = 3600;
 
 	private readonly TimeHelper $timeHelper;
 	private readonly ScheduleProvider $legacyScheduleProvider;
@@ -154,13 +154,18 @@ class RecordIntentService
 		$periodKey = 'D' . $this->localDate($nowUtc, $timeZone);
 		$periodEndAt = $this->startOfNextLocalDayUtc($nowUtc, $timeZone);
 
-		$avg = $this->averageLocalStartSeconds($userId, $nowUtc);
+		$historyMedian = $this->medianLocalStartSeconds($userId, $nowUtc);
 		$scheduleStartSeconds = $this->scheduleStartSeconds($legacySchedules);
 
-		if ($avg !== null)
+		// Set by the history branch itself: the choice of the target formula below stays bound to that source
+		// whatever the order of the sources.
+		$fromHistory = false;
+		if ($historyMedian !== null)
 		{
 			$mode = self::MODE_SMART;
-			$startSeconds = $avg;
+			$fromHistory = true;
+			// Not earlier than the start of the current local day.
+			$startSeconds = max(0, $historyMedian - self::HISTORY_LEAD_SECONDS);
 		}
 		elseif ($scheduleStartSeconds !== null)
 		{
@@ -178,7 +183,11 @@ class RecordIntentService
 			$startSeconds = self::FALLBACK_START;
 		}
 
-		$targetStartAt = $periodEndAt - self::SECONDS_PER_DAY + $startSeconds;
+		// The history start is set on the wall clock of the current local day: on a DST transition day it
+		// neither slips into the previous day nor shifts by an hour.
+		$targetStartAt = $fromHistory
+			? $this->localDayTimeUtc($nowUtc, $timeZone, $startSeconds)
+			: $periodEndAt - self::SECONDS_PER_DAY + $startSeconds;
 
 		// Show window gate for the fixed working-day branch. For flextime/free schedules it stays true
 		// and the window is bounded only by the local day (behaviour unchanged).
@@ -223,6 +232,18 @@ class RecordIntentService
 			targetShift: $targetShift,
 			shiftStartable: $shiftStartable,
 			canShowNowOverride: $shiftStartable ? null : false,
+		);
+	}
+
+	/**
+	 * UTC timestamp of the next local midnight of the user: the scope a verdict about the user's
+	 * current local day may cover, whatever period the show window currently belongs to.
+	 */
+	public function getNextLocalDayStart(int $userId): int
+	{
+		return $this->startOfNextLocalDayUtc(
+			$this->timeHelper->getUtcNowTimestamp(),
+			$this->timeHelper->getUserDateTimeZone($userId),
 		);
 	}
 
@@ -376,10 +397,11 @@ class RecordIntentService
 	}
 
 	/**
-	 * Average of local start seconds across the user's closed records over HISTORY_DAYS, floored to a
-	 * whole hour. Null when there are no closed records in the window.
+	 * Median of local start seconds across the user's closed records over HISTORY_DAYS: the values are
+	 * ordered by the time of day and the middle one is taken, for an even count the earlier of the two
+	 * middle values. Null when there are no closed records in the window.
 	 */
-	private function averageLocalStartSeconds(int $userId, int $nowUtc): ?int
+	private function medianLocalStartSeconds(int $userId, int $nowUtc): ?int
 	{
 		$fromTs = $nowUtc - self::HISTORY_DAYS * self::SECONDS_PER_DAY;
 		$rows = $this->recordRepository->getClosedStartTimestampsByUserAndRange($userId, $fromTs, $nowUtc);
@@ -388,8 +410,7 @@ class RecordIntentService
 			return null;
 		}
 
-		$sum = 0;
-		$count = 0;
+		$startSeconds = [];
 		foreach ($rows as $row)
 		{
 			$startTs = (int)$row['RECORDED_START_TIMESTAMP'];
@@ -397,16 +418,18 @@ class RecordIntentService
 			{
 				continue;
 			}
-			$sum += $this->timeHelper->convertUtcTimestampToDaySeconds($startTs, (int)$row['START_OFFSET']);
-			$count++;
+			$startSeconds[] = $this->timeHelper->convertUtcTimestampToDaySeconds($startTs, (int)$row['START_OFFSET']);
 		}
 
-		if ($count === 0)
+		if ($startSeconds === [])
 		{
 			return null;
 		}
 
-		return $this->floorToHour(intdiv($sum, $count));
+		// The rows come in chronological order, not by the time of day.
+		sort($startSeconds);
+
+		return $startSeconds[intdiv(count($startSeconds) - 1, 2)];
 	}
 
 	/**
@@ -467,11 +490,6 @@ class RecordIntentService
 		];
 	}
 
-	private function floorToHour(int $seconds): int
-	{
-		return intdiv($seconds, self::SECONDS_PER_HOUR) * self::SECONDS_PER_HOUR;
-	}
-
 	private function localDate(int $timestamp, \DateTimeZone $timeZone): string
 	{
 		return (new \DateTime('@' . $timestamp))->setTimezone($timeZone)->format('Ymd');
@@ -494,5 +512,19 @@ class RecordIntentService
 			->setTime(0, 0, 0)
 			->modify('+1 day')
 			->getTimestamp();
+	}
+
+	/**
+	 * UTC timestamp of the wall-clock time $daySeconds on the local day containing $nowUtc. $daySeconds is
+	 * the time of day in seconds (H * 3600 + M * 60 + S), not the time elapsed since midnight: it is set on
+	 * the clock of the user's real IANA zone, so it stays the same wall-clock time on a DST transition day
+	 * (the local day may be 23h or 25h, not a fixed 24h).
+	 */
+	private function localDayTimeUtc(int $nowUtc, \DateTimeZone $timeZone, int $daySeconds): int
+	{
+		$localDateTime = (new \DateTime('@' . $nowUtc))->setTimezone($timeZone);
+		$this->timeHelper->setTimeFromSeconds($localDateTime, $daySeconds);
+
+		return $localDateTime->getTimestamp();
 	}
 }

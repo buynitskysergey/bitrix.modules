@@ -95,18 +95,20 @@ class ResultService
 			$fileIds = array_map(static fn (int $fileId): string => 'n' . $fileId, $fileIds);
 		}
 
+		$messageText = $message->text ?? '';
+
 		$result = new Result(
 			taskId: $message->chat->entityId,
-			text: mb_strlen($message->text) > 0 ? $message->text : Loc::getMessage('TASKS_RESULT_SERVICE_DEFAULT_TITLE_FROM_MESSAGE'),
+			text: mb_strlen($messageText) > 0 ? $messageText : Loc::getMessage('TASKS_RESULT_SERVICE_DEFAULT_TITLE_FROM_MESSAGE'),
 			fileIds: $fileIds,
 			previewId: $message->previewId,
 			messageId: $message->getId(),
 		);
 
-		return $this->create($result, $userId);
+		return $this->create($result, $userId, notificationText: $messageText);
 	}
 
-	public function create(Result $result, int $userId, bool $skipNotification = false): Result
+	public function create(Result $result, int $userId, bool $skipNotification = false, ?string $notificationText = null): Result
 	{
 		if ($result->taskId === null)
 		{
@@ -168,7 +170,7 @@ class ResultService
 				? NotificationType::ResultFromMessage
 				: NotificationType::ResultAdded
 			;
-			$this->notifyChat($result, $userId, $notifyType);
+			$this->notifyChat($result, $userId, $notifyType, $notificationText);
 		}
 
 		if (!empty($uf))
@@ -368,7 +370,7 @@ class ResultService
 		$this->sendPush(self::COMMAND_DELETE, $result);
 	}
 
-	private function notifyChat(Result $result, int $userId, NotificationType $notificationType): void
+	private function notifyChat(Result $result, int $userId, NotificationType $notificationType, ?string $notificationText = null): void
 	{
 		$task = $this->getTask((int)$result->taskId);
 
@@ -379,7 +381,7 @@ class ResultService
 			task: $task,
 			args: [
 				'triggeredBy' => $triggeredBy,
-				'resultText' => $result->getText(),
+				'resultText' => $notificationText ?? $result->getText(),
 				'dateTs' => $result->createdAtTs,
 				'fileIds' => $result->fileIds ?? [],
 				'messageId' => $result->messageId ?? 0,

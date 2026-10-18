@@ -2,6 +2,12 @@
 
 namespace Bitrix\Disk;
 
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkSupportService;
+use Bitrix\Disk\Internal\Enum\ExternalLinkScenario;
+use Bitrix\Disk\Internal\Enum\SharingMemberType;
+use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkScenarioRegistry;
+use Bitrix\Disk\Internal\Service\ExternalLink\MailAttachmentLinkContract;
+use Bitrix\Disk\Internal\Service\Folder\MailAttachmentsFolderPredicate;
 use Bitrix\Disk\Internal\Service\UnifiedLink\UniqueCodeBackfiller;
 use Bitrix\Disk\Internals\Entity\ModelSynchronizer;
 use Bitrix\Disk\Internals\Error\Error;
@@ -21,6 +27,8 @@ use Bitrix\Main\Entity\Result;
 use Bitrix\Main\Event;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\ModuleManager;
+use Bitrix\Main\Security\Random;
 use Bitrix\Main\Text\Emoji;
 use Bitrix\Main\Type\Collection;
 use Bitrix\Main\Type\DateTime;
@@ -542,13 +550,27 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 
 		$data['OBJECT_ID'] = $this->id;
 
-		$parent = $this->getParent();
-		if ($parent && SpecificFolder::isSpecificFolder($parent, [SpecificFolder::CODE_FOR_MAIL_ATTACHMENTS]))
+		// Only internal services assign a scenario, never the calling code.
+		unset($data['SCENARIO']);
+
+		$predicate = ServiceLocator::getInstance()->get(MailAttachmentsFolderPredicate::class);
+		$isInsideMailAttachmentsTree = $predicate->isInsideMailAttachmentsTree((int)$this->id);
+
+		if ($isInsideMailAttachmentsTree)
 		{
-			// Invariant: links to objects inside the mail attachments folder always keep
-			// their settings locked. The client-supplied CAN_EDIT_SETTINGS is ignored so the
+			// Invariant: links to objects anywhere inside the mail attachments folder tree always
+			// keep their settings locked. The client-supplied CAN_EDIT_SETTINGS is ignored so the
 			// flag cannot be reset on link re-creation or by passing an explicit value in the request.
 			$data['CAN_EDIT_SETTINGS'] = false;
+		}
+
+		$scenario = $this->resolveExternalLinkScenario($data, $isInsideMailAttachmentsTree);
+		if ($scenario === ExternalLinkScenario::MailAttachments)
+		{
+			// The object remembers that its public link is a service one, so a link re-created from the
+			// interface comes back as a service link and with the whole contract of it, not just with
+			// its name: the settings of the request cannot widen what the recipient of the letter gets.
+			$data = MailAttachmentLinkContract::applyTo($data);
 		}
 
 		$addResult = ExternalLink::add($data, $this->errorCollection);
@@ -560,6 +582,22 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		}
 
 		return $addResult;
+	}
+
+	/**
+	 * The service nature of a link is bounded by three conditions at once: the object is marked as a
+	 * service one, the link being created is a manual one and the object still lies inside the mail
+	 * attachments folder tree. An automatic link and an object taken out of the tree get no scenario,
+	 * so they keep asking the portal policy as any regular link does.
+	 */
+	private function resolveExternalLinkScenario(array $data, bool $isInsideMailAttachmentsTree): ?ExternalLinkScenario
+	{
+		if (!$isInsideMailAttachmentsTree || (int)($data['TYPE'] ?? 0) !== ExternalLink::TYPE_MANUAL)
+		{
+			return null;
+		}
+
+		return ServiceLocator::getInstance()->get(ExternalLinkScenarioRegistry::class)->getFor($this);
 	}
 
 	/**
@@ -782,6 +820,44 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 	abstract public function copyTo(Folder $targetFolder, $updatedBy, $generateUniqueName = false);
 
 	/**
+	 * A write which carries a name is refused by the index over the pair of name and parent, so it means
+	 * a name already taken in the folder. The other unique index of the table guards the unique code and
+	 * keeps the generic error.
+	 */
+	protected function createDuplicateEntryError(array $data): Error
+	{
+		if (!array_key_exists('NAME', $data))
+		{
+			return parent::createDuplicateEntryError($data);
+		}
+
+		return new Error(
+			Loc::getMessage('DISK_OBJECT_MODEL_ERROR_NON_UNIQUE_NAME'),
+			self::ERROR_NON_UNIQUE_NAME
+		);
+	}
+
+	/**
+	 * Builds a name which is free in any folder, so the object can be parked under it while it travels
+	 * between folders.
+	 */
+	protected function generateUniqueTmpName(): string
+	{
+		$uniqueTmpName = $this->name;
+
+		$uniquePart = '_' . Random::getString(32);
+		$maxAllowedLength = 255 - mb_strlen($uniquePart);
+
+		if (mb_strlen($this->name) > $maxAllowedLength)
+		{
+			$uniqueTmpName = mb_substr($this->name, 0, $maxAllowedLength);
+		}
+		$uniqueTmpName .= $uniquePart;
+
+		return $uniqueTmpName;
+	}
+
+	/**
 	 * Moves object to another folder.
 	 * Support cross-storage move (mark deleted + create new)
 	 * @param Folder $folder             Destination folder.
@@ -835,28 +911,17 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		}
 
 		$possibleNewName = $result->getName();
-		$needToRename = $possibleNewName != $this->name;
-
-		$this->name = $possibleNewName;
-
-		if($needToRename)
-		{
-			$successUpdate = $this->update(array(
-				'NAME' => $possibleNewName
-			));
-			if(!$successUpdate)
-			{
-				return null;
-			}
-		}
 
 		//simple move
 		if($realStorageIdSource == $realStorageIdTarget)
 		{
-			$object = $this->moveInSameStorage($folder, $movedBy);
+			$object = $this->moveInSameStorageUnderName($folder, $movedBy, $possibleNewName, $generateUniqueName);
 		}
 		else
 		{
+			// the cross-storage branch copies the object into the target folder under this name and trashes
+			// the original, so the row of the source folder keeps its own name and is never renamed here
+			$this->name = $possibleNewName;
 			$object = $this->moveInAnotherStorage($folder, $movedBy);
 		}
 
@@ -869,6 +934,97 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		}
 
 		return $object;
+	}
+
+	/**
+	 * Moves the object and only then gives it the name prepared for the target folder.
+	 * The prepared name is free in the target folder, but can be taken in the source one, and the unique index
+	 * of the object table covers the pair of name and parent, so renaming before the move breaks on a collision
+	 * which has nothing to do with the destination. While the object travels it wears a temporary name free
+	 * in any folder.
+	 * @return $this|null
+	 */
+	private function moveInSameStorageUnderName(
+		Folder $folder,
+		$movedBy,
+		string $preparedName,
+		bool $generateUniqueName
+	)
+	{
+		$originalName = $this->name;
+		$needToRename = $preparedName !== $originalName;
+
+		if ($needToRename && !$this->updateName($this->generateUniqueTmpName()))
+		{
+			return null;
+		}
+
+		$object = $this->moveInSameStorage($folder, $movedBy);
+		if ($object === null)
+		{
+			if ($needToRename)
+			{
+				$this->restoreNameAfterFailedMove($originalName);
+			}
+
+			return null;
+		}
+
+		if ($needToRename && !$this->renameAfterMove($originalName, $folder, $generateUniqueName))
+		{
+			return null;
+		}
+
+		return $object;
+	}
+
+	/**
+	 * Picks the final name in the folder the object already belongs to.
+	 */
+	private function renameAfterMove(string $desiredName, Folder $folder, bool $generateUniqueName): bool
+	{
+		$nameService = new ObjectNameService($desiredName, $folder->getRealObject()->getId(), $this->getType());
+		$nameService->excludeId($this->getId());
+		if ($generateUniqueName)
+		{
+			$nameService->requireUniqueName();
+		}
+
+		$result = $nameService->prepareName();
+		if (!$result->isSuccess())
+		{
+			$this->errorCollection->add($result->getErrors());
+
+			return false;
+		}
+
+		return $this->updateName($result->getName());
+	}
+
+	private function restoreNameAfterFailedMove(string $originalName): void
+	{
+		// update() resets the error collection, so the errors of the failed move have to outlive the rollback
+		$errors = $this->getErrors();
+		$this->updateName($originalName);
+
+		$this->errorCollection->clear();
+		$this->errorCollection->add($errors);
+	}
+
+	/**
+	 * Writes the name and keeps the model in sync: an update result carries no fields back, and the label
+	 * caches the name it was built from.
+	 */
+	private function updateName(string $name): bool
+	{
+		if (!$this->update(['NAME' => $name]))
+		{
+			return false;
+		}
+		$this->name = $name;
+		$this->label = null;
+
+		return true;
 	}
 
 	/**
@@ -891,7 +1047,21 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		$moveResult = $tableClassName::move($this->id, $realFolderId);
 		if(!$moveResult->isSuccess())
 		{
-			$this->errorCollection->addFromResult($moveResult);
+			foreach($moveResult->getErrors() as $error)
+			{
+				if($error->getCode() === self::ERROR_NON_UNIQUE_NAME)
+				{
+					$this->errorCollection[] = new Error(
+						Loc::getMessage('DISK_OBJECT_MODEL_ERROR_NON_UNIQUE_NAME'),
+						self::ERROR_NON_UNIQUE_NAME
+					);
+
+					continue;
+				}
+
+				$this->errorCollection[] = new Error($error->getMessage());
+			}
+
 			return null;
 		}
 		$this->setAttributesFromResult($moveResult);
@@ -1037,6 +1207,18 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		$className = static::getClassNameModel($objectData);
 
 		return $className::buildFromArray($objectData);
+	}
+
+	/**
+	 * @param string $uniqueCode
+	 * @param array $with
+	 * @return File|null
+	 * @noinspection PhpDocMissingThrowsInspection
+	 */
+	public static function loadByUniqueCode(string $uniqueCode, array $with = []): ?static
+	{
+		/** @noinspection PhpUnhandledExceptionInspection */
+		return static::load(['=UNIQUE_CODE' => $uniqueCode], $with);
 	}
 
 	/**
@@ -1526,8 +1708,19 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 			}
 			if($type == SharingTable::TYPE_TO_USER)
 			{
+				// UF_DEPARTMENT is the condition by which User::buildFromArray() resolves the model
+				// flags from the row; the values read are EXTERNAL_AUTH_ID and UF_USER_CRM_ENTITY
+				$select = array(
+					'ID', 'PERSONAL_PHOTO', 'NAME', 'LOGIN', 'LAST_NAME', 'SECOND_NAME',
+					'UF_DEPARTMENT', 'EXTERNAL_AUTH_ID',
+				);
+				if (ModuleManager::isModuleInstalled('crm'))
+				{
+					$select[] = 'UF_USER_CRM_ENTITY';
+				}
+
 				$query = UserTable::getList(array(
-					'select' => array('ID', 'PERSONAL_PHOTO', 'NAME', 'LOGIN', 'LAST_NAME', 'SECOND_NAME'),
+					'select' => $select,
 					'filter' => array('ID' => array_values($members[$type])),
 				));
 				while($userRow = $query->fetch())
@@ -1542,8 +1735,10 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 						'name' => $userModel->getFormattedName(),
 						'right' => $sharing->getTaskName(),
 						'avatar' => $userModel->getAvatarSrc(),
+						'ownAvatar' => $userModel->getOwnAvatarSrc(),
 						'url' => $userModel->getDetailUrl(),
 						'type' => 'users',
+						'memberType' => SharingMemberType::forUser($userModel)?->value,
 					);
 				}
 			}
@@ -1564,7 +1759,9 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 						'name' => Emoji::decode($groupRow['NAME']),
 						'right' => $sharing->getTaskName(),
 						'avatar' => Avatar::getGroup($groupRow['IMAGE_ID']),
+						'ownAvatar' => Avatar::getSrc($groupRow['IMAGE_ID']) ?: null,
 						'type' => 'groups',
+						'memberType' => SharingMemberType::Group->value,
 					);
 				}
 			}
@@ -1586,7 +1783,9 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 						'name' => $structure['department']['DR' . $departmentId]['name'],
 						'right' => $sharing->getTaskName(),
 						'avatar' => Avatar::getDefaultGroup(),
+						'ownAvatar' => null,
 						'type' => 'department',
+						'memberType' => SharingMemberType::Department->value,
 					);
 				}
 				unset($departmentId);
@@ -1604,7 +1803,9 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 						'name' => $chat['title'],
 						'right' => $sharing->getTaskName(),
 						'avatar' => Avatar::getDefaultGroup(),
+						'ownAvatar' => null,
 						'type' => 'chat',
+						'memberType' => null,
 					];
 				}
 			}
@@ -1701,6 +1902,7 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 			$options = [
 				ObjectOptionsTable::NAME_ALLOW_DOWNLOAD_ON_READ => true,
 				ObjectOptionsTable::NAME_ALLOW_MANAGE_PUBLIC_ACCESS_ON_READ => true,
+				ObjectOptionsTable::NAME_EXTERNAL_LINK_SCENARIO => null,
 			];
 
 			$items = ObjectOptionsTable::getList([
@@ -1744,6 +1946,7 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		$options = [
 			ObjectOptionsTable::NAME_ALLOW_DOWNLOAD_ON_READ,
 			ObjectOptionsTable::NAME_ALLOW_MANAGE_PUBLIC_ACCESS_ON_READ,
+			ObjectOptionsTable::NAME_EXTERNAL_LINK_SCENARIO,
 		];
 		if (!in_array($name, $options))
 		{
@@ -1765,6 +1968,8 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 		}
 		$item->setValue(json_encode($value));
 		$item->save();
+		$this->objectOptions = null;
+
 		return $this;
 	}
 
@@ -1839,6 +2044,20 @@ abstract class BaseObject extends Internals\Model implements \JsonSerializable
 			'LOCK' => ObjectLock::className(),
 			'TTL' => ObjectTtl::className(),
 		);
+	}
+
+	public function supportsUnifiedLink(): bool
+	{
+		$realObject = $this->getRealObject();
+
+		if ($realObject === null)
+		{
+			return false;
+		}
+
+		$unifiedLinkSupportService = ServiceLocator::getInstance()->get(UnifiedLinkSupportService::class);
+
+		return $unifiedLinkSupportService->supports($realObject);
 	}
 
 	/**

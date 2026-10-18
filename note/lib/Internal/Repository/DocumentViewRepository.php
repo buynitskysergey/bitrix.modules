@@ -11,7 +11,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Model\DocumentViewTable;
 
 /**
- * [P3.T1-T3] b_note_document_view access: upsert on awareness join, keyset read
+ * b_note_document_view access: upsert on awareness join, keyset read
  * for the widget, and hard-delete cascade.
  */
 class DocumentViewRepository

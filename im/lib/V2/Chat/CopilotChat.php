@@ -5,6 +5,7 @@ namespace Bitrix\Im\V2\Chat;
 use Bitrix\Im;
 use Bitrix\Im\V2\Application\Features;
 use Bitrix\Im\V2\Chat;
+use Bitrix\Im\V2\Chat\Copilot\FileUploadPolicy;
 use Bitrix\Im\V2\Chat\Param\Params as ChatParams;
 use Bitrix\Im\V2\Error;
 use Bitrix\Im\V2\Integration\AI\EngineManager;
@@ -20,6 +21,7 @@ use Bitrix\Im\V2\Message\Send\SendingConfig;
 use Bitrix\Im\V2\Message\Send\SendResult;
 use Bitrix\ImBot\Bot;
 use Bitrix\Imbot\Bot\CopilotChatBot;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Im\V2\Chat\Add\AddResult;
@@ -442,6 +444,19 @@ class CopilotChat extends GroupChat
 		return (new Restriction())->isHistoryAvailable();
 	}
 
+	public static function getFileUploadPolicyPublicData(): ?array
+	{
+		if (
+			!Features::get()->isCopilotFileUploadAvailable
+			|| !Features::get()->isBitrixGptUploadPolicyAvailable
+		)
+		{
+			return null;
+		}
+
+		return FileUploadPolicy::toPublicData();
+	}
+
 	public function deleteUser(int $userId, DeleteUserConfig $config = new DeleteUserConfig()): Result
 	{
 		if (CopilotChatBot::getBotId() === $userId && $this->getContext()->getUserId() !== $userId)
@@ -465,5 +480,55 @@ class CopilotChat extends GroupChat
 		$pull['ai_provider'] = EngineManager::getDefaultEngineName();
 
 		return $pull;
+	}
+
+	public function toRestFormat(array $option = []): array
+	{
+		$rest = parent::toRestFormat($option);
+
+		// Skipped in the short format: the live per-chat session lookup must not become
+		// an N+1 in list payloads; full chat-load is the delivery point of this state.
+		if (!($option['CHAT_SHORT_FORMAT'] ?? false))
+		{
+			$rest['copilotGenerationState'] = $this->getGenerationState();
+		}
+
+		return $rest;
+	}
+
+	/**
+	 * Live derivative of the active aiassistant session; never cached with the chat,
+	 * so a finished generation cannot leave a stale "generating" behind.
+	 *
+	 * @return array{status: string, initiatorId: int}|null
+	 */
+	private function getGenerationState(): ?array
+	{
+		if (!Features::isBitrixGptStopGenerationAvailable() || !Loader::includeModule('aiassistant'))
+		{
+			return null;
+		}
+
+		// The lookup ships with the aiassistant module on its own schedule: until it lands,
+		// report "no generation" instead of fataling when the feature flag is enabled early.
+		if (!method_exists(\Bitrix\AiAssistant\Core\Service\SessionManager::class, 'findActiveByChatId'))
+		{
+			return null;
+		}
+
+		$session = ServiceLocator::getInstance()
+			->get(\Bitrix\AiAssistant\Core\Service\SessionManager::class)
+			->findActiveByChatId((int)$this->getChatId())
+		;
+
+		if ($session === null)
+		{
+			return null;
+		}
+
+		return [
+			'status' => Copilot\GenerationStatus::Generating->value,
+			'initiatorId' => (int)$session['userId'],
+		];
 	}
 }

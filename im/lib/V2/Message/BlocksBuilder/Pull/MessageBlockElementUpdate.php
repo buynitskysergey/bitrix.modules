@@ -40,7 +40,10 @@ class MessageBlockElementUpdate extends BaseMessageEvent
 			'text' => $this->message->getParsedMessage(),
 			'elementId' => $this->blockId,
 			'element' => $this->block?->jsonSerialize(),
-			'files' => FileCollection::initByDiskFilesIds($this->block?->getFiles() ?? [])->toRestFormat(),
+			'files' => FileCollection::initByDiskFilesIds(
+				$this->block?->getFiles() ?? [],
+				$this->message->getChatId(),
+			)->toRestFormat(),
 		];
 	}
 

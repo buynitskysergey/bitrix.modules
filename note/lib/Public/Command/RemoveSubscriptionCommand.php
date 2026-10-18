@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Subscription\MutePruner;
 
 /**
- * [P6.T3 / API-08] Unsubscribe — removes the caller's own subscription row.
+ * Unsubscribe - removes the caller's own subscription row.
  * Idempotent: a missing row is not an error. No ACL check — a user must always
  * be able to remove their own subscription, even after losing view access to
  * the target (per SDD: "потеря доступа строку не удаляет", the row can still
@@ -55,7 +55,7 @@ class RemoveSubscriptionCommand extends AbstractCommand
 	}
 
 	/**
-	 * [EVENT-02] subscriptionRemove into the personal channel. The initiator is not excluded: the same
+	 * subscriptionRemove into the personal channel. The initiator is not excluded: the same
 	 * bell may be open in another tab and in the mobile app.
 	 */
 	private function emitRemove(): void

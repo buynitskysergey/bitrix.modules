@@ -11,7 +11,6 @@ use Bitrix\Main\EventResult;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ObjectPropertyException;
 use Bitrix\Main\SystemException;
-use Bitrix\Main\Web\HttpClient;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Model\AppAttributeTable;
@@ -26,6 +25,7 @@ use Bitrix\Main\ORM\Fields\Relations\OneToMany;
 use Bitrix\Rest\Preset\EventController;
 use Bitrix\Rest\Public\Command\Application\DeactivateSystemUserCommand;
 use Bitrix\Rest\Public\Event\Application\AppUserReadyEvent;
+use Bitrix\Rest\Public\Provider\Application\HandlerHttpFactory;
 
 Loc::loadMessages(__FILE__);
 
@@ -1156,8 +1156,12 @@ class App
 		{
 			throw new ArgumentException('Property "URL_SETTINGS" is empty', 'URL_SETTINGS');
 		}
+		if (!\CRestUtil::checkAppAccess($this->clientId, $appData))
+		{
+			throw new Main\AccessDeniedException('Access to the application settings is denied');
+		}
 		$uri = new Uri($appData['URL_SETTINGS']);
-		$httpClient = new HttpClient();
+		$httpClient = HandlerHttpFactory::create();
 		$params = Sender::getDefaultEventParams();
 		$params['sendRefreshToken'] = true;
 		$event = [

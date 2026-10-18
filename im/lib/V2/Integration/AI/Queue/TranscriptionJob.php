@@ -7,12 +7,15 @@ namespace Bitrix\Im\V2\Integration\AI\Queue;
 use Bitrix\AI\Result;
 use Bitrix\Im\V2\Integration\AI\CopilotError;
 use Bitrix\Im\V2\Integration\AI\Restriction;
-use Bitrix\Im\V2\Integration\AI\TaskCreationManager;
+use Bitrix\Im\V2\Integration\AI\TaskCreation\MultipleMessagesCreator;
+use Bitrix\Im\V2\Integration\AI\TaskCreation\Status as TaskCreationStatus;
+use Bitrix\Im\V2\Integration\AI\TaskCreation\TranscriptionCreator;
 use Bitrix\Im\V2\Integration\AI\Transcription\Item\Status;
 use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
 use Bitrix\Im\V2\Integration\AI\Transcription\Result\TranscribeResult;
 use Bitrix\Im\V2\Integration\AI\Transcription\TranscribeManager;
 use Bitrix\Im\V2\Message;
+use Bitrix\Im\V2\Pull\Event\AutoTaskStatus;
 use Bitrix\Main\Error;
 
 class TranscriptionJob extends QueueJob
@@ -39,21 +42,51 @@ class TranscriptionJob extends QueueJob
 				? $parameters['launchType']
 				: null
 		);
+		$isAutoTask = (bool)($parameters['isAutoTask'] ?? false);
+		$userId = isset($parameters['userId']) ? (int)$parameters['userId'] : null;
 
 		$transcribeManager = new TranscribeManager($fileId, $diskFileId, $chatId, $messageId);
 		$transcribeResult = $this->getTranscribeResult($text ?? '', $transcribeManager);
 		$transcribeManager->handleTranscriptionResponse($transcribeResult, $launchType);
 
-		if (
-			$transcribeResult->isSuccess()
-			&& (new Restriction())->isAutoTaskActive()
-		)
+		$multiMessageIds = $this->extractIntList($parameters, 'multiMessageIds');
+		if (!empty($multiMessageIds))
 		{
-			$message = new Message($messageId);
-			(new TaskCreationManager($message, $transcribeResult->getFileItem()->getPlainText(), $fileId, $diskFileId))
-				->sendAiQuery()
-			;
+			MultipleMessagesCreator::onTranscriptionFinished(
+				$multiMessageIds,
+				$fileId,
+				$userId ?? 0,
+				!$transcribeResult->isSuccess()
+			);
+
+			return;
 		}
+
+		if (!(new Restriction())->isAutoTaskActive())
+		{
+			return;
+		}
+
+		$message = new Message($messageId);
+		$recipientId = $userId ?? $message->getAuthorId();
+
+		if (!$transcribeResult->isSuccess())
+		{
+			// transcription yielded no usable text: error, no task (override ERR-013)
+			if ($recipientId > 0)
+			{
+				(new AutoTaskStatus($message, $recipientId, TaskCreationStatus::NotFound))->send();
+			}
+
+			return;
+		}
+
+		$transcriptionCreator = new TranscriptionCreator($message, $fileId, $diskFileId);
+		$transcriptionCreator->sendAiQueryInternal(
+			$transcribeResult->getFileItem()->getPlainText(),
+			$recipientId,
+			$isAutoTask
+		);
 	}
 
 	protected function getTranscribeResult(string $text, TranscribeManager $transcribeManager): TranscribeResult
@@ -97,6 +130,7 @@ class TranscriptionJob extends QueueJob
 		$diskFileId = (int)$parameters['diskFileId'];
 		$chatId = (int)$parameters['chatId'];
 		$messageId = (int)$parameters['messageId'];
+		$userId = isset($parameters['userId']) ? (int)$parameters['userId'] : 0;
 		$launchType = LaunchType::fromString(
 			isset($parameters['launchType']) && is_string($parameters['launchType'])
 				? $parameters['launchType']
@@ -108,5 +142,25 @@ class TranscriptionJob extends QueueJob
 
 		$transcribeResult = (new TranscribeResult($transcribeFileItem))->addError($error);
 		$transcribeManager->handleTranscriptionResponse($transcribeResult, $launchType);
+
+		$multiMessageIds = $this->extractIntList($parameters, 'multiMessageIds');
+		if (!empty($multiMessageIds))
+		{
+			MultipleMessagesCreator::onTranscriptionFinished($multiMessageIds, $fileId, $userId, true);
+
+			return;
+		}
+
+		if (!(new Restriction())->isAutoTaskActive())
+		{
+			return;
+		}
+
+		$message = new Message($messageId);
+		$recipientId = $userId > 0 ? $userId : $message->getAuthorId();
+		if ($recipientId > 0)
+		{
+			(new AutoTaskStatus($message, $recipientId, TaskCreationStatus::NotFound))->send();
+		}
 	}
 }

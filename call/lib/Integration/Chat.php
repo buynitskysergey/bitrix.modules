@@ -453,7 +453,7 @@ class Chat extends AbstractEntity
 					*/
 					$message = '';
 				}
-				elseif ($otherUserState == CallUser::STATE_CALLING)
+				elseif ($otherUserState == CallUser::STATE_CALLING || $otherUserState == CallUser::STATE_UNAVAILABLE)
 				{
 					$callDurationSec = $this->call->getDuration();
 					$invitePeriodSec = (int)(Settings::getCallInvitePeriod() / 1000);

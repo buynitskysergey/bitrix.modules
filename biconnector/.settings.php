@@ -1,6 +1,9 @@
 <?php
 
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\ToolSet\BiChartsToolSet;
 use Bitrix\BIConnector\Internal\Integration\AiAssistant\ToolSet\BiDashboardsToolSet;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\ToolSet\BiDatasetsToolSet;
+use Bitrix\BIConnector\Internal\Integration\AiAssistant\ToolSet\BiTablesToolSet;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\ExternalConnectionProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\ExternalTableProvider;
 use Bitrix\BIConnector\Integration\UI\EntitySelector\SupersetDashboardProvider;
@@ -28,8 +31,13 @@ use Bitrix\Main\Config\Option;
 // must read the option directly: biconnector classes (Feature) aren't autoloadable here yet,
 // and referencing one breaks extension loading portal-wide. Mirrors
 // Feature::isBitrixGptBiConstructorEnabled().
-$biDashboardsToolSets = Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') === 'Y'
-	? [BiDashboardsToolSet::class]
+$biToolSets = Option::get('biconnector', 'bitrixgpt_bi_constructor', 'N') === 'Y'
+	? [
+		BiDashboardsToolSet::class,
+		BiTablesToolSet::class,
+		BiDatasetsToolSet::class,
+		BiChartsToolSet::class,
+	]
 	: [];
 
 return [
@@ -179,7 +187,7 @@ return [
 	],
 	'aiassistant.marta' => [
 		'value' => [
-			'toolSets' => $biDashboardsToolSets,
+			'toolSets' => $biToolSets,
 		],
 		'readonly' => true,
 	],

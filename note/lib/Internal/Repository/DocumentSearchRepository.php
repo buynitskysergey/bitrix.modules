@@ -13,7 +13,6 @@ use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\FloatField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\DB\SqlHelper;
-use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Main\Repository\RepositoryInterface;
@@ -171,8 +170,15 @@ class DocumentSearchRepository implements RepositoryInterface
 			return $collection;
 		}
 
-		$canUseDocumentGrants = $hasDocumentGrants && !empty($userAccessCodes);
-		if (empty($allowedCollectionIds) && !$canUseDocumentGrants)
+		// '*' is a collection policy, never a document grant - the listings drop it before building the
+		// predicate, and search must drop it in exactly the same place.
+		$codesPersonal = $hasDocumentGrants
+			? DocumentAccessService::personalCodes($userAccessCodes ?? [])
+			: [];
+
+		// Fail-closed before the query rather than through an unsatisfiable predicate: a caller with
+		// neither collections nor grants gets an empty answer, and the full-text query is not run at all.
+		if (empty($allowedCollectionIds) && empty($codesPersonal))
 		{
 			return $collection;
 		}
@@ -215,14 +221,14 @@ class DocumentSearchRepository implements RepositoryInterface
 			->where('DOCUMENT.IS_MAIN', DocumentTable::IS_MAIN_NO)
 		;
 
-		if ($canUseDocumentGrants)
-		{
-			$query->where($this->buildAclCondition($allowedCollectionIds, $userAccessCodes));
-		}
-		else
-		{
-			$query->whereIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
-		}
+		// The same predicate the listings are built on: search and lists answer one question - what is
+		// visible to this user - and answering it twice is how the two drift apart.
+		$query->where(DocumentAccessService::buildListVisibilityFilter(
+			'DOCUMENT_ID',
+			'DOCUMENT.COLLECTION_ID',
+			$codesPersonal,
+			$allowedCollectionIds,
+		));
 
 		$order = ['SCORE' => 'DESC', 'DOCUMENT_ID' => 'DESC'];
 		if ($titleBoostTokens !== [])
@@ -251,7 +257,9 @@ class DocumentSearchRepository implements RepositoryInterface
 				);
 			}
 			$documentCollectionId = (int)($row['DOC_COLLECTION_ID'] ?? 0);
-			$sharedAccess = $canUseDocumentGrants
+			// A row reachable only through a grant of its own: its collection is not among the ones the
+			// caller may see, so the answer must not name it.
+			$sharedAccess = !empty($codesPersonal)
 				&& $documentCollectionId > 0
 				&& !in_array($documentCollectionId, $allowedCollectionIds, true);
 			$collection->add(SearchResultMapper::convertFromOrm($row, $snippet, $sharedAccess));
@@ -303,40 +311,5 @@ class DocumentSearchRepository implements RepositoryInterface
 			(new ExpressionField('TITLE_MATCH', $titleMatchSql, $buildFrom))
 				->configureValueType(IntegerField::class),
 		);
-	}
-
-	/**
-	 * [ALG-02] Builds the OR-condition: document is visible if it lives in an accessible
-	 * collection, OR the current user holds an inherited positive grant (source != 0, VIEW+)
-	 * unconditionally, OR an explicit positive grant (source = 0, VIEW+) with no explicit
-	 * NONE override. Deny is scoped to explicit rows only, so inheritance stays hard. The grant
-	 * predicate itself comes from DocumentAccessService::buildDocumentGrantFilter.
-	 *
-	 * @param int[] $allowedCollectionIds
-	 * @param string[] $accessCodes
-	 */
-	private function buildAclCondition(array $allowedCollectionIds, array $accessCodes): ConditionTree
-	{
-		$codesPersonal = array_values(array_unique(array_filter(
-			$accessCodes,
-			static fn($code) => is_string($code) && $code !== '' && $code !== '*',
-		)));
-
-		$tree = new ConditionTree();
-		$tree->logic('or');
-
-		if (!empty($allowedCollectionIds))
-		{
-			$tree->whereIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
-		}
-
-		if (!empty($codesPersonal))
-		{
-			// Taken from the predicate's owner rather than restated here: search must never diverge
-			// from what the listings show.
-			$tree->where(DocumentAccessService::buildDocumentGrantFilter('DOCUMENT_ID', $codesPersonal));
-		}
-
-		return $tree;
 	}
 }

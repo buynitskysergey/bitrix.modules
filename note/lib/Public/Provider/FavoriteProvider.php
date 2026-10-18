@@ -8,7 +8,7 @@ use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Service\Favorite\FavoriteListService;
 
 /**
- * [P4.T2 / API-04 / DTO-01] Read side of the favorites block: one page of the caller's own list.
+ * Read side of the favorites block: one page of the caller's own list.
  *
  * The page is personal, so the provider resolves the access codes of that very user and hands them
  * to the list service together with the pagination parameters; assembling the rows (titles, rights,
@@ -53,7 +53,7 @@ final class FavoriteProvider
 	}
 
 	/**
-	 * [DTO-01] One row of the caller's own list, of the same shape `getPage()` returns in `items`.
+	 * One row of the caller's own list, of the same shape `getPage()` returns in `items`.
 	 * `null` when there is no such favorite row or its object is not visible to that user.
 	 *
 	 * @return array<string, mixed>|null

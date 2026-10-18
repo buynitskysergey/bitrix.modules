@@ -157,6 +157,19 @@ abstract class BaseController extends Controller
 		return (new RestAdapter(...$entities))->toRestFormat();
 	}
 
+	/**
+	 * Injects the per-user copilot `vote` state into an assembled REST response. Must be called
+	 * only from synchronous per-user read actions (message load/paging): `vote` is personalized
+	 * for the requesting user and is intentionally absent from the shared popup-DTO layer to keep
+	 * it out of broadcast pull/push payloads.
+	 */
+	protected function enrichCopilotVotes(array $rest): array
+	{
+		$userId = (int)($this->getCurrentUser()?->getId() ?? 0);
+
+		return (new \Bitrix\Im\V2\Message\Vote\CopilotVoteEnricher())->enrich($rest, $userId);
+	}
+
 	protected function load(\Bitrix\Im\V2\Chat $chat, int $messageLimit, int $pinLimit, bool $ignoreMark = false, ?Message $targetMessage = null): array
 	{
 		$messageLimit = $this->getLimit($messageLimit);
@@ -173,7 +186,9 @@ abstract class BaseController extends Controller
 
 		$rest = $restAdapter->toRestFormat();
 
-		return $messageService->fillContextPaginationData($rest, $messages, $messageLimit);
+		$rest = $messageService->fillContextPaginationData($rest, $messages, $messageLimit);
+
+		return $this->enrichCopilotVotes($rest);
 	}
 
 	protected function toRestFormatWithPaginationData(array $entities, int $needCount, int $realCount): array

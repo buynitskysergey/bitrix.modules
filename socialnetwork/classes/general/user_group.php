@@ -1090,7 +1090,7 @@ class CAllSocNetUserToGroup
 			"=DATE_UPDATE" => CDatabase::CurrentTimeFunction(),
 			"MESSAGE" => str_replace(
 				[ "#TEXT#", "#GROUP_NAME#" ],
-				[ $message, $groupFields["NAME"] ],
+				[ $message, self::escapeGroupNameForMessage($groupFields["NAME"]) ],
 				(
 					empty($message)
 						? Loc::getMessage($inviteConfirmTextEmptyMessageKey)
@@ -3522,6 +3522,20 @@ class CAllSocNetUserToGroup
 	public static function getMessage($message)
 	{
 		return Loc::getMessage($message);
+	}
+
+	private static function escapeGroupNameForMessage(?string $name): string
+	{
+		// The stored message is rendered through CSocNetTextParser with ANCHOR=Y. Besides HTML and
+		// bbcode brackets, the parser auto-links bare "scheme://..." URLs, so the ":" is turned into a
+		// numeric entity to keep a URL-like group name from becoming a live link. The template restores
+		// the text with htmlspecialcharsback(), which reverses only named entities, so "&#58;"/"&#91;"
+		// stay inert for the parser yet render as ":"/"[" for the user.
+		return str_replace(
+			[ '[', ']', ':' ],
+			[ '&#91;', '&#93;', '&#58;' ],
+			htmlspecialcharsbx((string)$name)
+		);
 	}
 
 	private static function getProjectAwareMessageKey(string $messageKey, ?string $fallbackMessageKey = null): string

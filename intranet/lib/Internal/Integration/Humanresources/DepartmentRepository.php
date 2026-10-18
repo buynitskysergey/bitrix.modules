@@ -8,11 +8,13 @@ use Bitrix\HumanResources\Enum\DepthLevel;
 use Bitrix\HumanResources\Item\Collection\NodeCollection;
 use Bitrix\HumanResources\Item\NodeMember;
 use Bitrix\HumanResources\Public\Service\Container as PublicContainer;
+use Bitrix\HumanResources\Service\Access\Structure\StructureAccessService;
 use Bitrix\HumanResources\Service\Container;
 use Bitrix\Intranet\Dto\EntitySelector\EntitySelectorCodeDto;
 use Bitrix\Intranet\Entity\Collection\DepartmentCollection;
 use Bitrix\Intranet\Entity\Collection\UserCollection;
 use Bitrix\Intranet\Entity\Department;
+use Bitrix\Intranet\Internal\Exception\PortalSetupIncompleteException;
 use Bitrix\Intranet\Service\ServiceContainer;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\Loader;
@@ -122,6 +124,48 @@ class DepartmentRepository
 	public function createDepartmentFromNode(Node $node): Department
 	{
 		return $this->departmentMapper->createDepartmentFromNode($node);
+	}
+
+	/**
+	 * @throws ArgumentException
+	 * @return list<int>
+	 */
+	public function filterAvailableForAddMemberIds(array $departmentIds): array
+	{
+		if (!$this->isAvailable || empty($departmentIds))
+		{
+			return [];
+		}
+
+		$allowedDepartments = PublicContainer::getNodeService()->findAllByIds(
+			nodeIds: $departmentIds,
+			nodeTypes: [NodeEntityType::DEPARTMENT],
+			structureAction: StructureAction::AddMemberAction,
+		);
+
+		return $allowedDepartments->getIds();
+	}
+
+	/**
+	 * @throws PortalSetupIncompleteException
+	 */
+	public function findFirstAvailableForAddMember(): ?Department
+	{
+		if (!$this->isAvailable)
+		{
+			return null;
+		}
+
+		$accessService = new StructureAccessService();
+		$accessService->setAction(StructureAction::AddMemberAction);
+
+		$node = $accessService->findFirstPossibleAvailableNode();
+		if (!$node)
+		{
+			return null;
+		}
+
+		return $this->createDepartmentFromNode($node);
 	}
 
 	public function searchAvailableDepartmentsByName(

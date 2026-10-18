@@ -9,7 +9,7 @@ use Bitrix\Note\Internal\Service\Favorite\FavoriteListService;
 use Bitrix\Note\Public\Provider\FavoriteProvider;
 
 /**
- * [TPL-02] First page of the caller's favorites block, rendered into the page next to the initial
+ * First page of the caller's favorites block, rendered into the page next to the initial
  * collections. Read-only and side-effect free: pull watches of the block are the same NOTE_COLLECTION_*
  * tags the collections service already registers.
  *

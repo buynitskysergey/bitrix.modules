@@ -11,6 +11,7 @@ use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
+use Bitrix\Note\Internal\Exceptions\CollectionTreeTooLargeException;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
 use Bitrix\Note\Public\Service\AccessService;
 
@@ -71,6 +72,24 @@ class TreeProvider
 
 	public function getAccessibleTree(int $collectionId): array
 	{
+		$this->assertCollectionReadable($collectionId);
+
+		[$nodes, $rootIds] = $this->readTreeNodes($collectionId);
+
+		$truncated = false;
+		if (count($nodes) > self::TREE_MAX_NODES)
+		{
+			[$nodes, $rootIds, $truncated] = $this->truncateTreeByRoots($nodes, $rootIds);
+		}
+
+		return [
+			'items' => $this->nestNodes($nodes, $rootIds),
+			'truncated' => $truncated,
+		];
+	}
+
+	private function assertCollectionReadable(int $collectionId): void
+	{
 		if ($this->collectionRepository->getById($collectionId) === null)
 		{
 			throw new CollectionNotFoundException();
@@ -80,10 +99,15 @@ class TreeProvider
 		{
 			throw new AccessDeniedException();
 		}
+	}
 
-		$documents = $this->repository->getCollectionDocuments($collectionId);
+	/**
+	 * @return array{0: array<int, array>, 1: int[]} flat nodes keyed by id, and the ids of the roots
+	 */
+	private function readTreeNodes(int $collectionId): array
+	{
 		$nodes = [];
-		foreach ($documents as $document)
+		foreach ($this->repository->getCollectionDocuments($collectionId) as $document)
 		{
 			$nodes[(int)$document->getId()] = [
 				'id' => (int)$document->getId(),
@@ -98,20 +122,42 @@ class TreeProvider
 		$rootIds = [];
 		foreach ($nodes as $id => $node)
 		{
-			$parentId = $node['parentId'];
-			if ($parentId === null || !isset($nodes[$parentId]))
+			// A node whose parent is out of reach is a root of what the caller can see, not a lost node.
+			if ($node['parentId'] === null || !isset($nodes[$node['parentId']]))
 			{
 				$rootIds[] = $id;
 			}
 		}
 
-		$truncated = false;
-		$totalNodes = count($nodes);
-		if ($totalNodes > self::TREE_MAX_NODES)
+		return [$nodes, $rootIds];
+	}
+
+	/**
+	 * @param array<int, array> $nodes
+	 * @return array<int, int[]> child ids keyed by parent id
+	 */
+	private function buildChildrenMap(array $nodes): array
+	{
+		$childrenByParent = [];
+		foreach ($nodes as $id => $node)
 		{
-			[$nodes, $rootIds, $truncated] = $this->truncateTreeByRoots($nodes, $rootIds);
+			$parentId = $node['parentId'];
+			if ($parentId !== null && isset($nodes[$parentId]))
+			{
+				$childrenByParent[$parentId][] = $id;
+			}
 		}
 
+		return $childrenByParent;
+	}
+
+	/**
+	 * @param array<int, array> $nodes
+	 * @param int[] $rootIds
+	 * @return array[] roots with their children nested inside
+	 */
+	private function nestNodes(array $nodes, array $rootIds): array
+	{
 		foreach ($nodes as $id => &$node)
 		{
 			$parentId = $node['parentId'];
@@ -131,10 +177,35 @@ class TreeProvider
 			}
 		}
 
-		return [
-			'items' => $items,
-			'truncated' => $truncated,
-		];
+		return $items;
+	}
+
+	/**
+	 * The tree of a collection whole, or a refusal - never a piece of it.
+	 *
+	 * The web path answers with a `truncated` flag and shows what it managed to read; a program cannot
+	 * work with that. Half a collection looks exactly like the whole one, so a client that got it would
+	 * draw a tree with branches silently missing and never learn which. The budget is therefore a wall
+	 * here rather than a pair of scissors: over it the answer is a refusal.
+	 *
+	 * There is nothing to send the refused caller to yet: REST V3 has no listing of documents, so a
+	 * collection over the budget cannot be walked branch by branch either. The web path walks it that
+	 * way through note.document.listByParent, which is an Engine action and not part of REST.
+	 *
+	 * @return array[] roots with their children nested inside
+	 * @throws CollectionTreeTooLargeException when the collection holds more nodes than the budget
+	 */
+	public function getWholeAccessibleTree(int $collectionId): array
+	{
+		$this->assertCollectionReadable($collectionId);
+
+		[$nodes, $rootIds] = $this->readTreeNodes($collectionId);
+		if (count($nodes) > self::TREE_MAX_NODES)
+		{
+			throw new CollectionTreeTooLargeException(self::TREE_MAX_NODES);
+		}
+
+		return $this->nestNodes($nodes, $rootIds);
 	}
 
 	/**
@@ -169,7 +240,7 @@ class TreeProvider
 			$documents,
 		);
 		$childrenCountMap = $this->repository->getChildrenCountMapByParentIds($collectionId, $documentIds);
-		// [TPL-01] Star flag of the branch: one batch read per page. The branch is always read for the
+		// Star flag of the branch: one batch read per page. The branch is always read for the
 		// current user, so the favorites owner comes from the ambient user, as elsewhere in the tree.
 		$favoriteIds = array_flip((new FavoriteRepository())->findFavoriteEntityIds(
 			(int)CurrentUser::get()->getId(),
@@ -216,15 +287,7 @@ class TreeProvider
 
 	private function truncateTreeByRoots(array $nodes, array $rootIds): array
 	{
-		$childrenByParent = [];
-		foreach ($nodes as $id => $node)
-		{
-			$parentId = $node['parentId'];
-			if ($parentId !== null && isset($nodes[$parentId]))
-			{
-				$childrenByParent[$parentId][] = $id;
-			}
-		}
+		$childrenByParent = $this->buildChildrenMap($nodes);
 
 		$keptNodes = [];
 		$keptRoots = [];
@@ -264,9 +327,13 @@ class TreeProvider
 	{
 		$subtree = [];
 		$queue = [$rootId];
-		while (!empty($queue))
+		// The queue is walked with a moving head instead of array_shift, which reindexes the whole
+		// queue on every step. On a branch that is wide rather than deep - one root with tens of
+		// thousands of children, the shape an import leaves behind - that reindexing is what the walk
+		// spends its time on, and it grows with the square of the branch.
+		for ($head = 0; $head < count($queue); $head++)
 		{
-			$current = array_shift($queue);
+			$current = $queue[$head];
 			$subtree[$current] = $nodes[$current];
 			if (count($subtree) > $softLimit)
 			{

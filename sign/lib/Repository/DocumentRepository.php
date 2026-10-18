@@ -93,6 +93,7 @@ class DocumentRepository
 			->setHcmlinkDateSettingId($item->hcmLinkDateSettingId)
 			->setHcmlinkExternalIdSettingId($item->hcmLinkExternalIdSettingId)
 			->setHcmlinkDocumentTypeSettingId($item->hcmLinkDocumentTypeSettingId)
+			->setInviteMessage($item->inviteMessage)
 			->save()
 		;
 
@@ -240,6 +241,36 @@ class DocumentRepository
 			->where('UID', $uid)
 			->setLimit(1)
 			->fetchObject();
+
+		return $document === null ? null : $this->extractItemFromModel($document);
+	}
+
+	/**
+	 * Returns the document of the group that has been waiting in the status the longest.
+	 *
+	 * @param int $afterId Skips the documents up to and including this id: a document the caller has
+	 *                     given up on must not hold back the ones behind it.
+	 */
+	public function getFirstByGroupIdAndStatus(int $groupId, string $status, int $afterId = 0): ?Item\Document
+	{
+		if ($groupId < 1)
+		{
+			return null;
+		}
+
+		$query = Internal\DocumentTable::query()
+			->setSelect(['*'])
+			->where('GROUP_ID', $groupId)
+			->where('STATUS', $status)
+			->addOrder('ID')
+			->setLimit(1)
+		;
+		if ($afterId > 0)
+		{
+			$query->where('ID', '>', $afterId);
+		}
+
+		$document = $query->fetchObject();
 
 		return $document === null ? null : $this->extractItemFromModel($document);
 	}
@@ -439,6 +470,7 @@ class DocumentRepository
 			externalIdSourceType:       ExternalIdSourceType::tryFromInt($model->getExternalIdSourceType()) ?? ExternalIdSourceType::MANUAL,
 			hcmLinkExternalIdSettingId: $model->getHcmlinkExternalIdSettingId(),
 			hcmLinkDocumentTypeSettingId: $model->getHcmlinkDocumentTypeSettingId(),
+			inviteMessage:         $model->getInviteMessage(),
 		);
 	}
 
@@ -706,6 +738,98 @@ class DocumentRepository
 		}
 
 		return Internal\DocumentTable::updateMulti($documentIds, ['PROVIDER_CODE' => $providerCode]);
+	}
+
+	/**
+	 * Writes the message of the invitation only while the document may still be edited. The status is
+	 * part of the `WHERE` clause on purpose: the caller judges a document it read earlier, while
+	 * `ConfigureDocument` of the same document runs in parallel and moves it to `ready`. A check made
+	 * before the write cannot keep the text out of a document whose sending has already started, a
+	 * conditional write can.
+	 *
+	 * The write goes around the item binder: only the two columns below change, so the whole item does
+	 * not have to be read and written back to make the condition part of the same statement.
+	 *
+	 * @return bool true when the document carries the requested message after the call
+	 */
+	public function updateInviteMessageIfEditable(int $documentId, ?string $message): bool
+	{
+		return $this->updateInviteMessageForEditableDocuments([$documentId], $message);
+	}
+
+	/**
+	 * The same conditional write for a whole batch of a group send. The text of the batch is one, so
+	 * the documents share a single statement instead of one statement each: the batch is written while
+	 * the transaction of the caller holds the rows, and every statement saved there is lock time saved.
+	 * The id list stays short — the batch is capped by `GroupService::MAX_DOCUMENT_COUNT`.
+	 *
+	 * The write is refused as a whole: the caller learns that not every document took the text, and
+	 * rolls its transaction back. Which document refused it is not reported — the batch entry point
+	 * names no document in its errors either, it checks the whole batch before the first write.
+	 *
+	 * @param int[] $documentIds
+	 *
+	 * @return bool true only when every requested document carries the requested message after the call
+	 */
+	public function updateInviteMessageForEditableDocuments(array $documentIds, ?string $message): bool
+	{
+		$documentIds = array_values(array_unique(array_filter(
+			array_map('intval', $documentIds),
+			static fn(int $documentId): bool => $documentId > 0,
+		)));
+		if ($documentIds === [])
+		{
+			return false;
+		}
+
+		$connection = Main\Application::getConnection();
+		$sqlHelper = $connection->getSqlHelper();
+		$tableName = Internal\DocumentTable::getTableName();
+
+		// The message is user input and never reaches the query as anything but the escaped assignment
+		// prepareUpdate() builds; the statuses are module constants and the ids are integers.
+		[$update] = $sqlHelper->prepareUpdate($tableName, [
+			'INVITE_MESSAGE' => $message,
+			'DATE_MODIFY' => new DateTime(),
+		]);
+		$editableStatuses = implode(',', array_map(
+			static fn(string $status): string => "'" . $sqlHelper->forSql($status) . "'",
+			DocumentStatus::getEditable(),
+		));
+
+		$connection->queryExecute(
+			'UPDATE ' . $sqlHelper->quote($tableName) . " SET {$update}"
+			. ' WHERE ' . $sqlHelper->quote('ID') . ' IN (' . implode(',', $documentIds) . ')'
+			. ' AND ' . $sqlHelper->quote('STATUS') . " IN ({$editableStatuses})"
+		);
+
+		if ($connection->getAffectedRowsCount() === count($documentIds))
+		{
+			return true;
+		}
+
+		// MySQL counts changed rows, not matched ones: storing the very same text within the same
+		// second changes nothing and looks exactly like a refused write. Only the stored value tells
+		// the two apart, and a document that already carries the requested text needs no write at all.
+		$rows = Internal\DocumentTable::query()
+			->setSelect(['ID', 'INVITE_MESSAGE'])
+			->whereIn('ID', $documentIds)
+			->fetchAll()
+		;
+		if (count($rows) !== count($documentIds))
+		{
+			return false;
+		}
+
+		foreach ($rows as $row)
+		{
+			if (($row['INVITE_MESSAGE'] ?? null) !== $message)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**

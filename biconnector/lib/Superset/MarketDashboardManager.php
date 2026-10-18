@@ -508,19 +508,11 @@ final class MarketDashboardManager
 				}
 
 				$response = $this->integrator->deleteDashboard([$originalDashboard->getExternalId()], $originalDashboard->getType() === SupersetDashboardTable::DASHBOARD_TYPE_MARKET);
-				if ($response->hasErrors())
+				if (
+					$response->hasErrors()
+					&& $response->getStatus() !== IntegratorResponse::STATUS_NOT_FOUND
+				)
 				{
-					if ($response->getStatus() === IntegratorResponse::STATUS_NOT_FOUND)
-					{
-						if ($originalDashboard->getType() === SupersetDashboardTable::DASHBOARD_TYPE_SYSTEM)
-						{
-							SystemDashboardManager::saveDeletedSystemDashboard($appCode);
-						}
-						$originalDashboard->delete();
-
-						return $result;
-					}
-
 					$result->addError(new Error(Loc::getMessage('BI_CONNECTOR_SUPERSET_ERROR_DELETE_PROXY') ?? ''));
 
 					return $result;
@@ -531,7 +523,15 @@ final class MarketDashboardManager
 			{
 				SystemDashboardManager::saveDeletedSystemDashboard($appCode);
 			}
-			$originalDashboard->delete();
+			$deleteResult = $originalDashboard->delete();
+			if (!$deleteResult->isSuccess())
+			{
+				$result->addErrors($deleteResult->getErrors());
+
+				return $result;
+			}
+
+			DashboardManager::notifyDashboardListChanged();
 		}
 
 		return $result;

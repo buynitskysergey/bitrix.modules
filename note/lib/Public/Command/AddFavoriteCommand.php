@@ -15,7 +15,7 @@ use Bitrix\Note\Internal\Service\Favorite\FavoritePositionService;
 use Bitrix\Note\Public\Provider\FavoriteProvider;
 
 /**
- * [P3.T1 / API-01] Puts one object into the caller's favorites. $position is the ordinal of the
+ * Puts one object into the caller's favorites. $position is the ordinal of the
  * insertion point (1 is the topmost row); without it the row goes on top of the list.
  *
  * ACL is the controller's responsibility (per MODULE.md, commands do not re-check it), and so is
@@ -109,7 +109,7 @@ final class AddFavoriteCommand extends AbstractCommand
 	}
 
 	/**
-	 * [DTO-01] The stored row in the shape the favorites block renders, so a caller does not have to
+	 * The stored row in the shape the favorites block renders, so a caller does not have to
 	 * re-read the list after starring. Never fatal: the add itself is already committed, and the
 	 * client falls back on re-reading when `item` is null.
 	 *
@@ -128,7 +128,7 @@ final class AddFavoriteCommand extends AbstractCommand
 	}
 
 	/**
-	 * [EVENT-01] favoriteAdd into the personal channel. The initiator is not excluded: the same user
+	 * favoriteAdd into the personal channel. The initiator is not excluded: the same user
 	 * may have several tabs and the mobile app open at once.
 	 *
 	 * The row travels along: the channel belongs to that one user, whose own rights and coverage it

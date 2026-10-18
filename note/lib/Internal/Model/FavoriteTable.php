@@ -13,7 +13,7 @@ use Bitrix\Main\ORM\Fields\Validators\LengthValidator;
 use Bitrix\Main\Type\DateTime;
 
 /**
- * [P1.T1 / SQL-01] One row per (user, entityType, entityId) favorite, written through
+ * One row per (user, entityType, entityId) favorite, written through
  * FavoriteRepository on the UNIQUE(USER_ID, ENTITY_TYPE, ENTITY_ID) index.
  *
  * ENTITY_TYPE repeats the SubscriptionTable::SCOPE_* wording on purpose: the same literal

@@ -60,7 +60,7 @@ class DirectOpenContextService
 		$this->lastChangeResolver = $lastChangeResolver ?? new DocumentLastChangeResolver();
 		// Same bundling rationale again, for the subscription bell state.
 		$this->subscriptionStateResolver = $subscriptionStateResolver ?? new DocumentSubscriptionStateResolver();
-		// [DTO-01] Same bundling once more, for the incoming-links counter. Without it the chip is
+		// Same bundling once more, for the incoming-links counter. Without it the chip is
 		// absent on first paint and pops in after its own request — the direct-open path feeds the
 		// very same activity line as getAction.
 		$this->backlinksSnapshotResolver = $backlinksSnapshotResolver ?? new DocumentBacklinksSnapshotResolver();
@@ -562,7 +562,7 @@ class DirectOpenContextService
 	}
 
 	/**
-	 * [TPL-01] Star state of the opened document, bundled next to the bell state for the same
+	 * Star state of the opened document, bundled next to the bell state for the same
 	 * reason: the header adopts it instead of asking for it on mount. Unknown means not starred.
 	 */
 	private function isFavorite(int $documentId): bool

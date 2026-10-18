@@ -5,20 +5,24 @@ namespace Bitrix\StaffTrack\Public\Provider;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main;
 use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\StaffTrack\Feature;
 use Bitrix\StaffTrack\Internal\Integration\Disk\FileResolver;
 use Bitrix\StaffTrack\Internal\Integration\Pull;
 use Bitrix\StaffTrack\Internal\Integration\Timeman\WorkDayService;
-use Bitrix\StaffTrack\Internal\Entity\CheckInType;
+use Bitrix\StaffTrack\Internal\Model\CheckInDailyStatsTable;
 use Bitrix\StaffTrack\Internal\Repository\CheckInRepository;
+use Bitrix\StaffTrack\Public\Services\CheckInMarkerAggregator;
 use Bitrix\StaffTrack\Public\Services\DailyStatsUpdater;
+use Bitrix\StaffTrack\Public\Services\FirstManualCheckInCache;
 use Bitrix\StaffTrack\Public\Services\MapDataCache;
 
 class CheckInProvider
 {
 	private const DAY_END_OFFSET = 86399;
 	private const MAX_TIMEZONE_OFFSET = 50400;
-
-	private static ?self $instance = null;
+	private const GAP_THRESHOLD_SEC = 300;
+	private const GAP_DISTANCE_METERS = 150;
+	private const EARTH_RADIUS_METERS = 6371000;
 
 	private CheckInRepository $repository;
 
@@ -27,33 +31,20 @@ class CheckInProvider
 		$this->repository = new CheckInRepository();
 	}
 
-	/**
-	 * @return self
-	 */
-	public static function getInstance(): self
-	{
-		if (self::$instance === null)
-		{
-			self::$instance = new self();
-		}
-
-		return self::$instance;
-	}
-
 	private function subscribeToPush(int $userId): void
 	{
 		Pull\PushSender::subscribeToTag(Pull\Tag::getUserTag($userId));
 	}
 
 	/**
-	 * @return array{checkIns: array<int, array>, stats: array<int, int>}
+	 * @return array{checkIns: array<int, array>, stats: array<int, int>, manualStats: array<int, int>, checkInRolloutEnabled: array<int, bool>}
 	 */
 	public function getLatestUsersCheckInByDepartment(int $timezoneOffset = 0, int $timestamp = 0): array
 	{
 		$currentUserId = (int)CurrentUser::get()->getId();
 		if ($currentUserId <= 0)
 		{
-			return ['checkIns' => [], 'stats' => []];
+			return ['checkIns' => [], 'stats' => [], 'manualStats' => [], 'checkInRolloutEnabled' => []];
 		}
 
 		$this->subscribeToPush($currentUserId);
@@ -80,12 +71,16 @@ class CheckInProvider
 			}
 
 			$result = $this->collectLatestCheckInsWithStats($userIds, $timezoneOffset, $timestamp);
+			$result['checkInRolloutEnabled'] = Feature::filterCheckInRolloutEnabled($userIds);
 			MapDataCache::set($currentUserId, $requestedDate, $userIds, $result);
 
 			return $result;
 		}
 
-		return $this->collectLatestCheckInsWithStats($userIds, $timezoneOffset, $timestamp);
+		$result = $this->collectLatestCheckInsWithStats($userIds, $timezoneOffset, $timestamp);
+		$result['checkInRolloutEnabled'] = Feature::filterCheckInRolloutEnabled($userIds);
+
+		return $result;
 	}
 
 	private function isPastLocalDate(string $requestedDate, int $timezoneOffset): bool
@@ -99,7 +94,7 @@ class CheckInProvider
 	 * @param int $userId
 	 * @param int $timestamp
 	 * @param int $timezoneOffset
-	 * @return array
+	 * @return array{route: array<int, array>, track: array<int, array{id: int, lat: float, lon: float, time: int, gapBefore: bool, address: string}>, markers: array<int, array>, isDayClosed: bool, stats?: array<int, int>, checkInRolloutEnabled: bool}
 	 */
 	public function getEmployeeRoute(int $userId, int $timestamp, int $timezoneOffset): array
 	{
@@ -108,7 +103,10 @@ class CheckInProvider
 		{
 			return [
 				'route' => [],
+				'track' => [],
+				'markers' => [],
 				'isDayClosed' => false,
+				'checkInRolloutEnabled' => false,
 			];
 		}
 
@@ -118,20 +116,31 @@ class CheckInProvider
 
 		$checkInCollection = $this->repository->getUserRouteByPeriod($userId, $dateStart, $dateEnd);
 		$aggregatedCheckIns = $this->repository->getAggregatedPointsByPeriod($userId, $dateStart, $dateEnd);
+		$dayRows = $this->collectDayRows($checkInCollection, $aggregatedCheckIns, $requestedDate);
 
-		$result = $this->filterAndNormalizeCheckIns($checkInCollection, $aggregatedCheckIns, $requestedDate, $timezoneOffset, $currentUserId);
+		$dayCloseTimestamp = WorkDayService::getDayCloseTimestamp($userId, $timestamp, $timezoneOffset);
+		$dayResult = $this->buildDayResult($dayRows, $timezoneOffset, $currentUserId, $dayCloseTimestamp);
 
 		$statsByUser = $this->getDailyStatsByUsers([$userId], $timezoneOffset, $timestamp);
 		$stats = [];
 		foreach ($statsByUser as $statRow)
 		{
-			$stats[(int)$statRow['USER_ID']] = (int)$statRow['CNT'] + (int)$statRow['HAS_OPEN_ENTER'];
+			$rowUserId = (int)$statRow['USER_ID'];
+			$stats[$rowUserId] = (int)$statRow['CNT'] + (int)$statRow['HAS_OPEN_ENTER'];
 		}
 
 		return [
-			'route' => $result,
-			'isDayClosed' => WorkDayService::isDayClosed($userId, $timestamp, $timezoneOffset),
+			'track' => $dayResult['track'],
+			'markers' => $dayResult['markers'],
+			'isDayClosed' => $dayCloseTimestamp !== null,
 			'stats' => $stats,
+			'checkInRolloutEnabled' => Feature::isCheckInRolloutEnabled($userId),
+			// the flat list is read by the v2 client and is served unconditionally: the client
+			// generation is decided by the bundle on the device, which can lag behind the rollout
+			// flag of its viewer, and a missing key draws an empty day with no error
+			'route' => self::dropCheckInsWithoutGeo(
+				$this->normalizeCheckIns($dayRows, $timezoneOffset, $currentUserId),
+			),
 		];
 	}
 
@@ -139,14 +148,14 @@ class CheckInProvider
 	 * @param int $userId
 	 * @param int $timestamp
 	 * @param int $timezoneOffset
-	 * @return array
+	 * @return array{checkIns?: array<int, array>, track?: array<int, array{id: int, lat: float, lon: float, time: int, gapBefore: bool, address: string}>, markers?: array<int, array>, isDayClosed?: bool, dayCloseTimestamp?: ?int, checkInRolloutEnabled: bool}
 	 */
 	public function getUserCheckInByDate(int $userId, int $timestamp, int $timezoneOffset = 0): array
 	{
 		$currentUserId = (int)CurrentUser::get()->getId();
 		if ($currentUserId <= 0)
 		{
-			return [];
+			return ['checkInRolloutEnabled' => false];
 		}
 
 		$this->subscribeToPush($currentUserId);
@@ -155,14 +164,23 @@ class CheckInProvider
 
 		$checkInCollection = $this->repository->getUserCheckInByPeriod($userId, $dateStart, $dateEnd);
 		$aggregatedCheckIns = $this->repository->getAggregatedPointsByPeriod($userId, $dateStart, $dateEnd);
+		$dayRows = $this->collectDayRows($checkInCollection, $aggregatedCheckIns, $requestedDate);
 
-		$result = $this->filterAndNormalizeCheckIns($checkInCollection, $aggregatedCheckIns, $requestedDate, $timezoneOffset, $currentUserId);
 		$dayCloseTimestamp = WorkDayService::getDayCloseTimestamp($userId, $timestamp, $timezoneOffset);
+		$dayResult = $this->buildDayResult($dayRows, $timezoneOffset, $currentUserId, $dayCloseTimestamp);
 
 		return [
-			'checkIns' => $result,
+			'track' => $dayResult['track'],
+			'markers' => $dayResult['markers'],
 			'isDayClosed' => $dayCloseTimestamp !== null,
 			'dayCloseTimestamp' => $dayCloseTimestamp,
+			'checkInRolloutEnabled' => Feature::isCheckInRolloutEnabled($userId),
+			// the flat list is read by the v2 client and is served unconditionally: the client
+			// generation is decided by the bundle on the device, which can lag behind the rollout
+			// flag of its viewer, and a missing key draws an empty day with no error
+			'checkIns' => self::dropCheckInsWithoutGeo(
+				$this->normalizeCheckIns($dayRows, $timezoneOffset, $currentUserId),
+			),
 		];
 	}
 
@@ -179,21 +197,35 @@ class CheckInProvider
 		$requestedDate = $this->getRequestedDate($timestamp, $timezoneOffset);
 		[$dateStart, $dateEnd] = $this->getWideDayBoundaries($requestedDate);
 
-		$rows = $this->repository->getCheckInRowsForAggregation($userId, $dateStart, $dateEnd);
+		$rows = $this->repository->getUserManualCheckInDatesByPeriod($userId, $dateStart, $dateEnd);
 
 		$count = 0;
 		foreach ($rows as $row)
 		{
-			if (
-				(int)($row['ENTITY_TYPE'] ?? 0) === CheckInType::MANUAL->value
-				&& $this->isCheckInOnLocalDate($row, $requestedDate)
-			)
+			if ($this->isCheckInOnLocalDate($row, $requestedDate))
 			{
 				$count++;
 			}
 		}
 
 		return $count;
+	}
+
+	public function isFirstManualCheckInToday(int $userId, ?int $timezoneOffset = null): bool
+	{
+		$timezoneOffset ??= \CTimeZone::GetOffset();
+		$localDate = $this->getRequestedDate(time(), $timezoneOffset);
+
+		$cached = FirstManualCheckInCache::get($userId, $localDate);
+		if ($cached !== null)
+		{
+			return $cached;
+		}
+
+		$isFirst = $this->getManualCheckInCountByDate($userId, time(), $timezoneOffset) === 0;
+		FirstManualCheckInCache::set($userId, $localDate, $isFirst);
+
+		return $isFirst;
 	}
 
 	/**
@@ -211,32 +243,27 @@ class CheckInProvider
 
 		$checkInCollection = $this->repository->getUserManualCheckInByPeriod($userId, $dateStart, $dateEnd);
 		$aggregatedCheckIns = $this->repository->getUserAggregatedManualPointsByPeriod($userId, $dateStart, $dateEnd);
+		$dayRows = $this->collectDayRows($checkInCollection, $aggregatedCheckIns, $requestedDate);
 
-		return $this->filterAndNormalizeCheckIns(
-			$checkInCollection,
-			$aggregatedCheckIns,
-			$requestedDate,
-			$timezoneOffset,
-			$userId,
-		);
+		return $this->normalizeCheckIns($dayRows, $timezoneOffset, $userId);
 	}
 
 	/**
 	 * @param int[] $userIds
-	 * @return array{checkIns: array<int, array>, stats: array<int, int>}
+	 * @return array{checkIns: array<int, array>, stats: array<int, int>, manualStats: array<int, int>}
 	 */
 	private function collectLatestCheckInsWithStats(array $userIds, int $timezoneOffset, int $timestamp): array
 	{
 		$userIds = array_values(array_unique(array_map('intval', $userIds)));
 		if (empty($userIds))
 		{
-			return ['checkIns' => [], 'stats' => []];
+			return ['checkIns' => [], 'stats' => [], 'manualStats' => []];
 		}
 
 		$statsByUser = $this->getDailyStatsByUsers($userIds, $timezoneOffset, $timestamp);
 		if (empty($statsByUser))
 		{
-			return ['checkIns' => [], 'stats' => []];
+			return ['checkIns' => [], 'stats' => [], 'manualStats' => []];
 		}
 
 		$lastCheckInIds = $this->extractLastCheckInIds($statsByUser);
@@ -247,18 +274,50 @@ class CheckInProvider
 		foreach ($statsByUser as $statRow)
 		{
 			$userId = (int)$statRow['USER_ID'];
-			$stats[$userId] = (int)$statRow['CNT'] + (int)$statRow['HAS_OPEN_ENTER'];
 
 			$checkIn = $checkInsById[(int)$statRow['LAST_CHECK_IN_ID']] ?? null;
-			if ($checkIn === null)
+			if ($checkIn === null || !CheckInNormalizer::hasGeo($checkIn))
 			{
 				continue;
 			}
 
+			$stats[$userId] = (int)$statRow['CNT'] + (int)$statRow['HAS_OPEN_ENTER'];
 			$checkIns[] = CheckInNormalizer::normalize($checkIn, $timezoneOffset);
 		}
 
-		return ['checkIns' => $checkIns, 'stats' => $stats];
+		$requestedDate = $this->getRequestedDate($timestamp > 0 ? $timestamp : null, $timezoneOffset);
+		$manualStats = $this->getManualStatsByUsers(array_keys($stats), $requestedDate);
+
+		return ['checkIns' => $checkIns, 'stats' => $stats, 'manualStats' => $manualStats];
+	}
+
+	/**
+	 * @param int[] $userIds
+	 * @return array<int, int>
+	 */
+	private function getManualStatsByUsers(array $userIds, string $requestedDate): array
+	{
+		if (empty($userIds))
+		{
+			return [];
+		}
+
+		[$dateStart, $dateEnd] = $this->getWideDayBoundaries($requestedDate);
+		$rows = $this->repository->getAllUsersManualCheckInByPeriod($userIds, $dateStart, $dateEnd);
+
+		$manualStats = [];
+		foreach ($rows as $row)
+		{
+			if (!$this->isCheckInOnLocalDate($row, $requestedDate))
+			{
+				continue;
+			}
+
+			$userId = (int)$row['USER_ID'];
+			$manualStats[$userId] = ($manualStats[$userId] ?? 0) + 1;
+		}
+
+		return $manualStats;
 	}
 
 	/**
@@ -396,7 +455,31 @@ class CheckInProvider
 		return date('Y-m-d', $timestamp + $requesterTimezoneOffset);
 	}
 
-	private function filterAndNormalizeCheckIns(iterable $checkInCollection, array $aggregatedCheckIns, string $requestedDate, int $timezoneOffset, int $currentUserId): array
+	/**
+	 * @param array<int, array> $dayRows
+	 * @return array<int, array>
+	 */
+	private function normalizeCheckIns(array $dayRows, int $timezoneOffset, int $currentUserId): array
+	{
+		$filesMap = (new FileResolver())->resolveMany(
+			self::collectCheckInFiles($dayRows),
+			$currentUserId,
+		);
+
+		$result = [];
+		foreach ($dayRows as $item)
+		{
+			$checkInId = (int)($item['ID'] ?? 0);
+			$result[] = CheckInNormalizer::normalize($item, $timezoneOffset, $filesMap[$checkInId] ?? []);
+		}
+
+		return $result;
+	}
+
+	/**
+	 * @return array<int, array>
+	 */
+	private function collectDayRows(iterable $checkInCollection, array $aggregatedCheckIns, string $requestedDate): array
 	{
 		$filteredData = [];
 		foreach ($checkInCollection as $item)
@@ -424,19 +507,163 @@ class CheckInProvider
 			return $tsA <=> $tsB ?: ((int)($a['ID'] ?? 0) <=> (int)($b['ID'] ?? 0));
 		});
 
+		return $filteredData;
+	}
+
+	/**
+	 * @return array{track: array<int, array{lat: float, lon: float, time: int, gapBefore: bool}>, markers: array<int, array>}
+	 */
+	private function buildDayResult(
+		array $dayRows,
+		int $timezoneOffset,
+		int $currentUserId,
+		?int $dayCloseTimestamp
+	): array
+	{
+		$rawRowsById = [];
+		foreach ($dayRows as $row)
+		{
+			$rawRowsById[(int)($row['ID'] ?? 0)] = $row;
+		}
+
+		$events = self::buildAggregatorEvents($dayRows);
+		$markers = (new CheckInMarkerAggregator())->buildMarkers($events, $dayCloseTimestamp);
+
+		$leadingRows = [];
+		foreach ($markers as $marker)
+		{
+			if ($marker['kind'] === CheckInMarkerAggregator::KIND_STAY)
+			{
+				continue;
+			}
+
+			$leadingId = (int)($marker['event']['id'] ?? 0);
+			if (isset($rawRowsById[$leadingId]))
+			{
+				$leadingRows[] = $rawRowsById[$leadingId];
+			}
+		}
+
 		$filesMap = (new FileResolver())->resolveMany(
-			self::collectCheckInFiles($filteredData),
+			self::collectCheckInFiles($leadingRows),
 			$currentUserId,
 		);
 
-		$result = [];
-		foreach ($filteredData as $item)
+		$normalizedMarkers = [];
+		foreach ($markers as $marker)
 		{
-			$checkInId = (int)($item['ID'] ?? 0);
-			$result[] = CheckInNormalizer::normalize($item, $timezoneOffset, $filesMap[$checkInId] ?? []);
+			$leadingId = (int)($marker['event']['id'] ?? 0);
+			$normalizedMarkers[] = CheckInMarkerNormalizer::normalize(
+				$marker,
+				$rawRowsById,
+				$filesMap[$leadingId] ?? [],
+				$timezoneOffset,
+			);
 		}
 
-		return $result;
+		return [
+			'track' => self::buildTrack($dayRows),
+			'markers' => $normalizedMarkers,
+		];
+	}
+
+	/**
+	 * Every point carries the id and the address of the check-in it stands on: the ends of the route are
+	 * technical moving points absent from `markers`, so this is the only path by which the address queue
+	 * reaches them and by which the resolved address (pull patch, keyed by check-in id) gets back.
+	 *
+	 * @param array<int, array> $rows
+	 * @return array<int, array{id: int, lat: float, lon: float, time: int, gapBefore: bool, address: string}>
+	 */
+	private static function buildTrack(array $rows): array
+	{
+		$track = [];
+		$prev = null;
+		foreach ($rows as $row)
+		{
+			$latitude = $row['LATITUDE'] ?? null;
+			$longitude = $row['LONGITUDE'] ?? null;
+			if ($latitude === null || $longitude === null)
+			{
+				continue;
+			}
+
+			$dateCreate = $row['DATE_CREATE'] ?? null;
+			$timestamp = $dateCreate instanceof DateTime ? $dateCreate->getTimestamp() : (int)$dateCreate;
+			$lat = (float)$latitude;
+			$lon = (float)$longitude;
+
+			$gapBefore = false;
+			if ($prev !== null)
+			{
+				$deltaSec = $timestamp - $prev['time'];
+				$movedMeters = self::haversineMeters($prev['lat'], $prev['lon'], $lat, $lon);
+				$gapBefore = $deltaSec > self::GAP_THRESHOLD_SEC && $movedMeters > self::GAP_DISTANCE_METERS;
+			}
+
+			$point = [
+				'id' => (int)($row['ID'] ?? 0),
+				'lat' => $lat,
+				'lon' => $lon,
+				'time' => $timestamp,
+				'gapBefore' => $gapBefore,
+				'address' => (string)($row['ADDRESS'] ?? ''),
+			];
+			$track[] = $point;
+			$prev = $point;
+		}
+
+		return $track;
+	}
+
+	private static function haversineMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
+	{
+		$dLat = deg2rad($lat2 - $lat1);
+		$dLon = deg2rad($lon2 - $lon1);
+		$a = (sin($dLat / 2) ** 2)
+			+ (cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * (sin($dLon / 2) ** 2));
+
+		return 2 * self::EARTH_RADIUS_METERS * asin(min(1.0, sqrt($a)));
+	}
+
+	/**
+	 * @param array<int, array> $rows
+	 * @return array<int, array{id: int, entityType: int, description: string, latitude: ?float, longitude: ?float, address: string, timestamp: int, userTimezone: int}>
+	 */
+	private static function buildAggregatorEvents(array $rows): array
+	{
+		$events = [];
+		foreach ($rows as $row)
+		{
+			$dateCreate = $row['DATE_CREATE'] ?? null;
+			$events[] = [
+				'id' => (int)($row['ID'] ?? 0),
+				'entityType' => (int)($row['ENTITY_TYPE'] ?? 0),
+				'description' => (string)($row['DESCRIPTION'] ?? ''),
+				'latitude' => ($row['LATITUDE'] ?? null) !== null ? (float)$row['LATITUDE'] : null,
+				'longitude' => ($row['LONGITUDE'] ?? null) !== null ? (float)$row['LONGITUDE'] : null,
+				'address' => (string)($row['ADDRESS'] ?? ''),
+				'timestamp' => $dateCreate instanceof DateTime ? $dateCreate->getTimestamp() : (int)$dateCreate,
+				'userTimezone' => (int)($row['USER_TIMEZONE'] ?? 0),
+			];
+		}
+
+		return $events;
+	}
+
+	/**
+	 * Excludes check-ins without geodata (coordinates reset by the cleanup agent) from the map output.
+	 * So that a cleaned check-in is not displayed as a point (0, 0).
+	 *
+	 * @param array<int, array> $checkIns
+	 * @return array<int, array>
+	 */
+	private static function dropCheckInsWithoutGeo(array $checkIns): array
+	{
+		return array_values(array_filter(
+			$checkIns,
+			static fn(array $checkIn): bool => ($checkIn['latitude'] ?? null) !== null && ($checkIn['longitude'] ?? null) !== null,
+		));
 	}
 
 	/**

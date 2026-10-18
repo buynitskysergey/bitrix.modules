@@ -57,17 +57,31 @@ class MessageLoader
 
 		$messages = self::aggregateMessages($detailsQuery->fetchAll());
 
-		if (Feature::isMailListImprovementsAvailable())
-		{
-			if ($filter->needsAttachmentsStack())
-			{
-				$messages = self::prepareAttachments($messages);
-			}
+		return self::decorateListRows($messages, $filter->getUserId(), $filter->needsAttachmentsStack());
+	}
 
-			$messages = self::prepareFavorites($messages, $filter->getUserId());
+	/**
+	 * Marks the plain list adds to its rows once the details are read: the favorite star and the stack
+	 * of attachments. They belong to the row model rather than to the list that built it, so a caller
+	 * assembling the very same rows out of {@see QueryBuilder::buildWebMessagesDetailsQuery()}, as the
+	 * grid grouped by conversations does, decorates them through here and shows the same row.
+	 *
+	 * @param array $items rows of the details query, one per message
+	 * @param int|null $userId owner of the favorites, null when the caller shows none
+	 */
+	public static function decorateListRows(array $items, ?int $userId, bool $withAttachmentsStack): array
+	{
+		if (!Feature::isMailListImprovementsAvailable())
+		{
+			return $items;
 		}
 
-		return $messages;
+		if ($withAttachmentsStack)
+		{
+			$items = self::prepareAttachments($items);
+		}
+
+		return self::prepareFavorites($items, $userId);
 	}
 
 	public static function buildContactList($fieldValue): array

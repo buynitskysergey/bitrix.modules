@@ -10,17 +10,17 @@ use Bitrix\Main\UI\PageNavigation;
 use Bitrix\Timeman\Model\Worktime\Record\WorktimeRecordCollection;
 use Bitrix\Timeman\Model\Worktime\Record\WorktimeRecordTable;
 use Bitrix\Timeman\Util\Form\Filter\Validator\NumberValidator;
+use Bitrix\Timeman\V2\Infrastructure\Controller\ActionFilter\ToolEnabledFilter;
 
 class WorktimeRecord extends Controller
 {
 	protected function getDefaultPreFilters()
 	{
-		return array_merge(
-			parent::getDefaultPreFilters(),
-			[
-				new Scope(Scope::REST),
-			]
-		);
+		return [
+			new ToolEnabledFilter(),
+			...parent::getDefaultPreFilters(),
+			new Scope(Scope::REST),
+		];
 	}
 
 	public function getAction($id)

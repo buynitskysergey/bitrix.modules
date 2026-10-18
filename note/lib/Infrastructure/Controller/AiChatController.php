@@ -11,7 +11,7 @@ use Bitrix\Note\Internal\Integration\AiAssistant\AiChatAvailability;
 use Bitrix\Note\Internal\Integration\AiAssistant\WidgetApplicationDataResolver;
 
 /**
- * [API-01] Application data for the BitrixGPT side chat widget. The class name is part of the
+ * Application data for the BitrixGPT side chat widget. The class name is part of the
  * action id (`note.infrastructure.AiChatController.getWidgetConfig`) — renaming it breaks the
  * front-end call.
  *

@@ -30,6 +30,7 @@ use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\RunIntegration;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\RunUpdateEvent;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\SendNotification;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\SendPush;
+use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\StartTimer;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\StopTimer;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\UpdateRelatedTasks;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\UpdateHistoryLog;
@@ -166,6 +167,8 @@ class UpdateService
 		(new SendPush($config))($fullTaskData, $sourceTaskData, $changes);
 
 		(new StopTimer($config))($fullTaskData, $changes);
+
+		(new StartTimer($config))($fullTaskData, $changes);
 
 		// get task object with prepopulated data
 		$this->repository->invalidate($taskObject->getId());

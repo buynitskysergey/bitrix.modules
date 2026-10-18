@@ -6,6 +6,9 @@ use Bitrix\Mobile\Dto\Caster\Caster;
 use Bitrix\Mobile\Dto\Validator\Validator;
 use Bitrix\Mobile\Dto\Transformer\Transformer;
 
+/**
+ * @deprected Just use plain readonly php-classes instead.
+ */
 abstract class Dto implements \JsonSerializable
 {
 	private ?array $casts = null;

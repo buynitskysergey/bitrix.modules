@@ -5,6 +5,7 @@ namespace Bitrix\StaffTrack;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\LoaderException;
+use Bitrix\StaffTrack\Public\Services\DepartmentFeatureToggle;
 use Bitrix\StaffTrack\Service\CheckIn\RegionAvailabilityService;
 
 class Feature
@@ -13,6 +14,9 @@ class Feature
 	public const CHECK_IN_SETTINGS_KEY = 'feature_check_in_enabled_by_settings';
 	public const CHECK_IN_GEO_ENABLED_KEY = 'feature_check_in_geo_enabled';
 	public const CHECK_IN_START_KEY = 'feature_check_in_start_enabled';
+
+	public const CHECK_IN_ROLLOUT_ENABLED_KEY = 'feature_check_in_rollout_enabled';
+	public const CHECK_IN_ROLLOUT_DEPARTMENTS_KEY = 'feature_check_in_rollout_departments';
 
 	/**
 	 * @return bool
@@ -32,6 +36,14 @@ class Feature
 	public static function isGeoFeaturesAvailableByRegion(): bool
 	{
 		return (new RegionAvailabilityService())->isGeoFeaturesAvailableByRegion();
+	}
+
+	/**
+	 * @return bool
+	 */
+	public static function isGeoRetentionLimited(): bool
+	{
+		return (new RegionAvailabilityService())->isGeoRetentionLimited();
 	}
 
 	/**
@@ -131,5 +143,74 @@ class Feature
 	public static function turnCheckInStartOff(): void
 	{
 		Option::set(self::MODULE_ID, self::CHECK_IN_START_KEY, 'N');
+	}
+
+	public static function isCheckInRolloutEnabled(int $userId): bool
+	{
+		return (new DepartmentFeatureToggle())->isEnabledForUser(
+			userId: $userId,
+			moduleId: self::MODULE_ID,
+			companyOptionKey: self::CHECK_IN_ROLLOUT_ENABLED_KEY,
+			deptsOptionKey: self::CHECK_IN_ROLLOUT_DEPARTMENTS_KEY,
+		);
+	}
+
+	/**
+	 * @param int[] $userIds
+	 * @return array<int, bool>
+	 */
+	public static function filterCheckInRolloutEnabled(array $userIds): array
+	{
+		return (new DepartmentFeatureToggle())->filterEnabledForUsers(
+			userIds: $userIds,
+			moduleId: self::MODULE_ID,
+			companyOptionKey: self::CHECK_IN_ROLLOUT_ENABLED_KEY,
+			deptsOptionKey: self::CHECK_IN_ROLLOUT_DEPARTMENTS_KEY,
+		);
+	}
+
+	/**
+	 * @throws \Bitrix\Main\ArgumentOutOfRangeException
+	 */
+	public static function turnCheckInRolloutOn(): void
+	{
+		(new DepartmentFeatureToggle())->enableForCompany(self::MODULE_ID, self::CHECK_IN_ROLLOUT_ENABLED_KEY);
+	}
+
+	/**
+	 * @throws \Bitrix\Main\ArgumentOutOfRangeException
+	 */
+	public static function turnCheckInRolloutOff(): void
+	{
+		(new DepartmentFeatureToggle())->disableForCompany(self::MODULE_ID, self::CHECK_IN_ROLLOUT_ENABLED_KEY);
+	}
+
+	/**
+	 * @param int[] $departmentIds
+	 * @throws \Bitrix\Main\ArgumentOutOfRangeException
+	 */
+	public static function setCheckInRolloutDepartments(array $departmentIds): void
+	{
+		(new DepartmentFeatureToggle())->setEnabledDepartments(
+			self::MODULE_ID,
+			self::CHECK_IN_ROLLOUT_DEPARTMENTS_KEY,
+			$departmentIds,
+		);
+	}
+
+	public static function isCheckInRolloutEnabledForCompany(): bool
+	{
+		return (new DepartmentFeatureToggle())->getCompanyEnabled(self::MODULE_ID, self::CHECK_IN_ROLLOUT_ENABLED_KEY);
+	}
+
+	/**
+	 * @return int[]
+	 */
+	public static function getCheckInRolloutDepartments(): array
+	{
+		return (new DepartmentFeatureToggle())->getEnabledDepartments(
+			self::MODULE_ID,
+			self::CHECK_IN_ROLLOUT_DEPARTMENTS_KEY,
+		);
 	}
 }

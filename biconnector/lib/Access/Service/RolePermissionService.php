@@ -7,6 +7,7 @@ use Bitrix\BIConnector\Access\Permission\PermissionDictionary;
 use Bitrix\BIConnector\Access\Permission\PermissionTable;
 use Bitrix\BIConnector\Access\Role\RoleTable;
 use Bitrix\BIConnector\Access\Role\RoleUtil;
+use Bitrix\BIConnector\Superset\Error\UserFacingError;
 use Bitrix\Main\Application;
 use Bitrix\Main\DB\SqlQueryException;
 use Bitrix\Main\Error;
@@ -136,7 +137,8 @@ final class RolePermissionService
 			{
 				if (!PermissionTable::deleteList(['=ROLE_ID' => $roles]))
 				{
-					$result->addError(new Error(Loc::getMessage('BICONNECTOR_APACHESUPERSET_CONFIG_PERMISSIONS_DB_ERROR') ?? ''));
+					$errorMessage = Loc::getMessage('BICONNECTOR_APACHESUPERSET_CONFIG_PERMISSIONS_DB_ERROR');
+					$result->addError(new UserFacingError($errorMessage));
 					$db->rollbackTransaction();
 
 					return $result;
@@ -175,7 +177,8 @@ final class RolePermissionService
 
 		if (empty($name))
 		{
-			$result->addError(new Error(Loc::getMessage('BICONNECTOR_ACCESS_SAVE_ROLE_ERROR_NO_NAME') ?? ''));
+			$errorMessage = Loc::getMessage('BICONNECTOR_ACCESS_SAVE_ROLE_ERROR_NO_NAME');
+			$result->addError(new UserFacingError($errorMessage));
 
 			return $result;
 		}

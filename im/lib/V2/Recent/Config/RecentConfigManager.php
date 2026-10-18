@@ -14,7 +14,6 @@ use Bitrix\Main\Engine\Response\Converter;
 
 class RecentConfigManager
 {
-	public const EXTERNAL_CHAT_USE_DEFAULT_RECENT_SECTION = false;
 	public const DEFAULT_SECTION_NAME = 'default';
 
 	private array $configByTypes = [];
@@ -33,6 +32,25 @@ class RecentConfigManager
 	public static function getInstance(): self
 	{
 		return ServiceLocator::getInstance()->get(RecentConfigManager::class);
+	}
+
+	public function getExternalTypesInDefaultSection(): array
+	{
+		if (!$this->isLoaded)
+		{
+			$this->load();
+		}
+
+		$types = [];
+		foreach (array_keys($this->externalTypeRegistry->getConfigs()) as $type)
+		{
+			if ($this->getByExtendedType($type)->useDefaultRecentSection)
+			{
+				$types[] = $type;
+			}
+		}
+
+		return $types;
 	}
 
 	public function getByExtendedType(string $type): RecentConfig
@@ -158,7 +176,7 @@ class RecentConfigManager
 			}
 
 			$recentConfig = new RecentConfig(
-				self::EXTERNAL_CHAT_USE_DEFAULT_RECENT_SECTION,
+				$config->useDefaultRecentSection,
 				$config->hasOwnRecentSection,
 				$config->hasOwnRecentSection ? FormatConverter::toCamelCase($type) : CounterType::Chat
 			);

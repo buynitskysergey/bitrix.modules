@@ -4,6 +4,8 @@ namespace Bitrix\Disk;
 
 use Bitrix\Disk\Access\AccessCodeEnum;
 use Bitrix\Disk\Document\TrackedObject;
+use Bitrix\Disk\Internal\Access\UnifiedLink\UnifiedLinkAccessLevel;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Disk\Internals\Error\ErrorCollection;
 use Bitrix\Disk\Internals\Error\IErrorable;
@@ -17,6 +19,7 @@ use Bitrix\Disk\Security\SecurityContext;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\DB\MysqlCommonConnection;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Entity\ExpressionField;
 use Bitrix\Main\Entity\Query;
 use Bitrix\Main\Event;
@@ -54,6 +57,7 @@ class RightsManager implements IErrorable
 
 	/** @var  ErrorCollection */
 	protected $errorCollection;
+	protected UnifiedLinkAccessService $unifiedLinkAccessService;
 	/** @var  array */
 	protected $accessTasks;
 	/** @var array  */
@@ -61,9 +65,26 @@ class RightsManager implements IErrorable
 	/** @var array<int, bool> */
 	private array $readableTaskIdMap = [];
 
+	private array $unifiedLinkAccessLevelToOperationsMap = [
+		UnifiedLinkAccessLevel::Read->value => [
+			self::OP_READ,
+		],
+		UnifiedLinkAccessLevel::Edit->value => [
+			self::OP_READ,
+			self::OP_ADD,
+			self::OP_EDIT,
+			self::OP_DELETE,
+			self::OP_START_BP,
+		],
+	];
+
+	/** @var array<string, array<int, UnifiedLinkAccessLevel>> */
+	private ?array $opToUnifiedLinkAccessLevelsMap = null;
+
 	public function __construct()
 	{
 		$this->errorCollection = new ErrorCollection();
+		$this->unifiedLinkAccessService = ServiceLocator::getInstance()->get(UnifiedLinkAccessService::class);
 	}
 
 	/**
@@ -762,11 +783,42 @@ class RightsManager implements IErrorable
 	 * @param $userId
 	 * @return array
 	 */
-	public function getUserOperationsByObject($objectId, $userId)
+	public function getUserOperationsByObject(
+		$objectId,
+		$userId,
+		bool $shouldCheckUnifiedLink = false,
+	)
 	{
-		return $this->reformatRightsToOperations(
+		$rights = $this->reformatRightsToOperations(
 			$this->getUserRightsByObject($objectId, $userId),
 		);
+
+		if ($shouldCheckUnifiedLink)
+		{
+			$baseObject = BaseObject::loadById($objectId);
+
+			if ($baseObject instanceof BaseObject)
+			{
+				$accessLevel = $this->unifiedLinkAccessService->check(
+					baseObject: $baseObject,
+					userId: $userId,
+				);
+
+				$unifiedLinkOperations = array_reduce(
+					array: $this->getOperationsByUnifiedLinkAccessLevel($accessLevel),
+					callback: function (array $res, string $operation) {
+						$res[$operation] = $operation;
+
+						return $res;
+					},
+					initial: [],
+				);
+
+				$rights = array_merge($rights, $unifiedLinkOperations);
+			}
+		}
+
+		return $rights;
 	}
 
 	public function getUserOperationsForChildren($parentId, $userId, array $restrictIds = [])
@@ -1401,6 +1453,46 @@ class RightsManager implements IErrorable
 			: $parameters['filter']['=RIGHTS_CHECK'] = true;
 
 		return $parameters;
+	}
+
+	public function getUnifiedLinkAccessLevelsByOperation(string $operation): array
+	{
+		return $this->getOpToUnifiedLinkAccessLevelsMap()[$operation] ?? [];
+	}
+
+	public function getMinUnifiedLinkAccessLevelByOperation(string $operation): ?UnifiedLinkAccessLevel
+	{
+		$accessLevels = $this->getUnifiedLinkAccessLevelsByOperation($operation);
+
+		if (empty($accessLevels))
+		{
+			return null;
+		}
+
+		$minAccessLevel = min($accessLevels);
+
+		return UnifiedLinkAccessLevel::tryFrom($minAccessLevel);
+	}
+
+	public function getOperationsByUnifiedLinkAccessLevel(UnifiedLinkAccessLevel $accessLevel): array
+	{
+		return $this->unifiedLinkAccessLevelToOperationsMap[$accessLevel->value] ?? [];
+	}
+
+	protected function getOpToUnifiedLinkAccessLevelsMap(): array
+	{
+		if (is_null($this->opToUnifiedLinkAccessLevelsMap))
+		{
+			foreach ($this->unifiedLinkAccessLevelToOperationsMap as $accessLevelString => $accessLevelOperations)
+			{
+				foreach ($accessLevelOperations as $accessLevelOperation)
+				{
+					$this->opToUnifiedLinkAccessLevelsMap[$accessLevelOperation][] = $accessLevelString;
+				}
+			}
+		}
+
+		return $this->opToUnifiedLinkAccessLevelsMap;
 	}
 }
 

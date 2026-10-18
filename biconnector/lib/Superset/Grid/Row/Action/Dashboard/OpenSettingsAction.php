@@ -7,8 +7,10 @@ use Bitrix\BIConnector\Access\ActionDictionary;
 use Bitrix\BIConnector\Access\Model\DashboardAccessItem;
 use Bitrix\Main;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\BIConnector\Superset\Grid\Row\Action\FormatMenuAction;
 
-final class OpenSettingsAction extends BaseDashboardAction
+
+final class OpenSettingsAction extends FormatMenuAction
 {
 
 	public static function getId(): ?string

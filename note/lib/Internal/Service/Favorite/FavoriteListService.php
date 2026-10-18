@@ -20,7 +20,7 @@ use Bitrix\Note\Internal\Service\Sidebar\AccessibleTreeService;
 use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
 
 /**
- * [P4.T1 / ALG-06] One page of a user's favorites: keyset window over (POSITION DESC, ID DESC)
+ * One page of a user's favorites: keyset window over (POSITION DESC, ID DESC)
  * already filtered by rights in the WHERE, plus batch notification coverage and the batch chevron
  * hint.
  *
@@ -44,16 +44,16 @@ final class FavoriteListService
 	public const EXPAND_VIA_TREE = 'tree';
 	public const EXPAND_VIA_ACCESSIBLE_TREE = 'accessibleTree';
 
-	// [Q-1] Refill budget in candidate ROWS read from the database per request, not in cursor
+	// Refill budget in candidate ROWS read from the database per request, not in cursor
 	// windows: a window cap would cost ten times more at limit=50 than at limit=5. On the cap the
 	// page comes back short with a live cursor on the last examined candidate.
 	//
 	// Since the visibility predicate moved into the query, this budget bounds the onlyNotified
-	// branch alone — coverage is an ancestor walk and cannot be expressed in SQL. A plain page is
-	// answered by the first window and never reaches it.
+	// branch alone — that filter reads the coverage state per window and drops rows after the
+	// fetch. A plain page is answered by the first window and never reaches it.
 	private const FAVORITE_SCAN_MAX_CANDIDATES = 500;
 
-	// [Q-1] Second bound of the same budget, in windows: the row budget alone would let a page of
+	// Second bound of the same budget, in windows: the row budget alone would let a page of
 	// limit=1 spend its 500 rows over 250 windows, each paying for metadata, rights and coverage.
 	// Windows are read at DEFAULT_LIMIT at least, so this cap and the row budget run out together.
 	private const FAVORITE_SCAN_MAX_WINDOWS = 10;
@@ -69,7 +69,7 @@ final class FavoriteListService
 	) {}
 
 	/**
-	 * [DTO-01] One page of rows the user may actually see. Rows whose object is gone, trashed or no
+	 * One page of rows the user may actually see. Rows whose object is gone, trashed or no
 	 * longer accessible are skipped silently - the favorite row itself survives, so restoring the
 	 * object or the access brings it back on its old position.
 	 *
@@ -116,10 +116,10 @@ final class FavoriteListService
 		$candidateLimit = max($limit, self::DEFAULT_LIMIT);
 
 		// Rights live in the WHERE now, so a plain page is answered by the first window and the
-		// budget below never engages. What it still bounds is the onlyNotified branch: coverage is an
-		// ancestor walk over the subscription tree, it cannot be pushed into SQL, and it still drops
-		// rows after the fetch. A user with many favorites and few subscriptions can therefore still
-		// receive a short page with a live cursor — intended, see ADR section 3.
+		// budget below never engages. What it still bounds is the onlyNotified branch: the coverage
+		// state is read per window and drops rows after the fetch, not in the WHERE. A user with
+		// many favorites and few subscriptions can therefore still receive a short page with a live
+		// cursor — intended, see ADR section 3.
 		while (
 			count($kept) < $limit
 			&& $scanned < self::FAVORITE_SCAN_MAX_CANDIDATES
@@ -201,7 +201,7 @@ final class FavoriteListService
 	}
 
 	/**
-	 * [DTO-01] One row of the same shape a page carries, for callers that already know which object
+	 * One row of the same shape a page carries, for callers that already know which object
 	 * changed (a fresh add) and would otherwise re-read the whole first page.
 	 *
 	 * Runs the page pipeline over a single candidate, so visibility, coverage and the chevron follow
@@ -292,7 +292,7 @@ final class FavoriteListService
 	}
 
 	/**
-	 * [ALG-06] Visibility predicate of the mixed list, or null for a portal admin (who sees every
+	 * Visibility predicate of the mixed list, or null for a portal admin (who sees every
 	 * favorite). Document rows are judged through the joined document, collection rows against the
 	 * PHP-resolved id list — the same two branches the two filters used to apply row by row.
 	 *
@@ -451,8 +451,9 @@ final class FavoriteListService
 
 	/**
 	 * Coverage of one window: one CoverageResolver call per entity type, never per row. With the
-	 * filter on, a row without real coverage is dropped here - that is part of the filtering, so it
-	 * happens before the next-page verdict, and a muted row never passes.
+	 * filter on, a row nothing is delivered to is dropped here - that is part of the filtering, so
+	 * it happens before the next-page verdict. `notified` is the resolver's own verdict, so a muted
+	 * row never passes and neither does one covered only from above.
 	 *
 	 * @param array<int, array<string, mixed>> $rows
 	 * @return array<int, array<string, mixed>> rows with the `notify` state attached
@@ -511,12 +512,12 @@ final class FavoriteListService
 	}
 
 	/**
-	 * [P4.T3] Chevron hint of the page: documents are answered by one query over all knowledge bases
+	 * Chevron hint of the page: documents are answered by one query over all knowledge bases
 	 * present on the page, knowledge bases by a single "has live root documents" query. Structure
 	 * only - a descendant's own rights are not checked (ADR section 3 trade-off).
 	 *
 	 * An archived knowledge base never gets a chevron: DTO-01 carries no archived flag, so the
-	 * client's "archived rows do not expand" rule (AC-041) rides on this hint alone.
+	 * client's "archived rows do not expand" rule rides on this hint alone.
 	 *
 	 * @param array<int, array<string, mixed>> $rows
 	 * @param array<int, int> $collectionLevels
@@ -635,7 +636,7 @@ final class FavoriteListService
 	}
 
 	/**
-	 * [ALG-02] Chevron of the rows that expand through the accessible tree. The batch query above
+	 * Chevron of the rows that expand through the accessible tree. The batch query above
 	 * answers whether the document has live children at all, which is the right answer only inside a
 	 * collection the reader may see: with a document-only grant the branch holds nothing but children
 	 * granted to them personally, and a grant of `scope=document` reaches none. So the question is put

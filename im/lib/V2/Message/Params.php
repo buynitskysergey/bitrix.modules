@@ -77,7 +77,9 @@ class Params extends Registry
 		COPILOT_FORCE_SEARCH = 'COPILOT_FORCE_SEARCH',
 		COPILOT_PAGE_CONTEXT = 'COPILOT_PAGE_CONTEXT',
 		COPILOT_MCP_AUTH_ID = 'COPILOT_MCP_AUTH_ID',
+		COPILOT_SIMPLE_REASONING_PLAN = 'COPILOT_SIMPLE_REASONING_PLAN',
 		AI_TASK_TRIGGER_MESSAGE_ID = 'AI_TASK_TRIGGER_MESSAGE_ID',
+		AI_TASK_ID = 'AI_TASK_ID',
 		COPILOT_TRIGGER_MESSAGE_ID = 'COPILOT_TRIGGER_MESSAGE_ID',
 		BLOCK = 'BLOCK'
 	;
@@ -295,6 +297,12 @@ class Params extends Registry
 			'type' => Param::TYPE_INT,
 			'isHidden' => true,
 		],
+		// Not hidden, unlike the other COPILOT_* params: the reasoning plan has to reach
+		// clients both in the new message push and in the REST history of the chat.
+		self::COPILOT_SIMPLE_REASONING_PLAN => [
+			'className' => Message\Param\CopilotSimpleReasoningPlan::class,
+			'type' => Param::TYPE_JSON,
+		],
 
 		//todo: Move it into CRM module
 		self::CRM_FORM_FILLED => [
@@ -314,6 +322,10 @@ class Params extends Registry
 			'type' => Param::TYPE_JSON,
 		],
 		self::AI_TASK_TRIGGER_MESSAGE_ID => [
+			'type' => Param::TYPE_INT,
+			'default' => 0,
+		],
+		self::AI_TASK_ID => [
 			'type' => Param::TYPE_INT,
 			'default' => 0,
 		],

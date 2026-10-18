@@ -1,7 +1,7 @@
 <?php
 class CSearchLanguageRu extends CSearchLanguage
 {
-	function GetKeyboardLayout()
+	public function GetKeyboardLayout()
 	{
 		return [
 			'lo' => 'ё          - ' . 'йцукенгшщзхъ' . 'фывапролджэ' . 'ячсмитьбю ',
@@ -10,7 +10,7 @@ class CSearchLanguageRu extends CSearchLanguage
 		];
 	}
 
-	function GetBigrammLetterFreq()
+	public function GetBigrammLetterFreq()
 	{
 		return [
 			//         а    б    в    г    д    е    ж    з    и    й    к    л    м    н    о    п    р    с    т    у    ф    х    ц    ч    ш    щ    ы    ь    э    ю    я    ъ    ё

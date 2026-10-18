@@ -49,11 +49,13 @@ class ExternalDatasetRowAssembler extends RowAssembler
 				[
 					'DATE_CREATE',
 				],
+				timeFormat: Field\Base\DateFieldAssembler::TIME_FORMAT_SHORT,
 			),
 			new Field\Base\DateFieldAssembler(
 				[
 					'DATE_UPDATE',
 				],
+				timeFormat: Field\Base\DateFieldAssembler::TIME_FORMAT_SHORT,
 			),
 			new Field\Dataset\CreatedByFieldAssembler(
 				[

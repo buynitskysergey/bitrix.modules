@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Repository\DocumentVersionRepository;
 /**
  * Restores a document's content to a past version's snapshot. Reuses the overwrite
  * path (OverwriteDocumentContentCommand) so the version/content_changed bookkeeping
- * of [P1.T1] is written once, in one place, with the restoring user as the actor.
+ * is written once, in one place, with the restoring user as the actor.
  */
 class RestoreDocumentVersionCommand extends AbstractCommand
 {

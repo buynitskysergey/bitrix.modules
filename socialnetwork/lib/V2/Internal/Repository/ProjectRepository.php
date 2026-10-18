@@ -353,9 +353,27 @@ class ProjectRepository implements ProjectRepositoryInterface
 		return is_numeric($row['IMAGE_ID'] ?? null) ? (int)$row['IMAGE_ID'] : 0;
 	}
 
+	// A row may hold no type at all, and an inequality never matches NULL, so such a row is taken in
+	// explicitly. A legacy scrum stays out of it: the scrum grid classifies a row by its scrum master alone
+	// (ScrumRepository::applyTypeFilter()), so a typeless scrum would otherwise sit in the project and the
+	// scrum lists at once
 	protected function applyTypeFilter(Query $query): void
 	{
-		$query->whereNot('TYPE', Type::Scrum->value);
+		$query->where(
+			Query::filter()
+				->logic('or')
+				->whereNot('TYPE', Type::Scrum->value)
+				->where(
+					Query::filter()
+						->whereNull('TYPE')
+						->where(
+							Query::filter()
+								->logic('or')
+								->whereNull('SCRUM_MASTER_ID')
+								->where('SCRUM_MASTER_ID', '<=', 0)
+						)
+				)
+		);
 	}
 
 	protected function getExtranetUserService(): ExtranetUserService
@@ -637,7 +655,7 @@ class ProjectRepository implements ProjectRepositoryInterface
 			return Type::tryFrom($row['TYPE']);
 		}
 
-		if (isset($row['SCRUM_MASTER_ID']))
+		if ((int)($row['SCRUM_MASTER_ID'] ?? 0) > 0)
 		{
 			return Type::Scrum;
 		}

@@ -22,6 +22,7 @@ use Bitrix\Note\Internal\Repository\DocumentUpdateRepository;
 use Bitrix\Note\Internal\Repository\DocumentVersionRepository;
 use Bitrix\Note\Internal\Repository\EventRepository;
 use Bitrix\Note\Internal\Service\Collaboration\DocumentLockService;
+use Bitrix\Note\Internal\Service\File\DiskAttachmentSyncService;
 use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 
@@ -41,6 +42,7 @@ class CompactDocumentCommand extends AbstractCommand
 		private readonly DocumentVersionRepository $documentVersionRepository = new DocumentVersionRepository(),
 		private readonly EventLogService $eventLogService = new EventLogService(),
 		private readonly EventRepository $eventRepository = new EventRepository(),
+		private readonly DiskAttachmentSyncService $diskAttachmentSyncService = new DiskAttachmentSyncService(),
 	) {}
 
 	protected function execute(): Result
@@ -69,7 +71,11 @@ class CompactDocumentCommand extends AbstractCommand
 			return new Result();
 		}
 
-		// [P4.T2] Derived projections (search + links) are no longer rebuilt inline here — compaction
+		// The document has no explicit save, so settled content is the moment its Disk attachments are
+		// made to match the text it ended up with.
+		$this->diskAttachmentSyncService->syncBestEffort($this->documentId, $this->userId);
+
+		// Derived projections (search + links) are no longer rebuilt inline here - compaction
 		// raised IS_DERIVED_STALE='Y' via materializeProjection, and the freshness agent recomputes both
 		// on its next tick. The content-settled event stays: RAG consumes it.
 		$this->eventPublisher->emitContentSettled(
@@ -155,7 +161,7 @@ class CompactDocumentCommand extends AbstractCommand
 
 		try
 		{
-			// [P3.T1] Projection write goes through the shared forward-only guard (under the 'compact'
+			// Projection write goes through the shared forward-only guard (under the 'compact'
 			// lock already held by execute()): it writes MARKDOWN + content date + cursor WITHOUT moving
 			// UPDATED_AT, and raises the derived-stale flag. A false return means a concurrent write is
 			// already at or ahead of this cursor: the projection is left as-is, without a rollback and
@@ -173,7 +179,7 @@ class CompactDocumentCommand extends AbstractCommand
 				$authorIds = $deleteResult->getData()['authorIds'] ?? [];
 			}
 
-			// [P3.T1] Version gate on the split write contract. The old "markdown != previousMarkdown"
+			// Version gate on the split write contract. The old "markdown != previousMarkdown"
 			// check no longer works: materialization keeps MARKDOWN fresh, so the pre-compact body
 			// already equals the incoming text and the check would almost always read "unchanged". The
 			// version is instead gated by three things, independent of materializeProjection's return

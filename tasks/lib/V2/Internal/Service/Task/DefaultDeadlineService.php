@@ -18,7 +18,7 @@ class DefaultDeadlineService
 
 	}
 
-	public function set(DeadlineUserOption $defaultDeadlineUserOption): void
+	public function set(DeadlineUserOption $defaultDeadlineUserOption): array
 	{
 		$deadlineUserOption = $this->deadlineUserOptionRepository->getByUserId($defaultDeadlineUserOption->userId);
 
@@ -45,6 +45,8 @@ class DefaultDeadlineService
 				'deadlineUserOption' => $deadlineUserOption->toArray(),
 			],
 		);
+
+		return $deadlineUserOption->toArray();
 	}
 
 	private function sendPush(int $userId, array $params = []): void

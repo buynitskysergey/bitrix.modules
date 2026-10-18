@@ -6,11 +6,73 @@ use Bitrix\Main\Config\ConfigurationException;
 use Bitrix\Main\Result;
 use Bitrix\Main\Error;
 use Bitrix\BIConnector\Aggregate;
+use Bitrix\BIConnector\Configuration\Feature;
+use Bitrix\BIConnector\DataSourceConnector\Aggregation;
+use Bitrix\BIConnector\DB\BiAggregationDialectInterface;
 use Bitrix\Main\DB;
 
 class Sql extends Base
 {
 	protected const ANALYTIC_TAG_DATASET = 'system';
+
+	private const ABORT_CHECK_DB_ROW_INTERVAL = 500;
+
+	protected ?string $biQueryError = null;
+
+	/**
+	 * Aggregation is delegated only when the connection is available and its helper implements the
+	 * aggregation contract; the dataset gates of design §6.5 are evaluated inside Capabilities.
+	 */
+	public function getAggregationCapabilities(): Aggregation\Capabilities
+	{
+		if (!Feature::isAggregationPushdownEnabled())
+		{
+			return Aggregation\Capabilities::unsupported();
+		}
+
+		return Aggregation\Capabilities::build(
+			$this->getAggregationDialect(),
+			$this->getDatasetSchema(),
+			$this->getAggregationScopeId(),
+		);
+	}
+
+	protected function getAggregationDialect(): ?BiAggregationDialectInterface
+	{
+		try
+		{
+			$helper = $this->getConnection()?->getSqlHelper();
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		return $helper instanceof BiAggregationDialectInterface ? $helper : null;
+	}
+
+	/**
+	 * @return array{readRows: int, readBytes: int}|null
+	 */
+	public function getLastScanStatistics(): ?array
+	{
+		try
+		{
+			$connection = $this->getConnection();
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		// Only a source that reports the scanned volume can answer; the others stay silent.
+		if ($connection === null || !method_exists($connection, 'getLastQueryStatistics'))
+		{
+			return null;
+		}
+
+		return $connection->getLastQueryStatistics();
+	}
 
 	/**
 	 * @return DB\Result|bool
@@ -24,7 +86,36 @@ class Sql extends Base
 			return false;
 		}
 
-		return $connection->biQuery($sql);
+		return $this->executeBiQuery($connection, $sql);
+	}
+
+	protected function executeBiQuery(DB\Connection $connection, string $sql): DB\Result|bool
+	{
+		$this->activeQueryConnection = $connection;
+		$this->biQueryError = null;
+
+		if (!$this->requiresPinnedExecutorConnection())
+		{
+			return $connection->biQuery($sql);
+		}
+
+		$pool = \Bitrix\Main\Application::getInstance()->getConnectionPool();
+		$pool->useMasterOnly(true);
+		try
+		{
+			if (!$this->applySqlTimeLimit($connection))
+			{
+				$this->biQueryError = 'Failed to enforce SQL time limit';
+
+				return false;
+			}
+
+			return $connection->biQuery($sql);
+		}
+		finally
+		{
+			$pool->useMasterOnly(false);
+		}
 	}
 
 	/**
@@ -32,7 +123,12 @@ class Sql extends Base
 	 */
 	protected function getQueryErrorMessage(): string
 	{
-		return $this->getConnection()?->getErrorMessage() ?? '';
+		if ($this->biQueryError !== null)
+		{
+			return $this->biQueryError;
+		}
+
+		return ($this->activeQueryConnection ?? $this->getConnection())?->getErrorMessage() ?? '';
 	}
 
 	/**
@@ -135,100 +231,143 @@ class Sql extends Base
 		$prevPrimaryKey = '';
 		$outputRow = null;
 		$rowsCount = 0;
+		$rowsSinceAbortCheck = 0;
 
-		while ($row = $resultQuery->fetch())
+		// A server may fail after the rows started flowing - ClickHouse answers 200, streams data and
+		// appends the error to the body - and such a failure surfaces as an exception from fetch().
+		// Caught here and turned into the same Result the early failures return, so the endpoint can
+		// finish its buffers and report the aggregation as not applied instead of dying mid-stream.
+		try
 		{
-			if ($limit && $rowsCount === $limit)
+			while ($row = $resultQuery->fetch())
 			{
-				/** It`s total prohibited for changing `continue` to `break` for avoiding `Commands out of sync`. The issue is 0205035 */
-				continue;
-			}
-
-			$onAfterCallbacks = $data['onAfterFetch'] ?? [];
-			foreach ($onAfterCallbacks as $i => $callback)
-			{
-				$row[$i] = $callback($row[$i], $dateFormats);
-			}
-
-			$primaryKey = '';
-			foreach ($primary as $primaryIndex)
-			{
-				if ($primaryKey)
+				if (++$rowsSinceAbortCheck >= self::ABORT_CHECK_DB_ROW_INTERVAL)
 				{
-					$primaryKey .= '-';
-				}
-				$primaryKey .= $row[$primaryIndex];
-			}
-
-			if ($primary && $groupFields)
-			{
-				if ($outputRow === null)
-				{
-					$outputRow = $row;
-					foreach ($groupFields as $i => $groupInfo)
+					$rowsSinceAbortCheck = 0;
+					if ($this->shouldAbort())
 					{
-						$groupId = $row[$groupInfo['unique_id']];
-						$outputRow[$i] = clone $groupInfo['state'];
-						$outputRow[$i]->updateState($groupId, $row[$i]);
+						$this->abortActiveQuery();
+
+						return $result;
 					}
 				}
-				elseif ($primaryKey === $prevPrimaryKey)
+
+				if ($limit && $rowsCount === $limit)
 				{
-					foreach ($groupFields as $i => $groupInfo)
+					/** It`s total prohibited for changing `continue` to `break` for avoiding `Commands out of sync`. The issue is 0205035 */
+					continue;
+				}
+
+				$onAfterCallbacks = $data['onAfterFetch'] ?? [];
+				foreach ($onAfterCallbacks as $i => $callback)
+				{
+					$row[$i] = $callback($row[$i], $dateFormats);
+				}
+
+				$primaryKey = '';
+				foreach ($primary as $primaryIndex)
+				{
+					if ($primaryKey)
 					{
-						$groupId = $row[$groupInfo['unique_id']];
-						$outputRow[$i]->updateState($groupId, $row[$i]);
+						$primaryKey .= '-';
 					}
+					$primaryKey .= $row[$primaryIndex];
+				}
+
+				if ($primary && $groupFields)
+				{
+					if ($outputRow === null)
+					{
+						$outputRow = $row;
+						foreach ($groupFields as $i => $groupInfo)
+						{
+							$groupId = $row[$groupInfo['unique_id']];
+							$outputRow[$i] = clone $groupInfo['state'];
+							$outputRow[$i]->updateState($groupId, $row[$i]);
+						}
+					}
+					elseif ($primaryKey === $prevPrimaryKey)
+					{
+						foreach ($groupFields as $i => $groupInfo)
+						{
+							$groupId = $row[$groupInfo['unique_id']];
+							$outputRow[$i]->updateState($groupId, $row[$i]);
+						}
+					}
+					else
+					{
+						foreach ($groupFields as $i => $groupInfo)
+						{
+							$outputRow[$i] = $outputRow[$i]->output();
+						}
+						if ($extraCount)
+						{
+							array_splice($outputRow, -$extraCount);
+						}
+
+						yield $outputRow;
+						$rowsCount++;
+
+						$outputRow = $row;
+						foreach ($groupFields as $i => $groupInfo)
+						{
+							$groupId = $row[$groupInfo['unique_id']];
+							$outputRow[$i] = clone $groupInfo['state'];
+							$outputRow[$i]->updateState($groupId, $row[$i]);
+						}
+					}
+					$prevPrimaryKey = $primaryKey;
 				}
 				else
 				{
-					foreach ($groupFields as $i => $groupInfo)
-					{
-						$outputRow[$i] = $outputRow[$i]->output();
-					}
 					if ($extraCount)
 					{
-						array_splice($outputRow, -$extraCount);
+						array_splice($row, -$extraCount);
 					}
 
-					yield $outputRow;
+					yield $row;
 					$rowsCount++;
-
-					$outputRow = $row;
-					foreach ($groupFields as $i => $groupInfo)
-					{
-						$groupId = $row[$groupInfo['unique_id']];
-						$outputRow[$i] = clone $groupInfo['state'];
-						$outputRow[$i]->updateState($groupId, $row[$i]);
-					}
 				}
-				$prevPrimaryKey = $primaryKey;
 			}
-			else
+
+			if ($outputRow && !($limit && $rowsCount === $limit))
 			{
+				foreach ($groupFields as $i => $groupInfo)
+				{
+					$outputRow[$i] = $outputRow[$i]->output();
+				}
+
 				if ($extraCount)
 				{
-					array_splice($row, -$extraCount);
+					array_splice($outputRow, -$extraCount);
 				}
 
-				yield $row;
-				$rowsCount++;
+				yield $outputRow;
 			}
 		}
-
-		if ($outputRow && !($limit && $rowsCount === $limit))
+		catch (DB\SqlQueryException $exception)
 		{
-			foreach ($groupFields as $i => $groupInfo)
-			{
-				$outputRow[$i] = $outputRow[$i]->output();
-			}
+			$result->addError(
+				new Error(
+					'SQL_ERROR',
+					0,
+					['description' => $exception->getDatabaseMessage() ?: $exception->getMessage()],
+				),
+			);
+		}
+		catch (\Exception $exception)
+		{
+			\AddMessage2Log(
+				'biconnector: unexpected failure while reading the query result of dataset "'
+				. $this->name . '": ' . $exception,
+				'biconnector',
+			);
 
-			if ($extraCount)
-			{
-				array_splice($outputRow, -$extraCount);
-			}
-
-			yield $outputRow;
+			$result->addError(new Error('SQL_ERROR'));
+		}
+		finally
+		{
+			$this->restoreSqlTimeLimit();
 		}
 
 		return $result;

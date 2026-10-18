@@ -6,6 +6,7 @@ namespace Bitrix\Im\V2\Message\Vote;
 
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Message;
+use Bitrix\Im\V2\Message\Vote\Event\CollectVotesEvent;
 use Bitrix\Main\Event;
 
 class VoteService
@@ -30,5 +31,26 @@ class VoteService
 			]
 		);
 		$event->send();
+	}
+
+	/**
+	 * Collects votes for the given message ids on behalf of $userId.
+	 * Fires OnMessageVoteCollect event; subscribers return SUCCESS results
+	 * with [messageId => ('like'|'dislike')[]] maps.
+	 *
+	 * @param int[] $messageIds
+	 * @return array<int, Vote[]> [messageId => Vote[]]
+	 */
+	public function collectVotes(array $messageIds, int $userId): array
+	{
+		if (empty($messageIds))
+		{
+			return [];
+		}
+
+		$event = new CollectVotesEvent($messageIds, $userId);
+		$event->send();
+
+		return $event->getCollectedVotes();
 	}
 }

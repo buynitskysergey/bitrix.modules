@@ -19,4 +19,5 @@ enum BlockType: string
 	case AiAssistantSearch = 'aiAssistantSearch';
 	case Card = 'card';
 	case Gallery = 'gallery';
+	case Form = 'form';
 }

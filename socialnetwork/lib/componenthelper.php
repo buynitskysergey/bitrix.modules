@@ -3524,6 +3524,16 @@ class ComponentHelper
 		return $allowToAll;
 	}
 
+	/**
+	 * Marker of the post form accepting a recipient set chosen by the caller.
+	 * Modules are released independently, so a neighbouring module tells the feature apart
+	 * by the existence of this method, not by the signature of the form init action.
+	 */
+	public static function isPostFormPreselectedRecipientsSupported(): bool
+	{
+		return true;
+	}
+
 	public static function getLivefeedStepper()
 	{
 		$res = array();

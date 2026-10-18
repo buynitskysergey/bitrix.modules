@@ -11,6 +11,7 @@ use Bitrix\Rest\V3\Exception\UnknownDtoPropertyException;
 use Bitrix\Rest\V3\Interaction\Relation;
 use Bitrix\Rest\V3\Interaction\Request\ListRequest;
 use Bitrix\Rest\V3\Interaction\Request\Request;
+use Bitrix\Rest\V3\Schema\Scope;
 use Bitrix\Rest\V3\Structure\Ordering\OrderStructure;
 
 /**
@@ -50,7 +51,7 @@ final class SelectStructure extends Structure
 
 		$availableFields = [];
 
-		if ($request->getOptions()['scope'])
+		if ($request !== null && isset($request->getOptions()['scope']) && $request->getOptions()['scope'] instanceof Scope)
 		{
 			$availableFields = $request->getOptions()['scope']->fields;
 		}

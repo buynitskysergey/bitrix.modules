@@ -5,12 +5,14 @@ namespace Bitrix\Im\V2\Application;
 use Bitrix\Call\Recent;
 use Bitrix\Im\V2\Anchor\DI\AnchorContainer;
 use Bitrix\Im\V2\Application\Config\PreloadedEntities;
+use Bitrix\Im\V2\Chat\CopilotChat;
 use Bitrix\Im\V2\Common\ContextCustomer;
 use Bitrix\Im\V2\Entity\User\User;
 use Bitrix\Im\V2\Folder\FolderLimits;
 use Bitrix\Im\V2\Folder\FolderProvider;
 use Bitrix\Im\V2\Integration\AI\CopilotNameResolver;
 use Bitrix\Im\V2\Integration\AI\EngineManager;
+use Bitrix\Im\V2\Integration\AI\GreetingProvider;
 use Bitrix\Im\V2\Integration\AI\SuggestProvider;
 use Bitrix\Im\V2\Integration\AI\Transcription\TranscribeManager;
 use Bitrix\Im\V2\Promotion\Internals\DeviceType;
@@ -248,7 +250,10 @@ class Config implements \JsonSerializable
 			'availableEngines' => (new EngineManager())->getAvailableEnginesForRest(),
 			'botName' => CopilotNameResolver::getInstance()->getName(),
 			'suggests' => SuggestProvider::getList(),
+			'greetings' => GreetingProvider::getList(),
+			'greetingWeekHolidays' => GreetingProvider::getWeekHolidays(),
 			'agentName' => CopilotNameResolver::getInstance()->getAgentName(),
+			'fileUploadPolicy' => CopilotChat::getFileUploadPolicyPublicData(),
 		];
 	}
 

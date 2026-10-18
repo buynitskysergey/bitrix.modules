@@ -15,6 +15,8 @@ use Bitrix\Main\Web\Json;
 
 class Sender extends MicroService\BaseSender
 {
+	public const ERROR_MALFORMED_RESPONSE = 'MALFORMED_RESPONSE';
+
 	private const API_VERSION = 2;
 	private array $singleUseHttpClientParams = [];
 
@@ -151,7 +153,8 @@ class Sender extends MicroService\BaseSender
 
 		if ($response !==  "")
 		{
-			$parseResult = self::parseJsonResponse($response);
+			$parseResult = self::tryBuildResponseResult($response) ?? self::createMalformedResponseResult();
+
 			$result->addErrors($parseResult->getErrors());
 
 			$data = $parseResult->getData();
@@ -162,31 +165,57 @@ class Sender extends MicroService\BaseSender
 		return $result;
 	}
 
-	protected static function parseJsonResponse(string $jsonResponse): Result
+	private static function tryBuildResponseResult(string $response): ?Result
 	{
-		$result = new Result();
 		try
 		{
-			$parsedResponse = Json::decode($jsonResponse);
+			$parsedResponse = Json::decode($response);
 		}
-		catch (\Exception $e)
+		catch (\Exception)
 		{
-			$result->addError(new Error("Could not parse server response. Raw response: " . $jsonResponse));
-			return $result;
+			return null;
 		}
 
 		if (($parsedResponse["status"] ?? null) === "error")
 		{
-			foreach ($parsedResponse["errors"] as $error)
-			{
-				$result->addError(new Error($error["message"], $error["code"], $error["customData"] ?? null));
-			}
+			return self::buildServiceErrorResult($parsedResponse["errors"] ?? null);
 		}
+
+		$result = new Result();
 
 		if (is_array($parsedResponse["data"] ?? null))
 		{
 			$result->setData($parsedResponse["data"]);
 		}
+
+		return $result;
+	}
+
+	private static function buildServiceErrorResult(mixed $serviceErrors): ?Result
+	{
+		$result = new Result();
+
+		foreach (is_array($serviceErrors) ? $serviceErrors : [] as $serviceError)
+		{
+			if (!is_array($serviceError) || !isset($serviceError["message"]))
+			{
+				continue;
+			}
+
+			$result->addError(new Error(
+				$serviceError["message"],
+				$serviceError["code"] ?? 0,
+				$serviceError["customData"] ?? null,
+			));
+		}
+
+		return $result->isSuccess() ? null : $result;
+	}
+
+	private static function createMalformedResponseResult(): Result
+	{
+		$result = new Result();
+		$result->addError(new Error('Could not parse server response', self::ERROR_MALFORMED_RESPONSE));
 
 		return $result;
 	}

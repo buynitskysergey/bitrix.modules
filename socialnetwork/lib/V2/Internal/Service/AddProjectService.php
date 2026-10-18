@@ -93,6 +93,15 @@ class AddProjectService
 			return (new Result())->addError(new Error('Base feature is invalid'));
 		}
 
+		if ($project->tagNames !== null)
+		{
+			$tagValidation = $this->projectTagRepository->validate($project->tagNames);
+			if (!$tagValidation->isSuccess())
+			{
+				return (new Result())->addErrors($tagValidation->getErrors());
+			}
+		}
+
 		$addCommand = CollabAddCommand::createFromArray($data)
 			->setInitiatorId($userId)
 			->addOption(new ConvertStatusOption(ConvertStatus::NotRequired->value))
@@ -132,7 +141,11 @@ class AddProjectService
 
 		if ($project->tagNames !== null)
 		{
-			$this->projectTagRepository->save($projectId, $project->tagNames);
+			$tagResult = $this->projectTagRepository->save($projectId, $project->tagNames);
+			if (!$tagResult->isSuccess())
+			{
+				return (new Result())->addErrors($tagResult->getErrors());
+			}
 		}
 
 		if ($project->publication !== null)

@@ -25,6 +25,7 @@ class SystemFolderRegistry
 			new SystemFolderPrototype(AllOpenChannelFolder::CODE, static fn (): SystemFolder => new AllOpenChannelFolder()),
 			new SystemFolderPrototype(CollabFolder::CODE, static fn (): SystemFolder => new CollabFolder()),
 			new SystemFolderPrototype(OpenLineFolder::CODE, static fn (): SystemFolder => new OpenLineFolder()),
+			new SystemFolderPrototype(VibecodeAppFolder::CODE, static fn (): SystemFolder => new VibecodeAppFolder()),
 		];
 
 		return $this->prototypes;

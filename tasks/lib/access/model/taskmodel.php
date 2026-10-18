@@ -361,6 +361,14 @@ class TaskModel implements AccessibleTask
 	public function setMembers(array $members): self
 	{
 		$this->members = $members;
+
+		return $this;
+	}
+
+	public function preloadMembers(array $members): self
+	{
+		$this->members ??= $members;
+
 		return $this;
 	}
 

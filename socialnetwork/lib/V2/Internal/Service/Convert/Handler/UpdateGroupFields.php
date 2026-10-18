@@ -24,6 +24,8 @@ class UpdateGroupFields implements HandlerInterface
 		$fields = $this->prepareFields($group);
 		if (empty($fields))
 		{
+			$this->ensureAlreadyPersistedAsCollab($group);
+
 			return;
 		}
 
@@ -90,13 +92,30 @@ class UpdateGroupFields implements HandlerInterface
 		GroupRegistry::getInstance()->invalidate($groupId);
 	}
 
-	private function ensureCollabWasPersisted(int $groupId, array $fields): void
+	// An empty field set means the group object already looks like a collab, the stored state has the last word
+	private function ensureAlreadyPersistedAsCollab(Workgroup $group): void
 	{
-		if (($fields['TYPE'] ?? null) !== Type::Collab->value)
+		$groupId = $group->getId();
+
+		$persistedFields = $this->getPersistedGroupFields($groupId);
+		if ($this->isPersistedAsCollab($persistedFields))
 		{
 			return;
 		}
 
+		throw new ProjectUpdateFieldsException(sprintf(
+			'Group %d is not stored as a collab (type [%s], project [%s]), nothing to update',
+			$groupId,
+			$persistedFields['TYPE'] ?? 'none',
+			$persistedFields['PROJECT'] ?? 'none',
+		));
+	}
+
+	// Every write is verified, not only the one carrying the type: a group whose type is already collab
+	// reaches this with the project flag alone, and an unverified flag leaves the same split container
+	// the type itself would
+	private function ensureCollabWasPersisted(int $groupId, array $fields): void
+	{
 		for ($attempt = 1; $attempt <= self::CONVERT_TO_COLLAB_MAX_ATTEMPTS; $attempt++)
 		{
 			if ($this->isPersistedAsCollab($this->getPersistedGroupFields($groupId)))
@@ -106,7 +125,10 @@ class UpdateGroupFields implements HandlerInterface
 				return;
 			}
 
-			if ($attempt === self::CONVERT_TO_COLLAB_MAX_ATTEMPTS)
+			if (
+				$attempt === self::CONVERT_TO_COLLAB_MAX_ATTEMPTS
+				|| !$this->canRetryFixInvariant($fields)
+			)
 			{
 				break;
 			}
@@ -119,6 +141,14 @@ class UpdateGroupFields implements HandlerInterface
 		}
 
 		throw new ProjectUpdateFieldsException(sprintf('Group %d was not converted to collab', $groupId));
+	}
+
+	// Repeating a set which carries neither the type nor the project flag cannot bring the group any
+	// closer to a collab, and CSocNetGroup::Update() is no dry run - it raises events, reindexes the
+	// group and syncs the chat on every call
+	private function canRetryFixInvariant(array $fields): bool
+	{
+		return isset($fields['TYPE']) || isset($fields['PROJECT']);
 	}
 
 	private function isPersistedAsCollab(?array $fields): bool

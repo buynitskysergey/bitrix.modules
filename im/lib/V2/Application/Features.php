@@ -60,8 +60,13 @@ class Features
 		public readonly bool $isTextFormatToolbarAvailable,
 		public readonly bool $isCounterV3Available,
 		public readonly bool $isCopilotFileUploadAvailable,
+		public readonly bool $isBitrixGptUploadPolicyAvailable,
 		public readonly bool $isMountedTasksCardAvailable,
 		public readonly bool $isBitrixGptV2Available,
+		public readonly bool $isMessageBuilderAvailable,
+		public readonly bool $isAddingUserByMentionAvailable,
+		public readonly bool $isAddToChatPopupAvailable,
+		public readonly bool $isExternalChatMessageForwardingAvailable,
 		public readonly bool $isNestedChatAvailable,
 		public readonly bool $isChatWithGuestsAvailable,
 		public readonly bool $isCopilotForceSearchAvailable,
@@ -75,8 +80,20 @@ class Features
 		public readonly bool $isMarkdownAvailable,
 		public readonly bool $isCopilotDraftChatAvailable,
 		public readonly bool $isAttachChatToProjectAvailable,
+		public readonly bool $isAiTaskCreationFromMessagesAvailable,
+		public readonly bool $isAirDesignEnabled,
 		public readonly bool $isMessageDateNavigationAvailable,
 		public readonly bool $isReplyWithMediaAvailable,
+		public readonly bool $isTaskResultButtonAvailable,
+		public readonly bool $isMessageFormBlockAvailable,
+		public readonly bool $isBitrixGptScrollPinAvailable,
+		public readonly bool $isBitrixGptStopGenerationAvailable,
+		public readonly bool $isChatBotCommandsAvailable,
+		public readonly bool $isUploadCaptionMentionsFormatAvailable,
+		public readonly bool $isVideoNotePlaybackRateAvailable,
+		public readonly bool $isMentionInstantSearchAvailable,
+		public readonly bool $isTaskChatAutoUnmuteAvailable,
+		public readonly bool $isVibecodeAppOpenButtonAvailable,
 	){}
 
 	public static function get(): self
@@ -126,8 +143,13 @@ class Features
 			isTextFormatToolbarAvailable: self::isTextFormatToolbarAvailable(),
 			isCounterV3Available: self::isCounterV3Available(),
 			isCopilotFileUploadAvailable: self::isCopilotFileUploadAvailable(),
+			isBitrixGptUploadPolicyAvailable: self::isBitrixGptUploadPolicyAvailable(),
 			isMountedTasksCardAvailable: self::isMountedTasksCardAvailable(),
 			isBitrixGptV2Available: self::isBitrixGptV2Available(),
+			isMessageBuilderAvailable: self::isMessageBuilderAvailable(),
+			isAddingUserByMentionAvailable: self::isAddingUserByMentionAvailable(),
+			isAddToChatPopupAvailable: self::isAddToChatPopupAvailable(),
+			isExternalChatMessageForwardingAvailable: self::isExternalChatMessageForwardingAvailable(),
 			isNestedChatAvailable: Collab::isNewProjectsAvailable(),
 			isChatWithGuestsAvailable: self::isChatWithGuestsAvailable(GuestService::getInstance()->getCurrentInviterId()),
 			isCopilotForceSearchAvailable: self::isCopilotForceSearchAvailable(),
@@ -141,8 +163,20 @@ class Features
 			isMarkdownAvailable: self::isMarkdownAvailable(),
 			isCopilotDraftChatAvailable: self::isCopilotDraftChatAvailable(),
 			isAttachChatToProjectAvailable: self::isAttachChatToProjectAvailable(),
+			isAiTaskCreationFromMessagesAvailable: self::isAiTaskCreationFromMessagesAvailable(),
+			isAirDesignEnabled: self::isAirDesignEnabled(),
 			isMessageDateNavigationAvailable: self::isMessageDateNavigationAvailable(),
 			isReplyWithMediaAvailable: self::isReplyWithMediaAvailable(),
+			isTaskResultButtonAvailable: self::isTaskResultButtonAvailable(),
+			isMessageFormBlockAvailable: self::isMessageFormBlockAvailable(),
+			isBitrixGptScrollPinAvailable: self::isBitrixGptScrollPinAvailable(),
+			isBitrixGptStopGenerationAvailable: self::isBitrixGptStopGenerationAvailable(),
+			isChatBotCommandsAvailable: self::isChatBotCommandsAvailable(),
+			isUploadCaptionMentionsFormatAvailable: self::isUploadCaptionMentionsFormatAvailable(),
+			isVideoNotePlaybackRateAvailable: self::isVideoNotePlaybackRateAvailable(),
+			isMentionInstantSearchAvailable: self::isMentionInstantSearchAvailable(),
+			isTaskChatAutoUnmuteAvailable: self::isTaskChatAutoUnmuteAvailable(),
+			isVibecodeAppOpenButtonAvailable: self::isVibecodeAppOpenButtonAvailable(),
 		);
 	}
 
@@ -262,6 +296,14 @@ class Features
 		;
 	}
 
+	public static function isBitrixGptUploadPolicyAvailable(): bool
+	{
+		return ServiceLocator::getInstance()
+			->get(AiAssistantService::class)
+			->isBitrixGptV2Available('bitrixgpt_upload_policy_available')
+		;
+	}
+
 	public static function isMountedTasksCardAvailable(): bool
 	{
 		return Option::get('im', 'mounted_tasks_card_available', 'N') === 'Y';
@@ -275,6 +317,14 @@ class Features
 		;
 	}
 
+	public static function isBitrixGptStopGenerationAvailable(): bool
+	{
+		return ServiceLocator::getInstance()
+			->get(AiAssistantService::class)
+			->isBitrixGptV2Available('bitrixgpt_stop_generation_available')
+		;
+	}
+
 	public static function isMessageBuilderAvailable(): bool
 	{
 		return Option::get('im', 'message_builder_available', 'N') === 'Y';
@@ -283,6 +333,11 @@ class Features
 	public static function isAddingUserByMentionAvailable(): bool
 	{
 		return Option::get('im', 'adding_user_by_mention_available', 'N') === 'Y';
+	}
+
+	public static function isAddToChatPopupAvailable(): bool
+	{
+		return Option::get('im', 'mention_add_to_chat_popup_available', 'N') === 'Y';
 	}
 
 	public static function isMessageDateNavigationAvailable(): bool
@@ -340,6 +395,16 @@ class Features
 		return Option::get('im', 'chat_folders_web_available', 'N') === 'Y';
 	}
 
+	public static function isVibecodeAppsFolderAvailable(): bool
+	{
+		return Option::get('im', 'vibecode_apps_folder_available', 'N') === 'Y';
+	}
+
+	public static function isVibecodeAppOpenButtonAvailable(): bool
+	{
+		return Option::get('im', 'vibecode_app_open_button_available', 'N') === 'Y';
+	}
+
 	public static function isCopilotWebSearchEnabledByAdmin(): bool
 	{
 		return ServiceLocator::getInstance()->get(WebSearchService::class)->isEnabledByAdmin();
@@ -360,9 +425,24 @@ class Features
 		return Option::get('im', 'reply_with_media_available', 'N') === 'Y';
 	}
 
+	public static function isTaskResultButtonAvailable(): bool
+	{
+		return Option::get('im', 'task_result_button_available', 'N') === 'Y';
+	}
+
+	public static function isMessageFormBlockAvailable(): bool
+	{
+		return Option::get('im', 'message_form_block_available', 'N') === 'Y';
+	}
+
+	public static function isBitrixGptScrollPinAvailable(): bool
+	{
+		return Option::get('im', 'bitrixgpt_scroll_pin_available', 'N') === 'Y';
+	}
+
 	public static function isCollabPreviewSourceEnabled(): bool
 	{
-		return Option::get('im', 'collab_preview_source_enabled', 'N') === 'Y';
+		return Option::get('im', 'collab_preview_source_enabled', 'Y') === 'Y';
 	}
 
 	public static function isMarkdownAvailable(): bool
@@ -382,6 +462,53 @@ class Features
 			return false;
 		}
 
-		return Option::get('im', 'attach_chat_to_project_available', 'N') === 'Y';
+		return Option::get('im', 'attach_chat_to_project_available', 'Y') === 'Y';
+	}
+
+	public static function isCopilotSimpleReasoningAvailable(): bool
+	{
+		return Option::get('im', 'copilot_simple_reasoning_available', 'N') === 'Y';
+	}
+
+	public static function isAiTaskCreationFromMessagesAvailable(): bool
+	{
+		if (Option::get('im', 'ai_task_creation_from_messages_available', 'N') !== 'Y')
+		{
+			return false;
+		}
+
+		return (new Restriction())->isAiTaskCreationActive();
+	}
+
+	public static function isAirDesignEnabled(): bool
+	{
+		return Option::get('im', 'air_design_enabled', 'N') === 'Y';
+	}
+
+	public static function isChatBotCommandsAvailable(): bool
+	{
+		return Option::get('im', 'chat_bot_commands_available', 'N') === 'Y';
+	}
+
+	public static function isUploadCaptionMentionsFormatAvailable(): bool
+	{
+		return Option::get('im', 'upload_caption_mentions_format_available', 'N') === 'Y';
+	}
+
+	public static function isVideoNotePlaybackRateAvailable(): bool
+	{
+		return Option::get('im', 'video_note_playback_rate_available', 'N') === 'Y';
+	}
+
+	public static function isMentionInstantSearchAvailable(): bool
+	{
+		return Option::get('im', 'mention_instant_search_available', 'N') === 'Y';
+	}
+
+	public static function isTaskChatAutoUnmuteAvailable(): bool
+	{
+		return Loader::includeModule('tasks')
+			&& Option::get('tasks', 'task_chat_auto_unmute_available', 'N') === 'Y'
+		;
 	}
 }

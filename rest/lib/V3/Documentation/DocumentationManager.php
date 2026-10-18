@@ -134,7 +134,7 @@ class DocumentationManager
 
 				foreach ($controllerData->getMethods() as $controllerMethodDescription)
 				{
-					if (!$controllerMethodDescription->isEnabled)
+					if (!$controllerMethodDescription->isEnabled || $controllerMethodDescription->isHidden)
 					{
 						continue;
 					}
@@ -325,12 +325,16 @@ class DocumentationManager
 				],
 				ListResponse::class => call_user_func(function () use ($dto) {
 					$result = [
-						'type' => 'array',
+						'type' => 'object',
+						'properties' => [
+							'items' => [
+								'type' => 'array',
+								'items' => $dto ? [
+									'$ref' => '#/components/schemas/' . TypeAliasRegistry::toPublicType($dto),
+								] : [],
+							],
+						],
 					];
-					if ($dto !== null)
-					{
-						$result['items'] = ['$ref' => '#/components/schemas/' . TypeAliasRegistry::toPublicType($dto)];
-					}
 
 					return $result;
 				}),

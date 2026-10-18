@@ -420,7 +420,7 @@ class CRestApiServer extends CRestServer
 			$request->setScopes($methodDescription->scopes ?? null);
 		}
 
-		$availableScope = $this->getAvailableScopeFromRequest($request->getScopes());
+		$availableScope = $this->getAvailableScope($request->getScopes());
 		if ($availableScope === null)
 		{
 			throw new InsufficientScopeException();
@@ -627,7 +627,7 @@ class CRestApiServer extends CRestServer
 		return $this->requestAccess;
 	}
 
-	private function getAvailableScopeFromRequest(array $requiredScopes): null|Scope
+	public function getAvailableScope(array $requiredScopes): null|Scope
 	{
 		foreach ($requiredScopes as $requiredScope)
 		{
@@ -636,6 +636,7 @@ class CRestApiServer extends CRestServer
 				return $this->availableScopes[$requiredScope];
 			}
 		}
+
 		return null;
 	}
 
@@ -718,12 +719,10 @@ class CRestApiServer extends CRestServer
 			if ($key === 'filter')
 			{
 				$queryFilter = $result['filter'] ?? [];
-
 				if (!is_array($queryFilter))
 				{
 					$queryFilter = [];
 				}
-
 				if (is_array($bodyValue))
 				{
 					$result['filter'] = $queryFilter;

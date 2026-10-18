@@ -11,6 +11,7 @@ class PromotionFactory
 			PromotionType::TASKS_AI => new TasksAi(),
 			PromotionType::TASKS_NEW_CARD => new TasksNewCard(),
 			PromotionType::TASKS_NEW_CHAT_BUTTON => new TasksNewChatButton(),
+			PromotionType::TASKS_CONSULTATION_BUTTON => new ConsultationButton(),
 		};
 	}
 }

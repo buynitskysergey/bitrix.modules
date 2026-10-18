@@ -7,23 +7,32 @@ namespace Bitrix\Note\Internal\Service\Notification;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
-use Bitrix\Note\Internal\Entity\History\Event;
 use Bitrix\Note\Internal\Model\EventTable;
+use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\History\EventVisibilityPolicy;
 use Bitrix\Note\Internal\Service\History\SubscriptionResolver;
 
 /**
- * [P7.T2 / ALG-03] Turns "who is subscribed" into "who may actually be notified of
- * this dedup'd event group right now" — the send-time gate the drainer calls once
+ * Turns "who is subscribed" into "who may actually be notified of
+ * this compacted event group right now" — the send-time gate the drainer calls once
  * per group. Only document-scope groups are resolved: SCOPE=collection events are
  * not written in v1 (see SDD P7), so there is nothing else to look up here yet.
+ *
+ * Subscribers come from the article's own rows in the shipped modes (MODES-01). Inherited
+ * coverage — a subtree row on an ancestor, a subscription to the whole knowledge base — is read
+ * by the bell but delivers nothing, so the mute that overrides it has nothing left to suppress.
+ *
+ * Exclusion is sole authorship of the group: a recipient is kept out only when the authors of
+ * everything the group folded are exactly themselves. A group carrying an event of somebody else
+ * — A renamed the article, B rewrote it — reaches both of them.
  */
 final class NotificationRecipientService
 {
 	public function __construct(
 		private readonly SubscriptionResolver $subscriptionResolver = new SubscriptionResolver(),
 		private readonly DocumentRepository $documentRepository = new DocumentRepository(),
+		private readonly EventAuthorResolver $eventAuthorResolver = new EventAuthorResolver(),
 	) {}
 
 	/** @var array<int, string[]> userId -> access codes (stable within one drainer tick) */
@@ -37,7 +46,7 @@ final class NotificationRecipientService
 	 * @return int[] recipient user ids — no anchors/pairs; the drainer derives the
 	 *               aggregate anchor (collectionId) separately (ALG-03).
 	 */
-	public function resolve(Event $group): array
+	public function resolve(CompactedEventGroup $group): array
 	{
 		if ($group->getScope() !== EventTable::SCOPE_DOCUMENT)
 		{
@@ -45,6 +54,18 @@ final class NotificationRecipientService
 		}
 
 		$documentId = $group->getEntityId();
+
+		// Subscribers first: an article nobody follows is the common case, and every query below
+		// — its meta row, its authors, its ACL — would be paid for a recipient set that is empty.
+		$subscribers = $this->subscriptionResolver->resolveDirectDocumentSubscribers(
+			$documentId,
+			NotificationShippingPolicy::shippedModes(SubscriptionTable::SCOPE_DOCUMENT),
+		);
+		if (empty($subscribers))
+		{
+			return [];
+		}
+
 		$document = $this->documentRepository->getMetaById($documentId, ['ID', 'COLLECTION_ID']);
 		if ($document === null)
 		{
@@ -53,10 +74,13 @@ final class NotificationRecipientService
 
 		$collectionId = (int)$document->getCollectionId();
 
-		$initiatorId = $group->getUserId();
+		// Who made the change is the group's author set, not any event's USER_ID: a compaction is
+		// fired by whichever client happened to flush the journal, who may have edited nothing.
+		$groupAuthorIds = $this->eventAuthorResolver->resolveGroup($group);
+		$soleAuthorId = count($groupAuthorIds) === 1 ? $groupAuthorIds[0] : null;
 		$candidates = array_filter(
-			$this->subscriptionResolver->resolveDocumentRecipients($documentId, $collectionId),
-			static fn(int $userId): bool => $userId !== $initiatorId,
+			$subscribers,
+			static fn(int $userId): bool => $userId !== $soleAuthorId,
 		);
 
 		if (empty($candidates))
@@ -64,7 +88,7 @@ final class NotificationRecipientService
 			return [];
 		}
 
-		$eventType = $group->getEventType();
+		$eventType = $group->getRepresentative()->getEventType();
 		$result = [];
 		foreach ($candidates as $userId)
 		{
@@ -103,8 +127,8 @@ final class NotificationRecipientService
 			return ['canEdit' => true, 'canEditCollection' => true, 'canView' => true];
 		}
 
-		// A subscriber recurs across every dedup group of the same batch (subtree/collection
-		// subscription), and access is immutable within a single tick — memoize per tick so the
+		// A subscriber recurs across the dedup groups of every article they follow in the same
+		// batch, and access is immutable within a single tick — memoize per tick so the
 		// per-recipient snapshot costs one DB round-trip set instead of one per group.
 		$accessCodes = $this->accessCodesCache[$userId]
 			??= CollectionAccessService::buildUserAccessCodes($userId);

@@ -20,12 +20,20 @@ use Bitrix\Call\Call\Registry;
  */
 class ChunkedDownloader extends AbstractDownloader
 {
-	private const CHUNK_SIZE = 10485760; // 10 MB
-	private const EXECUTION_TIME_LIMIT = 25; // seconds
+	// Defaults for the tuning options below (see the constructor).
+	public const CHUNK_SIZE = 10485760; // 10 MB
+	public const EXECUTION_TIME_LIMIT = 25; // seconds
+
+	// Floors for explicitly configured tuning options: a too-small value must not
+	// degrade the download loop into byte-sized chunks or an instant reschedule.
+	private const MIN_CHUNK_SIZE = 1048576; // 1 MB
+	private const MIN_EXECUTION_TIME_LIMIT = 5; // seconds
 
 	private int $fileSize;
 	private float $startTime;
 	private int $downloadedBytes = 0;
+	private int $chunkSize;
+	private int $executionTimeLimit;
 
 	/**
 	 * @param int $fileSize Known file size from Range support check
@@ -34,6 +42,27 @@ class ChunkedDownloader extends AbstractDownloader
 	{
 		$this->fileSize = $fileSize;
 		$this->startTime = defined('START_EXEC_TIME') ? START_EXEC_TIME : microtime(true);
+		// Tuning options are read once per instance, not per chunk in the download loop.
+		$this->chunkSize = self::getIntOption('call_download_chunk_size', self::CHUNK_SIZE, self::MIN_CHUNK_SIZE);
+		$this->executionTimeLimit = self::getIntOption('call_download_execution_time_limit', self::EXECUTION_TIME_LIMIT, self::MIN_EXECUTION_TIME_LIMIT);
+	}
+
+	/**
+	 * Option value if a positive int is configured, otherwise the class default
+	 * (mirrors DownloadAgent::getIntOption): empty/zero/garbage falls back to
+	 * $default — the dev page stores an untouched field as 0, which must mean
+	 * "use the default", not "degrade to the floor". An explicitly configured
+	 * but too-small positive value is raised to $min.
+	 */
+	private static function getIntOption(string $name, int $default, int $min): int
+	{
+		$value = (int)\Bitrix\Main\Config\Option::get('call', $name, $default);
+		if ($value <= 0)
+		{
+			return $default;
+		}
+
+		return max($value, $min);
 	}
 
 	/**
@@ -41,7 +70,7 @@ class ChunkedDownloader extends AbstractDownloader
 	 */
 	protected function isExecutionLimitReached(): bool
 	{
-		return php_sapi_name() !== 'cli' && (microtime(true) - $this->startTime) >= self::EXECUTION_TIME_LIMIT;
+		return php_sapi_name() !== 'cli' && (microtime(true) - $this->startTime) >= $this->executionTimeLimit;
 	}
 
 	/**
@@ -97,7 +126,7 @@ class ChunkedDownloader extends AbstractDownloader
 
 		$log && $logger->info(
 			"ChunkedDownloader::download: Starting. TrackId: {$track->getId()}, "
-			. "FileSize: {$this->fileSize}, Downloaded: {$this->downloadedBytes}, ChunkSize: " . self::CHUNK_SIZE
+			. "FileSize: {$this->fileSize}, Downloaded: {$this->downloadedBytes}, ChunkSize: {$this->chunkSize}"
 		);
 
 		// Send telemetry about download start
@@ -128,7 +157,7 @@ class ChunkedDownloader extends AbstractDownloader
 			{
 				$chunkCount++;
 				$startByte = $this->downloadedBytes;
-				$endByte = min($this->downloadedBytes + self::CHUNK_SIZE - 1, $this->fileSize - 1);
+				$endByte = min($this->downloadedBytes + $this->chunkSize - 1, $this->fileSize - 1);
 				$percent = round(($this->downloadedBytes / $this->fileSize) * 100, 1);
 
 				$log && $logger->info(

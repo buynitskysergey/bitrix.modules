@@ -43,7 +43,8 @@ final class Feature
 
 		self::loadFlags();
 
-		$moduleId = self::$flagModuleMap[$flag];
+		// A consumer module may ask about a flag this version of mobile does not ship yet.
+		$moduleId = self::$flagModuleMap[$flag] ?? null;
 
 		if (
 			$moduleId

@@ -46,6 +46,7 @@ class CRestServer
 	public const STATUS_PAYMENT_REQUIRED = "402 Payment Required"; // reserved for future use
 	public const STATUS_FORBIDDEN = "403 Forbidden";
 	public const STATUS_NOT_FOUND = "404 Not Found";
+	public const STATUS_CONFLICT = "409 Conflict";
 	public const STATUS_TO_MANY_REQUESTS = "429 Too Many Requests";
 	public const STATUS_INTERNAL = "500 Internal Server Error";
 
@@ -487,16 +488,27 @@ class CRestServer
 		{
 			throw new RestException('Wrong handler class!', RestException::ERROR_INTERNAL_WRONG_HANDLER_CLASS, self::STATUS_INTERNAL);
 		}
-		else
-		{
-			if (array_key_exists("state", $this->query))
-			{
-				$this->securityClientState = $this->query["state"];
-				unset($this->query["state"]);
-			}
-		}
+
+		$this->normalizeQuery();
 
 		return true;
+	}
+
+	private function normalizeQuery(): void
+	{
+		if (array_key_exists("state", $this->query))
+		{
+			if (is_string($this->query["state"]))
+			{
+				$this->securityClientState = $this->query["state"];
+			}
+			unset($this->query["state"]);
+		}
+
+		if (array_key_exists("token", $this->query) && !is_string($this->query["token"]))
+		{
+			unset($this->query["token"]);
+		}
 	}
 
 	protected function checkSite(): bool

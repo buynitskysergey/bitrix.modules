@@ -228,6 +228,7 @@ class UserRepository implements UserRepositoryContract
 				'UF_DEPARTMENT',
 				'PERSONAL_MOBILE',
 				'PERSONAL_PHOTO',
+				'PERSONAL_GENDER',
 			])
 			->fetchAll()
 		;
@@ -248,6 +249,66 @@ class UserRepository implements UserRepositoryContract
 		return $this->makeUserCollectionFromModelArray($userList);
 	}
 
+	public function findRealUsersByIds(array $ids): UserCollection
+	{
+		if (empty($ids))
+		{
+			return new UserCollection();
+		}
+
+		$query = UserTable::query()
+			->whereIn('ID', $ids)
+			->where('REAL_USER', 'expr', true)
+		;
+
+		return $this->makeUserCollectionFromModelArray($this->injectDefaultSelect($query)->fetchAll());
+	}
+
+	public function findRealUsersByFilter(array $filter): UserCollection
+	{
+		if (empty($filter))
+		{
+			return new UserCollection();
+		}
+
+		$query = UserTable::query()
+			->setFilter($filter)
+			->where('REAL_USER', 'expr', true)
+		;
+
+		return $this->makeUserCollectionFromModelArray($this->injectDefaultSelect($query)->fetchAll());
+	}
+
+	public function findSystemUsersByIds(array $ids): UserCollection
+	{
+		if (empty($ids))
+		{
+			return new UserCollection();
+		}
+
+		$query = UserTable::query()
+			->whereIn('ID', $ids)
+			->where('EXTERNAL_AUTH_ID', User::EXTERNAL_AUTH_ID_SYSTEM)
+		;
+
+		return $this->makeUserCollectionFromModelArray($this->injectDefaultSelect($query)->fetchAll());
+	}
+
+	public function findSystemUsersByFilter(array $filter): UserCollection
+	{
+		if (empty($filter))
+		{
+			return new UserCollection();
+		}
+
+		$query = UserTable::query()
+			->setFilter($filter)
+			->where('EXTERNAL_AUTH_ID', User::EXTERNAL_AUTH_ID_SYSTEM)
+		;
+
+		return $this->makeUserCollectionFromModelArray($this->injectDefaultSelect($query)->fetchAll());
+	}
+
 	private function injectDefaultSelect(Query $query): Query
 	{
 		return $query->setSelect([
@@ -265,6 +326,7 @@ class UserRepository implements UserRepositoryContract
 			'AUTH_PHONE_NUMBER' => 'PHONE_AUTH.PHONE_NUMBER',
 			'UF_DEPARTMENT',
 			'PERSONAL_MOBILE',
+			'PERSONAL_GENDER',
 		]);
 	}
 
@@ -494,26 +556,42 @@ class UserRepository implements UserRepositoryContract
 	 */
 	public function update(User $user): User
 	{
-		$result = \CUser::GetByID($user->getId());
+		$changedFields = $user->getChangedFields();
+		$userData = (new UserMapper())->convertToArray($user, empty($changedFields) ? null : $changedFields);
+		$this->updateFields($user->getId(), $userData);
+		$user->clearChangedFields();
+
+		return $user;
+	}
+
+	/**
+	 * @throws UpdateFailedException
+	 */
+	private function updateFields(int $id, array $fields): void
+	{
+		if (empty($fields))
+		{
+			return;
+		}
+
+		$result = \CUser::GetByID($id);
+
 		if (!$result->fetch())
 		{
 			throw new UpdateFailedException(new ErrorCollection([new Error('User not found')]));
 		}
 
 		$userApi = new \CUser();
-		$userData = (new UserMapper())->convertToArray($user);
 
-		if (array_key_exists('PASSWORD', $userData) && empty($userData['PASSWORD']))
+		if (array_key_exists('PASSWORD', $fields) && empty($fields['PASSWORD']))
 		{
-			unset($userData['PASSWORD']);
+			unset($fields['PASSWORD']);
 		}
 
-		if (!$userApi->Update($user->getId(), $userData))
+		if (!$userApi->Update($id, $fields))
 		{
 			throw $this->getUpdateExceptionFromLastError($userApi->LAST_ERROR);
 		}
-
-		return $user;
 	}
 
 	/**
@@ -619,6 +697,59 @@ class UserRepository implements UserRepositoryContract
 		);
 
 		return (int)$query->queryCountTotal();
+	}
+
+	public function hasMoreThanOneActiveUser(): bool
+	{
+		$requiredUserCount = 2;
+		$activeUsersWithoutExternalAuthId = $this
+			->buildActiveUsersWithoutExternalAuthIdQuery($requiredUserCount)
+			->fetchAll()
+		;
+
+		if (count($activeUsersWithoutExternalAuthId) >= $requiredUserCount)
+		{
+			return true;
+		}
+
+		$remainingUserCount = $requiredUserCount - count($activeUsersWithoutExternalAuthId);
+		$activeUsersWithRealExternalAuthId = $this
+			->buildActiveUsersWithRealExternalAuthIdQuery($remainingUserCount)
+			->fetchAll()
+		;
+
+		return count($activeUsersWithoutExternalAuthId) + count($activeUsersWithRealExternalAuthId)
+			>= $requiredUserCount;
+	}
+
+	protected function buildActiveUsersWithoutExternalAuthIdQuery(int $limit): Query
+	{
+		return $this->buildActiveUsersQuery($limit)
+			->whereNull('EXTERNAL_AUTH_ID')
+		;
+	}
+
+	protected function buildActiveUsersWithRealExternalAuthIdQuery(int $limit): Query
+	{
+		return $this->buildActiveUsersQuery($limit)
+			->whereNotNull('EXTERNAL_AUTH_ID')
+			->whereNotIn('EXTERNAL_AUTH_ID', UserTable::getExternalUserTypes())
+		;
+	}
+
+	private function buildActiveUsersQuery(int $limit): Query
+	{
+		return $this->createUserQuery()
+			->setSelect(['ID'])
+			->addFilter('=ACTIVE', 'Y')
+			->addFilter('=CONFIRM_CODE', false)
+			->setLimit($limit)
+		;
+	}
+
+	protected function createUserQuery(): Query
+	{
+		return UserTable::query();
 	}
 
 	/**

@@ -181,12 +181,6 @@ class UIPromotionService implements PromotionServiceInterface
 			];
 		}
 
-		$result[] = [
-			"ID" => 'call:sync-promo-popup:05052026:all',
-			"USER_TYPE" => UserType::ALL->value,
-			"DEVICE_TYPE" => DeviceType::WEB->value,
-		];
-
 		if (Locator::getMessenger()->getApplication()->isAirDesignEnabled())
 		{
 			$result[] = [
@@ -270,6 +264,14 @@ class UIPromotionService implements PromotionServiceInterface
 				"LIFETIME" => self::ENDLESS_LIFETIME,
 			];
 		}
+
+		$result[] = [
+			'ID' => 'im:main-reaction-onboarding:20072026:all',
+			'USER_TYPE' => UserType::ALL->value,
+			'DEVICE_TYPE' => DeviceType::WEB->value,
+			'LIFETIME' => self::ENDLESS_LIFETIME,
+			'START_DATE' => (new DateTime('20.07.2026', 'd.m.Y'))->getTimestamp(),
+		];
 
 		$settings = Configuration::getValue('im');
 		if (isset($settings['promotion']) && is_array($settings['promotion']))

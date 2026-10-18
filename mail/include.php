@@ -42,5 +42,9 @@ require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/mail/constants.php");
 
 		'Bitrix\Mail\BaseException'     => 'lib/exception.php',
 		'Bitrix\Mail\ReceiverException' => 'lib/exception.php',
+
+		// The ajax router builds the class name from the lowercase action, so a controller in a
+		// case sensitive path is only reachable through an explicit entry.
+		'Bitrix\Mail\Controller\MessageConversation' => 'lib/Controller/MessageConversation.php',
 	)
 );

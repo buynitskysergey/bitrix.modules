@@ -190,18 +190,7 @@ final class Cleaner
 			DateTime::createFromTimestamp(time() - $dayLimit * 86400)
 		);
 
-		$result = $connection->query( "
-			SELECT v.ID
-			FROM b_disk_version v
-			INNER JOIN b_disk_object obj ON obj.ID = v.OBJECT_ID
-			LEFT JOIN b_disk_attached_object atta ON v.OBJECT_ID = atta.OBJECT_ID AND v.ID = atta.VERSION_ID
-			WHERE
-				atta.OBJECT_ID IS NULL AND
-				v.CREATE_TIME < {$ttlTime} AND
-				v.FILE_ID <> obj.FILE_ID
-			ORDER BY v.ID ASC
-			LIMIT {$portion}
-		");
+		$result = $connection->query(self::getOutdatedVersionsQuery($dayLimit, $ttlTime, $portion));
 
 		$versionIds = [];
 		foreach ($result as $row)
@@ -230,6 +219,55 @@ final class Cleaner
 
 			$version->delete(SystemUser::SYSTEM_USER_ID);
 		}
+	}
+
+	/**
+	 * A zero day limit puts the boundary on the current moment, where no version can be newer than it,
+	 * so the whole history of every object is outdated and the lead below does not apply.
+	 */
+	private static function getOutdatedVersionsQuery(int $dayLimit, string $ttlTime, int $portion): string
+	{
+		if ($dayLimit > 0)
+		{
+			// Lead with a recent version of the same object: it restricts the scan to objects with
+			// fresh activity instead of walking every outdated version in the table.
+			// GLOBAL_CONTENT_VERSION discards none of the rows able to lead here, since the first version
+			// of an object is also its oldest one; it is kept for the plan it produced on production data
+			// (mantis 143725).
+			return "
+				SELECT DISTINCT v.ID
+				FROM b_disk_version last_v
+				INNER JOIN b_disk_version v
+					ON v.OBJECT_ID = last_v.OBJECT_ID
+					AND v.CREATE_TIME < {$ttlTime}
+				INNER JOIN b_disk_object obj ON obj.ID = v.OBJECT_ID
+				LEFT JOIN b_disk_attached_object atta
+					ON atta.OBJECT_ID = v.OBJECT_ID
+					AND atta.VERSION_ID = v.ID
+				WHERE
+					last_v.CREATE_TIME > {$ttlTime} AND
+					last_v.GLOBAL_CONTENT_VERSION > 1 AND
+					atta.OBJECT_ID IS NULL AND
+					v.FILE_ID <> obj.FILE_ID
+				LIMIT {$portion}
+			";
+		}
+
+		// The rows a pass takes leave the table, so the sweep advances without ordering by id and pays no
+		// filesort for it.
+		return "
+			SELECT v.ID
+			FROM b_disk_version v
+			INNER JOIN b_disk_object obj ON obj.ID = v.OBJECT_ID
+			LEFT JOIN b_disk_attached_object atta
+				ON atta.OBJECT_ID = v.OBJECT_ID
+				AND atta.VERSION_ID = v.ID
+			WHERE
+				atta.OBJECT_ID IS NULL AND
+				v.CREATE_TIME < {$ttlTime} AND
+				v.FILE_ID <> obj.FILE_ID
+			LIMIT {$portion}
+		";
 	}
 
 	public static function deleteTrashCanFilesByTtlAgent($type = self::DELETE_TYPE_PORTION, $limit = 10): string

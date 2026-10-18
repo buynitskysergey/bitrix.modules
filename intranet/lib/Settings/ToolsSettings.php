@@ -2,10 +2,13 @@
 
 namespace Bitrix\Intranet\Settings;
 
+use Bitrix\Intranet\Integration\Templates\Air\CollaborationWebMenu;
 use Bitrix\Intranet\Settings\Controls\Section;
 use Bitrix\Intranet\Settings\Search\SearchEngine;
 use Bitrix\Main\Analytics\AnalyticsEvent;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Config\Option;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
@@ -26,9 +29,24 @@ class ToolsSettings extends AbstractSettings
 	public function save(): Result
 	{
 		$isChanged = false;
+		$isCollaborationModelAvailable = CollaborationWebMenu::isModelAvailable();
 
 		foreach ($this->baseTools as $tool)
 		{
+			if ($tool instanceof Tools\TeamWork && $isCollaborationModelAvailable)
+			{
+				$value = $this->data[$tool->getOptionCode()] ?? null;
+				if (in_array($value, ['Y', 'N'], true))
+				{
+					Option::set($tool->getOptionName(), $tool->getOptionCode(), $value);
+					Tools\ToolsManager::getInstance()->clearCache();
+					ServiceLocator::getInstance()->get('intranet.customSection.manager')->clearLeftMenuCache();
+					$isChanged = true;
+				}
+
+				continue;
+			}
+
 			if (isset($this->data[$tool->getOptionCode()]))
 			{
 				if ($this->data[$tool->getOptionCode()] === 'Y')
@@ -105,6 +123,7 @@ class ToolsSettings extends AbstractSettings
 	public function get(): SettingsInterface
 	{
 		$data = [];
+		$isCollaborationModelAvailable = CollaborationWebMenu::isModelAvailable();
 
 		$data['sectionTools'] = new Section(
 			'settings-tools-section-tools',
@@ -141,6 +160,11 @@ class ToolsSettings extends AbstractSettings
 					'jsExportName' => $tool->getEnableConfirmationJsExportName(),
 				],
 			];
+			if ($tool instanceof Tools\TeamWork && $isCollaborationModelAvailable)
+			{
+				$data['tools'][$tool->getId()]['enabled'] = $tool->isEnabled();
+				$data['tools'][$tool->getId()]['subgroups'] = [];
+			}
 		}
 
 		return new static($data);

@@ -6,6 +6,8 @@ use Bitrix\Disk\Document\DocumentHandlersManager;
 use Bitrix\Disk\Document\Flipchart\DualMode;
 use Bitrix\Disk\Document\OnlyOffice;
 use Bitrix\Disk\Document\Vibeoffice;
+use Bitrix\Disk\Integration\Bitrix24Manager;
+use Bitrix\Disk\Integration\Ui\EntitySelector\SpecialAccessProvider;
 use Bitrix\Disk\Internal\Entity\CustomServers\OnlyOfficeCustomServer;
 use Bitrix\Disk\Internal\Entity\CustomServers\R7CustomServer;
 use Bitrix\Disk\Internal\Interface\CustomServerDataRepositoryInterface;
@@ -19,6 +21,16 @@ use Bitrix\Disk\Internal\Repository\Interface\ExternalLinkRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\Interface\LimitEncounterCounterRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\LimitEncounterCounterPersistentStorageRepository;
 use Bitrix\Disk\Internal\Service\CustomServerConfig;
+use Bitrix\Disk\Internal\Service\DocumentHeader\HeaderCompositionService;
+use Bitrix\Disk\Internal\Service\DocumentHeader\RenameService;
+use Bitrix\Disk\Internal\Service\DocumentPresence\InitialRosterService;
+use Bitrix\Disk\Internal\Service\DocumentPresence\PresenceAccessService;
+use Bitrix\Disk\Internal\Service\DocumentPresence\PresenceService;
+use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkOpenPolicy;
+use Bitrix\Disk\Internal\Service\ExternalLink\ExternalLinkScenarioRegistry;
+use Bitrix\Disk\Internal\Service\ExternalLink\MailAttachmentExternalLinkService;
+use Bitrix\Disk\Internal\Service\Folder\MailAttachmentsFolderPredicate;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
 use Bitrix\Disk\Internal\Service\VersionMatcher\DottedMatcher;
 use Bitrix\Disk\Internal\Service\VersionMatcher\Matcher;
 use Bitrix\Disk\Internals\DeletedLogManager;
@@ -29,6 +41,7 @@ use Bitrix\Disk\QuickAccess\Config\ConfigInterface;
 use Bitrix\Disk\QuickAccess\FileInfo\DiskProvider;
 use Bitrix\Disk\QuickAccess\FileInfo\MainProvider;
 use Bitrix\Disk\QuickAccess\FileInfo\ProviderFactory;
+use Bitrix\Disk\Public\Command\ExternalLink\CreateMailAttachmentLink\CreateMailAttachmentLinkCommandHandler;
 use Bitrix\Disk\RecentlyUsedManager;
 use Bitrix\Disk\Rest\RestManager;
 use Bitrix\Disk\RightsManager;
@@ -36,6 +49,8 @@ use Bitrix\Disk\Search\IndexManager;
 use Bitrix\Disk\Uf\UserFieldManager;
 use Bitrix\Disk\UrlManager;
 use Bitrix\Disk\TrackedObjectManager;
+use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Localization\Loc;
 
 $supportedOnlyOfficeVersions = [
@@ -69,6 +84,42 @@ return [
 			],
 			'disk.urlManager' => [
 				'className' => UrlManager::class,
+			],
+			HeaderCompositionService::class => [
+				'constructor' => static function() {
+					$locator = ServiceLocator::getInstance();
+
+					// The boost service is left unasked for: the header resolves it only when it draws Boost.
+					return new HeaderCompositionService(
+						$locator->get(UnifiedLinkAccessService::class),
+						$locator->get('disk.urlManager'),
+					);
+				},
+			],
+			RenameService::class => [
+				'className' => RenameService::class,
+			],
+			// One access service for every consumer of the request: it caches the users and the avatars
+			// it has already queried, and the roster asks about the same ones twice.
+			PresenceAccessService::class => [
+				'className' => PresenceAccessService::class,
+			],
+			PresenceService::class => [
+				'constructor' => static function() {
+					return new PresenceService(
+						presenceAccessService: ServiceLocator::getInstance()->get(PresenceAccessService::class),
+					);
+				},
+			],
+			InitialRosterService::class => [
+				'constructor' => static function() {
+					$locator = ServiceLocator::getInstance();
+
+					return new InitialRosterService(
+						$locator->get(PresenceService::class),
+						$locator->get(PresenceAccessService::class),
+					);
+				},
 			],
 			'disk.storageRuntimeCache' => [
 				'className' => StorageRuntimeCache::class,
@@ -151,6 +202,33 @@ return [
 			ExternalLinkRepositoryInterface::class => [
 				'className' => ExternalLinkBitrixOrmRepository::class,
 			],
+			ExternalLinkOpenPolicy::class => [
+				'constructor' => static function() {
+					return ExternalLinkOpenPolicy::fromPortalConfiguration();
+				},
+			],
+			MailAttachmentExternalLinkService::class => [
+				'constructor' => static function() {
+					$serviceLocator = ServiceLocator::getInstance();
+
+					return new MailAttachmentExternalLinkService(
+						$serviceLocator->get(MailAttachmentsFolderPredicate::class),
+						$serviceLocator->get(ExternalLinkRepositoryInterface::class),
+						$serviceLocator->get(ExternalLinkScenarioRegistry::class),
+						(bool)Bitrix24Manager::isFeatureEnabled(MailAttachmentExternalLinkService::FEATURE),
+					);
+				},
+			],
+			CreateMailAttachmentLinkCommandHandler::class => [
+				'constructor' => static function() {
+					return new CreateMailAttachmentLinkCommandHandler(
+						ServiceLocator::getInstance()->get(MailAttachmentExternalLinkService::class),
+						(int)CurrentUser::get()->getId(),
+					);
+				},
+				// A new handler on every resolve: it carries the current user, and a process can change them.
+				'singleton' => false,
+			],
 			DualMode\BoardApiServiceFactory::class => [
 				'className' => DualMode\DefaultBoardApiServiceFactory::class,
 			],
@@ -166,6 +244,20 @@ return [
 	'ui.uploader' => [
 		'value' => [
 			'allowUseControllers' => true,
+		],
+		'readonly' => true,
+	],
+	'ui.entity-selector' => [
+		'value' => [
+			'entities' => [
+				[
+					'entityId' => 'disk-special-access',
+					'provider' => [
+						'moduleId' => 'disk',
+						'className' => SpecialAccessProvider::class,
+					],
+				],
+			],
 		],
 		'readonly' => true,
 	],

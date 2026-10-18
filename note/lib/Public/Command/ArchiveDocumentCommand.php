@@ -8,6 +8,7 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
 use Bitrix\Note\Internal\Configuration;
+use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
 use Bitrix\Note\Internal\Exceptions\MainDocumentOperationException;
 use Bitrix\Note\Internal\Model\EventTable;
 use Bitrix\Note\Internal\Service\DomainEventPublisher;
@@ -18,6 +19,7 @@ use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Document\ReparentService;
 use Bitrix\Note\Internal\Service\History\EventLogService;
+use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 class ArchiveDocumentCommand extends AbstractCommand
@@ -32,6 +34,7 @@ class ArchiveDocumentCommand extends AbstractCommand
 	private readonly bool $notifyInitiator;
 	private readonly DomainEventPublisher $eventPublisher;
 	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
+	private readonly RecycleBinFilter $recycleBinFilter;
 	private readonly bool $withNested;
 	private readonly string $analyticsType;
 	// Failure is signalled via data['success']=false, so track the real archive outcome here.
@@ -54,6 +57,7 @@ class ArchiveDocumentCommand extends AbstractCommand
 		?ReparentService $reparentService = null,
 		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 		?BacklinkLifecycleNotifier $backlinkNotifier = null,
+		?RecycleBinFilter $recycleBinFilter = null,
 	)
 	{
 		$this->analyticsType = $analyticsType;
@@ -68,10 +72,18 @@ class ArchiveDocumentCommand extends AbstractCommand
 		$this->withNested = $withNested;
 		$this->reparentService = $reparentService ?? new ReparentService();
 		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
+		$this->recycleBinFilter = $recycleBinFilter ?? new RecycleBinFilter();
 	}
 
 	protected function execute(): Result
 	{
+		// A document in the recycle bin is out of the tree entirely: archiving it would move it into a
+		// state it cannot be seen or restored from. Every other document command already refuses.
+		if ($this->recycleBinFilter->isInRecycleBin($this->id))
+		{
+			throw new DocumentInRecycleBinException();
+		}
+
 		// The main document carries the collection description; it must never be archived
 		// independently - only the owning collection's cascade may remove it.
 		if ($this->repository->isMainDocument($this->id))

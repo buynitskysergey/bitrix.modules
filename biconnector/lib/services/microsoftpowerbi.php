@@ -79,10 +79,17 @@ class MicrosoftPowerBI extends Service
 		};
 
 		$schema = $data['schema'] ?? [];
+		// A delegated aggregation describes its answer with protocol aliases, so the usage log takes the
+		// field names the query touched; on the raw path the schema names them already.
+		$statFields = $data['usageStatFields'] ?? [];
+		if (!$statFields)
+		{
+			$statFields = array_map($getIdFunction, $schema);
+		}
 
 		$logId = $manager->startQuery(
 			$tableName,
-			implode(', ', array_map($getIdFunction, $schema)),
+			implode(', ', $statFields),
 			Json::encode($data['where'], JSON_UNESCAPED_UNICODE),
 			Json::encode($parameters, JSON_UNESCAPED_UNICODE),
 			$requestMethod,
@@ -158,6 +165,11 @@ class MicrosoftPowerBI extends Service
 		if ($queryReturnResult instanceof Result && !$queryReturnResult->isSuccess())
 		{
 			$result->addErrors($queryReturnResult->getErrors());
+
+			if ($firstLinePrinted)
+			{
+				$size += $this->printStreamedError($result, $queryReturnResult);
+			}
 		}
 		elseif (!$connector->isFulfilledOutput())
 		{
@@ -196,13 +208,50 @@ class MicrosoftPowerBI extends Service
 		}
 
 		$limitManager->fixLimit($count);
-		$manager->endQuery($logId, $count, $size, $isOverLimit);
+		$manager->endQuery($logId, $count, $size, $isOverLimit, $connector->getLastScanStatistics());
 
 		$databaseConnection->unlock('biconnector_data');
 
 		// Served row count, consumed by QueryResultCache on a cache hit for fixLimit().
-		$result->setData(['count' => $count]);
+		$resultData = $result->getData();
+		$resultData['count'] = $count;
+		$result->setData($resultData);
 
 		return $result;
+	}
+
+	protected function printStreamedError(Result $result, Result $queryResult): int
+	{
+		$errorRow = $this->buildErrorRow($queryResult);
+		$output = ',' . Json::encode($errorRow, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_IGNORE) . "\n]";
+		echo $output;
+
+		$this->markErrorStreamed($result);
+
+		return strlen($output);
+	}
+
+	protected function buildErrorRow(Result $result): array
+	{
+		$errorsMsg = [];
+		$errorsDescMsg = [];
+		foreach ($result->getErrorCollection() as $error)
+		{
+			$errorsMsg[] = $error->getMessage();
+			if (!empty($error->getCustomData()['description']))
+			{
+				$errorsDescMsg[] = $error->getCustomData()['description'];
+			}
+		}
+
+		$errorRow = [
+			'error' => implode('; ', $errorsMsg),
+		];
+		if (!empty($errorsDescMsg))
+		{
+			$errorRow['errorMessage'] = implode('; ', $errorsDescMsg);
+		}
+
+		return $errorRow;
 	}
 }

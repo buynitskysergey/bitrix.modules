@@ -42,7 +42,7 @@ class EventService
 					->disableAiAnalyze()
 					->save();
 
-				(new FollowUpAnalytics($call))->addErrorRecording(CallAIError::AI_RECORD_TOO_SHORT);
+				(new FollowUpAnalytics($call))->addErrorRecording(CallAIError::RECORD_TOO_SHORT);
 
 				return;
 			}

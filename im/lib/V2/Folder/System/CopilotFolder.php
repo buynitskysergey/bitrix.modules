@@ -28,7 +28,12 @@ final class CopilotFolder extends SystemFolder
 
 	public function getTitleLangKey(): string
 	{
-		return 'IM_FOLDER_SYSTEM_COPILOT';
+		return 'IM_FOLDER_SYSTEM_COPILOT_MSGVER_1';
+	}
+
+	public function getTitleReplacements(): array
+	{
+		return ['#COPILOT_NAME#' => CopilotNameResolver::getInstance()->getName()];
 	}
 
 	public function isAvailable(int $userId): bool
@@ -38,8 +43,9 @@ final class CopilotFolder extends SystemFolder
 
 	public function getTitle(): string
 	{
-		$name = CopilotNameResolver::getInstance()->getName();
+		$title = parent::getTitle();
 
-		return $name !== '' ? $name : parent::getTitle();
+		// Safety net for a locale with no phrase file or key; every shipped locale declares the phrase.
+		return $title !== '' ? $title : CopilotNameResolver::getInstance()->getName();
 	}
 }

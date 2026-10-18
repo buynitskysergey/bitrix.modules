@@ -24,6 +24,7 @@ use Bitrix\Rest\AppLangTable;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\Analytic;
+use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
 use Bitrix\Rest\Service\ServiceContainer;
 use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\Bot;
@@ -296,7 +297,7 @@ class Provider
 				$item['BOT_DATA_APP_ID'] = mb_substr($item['BOT_DATA_APP_ID'], 6);
 			}
 
-			if ($item['APP_ID'] > 0 && $item['APPLICATION_ONLY_API'] == 'N')
+			if ($item['APP_ID'] > 0)
 			{
 				$resLang = AppLangTable::getList(
 					[
@@ -409,6 +410,22 @@ class Provider
 			return $result;
 		}
 
+		if (
+			array_key_exists('APPLICATION_INSTALL_COMPLETION_MODE', $requestData)
+			&& (
+				!is_string($requestData['APPLICATION_INSTALL_COMPLETION_MODE'])
+				|| AppInstallCompletionMode::tryFrom($requestData['APPLICATION_INSTALL_COMPLETION_MODE']) === null
+			)
+		)
+		{
+			$result['status'] = false;
+			$result['errors'][] = Loc::getMessage(
+				'INTEGRATION_PRESET_PROVIDER_ERROR_INVALID_INSTALL_COMPLETION_MODE'
+			);
+
+			return $result;
+		}
+
 		if (!OAuthService::getEngine()->isRegistered())
 		{
 			try
@@ -430,7 +447,7 @@ class Provider
 			'ELEMENT_CODE' => $elementCode,
 			'USER_ID' => $userId,
 			'TITLE' => $requestData['TITLE'],
-			'SCOPE' => is_array($requestData['SCOPE']) ? $requestData['SCOPE'] : [],
+			'SCOPE' => (isset($requestData['SCOPE']) && is_array($requestData['SCOPE'])) ? $requestData['SCOPE'] : [],
 			'QUERY' => $requestData['QUERY'] ?? '',
 			'OUTGOING_HANDLER_URL' => trim($requestData['OUTGOING_HANDLER_URL'] ?? null),
 			'OUTGOING_EVENTS' => isset($requestData['OUTGOING_EVENTS']) && is_array($requestData['OUTGOING_EVENTS']) ? $requestData['OUTGOING_EVENTS'] : [],
@@ -790,6 +807,7 @@ class Provider
 							'URL_INSTALL' => $saveData['WIDGET_HANDLER_URL'],
 							'SCOPE' => $saveData['SCOPE'],
 							'ONLY_API' => 'Y',
+							'INSTALL_COMPLETION_MODE' => AppInstallCompletionMode::Immediate->value,
 							'MOBILE' => 'N',
 							'APP_NAME' => $saveData['TITLE'],
 						],
@@ -797,7 +815,7 @@ class Provider
 						'PLACEMENTS_LANG_LIST' => $saveData['WIDGET_LANG_LIST'],
 						'PLACEMENT_HANDLER_URL' => $saveData['WIDGET_HANDLER_URL'],
 						'INTEGRATION_CODE' => $saveData['ELEMENT_CODE'],
-						'INTEGRATION_ID' => $saveData['ID']
+						'INTEGRATION_ID' => $saveData['ID'],
 					]
 				);
 				if ($app['ID'] > 0)
@@ -815,24 +833,36 @@ class Provider
 				&& $saveData['APPLICATION_NEEDED'] == 'Y'
 			)
 			{
+				$applicationUrlInstall = trim((string)($requestData['APPLICATION_URL_INSTALL'] ?? ''));
+				$applicationLangName = is_array($requestData['APPLICATION_LANG_NAME'] ?? null)
+					? $requestData['APPLICATION_LANG_NAME']
+					: [];
+				$hasApplicationPage = static::hasApplicationPage($applicationLangName);
+				$saveData['APPLICATION_ONLY_API'] = $hasApplicationPage ? 'N' : 'Y';
+
 				$app = static::saveApp(
 					[
 						'ID' => $saveData['APP_ID'] ?? 0,
 						'FIELDS' => [
 							'URL' => trim($requestData['APPLICATION_URL_HANDLER']),
-							'URL_INSTALL' => trim($requestData['APPLICATION_URL_INSTALL']),
+							'URL_INSTALL' => $applicationUrlInstall,
 							'SCOPE' => $saveData['SCOPE'],
 							'ONLY_API' => ($saveData['APPLICATION_ONLY_API'] == 'Y') ? 'Y' : 'N',
-							'MOBILE' => ($saveData['APPLICATION_ONLY_API'] != 'Y'
-								&& ($requestData['APPLICATION_MOBILE'] ?? 'N') === 'Y') ? 'Y' : 'N',
+							// saveApp() derives the mode after OnRestLocalAppSave: the event may replace
+							// the install URL (a zip application takes it from the archive).
+							'INSTALL_COMPLETION_MODE' => $requestData['APPLICATION_INSTALL_COMPLETION_MODE'] ?? null,
+							'MOBILE' => (
+								$hasApplicationPage
+								&& ($requestData['APPLICATION_MOBILE'] ?? 'N') === 'Y'
+							) ? 'Y' : 'N',
 							'APP_NAME' => $saveData['TITLE'],
 						],
-						'LANG_NAME' => ($saveData['APPLICATION_ONLY_API'] != 'Y' && is_array($requestData['APPLICATION_LANG_NAME'])) ?
-											$requestData['APPLICATION_LANG_NAME']
-											:
-											[],
+						'LANG_NAME' => $applicationLangName,
 						'INTEGRATION_CODE' => $saveData['ELEMENT_CODE'],
-						'INTEGRATION_ID' => $saveData['ID'] ?? 0
+						'INTEGRATION_ID' => $saveData['ID'] ?? 0,
+						// The caller finishes saving the application (e.g. writes APPLICATION_TOKEN)
+						// and publishes the install event itself, once the record is complete.
+						'SKIP_INSTALL_EVENT' => !empty($requestData['APPLICATION_SKIP_INSTALL_EVENT']),
 					]
 				);
 
@@ -899,6 +929,20 @@ class Provider
 		return $result;
 	}
 
+	private static function resolveInstallCompletionMode(
+		?string $mode,
+		string $onlyApi,
+		string $installUrl,
+	): AppInstallCompletionMode
+	{
+		return AppInstallCompletionMode::resolve($installUrl, $onlyApi === 'Y', $mode);
+	}
+
+	private static function hasApplicationPage(array $menuTitles): bool
+	{
+		return !AppInstallCompletionMode::isApiOnly($menuTitles);
+	}
+
 	private static function saveApp($data)
 	{
 		$app = [];
@@ -946,6 +990,11 @@ class Provider
 		{
 			try
 			{
+				$installCompletionMode = static::resolveInstallCompletionMode(
+					$data['FIELDS']['INSTALL_COMPLETION_MODE'] ?? null,
+					$data['FIELDS']['ONLY_API'] ?? 'N',
+					$data['FIELDS']['URL_INSTALL'] ?? ''
+				);
 				$appFields = [
 					'URL' => $data['FIELDS']['URL'],
 					'URL_INSTALL' => $data['FIELDS']['URL_INSTALL'],
@@ -954,6 +1003,7 @@ class Provider
 					'SCOPE' => implode(',', $data['FIELDS']['SCOPE']),
 					'STATUS' => AppTable::STATUS_LOCAL,
 					'APP_NAME' => $data['FIELDS']['APP_NAME'],
+					'INSTALL_COMPLETION_MODE' => $installCompletionMode->value,
 					'MOBILE' => $data['FIELDS']['MOBILE'],
 				];
 				if (!empty($app['ID']))
@@ -962,8 +1012,9 @@ class Provider
 				}
 				else
 				{
-					$appFields['INSTALLED'] = (!empty($data['FIELDS']['URL_INSTALL'])
-						&& $data['FIELDS']['ONLY_API'] !== 'Y') ? AppTable::NOT_INSTALLED : AppTable::INSTALLED;
+					$appFields['INSTALLED'] = $installCompletionMode === AppInstallCompletionMode::Immediate
+						? AppTable::INSTALLED
+						: AppTable::NOT_INSTALLED;
 					$result = AppTable::add($appFields);
 					if ($result->isSuccess())
 					{
@@ -981,82 +1032,34 @@ class Provider
 					$return['ID'] = $result->getId();
 
 					AppLangTable::deleteByApp($return['ID']);
-					if ($data['FIELDS']['ONLY_API'] === 'N')
+					foreach ($data['LANG_NAME'] ?? [] as $lang => $name)
 					{
-						foreach ($data['LANG_NAME'] as $lang => $name)
-						{
-							AppLangTable::add(
-								[
-									'APP_ID' => $return['ID'],
-									'LANGUAGE_ID' => $lang,
-									'MENU_NAME' => $name
-								]
-							);
-						}
+						AppLangTable::add(
+							[
+								'APP_ID' => $return['ID'],
+								'LANGUAGE_ID' => $lang,
+								'MENU_NAME' => $name
+							]
+						);
 					}
-					else
+
+					$syncResult = EventTable::syncInstallEventHandlers(
+						(int)$return['ID'],
+						$installCompletionMode,
+						$data['FIELDS']['URL_INSTALL'] ?? ''
+					);
+					if (!$syncResult->isSuccess())
 					{
-						if (
-							$data['FIELDS']['ONLY_API'] === 'Y'
-							&& !empty($app['URL_INSTALL'])
-							&& $data['FIELDS']['URL_INSTALL'] != $app['URL_INSTALL']
-						)
-						{
-							$event = EventTable::getList(
-								[
-									'filter' => [
-										'=APP_ID' => $return['ID'],
-										'=EVENT_NAME' => 'ONAPPINSTALL',
-									],
-									'limit' => 1
-								]
-							);
-							if ($eventInstall = $event->fetch())
-							{
-								// checkCallback is already called inside checkFields
-								$result = EventTable::update(
-									$eventInstall['ID'],
-									[
-										'APP_ID' => $return['ID'],
-										'EVENT_NAME' => 'ONAPPINSTALL',
-										'EVENT_HANDLER' => $data['FIELDS']['URL_INSTALL'],
-									]
-								);
-							}
-						}
+						$errorList = array_merge($errorList, $syncResult->getErrorMessages());
+					}
 
-						if (!empty($data['FIELDS']['URL_INSTALL']) && empty($app['URL_INSTALL']))
-						{
-							// checkCallback is already called inside checkFields
-							$result = EventTable::add(
-								[
-									'APP_ID' => $return['ID'],
-									'EVENT_NAME' => 'ONAPPINSTALL',
-									'EVENT_HANDLER' => $data['FIELDS']['URL_INSTALL'],
-								]
-							);
-							if ($result->isSuccess())
-							{
-								Sender::bind('rest', 'OnRestAppInstall');
-							}
-
-							$bindUserReady = EventTable::add(
-								[
-									'APP_ID' => $return['ID'],
-									'EVENT_NAME' => 'ONAPPUSERREADY',
-									'EVENT_HANDLER' => $data['FIELDS']['URL_INSTALL'],
-								]
-							);
-							if ($bindUserReady->isSuccess())
-							{
-								Sender::bind('rest', 'OnRestAppUserReady');
-							}
-						}
-
-						if (empty($app['ID']))
-						{
-							AppTable::install($return['ID']);
-						}
+					if (
+						$installCompletionMode === AppInstallCompletionMode::Immediate
+						&& empty($app['ID'])
+						&& empty($data['SKIP_INSTALL_EVENT'])
+					)
+					{
+						AppTable::install($return['ID']);
 					}
 
 					if (defined('BX_COMP_MANAGED_CACHE'))

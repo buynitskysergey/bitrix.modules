@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Service\Mention;
 
 use Bitrix\Note\Internal\Mention\MentionType;
 use Bitrix\Note\Internal\Service\Mention\Resolver\CollectionMentionResolver;
+use Bitrix\Note\Internal\Service\Mention\Resolver\DiskFolderMentionResolver;
 use Bitrix\Note\Internal\Service\Mention\Resolver\DocumentMentionResolver;
 use Bitrix\Note\Internal\Service\Mention\Resolver\TaskMentionResolver;
 use Bitrix\Note\Internal\Service\Mention\Resolver\UserMentionResolver;
@@ -86,6 +87,7 @@ final class MentionResolver
 			MentionType::Document => new DocumentMentionResolver(),
 			MentionType::Collection => new CollectionMentionResolver(),
 			MentionType::Task => new TaskMentionResolver(),
+			MentionType::DiskFolder => new DiskFolderMentionResolver(),
 		};
 	}
 }

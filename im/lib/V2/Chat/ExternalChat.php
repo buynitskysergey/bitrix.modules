@@ -184,14 +184,15 @@ class ExternalChat extends GroupChat
 			return new Result();
 		}
 
-		$result = parent::deleteUser($userId, $config);
+		return parent::deleteUser($userId, $config);
+	}
 
-		if ($result->isSuccess())
-		{
-			(new AfterUsersDeleteEvent($this, $initiatorId, [$userId], $config))->send();
-		}
+	protected function onUserDeleteCompleted(int $userId, DeleteUserConfig $config): void
+	{
+		$initiatorId = $this->getContext()->getUserId();
+		(new AfterUsersDeleteEvent($this, $initiatorId, [$userId], $config))->send();
 
-		return $result;
+		parent::onUserDeleteCompleted($userId, $config);
 	}
 
 	public function hideUser(int $userId): Result

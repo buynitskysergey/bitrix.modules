@@ -94,7 +94,7 @@ class RestoreFromRecycleBinService
 		// update and reused for the post-update derived-row sync (P4.T2/T5).
 		$subtreeIds = $this->documentRepository->getSubtreeIds($documentId, $originalCollectionId, true);
 
-		// [P4.T2] Restoring into a subtree-shared branch that would open new access needs moderator
+		// Restoring into a subtree-shared branch that would open new access needs moderator
 		// level — the same silent-escalation gate as a live move.
 		if ($this->movementEscalatesAccess($parentId, $collectionId, $subtreeIds, $userId))
 		{
@@ -128,7 +128,7 @@ class RestoreFromRecycleBinService
 
 		$this->recycleBinRepository->deleteById((int)$record->getId());
 
-		// [P4.T5] Restore is an extra ENTRY of the reparent event, not a new type: route it through the
+		// Restore is an extra ENTRY of the reparent event, not a new type: route it through the
 		// same choke-point so a restore under an active source materialises derived rows (widen) and a
 		// restore out of a covered branch drops stale ones (narrow). Runs inside the caller's
 		// transaction, so the narrowing DELETE is atomic with the reattach.

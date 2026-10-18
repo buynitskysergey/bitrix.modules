@@ -18,9 +18,10 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 use Bitrix\Note\Internal\Service\DomainEventPublisher;
 use Bitrix\Note\Internal\Service\History\EventLogService;
+use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P4.T2 / API-05] Bulk move of selected roots (each with its
+ * Bulk move of selected roots (each with its
  * whole subtree) into a target collection/parent. Owner of the API-05 contract.
  *
  * This command does NOT extend AbstractBulkCommand: move has no chunk-level transaction (each
@@ -51,6 +52,7 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 	private readonly PushNotificationService $pushService;
 	private readonly EventLogService $eventLogService;
 	private readonly DomainEventPublisher $eventPublisher;
+	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
 
 	/**
 	 * @param int[] $documentIds selected root ids
@@ -67,6 +69,7 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 		?PushNotificationService $pushService = null,
 		?EventLogService $eventLogService = null,
 		?DomainEventPublisher $eventPublisher = null,
+		?BacklinkLifecycleNotifier $backlinkNotifier = null,
 	)
 	{
 		$this->userId = $userId;
@@ -80,6 +83,7 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 		$this->pushService = $pushService ?? new PushNotificationService();
 		$this->eventLogService = $eventLogService ?? new EventLogService();
 		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
+		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
 	}
 
 	protected function execute(): Result
@@ -214,16 +218,38 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 			// EVENT-NOTE-01 `moved`, one event per moved root: from/to describe that root's old and
 			// new location while the event carries its whole subtree (already rewritten to the target
 			// collection by the move) — the contract MoveDocumentCommand emits for a single move.
-			// Best-effort: the moves are already committed, so a failure here must not fail the run.
+			$subtreeIdsByRoot = [];
+			foreach ($moveEvents as $moveEvent)
+			{
+				$subtreeIds = [$moveEvent['rootId']];
+				try
+				{
+					$subtreeIds = $this->repository->getSubtreeIds(
+						$moveEvent['rootId'],
+						$moveEvent['to']['collectionId'],
+					) ?: $subtreeIds;
+				}
+				catch (\Throwable)
+				{
+				}
+				$subtreeIdsByRoot[$moveEvent['rootId']] = $subtreeIds;
+			}
+
 			try
 			{
-				foreach ($moveEvents as $moveEvent)
+				$this->backlinkNotifier->sourcesChanged(array_values(array_unique(array_merge(
+					...array_values($subtreeIdsByRoot),
+				))));
+			}
+			catch (\Throwable)
+			{
+			}
+
+			foreach ($moveEvents as $moveEvent)
+			{
+				try
 				{
-					$subtreeIds = $this->repository->getSubtreeIds($moveEvent['rootId'], $moveEvent['to']['collectionId']);
-					if (empty($subtreeIds))
-					{
-						$subtreeIds = [$moveEvent['rootId']];
-					}
+					$subtreeIds = $subtreeIdsByRoot[$moveEvent['rootId']];
 
 					$this->eventPublisher->emitLifecycle(
 						OnDocumentLifecycleEvent::MOVED,
@@ -233,9 +259,9 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 						$moveEvent['to'],
 					);
 				}
-			}
-			catch (\Throwable)
-			{
+				catch (\Throwable)
+				{
+				}
 			}
 		}
 

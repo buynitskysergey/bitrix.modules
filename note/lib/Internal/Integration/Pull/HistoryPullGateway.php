@@ -67,7 +67,7 @@ final class HistoryPullGateway
 			return;
 		}
 
-		// [MTX-01] The tag broadcast reaches every watcher (readers included) with no
+		// The tag broadcast reaches every watcher (readers included) with no
 		// per-recipient role context, so role-restricted types (moved/access_changed) must
 		// not go out live — they would leak event metadata to readers. Privileged roles
 		// still get them via the ACL-filtered listFeed fetch; only all-roles types splice in live.

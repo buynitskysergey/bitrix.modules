@@ -4,25 +4,39 @@ namespace Bitrix\Disk\Controller;
 
 use Bitrix\Disk;
 use Bitrix\Disk\Controller\DataProviders\ChildrenDataProvider;
-use Bitrix\Disk\Controller\Types;
-use Bitrix\Disk\Configuration;
 use Bitrix\Disk\Integration\Bitrix24Manager;
+use Bitrix\Disk\Internal\Command\BaseObject\AddSubFolderCommand;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkAccessService;
+use Bitrix\Disk\Internal\Service\UnifiedLink\UnifiedLinkUrl;
 use Bitrix\Disk\Internals\Error\Error;
 use Bitrix\Disk\ZipNginx;
-use Bitrix\Main\ArgumentException;
 use Bitrix\Main\ArgumentTypeException;
+use Bitrix\Main\Command\Exception\CommandException;
+use Bitrix\Main\Command\Exception\CommandValidationException;
+use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\Response\DataType\Page;
 use Bitrix\Main\NotImplementedException;
-use Bitrix\Main\Result;
-use Bitrix\Main\SystemException;
+use Bitrix\Main\Request;
 use Bitrix\Main\UI\PageNavigation;
 use Bitrix\Main\Engine\Response;
 
 class Folder extends BaseObject
 {
+	protected UnifiedLinkAccessService $unifiedLinkAccessService;
+	protected UnifiedLinkUrl $unifiedLinkUrl;
+
+	public function __construct(?Request $request = null)
+	{
+		parent::__construct($request);
+
+		$serviceLocator = ServiceLocator::getInstance();
+		$this->unifiedLinkAccessService = $serviceLocator->get(UnifiedLinkAccessService::class);
+		$this->unifiedLinkUrl = $serviceLocator->get(UnifiedLinkUrl::class);
+	}
+
 	public function configureActions()
 	{
 		$configureActions = parent::configureActions();
@@ -71,8 +85,9 @@ class Folder extends BaseObject
 	 * @param CurrentUser $currentUser Current user, autowired automatically.
 	 * @param bool $generateUniqueName Should be true if you want to generate unique name for folder.
 	 * @return array|null
-	 * @throws ArgumentException
 	 * @throws ArgumentTypeException
+	 * @throws CommandException
+	 * @throws CommandValidationException
 	 */
 	public function addSubFolderAction(
 		Disk\Folder $folder,
@@ -81,41 +96,21 @@ class Folder extends BaseObject
 		bool $generateUniqueName = false
 	): ?array
 	{
-		if (empty($name))
+		$result = (new AddSubFolderCommand(
+			folder: $folder,
+			name: $name,
+			createdBy: (int)$currentUser->getId(),
+			generateUniqueName: $generateUniqueName,
+		))->run();
+
+		if (!$result->isSuccess())
 		{
-			$this->addError(new Error('Could not create folder. Name is empty.'));
+			$this->addErrors($result->getErrors());
 
 			return null;
 		}
 
-		$storage = $folder->getStorage();
-		if (!$storage)
-		{
-			$this->addError(new Error('Could not find storage for folder.'));
-
-			return null;
-		}
-
-		$securityContext = $storage->getSecurityContext($currentUser->getId());
-		if (!$folder->canAdd($securityContext))
-		{
-			$this->addError(new Error('Could not create folder. Access denied.'));
-
-			return null;
-		}
-
-		$subFolder = $folder->addSubFolder([
-			'NAME' => $name,
-			'CREATED_BY' => $currentUser->getId(),
-		], generateUniqueName: $generateUniqueName);
-
-		if (!$subFolder)
-		{
-			$this->addError(new Error('Could not create folder.'));
-			$this->addErrors($folder->getErrors());
-
-			return null;
-		}
+		$subFolder = $result->getData()['folder'];
 
 		return $this->get($subFolder);
 	}
@@ -208,7 +203,17 @@ class Folder extends BaseObject
 	
 	public function getAllowedOperationsRightsAction(Disk\Folder $folder)
 	{
-		return $this->getAllowedOperationsRights($folder);
+		$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
+
+		$shouldCheckUnifiedLink =
+			is_string($uls)
+			&& $this->unifiedLinkAccessService->validateUlsForObjectId(
+				objectId: $folder->getRealObjectId(),
+				uls: $uls,
+			)
+		;
+
+		return $this->getAllowedOperationsRights($folder, $shouldCheckUnifiedLink);
 	}
 
 	public function checkFileLimitAction(Disk\Folder $folder): array
@@ -219,7 +224,17 @@ class Folder extends BaseObject
 
 		if ($storage)
 		{
-			if (ZipNginx\Archive::isFileLimitExceededByFolder($folder, $storage->getCurrentUserSecurityContext()))
+			$uls = $this->unifiedLinkUrl->getUlsFromRequest($this->request);
+
+			$shouldCheckUnifiedLink =
+				is_string($uls)
+				&& $this->unifiedLinkAccessService->validateUlsForObjectId(
+					objectId: $folder->getRealObjectId(),
+					uls: $uls,
+				)
+			;
+
+			if (ZipNginx\Archive::isFileLimitExceededByFolder($folder, $storage->getCurrentUserSecurityContext($shouldCheckUnifiedLink)))
 			{
 				$isFileLimitExceeded = true;
 			}

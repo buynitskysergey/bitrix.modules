@@ -14,7 +14,7 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Favorite\FavoriteLockService;
 
 /**
- * [P3.T1 / API-02] Takes one object out of the caller's favorites together with the positive
+ * Takes one object out of the caller's favorites together with the positive
  * notification subscription on it, and reports what was taken away so a caller can put it back.
  *
  * ACL is deliberately not checked anywhere on this path: a user must be able to clean their own list
@@ -143,7 +143,7 @@ final class RemoveFavoriteCommand extends AbstractCommand
 	}
 
 	/**
-	 * [EVENT-01 / EVENT-02] The only place in the feature where one command publishes two events: a
+	 * The only place in the feature where one command publishes two events: a
 	 * bell opened in another tab has no other way to learn the subscription went with the star.
 	 */
 	private function emitRemove(int $favoriteId, bool $subscriptionRemoved): void

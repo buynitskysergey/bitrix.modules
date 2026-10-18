@@ -61,6 +61,9 @@ return [
 					);
 				},
 			],
+			'intranet.service.otp.scenario' => [
+				'className' => \Bitrix\Intranet\Public\Service\Otp\OtpScenarioService::class,
+			],
 			'intranet.repository.iblock.department' => [
 				'className' => \Bitrix\Intranet\Repository\IblockDepartmentRepository::class,
 			],
@@ -103,6 +106,9 @@ return [
 					'departmentService' => new \Bitrix\Intranet\Integration\HumanResources\Department(),
 					'teamService' => new \Bitrix\Intranet\Internal\Integration\Humanresources\TeamRepository(),
 				],
+			],
+			'intranet.service.user.self-delete' => [
+				'className' => \Bitrix\Intranet\Public\Service\User\SelfDeleteService::class,
 			],
 			'intranet.service.invite.status' => [
 				'className' => \Bitrix\Intranet\Service\InviteStatusService::class

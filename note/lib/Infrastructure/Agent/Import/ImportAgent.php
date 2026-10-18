@@ -7,6 +7,7 @@ namespace Bitrix\Note\Infrastructure\Agent\Import;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Update\Stepper;
 use Bitrix\Note\Internal\Repository\ImportSessionRepository;
+use Bitrix\Note\Internal\Service\Import\ImportLogger;
 use Bitrix\Note\Public\Command\Import\ProcessImportStepCommand;
 use Bitrix\Note\Public\Command\Import\ProcessImportStepResult;
 
@@ -34,8 +35,22 @@ class ImportAgent extends Stepper
 		}
 		catch (\Throwable $e)
 		{
-			self::logError('ImportAgent exception: ' . $e->getMessage());
-			$this->finishSession($sessionId, 'error');
+			$step = $sessionOption['step'] ?? '?';
+			$sourceType = $sessionOption['sourceType'] ?? '?';
+			self::logError(sprintf(
+				'ImportAgent exception (session=%d, source=%s, step=%s): %s in %s:%d%s%s',
+				$sessionId,
+				$sourceType,
+				$step,
+				$e->getMessage(),
+				$e->getFile(),
+				$e->getLine(),
+				PHP_EOL,
+				$e->getTraceAsString(),
+			));
+			$sessionOption['errorMessage'] = self::userFacingReason($e);
+			$sessionOption['status'] = 'error';
+			$this->finishSession($sessionId, 'error', $sessionOption);
 
 			return self::FINISH_EXECUTION;
 		}
@@ -43,8 +58,18 @@ class ImportAgent extends Stepper
 		if (!$result->isSuccess() || !$result instanceof ProcessImportStepResult)
 		{
 			$errors = array_map(fn($e) => $e->getMessage(), $result->getErrors());
-			self::logError('ImportAgent step failed: ' . implode('; ', $errors));
-			$this->finishSession($sessionId, 'error');
+			self::logError(sprintf(
+				'ImportAgent step failed (session=%d, source=%s, step=%s): %s',
+				$sessionId,
+				$sessionOption['sourceType'] ?? '?',
+				$sessionOption['step'] ?? '?',
+				implode('; ', $errors),
+			));
+			// The words of the errors stay in the log above: they are written for us and name classes,
+			// queries and ids of the portal, while errorMessage is read on the screen of the initiator.
+			$sessionOption['errorMessage'] = ImportLogger::unexpectedErrorReason();
+			$sessionOption['status'] = 'error';
+			$this->finishSession($sessionId, 'error', $sessionOption);
 
 			return self::FINISH_EXECUTION;
 		}
@@ -104,10 +129,29 @@ class ImportAgent extends Stepper
 			'globalTotalAttachments' => $finalOption['globalTotalAttachments'] ?? 0,
 			'globalDoneAttachments' => $finalOption['globalDoneAttachments'] ?? 0,
 			'errorDetails' => $finalOption['errorDetails'] ?? [],
+			'errorMessage' => $finalOption['errorMessage'] ?? '',
 		];
 
 		$this->saveSessionOption($sessionId, $slim);
 		(new ImportSessionRepository())->updateStatus($sessionId, $status);
+	}
+
+	/**
+	 * What a session stopped by an exception tells the user ([P6.T14]). The message of the exception
+	 * itself never goes there: an error of the database layer carries the text of its query, and an
+	 * error of any other layer carries internals of its own. The whole of it stays in the log written
+	 * just above - the log does not get poorer, the answer to the user gets safe.
+	 *
+	 * The cause is unwrapped first: a command wraps whatever a step threw into an exception of its
+	 * own ({@see \Bitrix\Main\Command\AbstractCommand::run()}), which names the command that failed
+	 * and nothing about what went wrong, so the reason is decided by the cause and not by the wrapper.
+	 *
+	 * Always a phrase, never an empty string: an empty reason means "there is no reason" (API-03),
+	 * and a session that stopped on an exception has one.
+	 */
+	private static function userFacingReason(\Throwable $e): string
+	{
+		return ImportLogger::resolveErrorReason($e->getPrevious() ?? $e);
 	}
 
 	private static function logError(string $message): void

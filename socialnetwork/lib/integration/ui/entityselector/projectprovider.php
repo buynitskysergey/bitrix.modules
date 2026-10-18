@@ -15,7 +15,6 @@ use Bitrix\Main\ORM\Fields\Relations\Reference;
 use Bitrix\Main\ORM\Query\Filter;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
-use Bitrix\Main\Search\Content;
 use Bitrix\Socialnetwork\Collab\CollabFeature;
 use Bitrix\Socialnetwork\Collab\Control\Option\Type\WhoCanInviteOption;
 use Bitrix\Socialnetwork\Collab\Integration\IM;
@@ -444,14 +443,14 @@ class ProjectProvider extends BaseProvider
 
 		if (!empty($options['searchQuery']) && is_string($options['searchQuery']))
 		{
-			$query->whereMatch(
-				'SEARCH_INDEX',
-				Filter\Helper::matchAgainstWildcard(
-					Content::prepareStringToken($options['searchQuery']),
-					'*',
-					1
-				)
-			);
+			$searchToken = \Bitrix\Socialnetwork\Item\Workgroup::prepareSearchIndexQuery($options['searchQuery']);
+			if ($searchToken !== '')
+			{
+				$query->whereMatch(
+					'SEARCH_INDEX',
+					Filter\Helper::matchAgainstWildcard($searchToken, '*', 1)
+				);
+			}
 		}
 
 		$currentUserId = (!empty($options['currentUserId']) && is_int($options['currentUserId'])

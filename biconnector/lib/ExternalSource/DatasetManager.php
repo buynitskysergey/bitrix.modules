@@ -588,6 +588,57 @@ class DatasetManager
 	}
 
 	/**
+	 * Stores the settings a CSV file was actually parsed with.
+	 *
+	 * Called after a successful import, not together with the dataset row: the import runs outside
+	 * the dataset transaction and may fail, and settings must never describe data that was parsed
+	 * with something else. Deliberately bypasses self::update() so that dataset lifecycle events —
+	 * and the Superset mirroring hanging on them — are not fired a second time per save.
+	 *
+	 * @param int $datasetId
+	 * @param array $settings Keys: delimiter, encoding, hasHeaders.
+	 * @return Main\Result
+	 */
+	public static function saveFileParsingSettings(int $datasetId, array $settings): Main\Result
+	{
+		$result = new Main\Result();
+
+		foreach (['delimiter', 'encoding', 'hasHeaders'] as $key)
+		{
+			if (!isset($settings[$key]))
+			{
+				$result->addError(new Main\Error('Setting "' . $key . '" must be set', 'FILE_PARSING_SETTINGS_INCOMPLETE'));
+
+				return $result;
+			}
+		}
+
+		try
+		{
+			$updateResult = Internal\ExternalDatasetTable::update($datasetId, [
+				'CSV_DELIMITER' => $settings['delimiter'],
+				'CSV_ENCODING' => $settings['encoding'],
+				'CSV_HAS_HEADERS' => (bool)$settings['hasHeaders'],
+			]);
+		}
+		catch (\Throwable $exception)
+		{
+			// The caller runs this after a finished import and only logs the failure, so a storage
+			// exception must not escape and turn an imported dataset into a failed request.
+			$result->addError(new Main\Error($exception->getMessage(), 'FILE_PARSING_SETTINGS_SAVE_ERROR'));
+
+			return $result;
+		}
+
+		if (!$updateResult->isSuccess())
+		{
+			$result->addErrors($updateResult->getErrors());
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Gets settings by dataset id
 	 *
 	 * @param int $id

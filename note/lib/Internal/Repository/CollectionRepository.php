@@ -7,6 +7,7 @@ namespace Bitrix\Note\Internal\Repository;
 use Bitrix\Main\Application;
 use Bitrix\Main\ORM\Data\Result as OrmResult;
 use Bitrix\Main\Result;
+use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Query\Query;
@@ -122,6 +123,67 @@ class CollectionRepository
 		return (int)($row['MAX_POSITION'] ?? 0);
 	}
 
+	/**
+	 * [ALG-01] Knowledge bases each of the given users created within the period, counted for the
+	 * whole batch in one grouped query - the annual summary walks users in batches, and a per-user
+	 * query would turn one scan into as many scans as there are users in the batch.
+	 *
+	 * Period bounds are half-open: from is included, to is not. Archived and physically alive
+	 * collections both count - "how many did I create this year" is a historical fact, and a base
+	 * deleted for good drops out on its own, together with its row.
+	 *
+	 * @param int[] $userIds
+	 * @return array<int, int> userId => count, users with no collections are absent
+	 */
+	public function countCreatedByAuthors(array $userIds, Date $from, Date $to): array
+	{
+		$normalizedIds = $this->normalizeUserIds($userIds);
+		if (empty($normalizedIds))
+		{
+			return [];
+		}
+
+		// GROUP BY CREATED_BY is added by the core: Query::hasAggregation() sees the aggregate in
+		// the select list and groups the non-aggregate fields itself.
+		$rows = CollectionTable::query()
+			->registerRuntimeField(new ExpressionField('CNT', 'COUNT(*)'))
+			->setSelect(['CREATED_BY', 'CNT'])
+			->whereIn('CREATED_BY', $normalizedIds)
+			->where('CREATED_AT', '>=', $this->toDateTime($from))
+			->where('CREATED_AT', '<', $this->toDateTime($to))
+			->fetchAll()
+		;
+
+		$counts = [];
+		foreach ($rows as $row)
+		{
+			$counts[(int)$row['CREATED_BY']] = (int)$row['CNT'];
+		}
+
+		return $counts;
+	}
+
+	/**
+	 * @param int[] $userIds
+	 * @return int[]
+	 */
+	private function normalizeUserIds(array $userIds): array
+	{
+		return array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $userIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+	}
+
+	/**
+	 * The annual summary hands over plain Date bounds; converting them explicitly keeps the
+	 * comparison a datetime one on every driver instead of relying on implicit casting.
+	 */
+	private function toDateTime(Date $value): DateTime
+	{
+		return $value instanceof DateTime ? $value : DateTime::createFromTimestamp($value->getTimestamp());
+	}
+
 	public function reorderByIds(array $ids, int $userId): void
 	{
 		$normalizedIds = array_values(array_unique(array_map(static fn($id): int => (int)$id, $ids)));
@@ -228,7 +290,7 @@ class CollectionRepository
 		$idSafe = (int)$id;
 		$connection->queryExecute("DELETE FROM b_note_collection_access WHERE COLLECTION_ID = {$idSafe}");
 		$connection->queryExecute("DELETE FROM b_note_import_map WHERE COLLECTION_ID = {$idSafe}");
-		// [P6.T1] Collection-scope subscriptions have no other cleanup hook — the
+		// Collection-scope subscriptions have no other cleanup hook - the
 		// collection row is gone after this call, so ENTITY_ID would otherwise dangle.
 		(new SubscriptionRepository())->deleteByCollectionId($id);
 

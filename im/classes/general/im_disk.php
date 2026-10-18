@@ -535,6 +535,7 @@ class CIMDisk
 
 		$skipUserCheck = isset($options['SKIP_USER_CHECK']) && $options['SKIP_USER_CHECK'] === true;
 		$linesSilentMode = isset($options['LINES_SILENT_MODE']) && $options['LINES_SILENT_MODE'] === true;
+		$sentFromUi = isset($options['SENT_FROM_UI']) && $options['SENT_FROM_UI'] === true;
 		$makeSymlink = isset($options['SYMLINK']) && $options['SYMLINK'] === true;
 		$templateId = isset($options['TEMPLATE_ID']) && $options['TEMPLATE_ID'] <> '' ? $options['TEMPLATE_ID'] : '';
 		$fileTemplateId = isset($options['FILE_TEMPLATE_ID']) && $options['FILE_TEMPLATE_ID'] <> '' ? $options['FILE_TEMPLATE_ID'] : '';
@@ -664,6 +665,7 @@ class CIMDisk
 			"FILE_TEMPLATE_ID" => $fileTemplateId,
 			"FILE_MODELS" => $result['FILE_MODELS'] ?? [],
 			"WAIT_FULL_EXECUTION" => $waitFullExecution,
+			"SENT_FROM_UI" => $sentFromUi,
 		];
 
 		if ($chat->getEntityType() == 'LIVECHAT')

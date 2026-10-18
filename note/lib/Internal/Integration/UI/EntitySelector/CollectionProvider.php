@@ -182,9 +182,19 @@ class CollectionProvider extends BaseProvider
 				// DS accent token; resolves against the popup design-system context (light/dark)
 				// since entity-selector writes bgColor as inline style on an element inside that scope.
 				'bgColor' => 'var(--ui-color-design-filled-bg)',
-				// Tuned for compactView (22px box): icon-set tokens render ~18px icon with ~14px visible glyph;
-				// match that visual size so the collection icon aligns with document/task glyphs.
-				'bgSize' => '14px',
+				// Share of the avatar box rather than a fixed size. Icon-set neighbours draw at 20/32 of the
+				// box with art covering about 2/3 of that, leaving ~12.5px visible; 44% puts this width-driven
+				// 16:15 asset at the same height.
+				'bgSize' => '44%',
+			],
+			// A TagSelector tag (note.ui.collection-picker) inherits item avatarOptions unless the tag
+			// carries its own, and its avatar box is 21px, 18px in --air, against the dialog's 32px —
+			// a box share resolves far too small there. Keep the tag at the size it had.
+			'tagOptions' => [
+				'avatarOptions' => [
+					'bgColor' => 'var(--ui-color-design-filled-bg)',
+					'bgSize' => '14px',
+				],
 			],
 		]);
 	}

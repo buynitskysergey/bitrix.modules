@@ -63,11 +63,15 @@ class EmptyRecycleBinCommand extends AbstractCommand
 
 			if (!empty($documentIds))
 			{
+				$preparedLinkChange = $this->hardDeleteService->prepareDelete($documentIds);
 				$connection = Application::getConnection();
 				$connection->startTransaction();
 				try
 				{
-					$cleanupPayload = $this->hardDeleteService->deleteByDocumentIds($documentIds);
+					$cleanupPayload = $this->hardDeleteService->deleteByDocumentIds(
+						$documentIds,
+						$preparedLinkChange,
+					);
 					$connection->commitTransaction();
 				}
 				catch (\Throwable $e)

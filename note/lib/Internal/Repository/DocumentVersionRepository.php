@@ -70,7 +70,7 @@ class DocumentVersionRepository
 	}
 
 	/**
-	 * [P3.T1] Identity probe of the most recent version snapshot (highest ID = latest by CREATED_AT), or
+	 * Identity probe of the most recent version snapshot (highest ID = latest by CREATED_AT), or
 	 * null when the document has no versions yet. Compaction compares the freshly materialized text
 	 * against that snapshot to suppress a no-op version (the pre-compact MARKDOWN can no longer serve as
 	 * the baseline, since materialization keeps it equal to the incoming text), and it asks on every
@@ -152,7 +152,7 @@ class DocumentVersionRepository
 	 * (VersionCleanupAgent). No cursor param is needed: the agent deletes each batch before
 	 * requesting the next one, so the same query naturally surfaces the next-oldest rows
 	 * (mirrors RecycleBinRepository::listExpiredAt). DOCUMENT_ID rides along so the agent can
-	 * scope the post-commit file-reachability sweep ([P4.T3]) to exactly the documents touched
+	 * scope the post-commit file-reachability sweep to exactly the documents touched
 	 * by this batch, without a second query.
 	 *
 	 * @return array<int, array{id: int, documentId: int}>
@@ -229,7 +229,7 @@ class DocumentVersionRepository
 	}
 
 	/**
-	 * [P2.T3] Batch existence check for feed enrichment: a content_changed event's
+	 * Batch existence check for feed enrichment: a content_changed event's
 	 * VERSION_ID may have already been TTL-cleaned (see VersionCleanupAgent) — the
 	 * feed marks such events with versionAvailable=false (non-interactive node)
 	 * instead of erroring out on click.

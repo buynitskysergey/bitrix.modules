@@ -4,46 +4,44 @@ declare(strict_types=1);
 
 namespace Bitrix\Market\Application;
 
-use Bitrix\Bitrix24\Internal\Service\VibePlus\Communication\ValueObject\Cta;
-use Bitrix\Main\DI\ServiceLocator;
-use Bitrix\Main\Loader;
+use Bitrix\Market\Internal\Integration\Bitrix24\VibePlusUpsellAdapter;
+use Bitrix\Market\Internal\Integration\Rest\VibePlusLimitAdapter;
 
 final class VibePlusApplicationLimit
 {
 	public const INSTALLED_LIST_URL = '/market/installed/?vibe_plus_limit=Y';
 
-	private readonly \Closure $limitProjectionProvider;
-	private readonly \Closure $countedApplicationCodesProvider;
-	private readonly \Closure $upsellProjectionProvider;
-	private readonly \Closure $canManageApplicationsProvider;
-	private readonly \Closure $transitionStateProvider;
+	private readonly VibePlusLimitAdapter $restAdapter;
+	private readonly VibePlusUpsellAdapter $bitrix24Adapter;
 
 	public function __construct(
-		?\Closure $limitProjectionProvider = null,
-		?\Closure $countedApplicationCodesProvider = null,
-		?\Closure $upsellProjectionProvider = null,
-		?\Closure $canManageApplicationsProvider = null,
-		?\Closure $transitionStateProvider = null,
+		?VibePlusLimitAdapter $restAdapter = null,
+		?VibePlusUpsellAdapter $bitrix24Adapter = null,
+		private readonly ?bool $canManageApplications = null,
 	)
 	{
-		$this->limitProjectionProvider = $limitProjectionProvider ?? self::resolveLimitProjection(...);
-		$this->countedApplicationCodesProvider
-			= $countedApplicationCodesProvider ?? self::resolveCountedApplicationCodes(...);
-		$this->upsellProjectionProvider = $upsellProjectionProvider ?? self::resolveUpsellProjection(...);
-		$this->canManageApplicationsProvider
-			= $canManageApplicationsProvider ?? InstalledListAccess::isAdmin(...);
-		$this->transitionStateProvider = $transitionStateProvider ?? self::resolveTransitionState(...);
+		$this->restAdapter = $restAdapter ?? new VibePlusLimitAdapter();
+		$this->bitrix24Adapter = $bitrix24Adapter ?? new VibePlusUpsellAdapter();
 	}
 
 	public function getProjection(): array
 	{
-		$limit = $this->getLimitProjection();
-		$transition = $this->getTransitionState();
+		$limit = $this->restAdapter->getLimitProjection();
+		$transition = $this->bitrix24Adapter->getTransitionState();
 		$actions = [];
 
 		if ($this->shouldProvideActions($limit, $transition))
 		{
-			if ($this->canManageApplications())
+			try
+			{
+				$canManageApplications = $this->canManageApplications ?? InstalledListAccess::isAdmin();
+			}
+			catch (\Throwable)
+			{
+				$canManageApplications = false;
+			}
+
+			if ($canManageApplications)
 			{
 				$actions[] = [
 					'type' => 'list',
@@ -51,7 +49,7 @@ final class VibePlusApplicationLimit
 				];
 			}
 
-			$upsellAction = $this->getUpsellAction();
+			$upsellAction = $this->bitrix24Adapter->getUpsellAction();
 			if ($upsellAction !== null)
 			{
 				$actions[] = $upsellAction;
@@ -70,84 +68,7 @@ final class VibePlusApplicationLimit
 	 */
 	public function getCountedApplicationCodes(): array
 	{
-		try
-		{
-			$codes = ($this->countedApplicationCodesProvider)();
-			if (!is_array($codes))
-			{
-				return [];
-			}
-
-			$result = [];
-			foreach ($codes as $code)
-			{
-				if (is_string($code) && $code !== '')
-				{
-					$result[$code] = $code;
-				}
-			}
-
-			return array_values($result);
-		}
-		catch (\Throwable)
-		{
-			return [];
-		}
-	}
-
-	private function getLimitProjection(): array
-	{
-		try
-		{
-			$projection = ($this->limitProjectionProvider)();
-			$state = $projection->getState();
-			$stateValue = $state instanceof \BackedEnum ? $state->value : null;
-			if (!is_string($stateValue) || $stateValue === '')
-			{
-				return self::unknownLimitProjection();
-			}
-
-			return [
-				'state' => $stateValue,
-				'count' => $projection->getCount(),
-				'limit' => $projection->getLimit(),
-				'configuredLimit' => method_exists($projection, 'getConfiguredLimit')
-					? $projection->getConfiguredLimit()
-					: $projection->getLimit(),
-				'exceeded' => $projection->isExceeded(),
-				'installationBlocked' => $projection->isInstallationBlocked(),
-			];
-		}
-		catch (\Throwable)
-		{
-			return self::unknownLimitProjection();
-		}
-	}
-
-	private function getTransitionState(): array
-	{
-		try
-		{
-			$state = ($this->transitionStateProvider)();
-			$active = $state['active'] ?? null;
-			$endsAt = $state['endsAt'] ?? null;
-			if (
-				!is_bool($active)
-				|| ($endsAt !== null && (!is_int($endsAt) || $endsAt <= 0))
-			)
-			{
-				return self::inactiveTransitionState();
-			}
-
-			return [
-				'active' => $active,
-				'endsAt' => $active ? $endsAt : null,
-			];
-		}
-		catch (\Throwable)
-		{
-			return self::inactiveTransitionState();
-		}
+		return $this->restAdapter->getCountedApplicationCodes();
 	}
 
 	private function shouldProvideActions(array $limit, array $transition): bool
@@ -165,151 +86,5 @@ final class VibePlusApplicationLimit
 			&& is_int($limit['configuredLimit'])
 			&& $limit['configuredLimit'] >= 0
 			&& $limit['count'] > $limit['configuredLimit'];
-	}
-
-	private function getUpsellAction(): ?array
-	{
-		try
-		{
-			$projection = ($this->upsellProjectionProvider)();
-			if (!is_object($projection))
-			{
-				return null;
-			}
-
-			$cta = $projection->getCta();
-			$target = $projection->getCtaTarget();
-			if (
-				$cta !== 'buy'
-				|| !Cta::isTargetValid($target)
-			)
-			{
-				return null;
-			}
-
-			return [
-				'type' => $cta,
-				'target' => $target,
-			];
-		}
-		catch (\Throwable)
-		{
-			return null;
-		}
-	}
-
-	private function canManageApplications(): bool
-	{
-		try
-		{
-			return ($this->canManageApplicationsProvider)() === true;
-		}
-		catch (\Throwable)
-		{
-			return false;
-		}
-	}
-
-	private static function resolveLimitProjection(): object
-	{
-		if (!Loader::includeModule('rest'))
-		{
-			throw new \RuntimeException('The rest module is unavailable.');
-		}
-
-		$providerClass = \Bitrix\Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class;
-		$serviceLocator = ServiceLocator::getInstance();
-		if (!$serviceLocator->has($providerClass))
-		{
-			throw new \RuntimeException('The application limit provider is unavailable.');
-		}
-
-		return $serviceLocator->get($providerClass)->getProjection();
-	}
-
-	/**
-	 * @return string[]
-	 */
-	private static function resolveCountedApplicationCodes(): array
-	{
-		if (!Loader::includeModule('rest'))
-		{
-			return [];
-		}
-
-		$providerClass = \Bitrix\Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class;
-		$serviceLocator = ServiceLocator::getInstance();
-		if (!$serviceLocator->has($providerClass))
-		{
-			return [];
-		}
-
-		return $serviceLocator->get($providerClass)->getCountedApplicationCodes();
-	}
-
-	private static function resolveUpsellProjection(): ?object
-	{
-		if (!Loader::includeModule('bitrix24'))
-		{
-			return null;
-		}
-
-		$providerClass = \Bitrix\Bitrix24\Public\Service\VibePlus\UpsellProjectionProvider::class;
-		$serviceLocator = ServiceLocator::getInstance();
-		if (!$serviceLocator->has($providerClass))
-		{
-			return null;
-		}
-
-		return $serviceLocator->get($providerClass)->getBuyProjection();
-	}
-
-	private static function resolveTransitionState(): array
-	{
-		if (!Loader::includeModule('bitrix24'))
-		{
-			return self::inactiveTransitionState();
-		}
-
-		$providerClass = \Bitrix\Bitrix24\Public\Service\VibePlus\RuntimeStateProvider::class;
-		$serviceLocator = ServiceLocator::getInstance();
-		if (!$serviceLocator->has($providerClass))
-		{
-			return self::inactiveTransitionState();
-		}
-
-		$provider = $serviceLocator->get($providerClass);
-		if (
-			!method_exists($provider, 'isTransitionPeriodActive')
-			|| !method_exists($provider, 'getTransitionPeriodEndAt')
-		)
-		{
-			return self::inactiveTransitionState();
-		}
-
-		return [
-			'active' => $provider->isTransitionPeriodActive(),
-			'endsAt' => $provider->getTransitionPeriodEndAt(),
-		];
-	}
-
-	private static function unknownLimitProjection(): array
-	{
-		return [
-			'state' => 'unknown',
-			'count' => null,
-			'limit' => null,
-			'configuredLimit' => null,
-			'exceeded' => null,
-			'installationBlocked' => null,
-		];
-	}
-
-	private static function inactiveTransitionState(): array
-	{
-		return [
-			'active' => false,
-			'endsAt' => null,
-		];
 	}
 }

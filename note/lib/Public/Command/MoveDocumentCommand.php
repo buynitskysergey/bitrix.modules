@@ -21,6 +21,7 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
+use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 
 class MoveDocumentCommand extends AbstractCommand
 {
@@ -35,6 +36,7 @@ class MoveDocumentCommand extends AbstractCommand
 	private readonly PushNotificationService $pushService;
 	private readonly DomainEventPublisher $eventPublisher;
 	private readonly EventLogService $eventLogService;
+	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
 
 	public function __construct(
 		int $id,
@@ -48,6 +50,7 @@ class MoveDocumentCommand extends AbstractCommand
 		?PushNotificationService $pushService = null,
 		?DomainEventPublisher $eventPublisher = null,
 		?EventLogService $eventLogService = null,
+		?BacklinkLifecycleNotifier $backlinkNotifier = null,
 	)
 	{
 		$this->id = $id;
@@ -61,6 +64,7 @@ class MoveDocumentCommand extends AbstractCommand
 		$this->pushService = $pushService ?? new PushNotificationService();
 		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
 		$this->eventLogService = $eventLogService ?? new EventLogService();
+		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
 	}
 
 	protected function execute(): Result
@@ -163,7 +167,35 @@ class MoveDocumentCommand extends AbstractCommand
 		}
 
 		$this->emitDocumentMove($document, $fullDocument, $affectedPositions, $sourceCollectionId, $sourceParentId);
-		$this->emitMoveDomainEvent($document, $sourceCollectionId, $sourceParentId);
+		$targetCollectionId = (int)$document->getCollectionId();
+		$targetParentId = $document->getParentId() !== null ? (int)$document->getParentId() : null;
+		if ($sourceCollectionId !== $targetCollectionId || $sourceParentId !== $targetParentId)
+		{
+			$movedIds = [(int)$document->getId()];
+			try
+			{
+				$movedIds = $this->repository->getSubtreeIds((int)$document->getId(), $targetCollectionId) ?: $movedIds;
+			}
+			catch (\Throwable)
+			{
+			}
+
+			try
+			{
+				$this->backlinkNotifier->sourcesChanged($movedIds);
+			}
+			catch (\Throwable)
+			{
+			}
+
+			try
+			{
+				$this->emitMoveDomainEvent($document, $sourceCollectionId, $sourceParentId, $movedIds);
+			}
+			catch (\Throwable)
+			{
+			}
+		}
 
 		return $this->createResult([
 			'document' => $document,
@@ -253,13 +285,14 @@ class MoveDocumentCommand extends AbstractCommand
 	/**
 	 * EVENT-NOTE-01 `moved`: the whole subtree moves as one unit — a single event carrying
 	 * every subtree id, with from/to describing only the root's old/new location. The subtree
-	 * COLLECTION_ID has already been rewritten to the target by BranchManager, so the live
-	 * subtree is enumerated against the target collection.
+	 * COLLECTION_ID has already been rewritten to the target by BranchManager, so the caller
+	 * enumerates the live subtree against the target collection once for all consumers.
 	 */
 	private function emitMoveDomainEvent(
 		Document $document,
 		?int $sourceCollectionId,
 		?int $sourceParentId,
+		array $subtreeIds,
 	): void
 	{
 		if ($sourceCollectionId === null)
@@ -267,7 +300,6 @@ class MoveDocumentCommand extends AbstractCommand
 			return;
 		}
 
-		$documentId = (int)$document->getId();
 		$targetCollectionId = (int)$document->getCollectionId();
 		$targetParentId = $document->getParentId() !== null ? (int)$document->getParentId() : null;
 
@@ -278,12 +310,6 @@ class MoveDocumentCommand extends AbstractCommand
 		if ($sourceCollectionId === $targetCollectionId && $sourceParentId === $targetParentId)
 		{
 			return;
-		}
-
-		$subtreeIds = $this->repository->getSubtreeIds($documentId, $targetCollectionId);
-		if (empty($subtreeIds))
-		{
-			$subtreeIds = [$documentId];
 		}
 
 		$this->eventPublisher->emitLifecycle(

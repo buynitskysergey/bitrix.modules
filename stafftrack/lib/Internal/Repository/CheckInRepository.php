@@ -38,6 +38,7 @@ class CheckInRepository
 		'LATITUDE',
 		'LONGITUDE',
 		'DESCRIPTION',
+		'ADDRESS',
 		'USER_TIMEZONE',
 	];
 
@@ -106,6 +107,50 @@ class CheckInRepository
 			->whereIn('USER_ID', $userIds)
 			->whereBetween('DATE_CREATE', $dateStart, $dateEnd)
 			->setOrder(['DATE_CREATE' => 'ASC'])
+			->exec()
+			->fetchAll()
+		;
+	}
+
+	/**
+	 * @param array $userIds
+	 * @param DateTime $dateStart
+	 * @param DateTime $dateEnd
+	 * @return array
+	 */
+	public function getAllUsersManualCheckInByPeriod(array $userIds, DateTime $dateStart, DateTime $dateEnd): array
+	{
+		$userIds = array_map('intval', $userIds);
+		if (empty($userIds))
+		{
+			return [];
+		}
+
+		return CheckInTable::query()
+			->setSelect(['USER_ID', 'DATE_CREATE', 'USER_TIMEZONE'])
+			->whereIn('USER_ID', $userIds)
+			->where('ENTITY_TYPE', self::ENTITY_TYPE['MANUAL'])
+			->whereBetween('DATE_CREATE', $dateStart, $dateEnd)
+			->exec()
+			->fetchAll()
+		;
+	}
+
+	/**
+	 * Only the columns needed to resolve the local date of a manual check-in.
+	 *
+	 * @param int $userId
+	 * @param DateTime $dateStart
+	 * @param DateTime $dateEnd
+	 * @return array
+	 */
+	public function getUserManualCheckInDatesByPeriod(int $userId, DateTime $dateStart, DateTime $dateEnd): array
+	{
+		return CheckInTable::query()
+			->setSelect(['DATE_CREATE', 'USER_TIMEZONE'])
+			->where('USER_ID', $userId)
+			->where('ENTITY_TYPE', self::ENTITY_TYPE['MANUAL'])
+			->whereBetween('DATE_CREATE', $dateStart, $dateEnd)
 			->exec()
 			->fetchAll()
 		;
@@ -289,5 +334,45 @@ class CheckInRepository
 		}
 
 		CheckInTable::updateMulti($checkInIds, ['ADDRESS' => $address], true);
+	}
+
+	/**
+	 * @param DateTime $windowStart
+	 * @param DateTime $threshold
+	 * @param int $lastId
+	 * @param int $limit
+	 * @return array
+	 */
+	public function getStaleRawCheckIns(DateTime $windowStart, DateTime $threshold, int $lastId = 0, int $limit = 500): array
+	{
+		return CheckInTable::query()
+			->setSelect(['ID', 'LATITUDE', 'LONGITUDE', 'ADDRESS', 'MESSAGE_IDS'])
+			->where('DATE_CREATE', '>', $windowStart)
+			->where('DATE_CREATE', '<=', $threshold)
+			->where('ID', '>', $lastId)
+			->setOrder(['ID' => 'ASC'])
+			->setLimit($limit)
+			->exec()
+			->fetchAll()
+		;
+	}
+
+	/**
+	 * @param int[] $ids
+	 */
+	public function clearGeoFieldsByIds(array $ids): void
+	{
+		$ids = array_values(array_filter(array_map('intval', $ids)));
+		if (empty($ids))
+		{
+			return;
+		}
+
+		CheckInTable::updateMulti($ids, [
+			'LATITUDE' => null,
+			'LONGITUDE' => null,
+			'ADDRESS' => null,
+			'MESSAGE_IDS' => null,
+		], true);
 	}
 }

@@ -13,6 +13,7 @@ use Bitrix\Rest\V3\Attribute\Scope;
 use Bitrix\Rest\V3\Attribute\Title;
 use Bitrix\Rest\V3\CacheManager;
 use Bitrix\Rest\V3\Controller\RestController;
+use Bitrix\Rest\V3\Documentation\Attributes\Hidden;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\Generator;
 use Bitrix\Rest\V3\Exception\TooManyAttributesException;
@@ -468,6 +469,7 @@ final class ControllerDataManager
 				'description' => null,
 				'isEnabled' => true,
 				'queryParams' => null,
+				'isHidden' => false,
 			];
 
 			foreach ($method->getAttributes() as $attribute)
@@ -484,6 +486,7 @@ final class ControllerDataManager
 						$provider = new $attributeInstance->provider();
 						$methodDescriptionData['isEnabled'] = $provider->isEnabled();
 					}),
+					Hidden::class => $methodDescriptionData['isHidden'] = true,
 					default => null,
 				};
 			}
@@ -499,6 +502,7 @@ final class ControllerDataManager
 				description: $methodDescriptionData['description'],
 				isEnabled: $methodDescriptionData['isEnabled'],
 				queryParams: $methodDescriptionData['queryParams'],
+				isHidden: $methodDescriptionData['isHidden'],
 			);
 
 			$controllerData->addMethod($methodDescription);

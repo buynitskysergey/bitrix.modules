@@ -38,7 +38,7 @@ final class SendContractValidator
 	/**
 	 * Validates all contracts atomically for the current sender and outgoing HTML.
 	 *
-	 * @param array<int, array{token?: mixed, fileIds?: mixed}> $contracts
+	 * @param array<int, array{token?: mixed, fileIds?: mixed, sourceFileIds?: mixed}> $contracts
 	 * @param mixed[] $allowedFileIds
 	 *
 	 * @return Result
@@ -63,6 +63,7 @@ final class SendContractValidator
 
 		$allowedFileIds = $this->normalizeAllowedFileIds($allowedFileIds);
 		$claimedFileIds = [];
+		$claimedSourceFileIds = [];
 		$normalizedContracts = [];
 		$totalFileCount = 0;
 
@@ -74,8 +75,13 @@ final class SendContractValidator
 			$fileIds = is_array($contract) && is_array($contract['fileIds'] ?? null)
 				? $this->normalizeContractFileIds($contract['fileIds'])
 				: null;
+			$sourceFileIds = is_array($contract) && array_key_exists('sourceFileIds', $contract)
+				? (is_array($contract['sourceFileIds'])
+					? $this->normalizeContractFileIds($contract['sourceFileIds'])
+					: null)
+				: $fileIds;
 
-			if ($token === '' || $fileIds === null)
+			if ($token === '' || $fileIds === null || $sourceFileIds === null || count($fileIds) !== count($sourceFileIds))
 			{
 				return $this->invalidContract();
 			}
@@ -95,10 +101,20 @@ final class SendContractValidator
 
 				$claimedFileIds[$fileId] = true;
 			}
+			foreach ($sourceFileIds as $sourceFileId)
+			{
+				if (isset($claimedSourceFileIds[$sourceFileId]))
+				{
+					return $this->invalidContract();
+				}
+
+				$claimedSourceFileIds[$sourceFileId] = true;
+			}
 
 			$normalizedContracts[] = [
 				'token' => $token,
 				'fileIds' => $fileIds,
+				'sourceFileIds' => $sourceFileIds,
 			];
 		}
 
@@ -111,7 +127,7 @@ final class SendContractValidator
 			$resolveResult = LargeAttachmentService::resolveForSend(
 				$userId,
 				$contract['token'],
-				$contract['fileIds'],
+				$contract['sourceFileIds'],
 				$this->storage,
 			);
 			if (!$resolveResult->isSuccess())
@@ -132,7 +148,7 @@ final class SendContractValidator
 				|| $resolved->externalLinkId === null
 				|| $resolved->externalLinkId <= 0
 				|| $resolvedFileIds === null
-				|| $resolvedFileIds !== $contract['fileIds']
+				|| $resolvedFileIds !== $contract['sourceFileIds']
 			)
 			{
 				return $this->invalidSendResult();

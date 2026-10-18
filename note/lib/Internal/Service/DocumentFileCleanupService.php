@@ -71,7 +71,7 @@ class DocumentFileCleanupService
 	}
 
 	/**
-	 * [P4.T3 / P4.T4, invariant N2] Physically removes files the CALLER has already confirmed
+	 * Physically removes files the CALLER has already confirmed
 	 * unreachable via {@see \Bitrix\Note\Internal\Service\File\FileReachabilityService} — deletes
 	 * the link row and the underlying CFile together. This is the only pairing that may ever
 	 * delete a b_note_document_file link that once pointed at a reachable file: callers MUST NOT

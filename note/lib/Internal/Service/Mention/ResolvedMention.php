@@ -18,12 +18,12 @@ final class ResolvedMention
 	) {
 	}
 
-	public static function unavailable(string $type, int $id, string $reason): self
+	public static function unavailable(string $type, int $id, string $reason, ?string $label = null): self
 	{
 		return new self(
 			type: $type,
 			id: $id,
-			label: null,
+			label: $label,
 			avatar: null,
 			url: null,
 			available: false,

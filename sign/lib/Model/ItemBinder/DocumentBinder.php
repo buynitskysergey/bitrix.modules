@@ -61,6 +61,7 @@ class DocumentBinder extends BaseItemToModelBinder
 			'groupId',
 			'externalId',
 			'externalDateCreate',
+			'inviteMessage',
 		];
 
 		return in_array($name, $properties, true);

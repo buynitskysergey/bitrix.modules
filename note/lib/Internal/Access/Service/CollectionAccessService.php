@@ -15,6 +15,7 @@ use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Model\CollectionAccessTable;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
+use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
 use Bitrix\Note\Internal\Service\User\SystemUser;
 
 final class CollectionAccessService
@@ -27,6 +28,11 @@ final class CollectionAccessService
 	public const LEVEL_CODE_VIEW = 'view';
 	public const LEVEL_CODE_MANAGE = 'manage';
 	public const LEVEL_CODE_MODERATE = 'moderate';
+	// What the REST client is told about its own rights over a collection.
+	public const ACCESS_CODE_NONE = 'none';
+	public const ACCESS_CODE_VIEW = 'view';
+	public const ACCESS_CODE_EDIT = 'edit';
+	public const ACCESS_CODE_FULL = 'full';
 
 	/**
 	 * Access codes of one user for the lifetime of the request, keyed by user id.
@@ -249,6 +255,116 @@ final class CollectionAccessService
 	}
 
 	/**
+	 * The `'*'` level of many collections at once - one query for a whole page of a list.
+	 *
+	 * @param int[] $collectionIds
+	 * @return array<int, int> level keyed by collection id; a collection without a `'*'` row is absent
+	 */
+	public static function batchGetPolicyLevels(array $collectionIds): array
+	{
+		$ids = array_values(array_unique(array_filter(array_map('intval', $collectionIds))));
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		$query = CollectionAccessTable::query()
+			->setSelect(['COLLECTION_ID', 'LEVEL'])
+			->whereIn('COLLECTION_ID', $ids)
+			->where('SUBJECT_CODE', '*')
+			->exec()
+		;
+
+		$levels = [];
+		while ($row = $query->fetch())
+		{
+			$levels[(int)$row['COLLECTION_ID']] = self::normalizePolicyLevel((int)$row['LEVEL']);
+		}
+
+		return $levels;
+	}
+
+	/**
+	 * The level as the REST client is told it: what the caller may do, not which internal rank they hold.
+	 */
+	public static function levelToAccessCode(int $level): string
+	{
+		return match (true)
+		{
+			$level >= self::LEVEL_MODERATE => self::ACCESS_CODE_FULL,
+			$level >= self::LEVEL_MANAGE => self::ACCESS_CODE_EDIT,
+			$level >= self::LEVEL_VIEW => self::ACCESS_CODE_VIEW,
+			default => self::ACCESS_CODE_NONE,
+		};
+	}
+
+	/**
+	 * Idempotently grants the supplied access level to a single subject (`U{userId}` or
+	 * a group/role code) on a collection. If a row already exists for the (collection,
+	 * subject) pair, its LEVEL is updated; otherwise a new row is inserted.
+	 *
+	 * Used by the landing import (SDD P3.T1) to guarantee the initiator keeps
+	 * LEVEL_MODERATE on a freshly created collection regardless of whether the
+	 * default-access bootstrap already ran.
+	 */
+	public static function grantUserLevel(int $collectionId, int $userId, int $level, ?int $actorId = null): Result
+	{
+		$result = new Result();
+		if ($collectionId <= 0 || $userId <= 0)
+		{
+			$result->addError(new \Bitrix\Main\Error('Invalid collection or user id'));
+
+			return $result;
+		}
+
+		$normalizedLevel = self::normalizePermissionLevel($level);
+		$subjectCode = 'U' . $userId;
+		$actor = $actorId ?? $userId;
+
+		$existing = CollectionAccessTable::query()
+			->setSelect(['ID', 'LEVEL'])
+			->where('COLLECTION_ID', $collectionId)
+			->where('SUBJECT_CODE', $subjectCode)
+			->fetch()
+		;
+
+		if ($existing)
+		{
+			if ((int)$existing['LEVEL'] === $normalizedLevel)
+			{
+				PermissionDictionary::clearCollectionPermissionsCache();
+
+				return $result;
+			}
+
+			$update = CollectionAccessTable::update((int)$existing['ID'], [
+				'LEVEL' => $normalizedLevel,
+			]);
+			if (!$update->isSuccess())
+			{
+				$result->addErrors($update->getErrors());
+			}
+		}
+		else
+		{
+			$add = CollectionAccessTable::add([
+				'COLLECTION_ID' => $collectionId,
+				'SUBJECT_CODE' => $subjectCode,
+				'LEVEL' => $normalizedLevel,
+				'CREATED_BY' => $actor,
+			]);
+			if (!$add->isSuccess())
+			{
+				$result->addErrors($add->getErrors());
+			}
+		}
+
+		PermissionDictionary::clearCollectionPermissionsCache();
+
+		return $result;
+	}
+
+	/**
 	 * Creates the default ACL rows for a freshly created collection:
 	 *  - owner (`U{userId}`) gets LEVEL_MODERATE
 	 *  - everyone else (`*`) gets LEVEL_NONE
@@ -341,7 +457,8 @@ final class CollectionAccessService
 		array $permissions,
 		int $actorId,
 		string|int $policyLevel = self::LEVEL_NONE,
-		?PushNotificationService $pushService = null
+		?PushNotificationService $pushService = null,
+		?DocumentLinkIndexService $linkIndexService = null,
 	): Result
 	{
 		$result = new Result();
@@ -472,6 +589,16 @@ final class CollectionAccessService
 			// no one is subscribed to NOTE_COLLECTION_{id}_ACL yet anyway.
 			$newRows = self::projectAclMap($prepared);
 			$change = CollectionAccessChange::lexical($oldRows, $newRows);
+			if ($change->maybeBoundary())
+			{
+				try
+				{
+					($linkIndexService ?? new DocumentLinkIndexService())->notifyMentionTargetCollectionChanged($collectionId);
+				}
+				catch (\Throwable)
+				{
+				}
+			}
 			self::dispatchAccessChange($collectionId, $change, $pushService);
 		}
 

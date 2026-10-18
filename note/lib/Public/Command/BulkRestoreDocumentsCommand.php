@@ -20,7 +20,7 @@ use Bitrix\Note\Internal\Service\RecycleBin\RestoreFromRecycleBinService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P3.T2 / API-03] Bulk restore of a selection, for both the
+ * Bulk restore of a selection, for both the
  * archive and recycle sections. Owner of the API-03 contract.
  *
  * Only the selected nodes are restored (withNested=false): no ancestor chain is rebuilt. A

@@ -43,7 +43,25 @@ class Settings
 			'mobileCallUIVisibilityTimer' => static::getMobileCallInterfaceVisibilityTimer(),
 			'callInvitePeriod' => static::getCallInvitePeriod(),
 			'gridViewEnabled' => static::isGridViewEnabled(),
+			'finishForAllEnabled' => static::isFinishForAllEnabled(),
+			'autoBalanceEnabled' => static::isAutoBalanceEnabled(),
+			'nqeDowngradeWindowSec' => static::getNqeDowngradeWindowSec(),
+			'nqeUpgradeWindowSec' => static::getNqeUpgradeWindowSec(),
+			'nqeWarmupSec' => static::getNqeWarmupSec(),
+			'nqeHighDowngradePacketsLostPct' => static::getNqeHighDowngradePacketsLostPct(),
+			'nqeHighDowngradeRttMs' => static::getNqeHighDowngradeRttMs(),
+			'nqeHighDowngradeJitterMs' => static::getNqeHighDowngradeJitterMs(),
+			'nqeMedDowngradePacketsLostPct' => static::getNqeMedDowngradePacketsLostPct(),
+			'nqeMedDowngradeRttMs' => static::getNqeMedDowngradeRttMs(),
+			'nqeMedDowngradeJitterMs' => static::getNqeMedDowngradeJitterMs(),
+			'nqeMedUpgradePacketsLostPct' => static::getNqeMedUpgradePacketsLostPct(),
+			'nqeMedUpgradeRttMs' => static::getNqeMedUpgradeRttMs(),
+			'nqeMedUpgradeJitterMs' => static::getNqeMedUpgradeJitterMs(),
+			'nqeLowUpgradePacketsLostPct' => static::getNqeLowUpgradePacketsLostPct(),
+			'nqeLowUpgradeRttMs' => static::getNqeLowUpgradeRttMs(),
+			'nqeLowUpgradeJitterMs' => static::getNqeLowUpgradeJitterMs(),
 			'isLargeMobileCallEnabled' => static::isLargeMobileCallEnabled(),
+			'viewToggleEnabled' => static::isViewToggleEnabled(),
 			'getBigRoomChats' => static::getBigRoomChats(),
 			'ai' => [
 				'serviceEnabled' => static::isAIServiceEnabled(),
@@ -429,6 +447,44 @@ class Settings
 		return $cached;
 	}
 
+	/**
+	 * Whether the mobile "finish call for all" feature is enabled (portal-wide or per-user).
+	 *
+	 * @return bool
+	 */
+	public static function isFinishForAllEnabled(): bool
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			if ((bool)Option::get('call', 'finish_for_all_enabled', false))
+			{
+				$cached = true;
+			}
+			else
+			{
+				$cached = (bool)\CUserOptions::GetOption('call', 'finish_for_all_enabled', false);
+			}
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Whether manual view toggling is available in the mobile call interface.
+	 *
+	 * Portal-level kill-switch / staged rollout only: no per-user fallback.
+	 * Boolean option, off by default: enable with
+	 * Option::set('call', 'view_toggle_enabled', true); disable by setting it
+	 * falsy or deleting it.
+	 *
+	 * @return bool
+	 */
+	public static function isViewToggleEnabled(): bool
+	{
+		return (bool)Option::get('call', 'view_toggle_enabled', false);
+	}
+
 	public static function isLargeMobileCallEnabled(): bool
 	{
 		static $cached = null;
@@ -605,6 +661,293 @@ class Settings
 
 		return $cached;
 	}
+
+	/**
+	 * Whether auto balance quality is enabled.
+	 *
+	 * @return bool
+	 */
+	public static function isAutoBalanceEnabled(): bool
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			if (Option::get('call', 'call_auto_balance_enabled', false))
+			{
+				$cached = true;
+			}
+			else
+			{
+				$cached = (bool)\CUserOptions::GetOption('call', 'call_auto_balance_enabled', false);
+			}
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get downgrade window in seconds.
+	 *
+	 * @return int
+	 */
+	public static function getNqeDowngradeWindowSec(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_downgrade_window_sec', 5);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get upgrade window in seconds.
+	 *
+	 * @return int
+	 */
+	public static function getNqeUpgradeWindowSec(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_upgrade_window_sec', 15);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get warmup period in seconds.
+	 *
+	 * @return int
+	 */
+	public static function getNqeWarmupSec(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_warmup_sec', 30);
+		}
+
+		return $cached;
+	}
+
+	//region Quality-specific thresholds (HIGH quality)
+
+	/**
+	 * Get HIGH→MEDIUM packets lost threshold (%).
+	 *
+	 * @return int
+	 */
+	public static function getNqeHighDowngradePacketsLostPct(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_high_downgrade_packets_lost_pct', 5);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get HIGH→MEDIUM RTT threshold (ms).
+	 *
+	 * Delivered for forward-compatibility only. RTT is not part of the v1 composite
+	 * score (reserved for a future version); the value is unused by the client in v1.
+	 *
+	 * @return int
+	 */
+	public static function getNqeHighDowngradeRttMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_high_downgrade_rtt_ms', 100);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get HIGH→MEDIUM jitter threshold (ms).
+	 *
+	 * @return int
+	 */
+	public static function getNqeHighDowngradeJitterMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_high_downgrade_jitter_ms', 30);
+		}
+
+		return $cached;
+	}
+
+	//endregion
+
+	//region Quality-specific thresholds (MEDIUM quality)
+
+	/**
+	 * Get MEDIUM→LOW packets lost threshold (%).
+	 *
+	 * @return int
+	 */
+	public static function getNqeMedDowngradePacketsLostPct(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_med_downgrade_packets_lost_pct', 10);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get MEDIUM→LOW RTT threshold (ms).
+	 *
+	 * Delivered for forward-compatibility only. RTT is not part of the v1 composite
+	 * score (reserved for a future version); the value is unused by the client in v1.
+	 *
+	 * @return int
+	 */
+	public static function getNqeMedDowngradeRttMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_med_downgrade_rtt_ms', 200);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get MEDIUM→LOW jitter threshold (ms).
+	 *
+	 * @return int
+	 */
+	public static function getNqeMedDowngradeJitterMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_med_downgrade_jitter_ms', 50);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get MEDIUM→HIGH packets lost threshold (%).
+	 *
+	 * @return int
+	 */
+	public static function getNqeMedUpgradePacketsLostPct(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_med_upgrade_packets_lost_pct', 2);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get MEDIUM→HIGH RTT threshold (ms).
+	 *
+	 * Delivered for forward-compatibility only. RTT is not part of the v1 composite
+	 * score (reserved for a future version); the value is unused by the client in v1.
+	 *
+	 * @return int
+	 */
+	public static function getNqeMedUpgradeRttMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_med_upgrade_rtt_ms', 80);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get MEDIUM→HIGH jitter threshold (ms).
+	 *
+	 * @return int
+	 */
+	public static function getNqeMedUpgradeJitterMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_med_upgrade_jitter_ms', 25);
+		}
+
+		return $cached;
+	}
+
+	//endregion
+
+	//region Quality-specific thresholds (LOW quality)
+
+	/**
+	 * Get LOW→MEDIUM packets lost threshold (%).
+	 *
+	 * @return int
+	 */
+	public static function getNqeLowUpgradePacketsLostPct(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_low_upgrade_packets_lost_pct', 3);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get LOW→MEDIUM RTT threshold (ms).
+	 *
+	 * Delivered for forward-compatibility only. RTT is not part of the v1 composite
+	 * score (reserved for a future version); the value is unused by the client in v1.
+	 *
+	 * @return int
+	 */
+	public static function getNqeLowUpgradeRttMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_low_upgrade_rtt_ms', 150);
+		}
+
+		return $cached;
+	}
+
+	/**
+	 * Get LOW→MEDIUM jitter threshold (ms).
+	 *
+	 * @return int
+	 */
+	public static function getNqeLowUpgradeJitterMs(): int
+	{
+		static $cached = null;
+		if ($cached === null)
+		{
+			$cached = (int)Option::get('call', 'nqe_low_upgrade_jitter_ms', 40);
+		}
+
+		return $cached;
+	}
+
+	//endregion
 
 	/**
 	 * Whether call metrics collection is enabled.

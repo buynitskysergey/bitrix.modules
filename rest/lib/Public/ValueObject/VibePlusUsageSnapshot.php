@@ -52,13 +52,11 @@ final readonly class VibePlusUsageSnapshot
 
 	public function hasUserRestUsage(): bool
 	{
-		return $this->userWebhookCount > 0 || $this->userIntegrationCount > 0;
+		return $this->userIntegrationCount > 0;
 	}
 
 	public function hasVibecodeUsage(): bool
 	{
-		return $this->vibecodeWebhookCount > 0
-			|| $this->vibecodeApplicationCount > 0
-			|| $this->developerKeyCount > 0;
+		return $this->vibecodeApplicationCount > 0;
 	}
 }

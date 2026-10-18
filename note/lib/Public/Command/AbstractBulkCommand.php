@@ -17,7 +17,7 @@ use Bitrix\Note\Internal\Service\DomainEventPublisher;
 use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P1.T4] Template-method skeleton wiring the bulk pipeline:
+ * Template-method skeleton wiring the bulk pipeline:
  * SelectionResolver -> BulkAccessAggregator -> chunked apply -> BulkOutcome.
  *
  * Concrete actions (archive/delete/restore/hardDelete/move) are heirs — none exist in

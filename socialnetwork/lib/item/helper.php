@@ -188,8 +188,12 @@ class Helper
 			}
 		}
 		elseif (
-			!Loader::includeModule('extranet')
-			|| \CExtranet::isIntranetUser()
+			// permission of the publishing user, not of AUTHOR_ID, same as in the DEST and SPERM branches
+			ComponentHelper::getAllowToAllDestination()
+			&& (
+				!Loader::includeModule('extranet')
+				|| \CExtranet::isIntranetUser()
+			)
 		)
 		{
 			$postFields['SOCNET_RIGHTS'] = [ 'UA' ];

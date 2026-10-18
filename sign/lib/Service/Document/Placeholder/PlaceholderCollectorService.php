@@ -6,6 +6,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 use Bitrix\Sign\Config;
 use Bitrix\Sign\Helper\Field\NameHelper;
+use Bitrix\Sign\Helper\Field\UserFieldCodeHelper;
 use Bitrix\Sign\Item\Document\Placeholder\HcmLinkCompany;
 use Bitrix\Sign\Item\Document\Placeholder\HcmLinkCompanyCollection;
 use Bitrix\Sign\Item\Document\Placeholder\HcmLinkPlaceholderNameConfig;
@@ -15,6 +16,7 @@ use Bitrix\Sign\Item\Document\Placeholder\PlaceholderCollection;
 use Bitrix\Sign\Item\Document\Placeholder\PlaceholderNameConfig;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
+use Bitrix\Sign\Service\Document\FieldAccessService;
 use Bitrix\Sign\Service\Document\FieldService;
 use Bitrix\Sign\Service\Document\Placeholder\Strategy\CrmReferencePlaceholderCollectorStrategy;
 use Bitrix\Sign\Service\Document\Placeholder\Strategy\EmployeeDynamicPlaceholderCollectorStrategy;
@@ -24,10 +26,15 @@ use Bitrix\Sign\Service\Container;
 use Bitrix\Sign\Service\Integration\Crm\MyCompanyService;
 use Bitrix\Sign\Service\Integration\HumanResources\HcmLinkFieldService;
 use Bitrix\Sign\Service\Integration\HumanResources\HcmLinkService;
+use Bitrix\Sign\Service\Placeholder\FieldAlias\AliasRoleResolver;
 use Bitrix\Sign\Service\Placeholder\FieldAlias\FieldAliasService;
 use Bitrix\Sign\Service\Placeholder\FieldAlias\AliasContext;
+use Bitrix\Sign\Service\Providers\InfoProvider;
+use Bitrix\Sign\Service\Providers\LegalInfoProvider;
+use Bitrix\Sign\Service\Providers\MemberDynamicFieldInfoProvider;
 use Bitrix\Sign\Type\BlockCode;
 use Bitrix\Sign\Type\BlockParty;
+use Bitrix\Sign\Type\Field\FrontFieldCategory;
 use Bitrix\Sign\Ui\PlaceholderGrid\SectionBuilder;
 use Psr\Log\LoggerInterface;
 
@@ -37,6 +44,10 @@ class PlaceholderCollectorService
 
 	private readonly LoggerInterface $logger;
 	private readonly Config\Storage $config;
+	private readonly FieldAccessService $fieldAccessService;
+	private readonly AliasRoleResolver $aliasRoleResolver;
+	private readonly LegalInfoProvider $legalInfoProvider;
+	private readonly MemberDynamicFieldInfoProvider $memberDynamicFieldProvider;
 
 	private bool $verifiedAliasFilterDisabled = false;
 	private bool $hcmLinkCollectionFullyHidden = false;
@@ -51,13 +62,34 @@ class PlaceholderCollectorService
 		private readonly FieldAliasService $fieldAliasService,
 		?LoggerInterface $logger = null,
 		?Config\Storage $config = null,
+		?FieldAccessService $fieldAccessService = null,
+		?AliasRoleResolver $aliasRoleResolver = null,
+		?LegalInfoProvider $legalInfoProvider = null,
+		?MemberDynamicFieldInfoProvider $memberDynamicFieldProvider = null,
 	)
 	{
-		$this->logger = $logger ?? Container::instance()->getLogger('Service');
+		$container = Container::instance();
+		$this->logger = $logger ?? $container->getLogger('Service');
 		$this->config = $config ?? Config\Storage::instance();
+		$this->fieldAccessService = $fieldAccessService ?? $container->getDocumentFieldAccessService();
+		$this->aliasRoleResolver = $aliasRoleResolver ?? $container->getAliasRoleResolver();
+		$this->legalInfoProvider = $legalInfoProvider ?? $container->getLegalInfoProvider();
+		$this->memberDynamicFieldProvider = $memberDynamicFieldProvider
+			?? $container->getMemberDynamicFieldProvider()
+		;
 	}
 
-	public function loadPlaceholdersByUserId(int $userId, bool $clearCache = false): Result
+	/**
+	 * @param bool $withDeletableMarks marks of the deletable fields (NORMATIVE ALG-B02) belong to the
+	 *                                 answer of the list; they cost the field maps of the permitted
+	 *                                 categories, so a caller that reads the codes of the fields only
+	 *                                 asks for the list without them.
+	 */
+	public function loadPlaceholdersByUserId(
+		int $userId,
+		bool $clearCache = false,
+		bool $withDeletableMarks = true,
+	): Result
 	{
 		$loadPlaceholdersResult = new Result();
 
@@ -67,9 +99,13 @@ class PlaceholderCollectorService
 		}
 
 		$placeholdersFromCache = $this->placeholderCacheService->getPlaceholderList();
-		if ($placeholdersFromCache !== null)
+		if (is_array($placeholdersFromCache))
 		{
-			return $loadPlaceholdersResult->setData($placeholdersFromCache);
+			return $loadPlaceholdersResult->setData(
+				$withDeletableMarks
+					? $this->markDeletableFields($placeholdersFromCache, $userId)
+					: $placeholdersFromCache,
+			);
 		}
 
 		$this->verifiedAliasFilterDisabled = $this->config->isPlaceholderVerifiedAliasFilterDisabled();
@@ -90,10 +126,11 @@ class PlaceholderCollectorService
 		$placeholders = $this->convertAllPlaceholdersToAliases($placeholders);
 
 		$sections = $this->sectionBuilder->buildSections($placeholders);
-		$loadPlaceholdersResult->setData($sections);
 		$this->placeholderCacheService->setPlaceholderList($sections);
 
-		return $loadPlaceholdersResult;
+		return $loadPlaceholdersResult->setData(
+			$withDeletableMarks ? $this->markDeletableFields($sections, $userId) : $sections,
+		);
 	}
 
 	public function loadPlaceholdersByHcmLinkCompanyId(int $hcmLinkCompanyId): Result
@@ -298,6 +335,7 @@ class PlaceholderCollectorService
 				$result->add(new Placeholder(
 					$placeholder->name,
 					$alias ?? $placeholder->value,
+					$placeholder->type,
 				));
 
 				continue;
@@ -312,6 +350,7 @@ class PlaceholderCollectorService
 			$result->add(new Placeholder(
 				$placeholder->name,
 				$alias,
+				$placeholder->type,
 			));
 		}
 
@@ -383,7 +422,13 @@ class PlaceholderCollectorService
 			return null;
 		}
 
+		// the identifier arrives from the client, so a company of no such identifier answers empty
 		$hcmLinkCompany = $this->hcmLinkService->getById($hcmLinkCompanyId);
+		if ($hcmLinkCompany === null)
+		{
+			return null;
+		}
+
 		$fields = $this->hcmLinkFieldService->getFieldsForSelector($hcmLinkCompanyId);
 
 		$myCompanies = $this->myCompanyService->listWithTaxIds();
@@ -395,7 +440,9 @@ class PlaceholderCollectorService
 		foreach ([$representativeConfig, $employeeConfig] as $config)
 		{
 			$configFields = $fields[$config->key]['FIELDS'] ?? [];
-			$items = (new HcmLinkPlaceholderCollectorStrategy())->createFromFields($configFields, $config->party);
+			$items = (new HcmLinkPlaceholderCollectorStrategy($this->hcmLinkFieldService))
+				->createFromFields($configFields, $config->party)
+			;
 			
 			$config->collection->add(new HcmLinkCompany($hcmLinkCompany->title, $myCompanyTitle, $items));
 		}
@@ -427,18 +474,171 @@ class PlaceholderCollectorService
 
 		foreach ($externalB2eDocumentBlocksMap as $blockCode => $langKey)
 		{
+			$fieldType = $this->fieldService->getB2eRegionalFieldTypeByBlockCode($blockCode);
 			$placeholderName = NameHelper::create(
 				$blockCode,
-				$this->fieldService->getB2eRegionalFieldTypeByBlockCode($blockCode),
+				$fieldType,
 				BlockParty::LAST_PARTY,
 			);
 
 			$placeholders->add(new Placeholder(
 				Loc::getMessage($langKey) ?? '',
 				$placeholderName,
+				$fieldType,
 			));
 		}
 
 		return $placeholders;
+	}
+
+	/**
+	 * Adds `fieldId` and `category` to the items the user may delete. The mark is personal and goes to
+	 * the answer only: the portal cache is shared and carries no user in its key.
+	 *
+	 * @param array<int, array> $sections sections of the fields list, possibly with subsections
+	 *
+	 * @return array<int, array>
+	 */
+	private function markDeletableFields(array $sections, int $userId): array
+	{
+		$fieldMapsByCategory = $this->getDeletableFieldMapsByCategory($userId);
+		if ($fieldMapsByCategory === [])
+		{
+			return $sections;
+		}
+
+		return $this->markDeletableItemsOfSections($sections, $fieldMapsByCategory);
+	}
+
+	/**
+	 * @return array<string, array<string, int>> field identifiers by name of the categories the user
+	 *                                           may delete from
+	 */
+	private function getDeletableFieldMapsByCategory(int $userId): array
+	{
+		$fieldMaps = [];
+		foreach ($this->fieldAccessService->getDeleteByCategoryPermissions($userId) as $category => $isAllowed)
+		{
+			if (!$isAllowed || !$this->isDeleteOfCategoryAvailable($category))
+			{
+				continue;
+			}
+
+			$provider = $this->getFieldProviderByCategory($category);
+			if ($provider !== null)
+			{
+				$fieldMaps[$category] = $provider->getFieldIdsByName();
+			}
+		}
+
+		return $fieldMaps;
+	}
+
+	/**
+	 * The gates the action of the deletion checks again
+	 * (Controllers\V1\B2e\Document\Placeholder::isDeleteOfCategoryAllowed()): a category the action
+	 * refuses must carry no mark at all, otherwise the panel offers an irreversible operation that
+	 * always ends with an error.
+	 */
+	private function isDeleteOfCategoryAvailable(string $category): bool
+	{
+		return $category !== FrontFieldCategory::DYNAMIC_MEMBER->value
+			|| Config\Feature::instance()->isDocumentTemplatesAvailable()
+		;
+	}
+
+	private function getFieldProviderByCategory(string $category): ?InfoProvider
+	{
+		return match ($category)
+		{
+			FrontFieldCategory::PROFILE->value => $this->legalInfoProvider,
+			FrontFieldCategory::DYNAMIC_MEMBER->value => $this->memberDynamicFieldProvider,
+			default => null,
+		};
+	}
+
+	/**
+	 * @param array<int, array> $sections
+	 * @param array<string, array<string, int>> $fieldMapsByCategory
+	 *
+	 * @return array<int, array>
+	 */
+	private function markDeletableItemsOfSections(array $sections, array $fieldMapsByCategory): array
+	{
+		foreach ($sections as &$section)
+		{
+			foreach (($section['items'] ?? []) as $index => $item)
+			{
+				$section['items'][$index] = $this->markDeletableItem($item, $fieldMapsByCategory);
+			}
+
+			if (isset($section['subsections']))
+			{
+				$section['subsections'] = $this->markDeletableItemsOfSections(
+					$section['subsections'],
+					$fieldMapsByCategory,
+				);
+			}
+		}
+		unset($section);
+
+		return $sections;
+	}
+
+	/**
+	 * A profile field stands in the answer twice, under the representative and under the personal data
+	 * of the employee: both codes lead to one user field, so both items get the same mark. Default
+	 * legal fields are never deletable; the virtual full name has no user field and is absent from the map.
+	 *
+	 * @param array<string, mixed> $item
+	 * @param array<string, array<string, int>> $fieldMapsByCategory
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function markDeletableItem(array $item, array $fieldMapsByCategory): array
+	{
+		$fieldCode = $item['value'] ?? null;
+		if (!is_string($fieldCode) || $fieldCode === '')
+		{
+			return $item;
+		}
+
+		$fieldName = $this->resolveUserFieldName($fieldCode);
+		foreach ($fieldMapsByCategory as $category => $fieldMap)
+		{
+			if (!isset($fieldMap[$fieldName]))
+			{
+				continue;
+			}
+
+			if (
+				$category === FrontFieldCategory::PROFILE->value
+				&& in_array($fieldName, LegalInfoProvider::LEGAL_USER_FIELD_DEFAULT, true)
+			)
+			{
+				break;
+			}
+
+			$item['fieldId'] = $fieldMap[$fieldName];
+			$item['category'] = $category;
+
+			break;
+		}
+
+		return $item;
+	}
+
+	/**
+	 * Resolves backwards, from the code the panel shows to the name of the user field: a verified alias
+	 * carries a shortcut of the field type, so building the code forward from the field map would
+	 * repeat the type heuristic and could match nothing. A legacy raw internal name resolves as is.
+	 */
+	private function resolveUserFieldName(string $fieldCode): string
+	{
+		$context = $this->aliasRoleResolver->resolveContextByAlias(AliasContext::empty(), $fieldCode);
+		$internalName = $this->fieldAliasService->toFieldName($fieldCode, $context) ?? $fieldCode;
+		$fieldName = NameHelper::parse($internalName)['fieldCode'];
+
+		return UserFieldCodeHelper::removePrefix($fieldName);
 	}
 }

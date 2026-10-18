@@ -27,7 +27,8 @@ final class ListDashboardsTool extends BaseBiTool
 			. '(a task flow, a workflow template, ...) that must be chosen first — call '
 			. 'search_dashboard_parameters for it before get_dashboard_meta. When false, call '
 			. 'get_dashboard_meta directly. '
-			. 'Returns up to ' . self::PAGE_SIZE . ' dashboards per page along with a `has_more` flag; '
+			. 'Returns up to ' . self::PAGE_SIZE . ' dashboards per page along with a `has_more` flag '
+			. 'and `total` (overall number of dashboards available to the user); '
 			. 'when `has_more` is true, repeat the call with `offset` advanced by ' . self::PAGE_SIZE
 			. ' to fetch the next page.';
 	}
@@ -69,7 +70,7 @@ final class ListDashboardsTool extends BaseBiTool
 		{
 			if (empty($allowedIds))
 			{
-				return ['dashboards' => [], 'has_more' => false];
+				return ['dashboards' => [], 'has_more' => false, 'total' => 0];
 			}
 			$filter['=ID'] = $allowedIds;
 		}
@@ -90,12 +91,13 @@ final class ListDashboardsTool extends BaseBiTool
 			$offset = max(0, (int)$args['offset']);
 		}
 
-		$rows = SupersetDashboardTable::getList([
+		$query = SupersetDashboardTable::getList([
 			'select' => ['ID', 'TITLE', 'TYPE', 'FILTER_PERIOD', 'DESCRIPTION' => 'INFO.DESCRIPTION'],
 			'filter' => $filter,
 			'order' => ['TITLE' => 'ASC', 'ID' => 'ASC'],
 			'limit' => self::PAGE_SIZE + 1,
 			'offset' => $offset,
+			'count_total' => true,
 			'runtime' => [
 				new ReferenceField(
 					'INFO',
@@ -104,7 +106,9 @@ final class ListDashboardsTool extends BaseBiTool
 					['join_type' => 'LEFT'],
 				),
 			],
-		])->fetchAll();
+		]);
+		$rows = $query->fetchAll();
+		$total = (int)$query->getCount();
 
 		$hasMore = count($rows) > self::PAGE_SIZE;
 		if ($hasMore)
@@ -130,6 +134,6 @@ final class ListDashboardsTool extends BaseBiTool
 			];
 		}
 
-		return ['dashboards' => $dashboards, 'has_more' => $hasMore];
+		return ['dashboards' => $dashboards, 'has_more' => $hasMore, 'total' => $total];
 	}
 }

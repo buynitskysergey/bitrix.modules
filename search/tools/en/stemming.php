@@ -82,7 +82,7 @@ function stemming_stop_en($sWord)
 			foreach (explode(',', STEMMING_STOP_EN) as $word)
 			{
 				$word = trim($word);
-				if ($word <> '')
+				if ($word !== '')
 				{
 					$stop_list[$word] = 0;
 				}
@@ -103,7 +103,6 @@ function stemming_en($word)
 	global $STEMMING_EN_STEP2;
 	global $STEMMING_EN_STEP3A;
 	global $STEMMING_EN_STEP3;
-	global $STEMMING_EN_STEP4A;
 	global $STEMMING_EN_STEP4;
 	global $STEMMING_EN_EX1;
 	global $STEMMING_EN_EX2;
@@ -284,15 +283,15 @@ function stemming_en($word)
 		&& preg_match('/' . $found[0] . '$/', mb_substr($word, $R1))
 	)
 	{
-		switch ($found[0])
+		if ($found[0] === 'ATIVE')
 		{
-		case 'ATIVE':
 			if (preg_match('/ATIVE$/', mb_substr($word, $R2)))
 			{
 				$word = mb_substr($word, 0, mb_strlen($word) - 5);
 			}
-			break;
-		default:
+		}
+		else
+		{
 			$word = mb_substr($word, 0, mb_strlen($word) - mb_strlen($found[0])) . $STEMMING_EN_STEP3A[$found[0]];
 		}
 	}
@@ -304,15 +303,15 @@ function stemming_en($word)
 		&& preg_match('/' . $found[0] . '$/', mb_substr($word, $R2))
 	)
 	{
-		switch ($found[0])
+		if ($found[0] === 'ION')
 		{
-		case 'ION':
 			if (preg_match('/[ST]ION$/', $word))
 			{
 				$word = mb_substr($word, 0, mb_strlen($word) - mb_strlen($found[0]));
 			}
-			break;
-		default:
+		}
+		else
+		{
 			$word = mb_substr($word, 0, mb_strlen($word) - mb_strlen($found[0]));
 		}
 	}

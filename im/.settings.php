@@ -128,9 +128,6 @@ return [
 	],
 	'aiassistant.marta' => [
 		'value' => [
-			'agents' => [
-				Bitrix\Im\V2\Integration\AiAssistant\Agents\ImAgent::class,
-			],
 			'toolSets' => [
 				Bitrix\Im\V2\Integration\AiAssistant\ToolSets\ImToolSet::class,
 			],

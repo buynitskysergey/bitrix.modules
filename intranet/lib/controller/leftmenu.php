@@ -2,11 +2,17 @@
 
 namespace Bitrix\Intranet\Controller;
 
+use Bitrix\Intranet\Internal\Integration\Socialnetwork\WorkgroupLink;
+use Bitrix\Intranet\Internal\Service\LeftMenu\GroupFavoritesService;
+use Bitrix\Intranet\Internal\Service\LeftMenu\StandardItemIdentity;
 use Bitrix\Intranet\Settings\Tools\Crm;
 use Bitrix\Intranet\Settings\Tools\Sites;
 use Bitrix\Intranet\Settings\Tools\Tasks;
 use Bitrix\Intranet\Settings\Tools\TeamWork;
 use Bitrix\Intranet\Portal\FirstPage;
+use Bitrix\Intranet\Internal\Service\Portal\PortalFirstPageUrlNormalizer;
+use Bitrix\Intranet\UI\LeftMenu\MenuItem\ItemUserFavorites;
+use Bitrix\Intranet\UI\LeftMenu\Preset;
 use Bitrix\Main\DB\SqlExpression;
 use Bitrix\Main\Entity\ReferenceField;
 use Bitrix\Main\Error;
@@ -258,20 +264,30 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 				$error = Loc::getMessage('INTRANET_LEFT_MENU_SELF_ITEM_LINK_ERROR');
 		}
 
-		if (isset($_POST['itemData']['id']))
-		{
-			$itemId = trim($_POST['itemData']['id']);
-		}
-		else
-		{
-			$itemId = crc32($itemLink);
-		}
-
 		if (!empty($error))
 		{
 			$this->addError(new Error($error));
 			return null;
 		}
+
+		$standardItems = \CUserOptions::GetOption('intranet', 'left_menu_standard_items_' . SITE_ID);
+		$standardItems = is_array($standardItems) ? $standardItems : [];
+		$userId = (int)$this->getCurrentUser()?->getId();
+		$groupFavoritesService = new GroupFavoritesService();
+		$linkState = $groupFavoritesService->resolveState($userId, $itemLink);
+		if (!$groupFavoritesService->canAddLink($standardItems, $itemLink, $userId, $linkState))
+		{
+			$this->addError(new Error(Loc::getMessage('INTRANET_LEFT_MENU_SELF_ITEM_UNKNOWN_ERROR')));
+
+			return null;
+		}
+
+		$state = $linkState?->isAccessibleProjectSection() ? $linkState : null;
+		$providedItemId = isset($_POST['itemData']['id']) ? trim($_POST['itemData']['id']) : null;
+		$standardItemIdentity = new StandardItemIdentity();
+		$identity = $standardItemIdentity->resolve($itemLink, $providedItemId, $state);
+		$itemLink = $identity['link'];
+		$itemId = $identity['id'];
 
 		$newItem = array(
 			'TEXT' => $itemText,
@@ -288,14 +304,14 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		{
 			$newItem['SUB_LINK'] = $_POST['itemData']['subLink']['URL'];
 		}
-
-		$standardItems = \CUserOptions::GetOption('intranet', 'left_menu_standard_items_' . SITE_ID);
-
-		if (is_array($standardItems) && !empty($standardItems))
+		if (!empty($standardItems))
 		{
 			foreach ($standardItems as $item)
 			{
-				if ($item['LINK'] == $newItem['LINK'])
+				if (
+					is_string($item['LINK'] ?? null)
+					&& $standardItemIdentity->isSame($item['LINK'], $newItem['LINK'], $state)
+				)
 				{
 					$this->addError(new Error(Loc::getMessage('INTRANET_LEFT_MENU_SELF_ITEM_DUBLICATE_ERROR')));
 					return null;
@@ -307,17 +323,25 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		{
 			$standardItems = array($itemId => $newItem);
 		}
+		$this->saveStandardItems(SITE_ID, $standardItems);
 
-		\CUserOptions::SetOption('intranet', 'left_menu_standard_items_' . SITE_ID, $standardItems);
-
-		if (preg_match('~^/workgroups/group/([0-9]+)/$~i', $itemLink, $match))
+		$workgroupLink = WorkgroupLink::parse($itemLink);
+		if ($workgroupLink['isFeed'] ?? false)
 		{
-			$this->setGroupToFavorites($match[1], 'Y');
+			$this->setGroupToFavorites($workgroupLink['groupId'], 'Y');
 		}
 
-		return [
+		$response = [
 			'itemId' => $itemId,
+			'iconClass' => $state !== null ? ItemUserFavorites::PROJECT_ICON_CLASS : '',
+			'bindSlider' => $state !== null ? 'Y' : 'N',
 		];
+		if ($state !== null)
+		{
+			$response['canonicalLink'] = $state->canonicalLink;
+		}
+
+		return $response;
 	}
 
 	public function updateStandartItemAction()
@@ -357,11 +381,11 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 
 			if (!empty($standardItems))
 			{
-				\CUserOptions::SetOption('intranet', 'left_menu_standard_items_' . SITE_ID, $standardItems);
+				$this->saveStandardItems(SITE_ID, $standardItems);
 			}
 			else
 			{
-				\CUserOptions::DeleteOption('intranet', 'left_menu_standard_items_' . SITE_ID);
+				$this->deleteStandardItems(SITE_ID);
 			}
 		}
 	}
@@ -373,9 +397,11 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		if (is_array($standardItems))
 		{
 			$itemId = '';
+			$itemLinkFromRequest = null;
 			if (isset($_POST['itemData']['link']))
 			{
-				$itemId = crc32($_POST['itemData']['link']);
+				$itemLinkFromRequest = $_POST['itemData']['link'];
+				$itemId = crc32($itemLinkFromRequest);
 			}
 			else if (isset($_POST['itemData']['id']))
 			{
@@ -389,28 +415,61 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 			}
 
 			$itemLink = '';
-			foreach($standardItems as $key => $item)
+			if ($itemLinkFromRequest !== null)
 			{
-				if ($item['ID'] == $itemId)
+				$standardItemIdentity = new StandardItemIdentity();
+				$storedItem = $standardItemIdentity->findStoredItemByLink(
+					items: $standardItems,
+					link: $itemLinkFromRequest,
+				);
+				if ($storedItem === null)
 				{
-					$itemLink = $item['LINK'];
-					unset($standardItems[$key]);
-					break;
+					$state = (new GroupFavoritesService())->resolveState(
+						userId: (int)$this->getCurrentUser()?->getId(),
+						link: $itemLinkFromRequest,
+					);
+					if ($state?->isAccessibleProjectSection())
+					{
+						$storedItem = $standardItemIdentity->findStoredItemByLink(
+							items: $standardItems,
+							link: $itemLinkFromRequest,
+							state: $state,
+						);
+					}
+				}
+				if ($storedItem !== null)
+				{
+					$itemId = $storedItem['id'];
+					$itemLink = $storedItem['link'];
+					unset($standardItems[$storedItem['key']]);
+				}
+			}
+			else
+			{
+				foreach($standardItems as $key => $item)
+				{
+					if ($item['ID'] == $itemId)
+					{
+						$itemLink = $item['LINK'];
+						unset($standardItems[$key]);
+						break;
+					}
 				}
 			}
 
-			if (preg_match('~^/workgroups/group/([0-9]+)/$~i', $itemLink, $match))
+			$workgroupLink = WorkgroupLink::parse($itemLink);
+			if ($workgroupLink['isFeed'] ?? false)
 			{
-				$this->setGroupToFavorites($match[1], 'N');
+				$this->setGroupToFavorites($workgroupLink['groupId'], 'N');
 			}
 
 			if (!empty($standardItems))
 			{
-				\CUserOptions::SetOption('intranet', 'left_menu_standard_items_' . SITE_ID, $standardItems);
+				$this->saveStandardItems(SITE_ID, $standardItems);
 			}
 			else
 			{
-				\CUserOptions::DeleteOption('intranet', 'left_menu_standard_items_' . SITE_ID);
+				$this->deleteStandardItems(SITE_ID);
 			}
 
 			return [
@@ -572,7 +631,9 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		\CUserOptions::SetOption(
 			'intranet',
 			$this->getItemsSortOptionName(),
-			self::convertItemsSortFromJSToDB($_POST['items'], $_POST['version'])
+			$this->restoreCollaborationMenuSort(
+				self::convertItemsSortFromJSToDB($_POST['items'], $_POST['version'] ?? null),
+			),
 		);
 
 		if (isset($_POST['firstItemLink']))
@@ -790,6 +851,133 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		return $userOption;
 	}
 
+	private function restoreCollaborationMenuSort(array $sort, bool $customPreset = false): array
+	{
+		if (!isset($sort['version']))
+		{
+			return $sort;
+		}
+
+		$postedIds = [];
+		$postedGroupIds = [];
+		$collectIds = static function (array $items) use (&$collectIds, &$postedIds, &$postedGroupIds): void {
+			foreach ($items as $key => $item)
+			{
+				if (is_array($item))
+				{
+					if (isset($item['group_id']))
+					{
+						$postedGroupIds[$item['group_id']] = true;
+
+						continue;
+					}
+					if (is_string($key))
+					{
+						$postedGroupIds[$key] = true;
+					}
+					$collectIds($item);
+				}
+				elseif (is_string($item))
+				{
+					$postedIds[$item] = true;
+				}
+			}
+		};
+		$collectIds($sort['show']);
+		$collectIds($sort['hide']);
+		if (!isset($postedIds['menu_teamwork']))
+		{
+			return $sort;
+		}
+
+		// A flattened system group can be saved after the feature has been disabled.
+		$preset = Preset\Manager::getPreset();
+		$previous = $customPreset
+			? unserialize(Option::get('intranet', 'left_menu_custom_preset_sort', '', SITE_ID), ['allowed_classes' => false])
+			: \CUserOptions::GetOption('intranet', $this->getItemsSortOptionName(), [])
+		;
+		if (is_array($previous) && !isset($previous['version']) && !$customPreset)
+		{
+			$previous = Preset\PresetAbstract::oldToNewStructure($previous, $preset->getStructure());
+		}
+		$teamworkItems = self::findCollaborationMenuGroup(is_array($previous) ? $previous : [])
+			?? self::findCollaborationMenuGroup($preset->getStructure())
+			?? []
+		;
+		$removePostedItems = static function (array $items) use (&$removePostedItems, $postedIds, $postedGroupIds): array {
+			$result = [];
+			foreach ($items as $key => $item)
+			{
+				if (is_array($item))
+				{
+					if (isset($item['group_id']))
+					{
+						if (!isset($postedGroupIds[$item['group_id']]))
+						{
+							$result[] = $item;
+						}
+					}
+					elseif (!isset($postedGroupIds[$key]))
+					{
+						$result[$key] = $removePostedItems($item);
+					}
+				}
+				elseif (!isset($postedIds[$item]))
+				{
+					$result[] = $item;
+				}
+			}
+
+			return $result;
+		};
+		$teamworkItems = $removePostedItems($teamworkItems);
+		$restore = static function (array $items) use (&$restore, $teamworkItems): array {
+			$result = [];
+			foreach ($items as $key => $item)
+			{
+				if ($item === 'menu_teamwork')
+				{
+					$result['menu_teamwork'] = $teamworkItems;
+				}
+				elseif (is_array($item) && !isset($item['group_id']))
+				{
+					$result[$key] = $restore($item);
+				}
+				else
+				{
+					$result[] = $item;
+				}
+			}
+
+			return $result;
+		};
+		$sort['show'] = $restore($sort['show']);
+		$sort['hide'] = $restore($sort['hide']);
+
+		return $sort;
+	}
+
+	private static function findCollaborationMenuGroup(array $items): ?array
+	{
+		if (isset($items['menu_teamwork']) && is_array($items['menu_teamwork']))
+		{
+			return $items['menu_teamwork'];
+		}
+		foreach ($items as $item)
+		{
+			if (is_array($item))
+			{
+				$group = self::findCollaborationMenuGroup($item);
+				if ($group !== null)
+				{
+					return $group;
+				}
+			}
+		}
+
+		return null;
+	}
+
 	public function saveCustomPresetAction()
 	{
 		if (!$this->isCurrentUserAdmin())
@@ -805,32 +993,85 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 			FirstPage::getInstance()->clearCacheForAll();
 		}
 
+		$restoredSort = null;
 		if (isset($_POST['itemsSort']))
 		{
+			$restoredSort = $this->restoreCollaborationMenuSort(
+				self::convertItemsSortFromJSToDB($_POST['itemsSort'], $_POST['version'] ?? null),
+				true,
+			);
 			Option::set(
 				'intranet',
 				'left_menu_custom_preset_sort',
-				serialize(self::convertItemsSortFromJSToDB($_POST['itemsSort'], $_POST['version'])),
-				SITE_ID
+				serialize($restoredSort),
+				SITE_ID,
 			);
 		}
 
 		if (isset($_POST['customItems']))
 		{
-			Option::set('intranet', 'left_menu_custom_preset_items', serialize($_POST['customItems']), false, SITE_ID);
+			$customItems = $_POST['customItems'];
+			if (is_array($customItems) && is_array($restoredSort))
+			{
+				$customItems = $this->restoreCollaborationMenuCustomItems($customItems, $restoredSort);
+			}
+			Option::set('intranet', 'left_menu_custom_preset_items', serialize($customItems), false, SITE_ID);
 		}
 
 		Option::set('intranet', 'left_menu_preset', 'custom', false, SITE_ID);
-		if (isset($_POST['firstItemLink']))
+		if (isset($_POST['firstItemLink']) && is_string($_POST['firstItemLink']))
 		{
-			$firstPageUrl = $_POST['firstItemLink'];
-			if (preg_match('~company/personal/user/\d+/tasks/$~i', $firstPageUrl, $match))
-			{
-				$firstPageUrl = $_POST["siteDir"] . 'company/personal/user/#USER_ID#/tasks/';
-			}
+			$firstPageUrl = (new PortalFirstPageUrlNormalizer())
+				->normalize($_POST['firstItemLink'])
+			;
 
 			Option::set('intranet', 'left_menu_first_page', $firstPageUrl, false, SITE_ID);
 		}
+	}
+
+	private function restoreCollaborationMenuCustomItems(array $customItems, array $sort): array
+	{
+		$teamworkItems = self::findCollaborationMenuGroup($sort);
+		if ($teamworkItems === null)
+		{
+			return $customItems;
+		}
+
+		$teamworkIds = [];
+		array_walk_recursive($teamworkItems, static function ($id) use (&$teamworkIds): void {
+			if (is_string($id))
+			{
+				$teamworkIds[$id] = true;
+			}
+		});
+		$postedIds = [];
+		foreach ($customItems as $item)
+		{
+			if (is_array($item) && is_string($item['ID'] ?? null))
+			{
+				$postedIds[$item['ID']] = true;
+			}
+		}
+		$serializedPreviousItems = Option::get('intranet', 'left_menu_custom_preset_items', '', SITE_ID);
+		if ($serializedPreviousItems === '')
+		{
+			return $customItems;
+		}
+		$previousItems = unserialize($serializedPreviousItems, ['allowed_classes' => false]);
+		if (!is_array($previousItems))
+		{
+			return $customItems;
+		}
+		foreach ($previousItems as $item)
+		{
+			$id = is_array($item) ? ($item['ID'] ?? null) : null;
+			if (is_string($id) && isset($teamworkIds[$id]) && !isset($postedIds[$id]))
+			{
+				$customItems[] = $item;
+			}
+		}
+
+		return $customItems;
 	}
 
 	public function setFirstPageAction()
@@ -852,7 +1093,7 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 	{
 		\CUserOptions::DeleteOption('intranet', 'left_menu_first_page_' . SITE_ID);
 		\CUserOptions::DeleteOption('intranet', 'left_menu_self_items_' . SITE_ID);
-		\CUserOptions::DeleteOption('intranet', 'left_menu_standard_items_' . SITE_ID);
+		$this->deleteStandardItems(SITE_ID);
 		\CUserOptions::DeleteOption('intranet', $this->getItemsSortOptionName());
 		\CUserOptions::DeleteOption('intranet', 'left_menu_groups_' . SITE_ID);
 
@@ -1120,7 +1361,7 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_preset_' . $siteId);
 		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_self_items_' . $siteId);
 		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_preset_' . $siteId);
-		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_standard_items_' . $siteId);
+		(new GroupFavoritesService())->deleteAllFavoritesForSite($siteId);
 		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_sorted_items_' . $siteId);
 		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_groups_' . $siteId);
 		\CUserOptions::DeleteOptionsByName('intranet', 'left_menu_collapsed');
@@ -1132,5 +1373,22 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		\COption::RemoveOption('intranet', 'left_menu_items_to_all_' . $siteId);
 		\COption::RemoveOption('intranet', 'left_menu_custom_preset_items', $siteId);
 		\COption::RemoveOption('intranet', 'left_menu_custom_preset_sort', $siteId);
+	}
+
+	private function saveStandardItems(string $siteId, array $items): void
+	{
+		(new GroupFavoritesService())->saveFavorites(
+			$siteId,
+			(int)$this->getCurrentUser()?->getId(),
+			$items,
+		);
+	}
+
+	private function deleteStandardItems(string $siteId): void
+	{
+		(new GroupFavoritesService())->deleteFavoritesForSite(
+			$siteId,
+			(int)$this->getCurrentUser()?->getId(),
+		);
 	}
 }

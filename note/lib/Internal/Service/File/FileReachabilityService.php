@@ -9,12 +9,12 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\DocumentVersionRepository;
 
 /**
- * [P4.T2] A file is reachable within its owning document (UNIQUE(FILE_ID) guarantees no
+ * A file is reachable within its owning document (UNIQUE(FILE_ID) guarantees no
  * cross-document ambiguity) as long as its fileId appears in the current Document.MARKDOWN
  * or in the markdown of at least one surviving version snapshot. Anything linked
  * (b_note_document_file) but not reachable is a candidate for physical deletion — see
- * VersionCleanupAgent's post-commit sweep ([P4.T3]) and FileController::unlinkBatchAction
- * ([P4.T4]), which are the only two callers allowed to act on this result.
+ * VersionCleanupAgent's post-commit sweep and FileController::unlinkBatchAction,
+ * which are the only two callers allowed to act on this result.
  *
  * Reachability here is computed against IMMUTABLE version snapshots, never against live
  * in-progress content — mixing the two was the source of the race that got the previous

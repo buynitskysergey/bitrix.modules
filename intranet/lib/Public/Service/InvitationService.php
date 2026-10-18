@@ -58,7 +58,7 @@ class InvitationService
 		$userCollection = new UserCollection();
 		$errorCollection = new ErrorCollection();
 		$this->isMassInviteStarted = true;
-		foreach ($collection as $invitation)
+		foreach ($collection as $invitationIndex => $invitation)
 		{
 			try
 			{
@@ -67,11 +67,19 @@ class InvitationService
 			}
 			catch (ErrorCollectionException $exception)
 			{
-				$errorCollection->add($exception->getErrors()->getValues());
+				foreach ($exception->getErrors()->getValues() as $error)
+				{
+					$errorCollection->setError($this->addInvitationIndex($error, $invitationIndex));
+				}
 			}
 			catch (\Exception $exception)
 			{
-				$errorCollection->setError(new Error($exception->getMessage(), $exception->getCode()));
+				$errorCollection->setError(
+					$this->addInvitationIndex(
+						new Error($exception->getMessage(), $exception->getCode()),
+						$invitationIndex,
+					),
+				);
 			}
 		}
 
@@ -94,6 +102,20 @@ class InvitationService
 		}
 
 		return $userCollection;
+	}
+
+	private function addInvitationIndex(Error $error, int $invitationIndex): Error
+	{
+		$customData = $error->getCustomData();
+		if ($customData !== null && !is_array($customData))
+		{
+			return $error;
+		}
+
+		$customData ??= [];
+		$customData['invitationIndex'] = $invitationIndex;
+
+		return new Error($error->getMessage(), $error->getCode(), $customData);
 	}
 
 	/**

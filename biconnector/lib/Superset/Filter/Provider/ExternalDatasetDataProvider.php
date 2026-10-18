@@ -118,6 +118,7 @@ class ExternalDatasetDataProvider extends EntityDataProvider
 			{
 				$items[ExternalSource\Type::Mysql->value] = Loc::getMessage('BICONNECTOR_SUPERSET_EXTERNAL_DATASET_GRID_FILTER_TYPE_MYSQL');
 				$items[ExternalSource\Type::Pgsql->value] = Loc::getMessage('BICONNECTOR_SUPERSET_EXTERNAL_DATASET_GRID_FILTER_TYPE_PGSQL');
+				$items[ExternalSource\Type::Clickhouse->value] = Loc::getMessage('BICONNECTOR_SUPERSET_EXTERNAL_DATASET_GRID_FILTER_TYPE_CLICKHOUSE');
 			}
 
 			return [

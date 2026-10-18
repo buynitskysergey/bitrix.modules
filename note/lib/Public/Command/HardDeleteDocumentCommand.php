@@ -39,12 +39,13 @@ class HardDeleteDocumentCommand extends AbstractCommand
 		}
 
 		$documentId = (int)$record->getDocumentId();
+		$preparedLinkChange = $this->hardDeleteService->prepareDelete([$documentId]);
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
 		try
 		{
-			$cleanupPayload = $this->hardDeleteService->deleteByDocumentIds([$documentId]);
+			$cleanupPayload = $this->hardDeleteService->deleteByDocumentIds([$documentId], $preparedLinkChange);
 			$connection->commitTransaction();
 		}
 		catch (\Throwable $e)

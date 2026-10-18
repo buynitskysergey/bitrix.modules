@@ -2,9 +2,7 @@
 
 namespace Bitrix\Rest\V3\Structure;
 
-use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Validation\Group\ValidationGroup;
-use Bitrix\Main\Validation\ValidationService;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoCollection;
 use Bitrix\Rest\V3\Dto\DtoValidatorHelper;
@@ -195,6 +193,19 @@ final class FieldsStructure extends Structure
 					$dto->{$propertyName} = $collection;
 				}
 				continue;
+			}
+
+			// The assignment below runs in weak typing mode, so PHP casts the incoming
+			// value to the property type BEFORE FieldTypeValidator ever sees it, and no
+			// TypeError is raised for the catch block to translate. For bool that cast
+			// inverts meaning instead of failing: every non-empty string but "0" becomes
+			// true, so a client sending "N" switches the flag ON and gets a 200 back.
+			// Reject the incompatible value here, where the original type is still known.
+			// Integer 0/1 stays accepted: in a JSON body it is the one non-boolean shape
+			// whose intent is unambiguous, and clients already write flags that way.
+			if ($propertyType === 'bool' && !is_bool($value) && $value !== 0 && $value !== 1)
+			{
+				throw new InvalidRequestFieldTypeException($qualifiedName, 'bool');
 			}
 
 			try

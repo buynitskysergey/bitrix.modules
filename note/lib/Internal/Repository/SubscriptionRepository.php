@@ -10,7 +10,7 @@ use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
 
 /**
- * [P6.T1] b_note_subscription access: upsert/remove on the colocated bell
+ * b_note_subscription access: upsert/remove on the colocated bell
  * control, subscriber lookups for SubscriptionResolver (P6.T2), and hard-delete
  * cascades.
  */
@@ -241,7 +241,7 @@ class SubscriptionRepository
 	}
 
 	/**
-	 * [P2.T2] Modes of the user's own direct rows for a set of targets - findSubscribedEntityIds()
+	 * Modes of the user's own direct rows for a set of targets - findSubscribedEntityIds()
 	 * answers "which of these" but drops the MODE, and the coverage resolver needs the mode itself
 	 * (muted is a row like any other, it just means the opposite).
 	 *
@@ -281,7 +281,7 @@ class SubscriptionRepository
 	}
 
 	/**
-	 * [P2.T2] Every document the user subscribed to "with nested" - the anchors a subtree
+	 * Every document the user subscribed to "with nested" - the anchors a subtree
 	 * coverage walk can hit. Read without an input set (one query on (USER_ID, SCOPE, MODE)),
 	 * so the coverage resolver can skip the ancestor walk entirely when the set is empty.
 	 *

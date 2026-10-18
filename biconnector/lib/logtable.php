@@ -27,14 +27,14 @@ use Bitrix\BIConnector\Internal\Model\UsageStatTable;
 class LogTable extends UsageStatTable
 {
 	/**
-	 * Agent deletes log records older than 30 days.
+	 * Agent deletes log records older than 7 days.
 	 *
 	 * @return string
 	 */
 	public static function cleanUpAgent()
 	{
 		$date = new \Bitrix\Main\Type\DateTime();
-		$date->add('-30D');
+		$date->add('-7D');
 
 		static::deleteByFilter([
 			'<TIMESTAMP_X' => $date,

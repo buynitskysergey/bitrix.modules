@@ -5,41 +5,58 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Rest\V3\Dto\Mapping;
 
 use Bitrix\Note\Infrastructure\Rest\V3\Dto\DocumentItemDto;
-use Bitrix\Note\Public\Provider\Dto\DocumentReadDto;
+use Bitrix\Note\Infrastructure\Rest\V3\Read\DocumentReadModel;
 use Bitrix\Rest\V3\Dto\DtoCollection;
 use Bitrix\Rest\V3\Dto\Mapping\Mapper;
 
 class DocumentMapper extends Mapper
 {
+	use SelectsFields;
+
+	private const FIELDS = [
+		'id',
+		'collectionId',
+		'parentId',
+		'title',
+		'markdown',
+		'position',
+		'createdBy',
+		'updatedBy',
+		'createdAt',
+		'updatedAt',
+		'contentUpdatedAt',
+		'isArchived',
+		'isTrashed',
+		'isOrphan',
+	];
+
 	/**
-	 * @param DocumentReadDto[] $items
+	 * @param DocumentReadModel[] $items
 	 */
 	public function mapCollection(array $items, array $fields = []): DtoCollection
 	{
 		$collection = new DtoCollection(DocumentItemDto::class);
 		foreach ($items as $item)
 		{
-			$collection->add($this->mapReadModel($item));
+			$collection->add($this->mapReadModel($item, $fields));
 		}
 
 		return $collection;
 	}
 
-	private function mapReadModel(DocumentReadDto $view): DocumentItemDto
+	/**
+	 * @param string[]|array<string, mixed> $fields
+	 */
+	private function mapReadModel(DocumentReadModel $view, array $fields): DocumentItemDto
 	{
-		// Dates already arrive in UTC (ISO 8601 with Z) from DocumentProvider::getForRead().
 		$dto = new DocumentItemDto();
-		$dto->id = $view->id;
-		$dto->collectionId = $view->collectionId;
-		$dto->parentId = $view->parentId;
-		$dto->title = $view->title;
-		$dto->markdown = $view->markdown;
-		$dto->position = $view->position;
-		$dto->createdBy = $view->createdBy;
-		$dto->updatedBy = $view->updatedBy;
-		$dto->createdAt = $view->createdAt;
-		$dto->updatedAt = $view->updatedAt;
-		$dto->contentUpdatedAt = $view->contentUpdatedAt;
+		foreach (self::FIELDS as $field)
+		{
+			if ($this->isFieldSelected($field, $fields))
+			{
+				$dto->{$field} = $view->{$field};
+			}
+		}
 
 		return $dto;
 	}

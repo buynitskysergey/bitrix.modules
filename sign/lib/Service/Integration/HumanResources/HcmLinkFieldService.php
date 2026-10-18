@@ -175,9 +175,13 @@ class HcmLinkFieldService
 			return FieldType::STRING;
 		}
 
+		// ADDRESS is deliberately not mapped: an HCM Link field holds a single value per employee, it has no
+		// subfields to build a structured address from. Mapping it would enable the address subfield branch in
+		// Factory\Field::createHcmLinkFields() and put the whole address string into every subfield.
 		return match ($hcmLinkType)
 		{
 			HumanResources\Type\HcmLink\FieldType::SNILS => FieldType::SNILS,
+			HumanResources\Type\HcmLink\FieldType::INN => FieldType::INN,
 			HumanResources\Type\HcmLink\FieldType::FIRST_NAME => FieldType::FIRST_NAME,
 			HumanResources\Type\HcmLink\FieldType::LAST_NAME => FieldType::LAST_NAME,
 			HumanResources\Type\HcmLink\FieldType::PATRONYMIC_NAME => FieldType::PATRONYMIC,

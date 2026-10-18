@@ -898,6 +898,16 @@ namespace Bitrix\Sign\Internal {
 	 * @method \Bitrix\Sign\Internal\Document resetConfiguredDateFormat()
 	 * @method \Bitrix\Sign\Internal\Document unsetConfiguredDateFormat()
 	 * @method null|\string fillConfiguredDateFormat()
+	 * @method null|\string getInviteMessage()
+	 * @method \Bitrix\Sign\Internal\Document setInviteMessage(null|\string|\Bitrix\Main\DB\SqlExpression $inviteMessage)
+	 * @method bool hasInviteMessage()
+	 * @method bool isInviteMessageFilled()
+	 * @method bool isInviteMessageChanged()
+	 * @method null|\string remindActualInviteMessage()
+	 * @method null|\string requireInviteMessage()
+	 * @method \Bitrix\Sign\Internal\Document resetInviteMessage()
+	 * @method \Bitrix\Sign\Internal\Document unsetInviteMessage()
+	 * @method null|\string fillInviteMessage()
 	 *
 	 * Common methods:
 	 * ---------------
@@ -1038,6 +1048,8 @@ namespace Bitrix\Sign\Internal {
 	 * @method null|\Bitrix\Main\Type\DateTime[] fillDateSignUntil()
 	 * @method null|\string[] getConfiguredDateFormatList()
 	 * @method null|\string[] fillConfiguredDateFormat()
+	 * @method null|\string[] getInviteMessageList()
+	 * @method null|\string[] fillInviteMessage()
 	 *
 	 * Common methods:
 	 * ---------------

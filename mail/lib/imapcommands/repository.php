@@ -3,6 +3,7 @@ namespace Bitrix\Mail\ImapCommands;
 
 use Bitrix\Mail;
 use Bitrix\Mail\Internal\Service\Label\LabelCountersService;
+use Bitrix\Mail\Internal\Service\Message\Conversation\ConversationBackfill;
 use Bitrix\Mail\Internal\Service\SourceGeneration\GenerationScope;
 use Bitrix\Main;
 use Bitrix\Main\Entity\ReferenceField;
@@ -233,7 +234,17 @@ class Repository
 		// The uid rows are gone from the server, not from deleteList above: it gets event data without ID.
 		(new LabelCountersService())->handleMessagesDeleted((int)$this->mailboxId, $ids);
 
-		return $this->deleteMailMessageRows($ids);
+		$affectedRows = $this->deleteMailMessageRows($ids);
+
+		/*
+			After the message rows themselves are gone, and not before: while a message is stored it
+			still connects the closure, and the rest of its conversation would be read back as one
+			component. Each removal checks what is left of the conversation and splits it into the
+			components it really consists of.
+		*/
+		(new ConversationBackfill())->removeMessages((int)$this->mailboxId, $ids);
+
+		return $affectedRows;
 	}
 
 	/**

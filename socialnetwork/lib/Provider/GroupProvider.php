@@ -117,7 +117,10 @@ class GroupProvider
 			return Type::tryFrom($fields['TYPE']);
 		}
 
-		if (isset($fields['SCRUM_MASTER_ID']))
+		// The marker counts only while it is positive, the way the scrum grid reads it
+		// (ScrumRepository::applyTypeFilter()): a stored zero puts the row in no scrum list, so it must not
+		// be classified as a scrum here either
+		if ((int)($fields['SCRUM_MASTER_ID'] ?? 0) > 0)
 		{
 			return Type::Scrum;
 		}

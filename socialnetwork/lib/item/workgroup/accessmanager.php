@@ -16,6 +16,7 @@ use Bitrix\Socialnetwork\EO_Workgroup;
 use Bitrix\Socialnetwork\EO_WorkgroupFavorites;
 use Bitrix\Socialnetwork\Permission\Trait\AccessErrorTrait;
 use Bitrix\Socialnetwork\Permission\User\UserModel;
+use Bitrix\Socialnetwork\Provider\GroupProvider;
 use Bitrix\Socialnetwork\UserToGroupTable;
 
 class AccessManager
@@ -707,9 +708,36 @@ class AccessManager
 		return
 			Feature::isNewProjectsOn()
 			&& $this->currentUserRelation
-			&& ($this->group->getType() === Type::Group->value || $this->group->getType() === Type::Project->value)
+			&& $this->isConvertibleToCollabType()
 			&& $this->checkOwner($this->currentUserRelation)
 		;
+	}
+
+	// The type column is nullable, and a row that holds no type is not an ordinary group by default: a
+	// legacy scrum board kept its scrum master, and the conversion must stay closed for it
+	private function isConvertibleToCollabType(): bool
+	{
+		$storedType = Type::tryFrom((string)$this->group->getType());
+
+		if ($storedType !== null)
+		{
+			return $storedType === Type::Group || $storedType === Type::Project;
+		}
+
+		return !$this->isLegacyScrum();
+	}
+
+	// The scrum grid tells a typeless scrum from a project by the scrum master alone
+	// (ScrumRepository::applyTypeFilter()). The caller may not have selected the marker - then the row is
+	// classified by the provider, which reads it
+	private function isLegacyScrum(): bool
+	{
+		if ($this->group->has('SCRUM_MASTER_ID'))
+		{
+			return (int)$this->group->getScrumMasterId() > 0;
+		}
+
+		return GroupProvider::getInstance()->getGroupType((int)$this->group->getId()) === Type::Scrum;
 	}
 
 	protected function checkGroupEntityFields(array $fieldsList = []): void

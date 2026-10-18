@@ -77,7 +77,7 @@ function stemming_stop_de($sWord)
 			foreach (explode(',', STEMMING_STOP_DE) as $word)
 			{
 				$word = trim($word);
-				if ($word <> '')
+				if ($word !== '')
 				{
 					$stop_list[$word] = 0;
 				}
@@ -163,7 +163,7 @@ function stemming_de($word)
 	}
 	//(c) s (preceded by a valid s-ending)
 	//the letter of the valid s-ending is not necessarily in R1
-	elseif (mb_substr($word_r1, -1) == 'S' && preg_match('/[' . $s_ending . ']S$/', $word))
+	elseif (mb_substr($word_r1, -1) === 'S' && preg_match('/[' . $s_ending . ']S$/', $word))
 	{
 		$word = mb_substr($word, 0, -1);
 	}

@@ -64,6 +64,7 @@ class MessageAnalytics extends ChatAnalytics
 			$this
 				->createMessageEvent(self::ADD_REACTION)
 				?->setType($reaction)
+				?->setSection((new MessageContent($this->message))->getComponentName())
 				?->setReactionP3($reactionCount)
 				?->setReactionP4($this->message->getAuthorId())
 				?->send()

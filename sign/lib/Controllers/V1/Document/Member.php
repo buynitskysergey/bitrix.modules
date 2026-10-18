@@ -14,6 +14,7 @@ use Bitrix\Sign\Access\Service\SelectorSourceAccessService;
 use Bitrix\Sign\Attribute;
 use Bitrix\Sign\Debug\Logger;
 use Bitrix\Sign\FeatureResolver;
+use Bitrix\Sign\Helper\IterationHelper;
 use Bitrix\Sign\Item;
 use Bitrix\Sign\Item\Hr\EntitySelector\EntityCollection;
 use Bitrix\Sign\Item\Hr\NodeSync;
@@ -24,6 +25,7 @@ use Bitrix\Sign\Operation\Member\Validation\ValidateEntitySelectorMembers;
 use Bitrix\Sign\Result\Operation\Member\ValidateEntitySelectorMembersResult;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Type\Access\AccessibleItemType;
+use Bitrix\Sign\Type\Access\ItemIdentifierType;
 use Bitrix\Sign\Type\DocumentScenario;
 use Bitrix\Sign\Type\Member\EntityType;
 use Bitrix\Sign\Type\Member\Role;
@@ -37,6 +39,12 @@ class Member extends \Bitrix\Sign\Engine\Controller
 	 * call may touch. Guards against unbounded "select all" grid mass actions.
 	 */
 	private const MAX_ANNUL_BATCH_COUNT = 100;
+
+	/** Reading the stage of a member is available to whoever may read the document that owns it. */
+	private const LOAD_STAGE_ACCESS_ACTIONS = [
+		ActionDictionary::ACTION_B2E_DOCUMENT_READ,
+		ActionDictionary::ACTION_DOCUMENT_READ,
+	];
 
 	private Service\Sign\MemberService $memberService;
 	private Service\Sign\DocumentService $documentService;
@@ -117,6 +125,7 @@ class Member extends \Bitrix\Sign\Engine\Controller
 				'presetId' => $member->presetId,
 				'party' => $member->party,
 				'role' => $member->role,
+				'reminderType' => $member->reminder->type->value,
 			];
 		}
 
@@ -179,11 +188,13 @@ class Member extends \Bitrix\Sign\Engine\Controller
 			ActionDictionary::ACTION_DOCUMENT_EDIT,
 			AccessibleItemType::DOCUMENT,
 			'uid',
-	),
+			ItemIdentifierType::MEMBER_UID,
+		),
 		new Attribute\ActionAccess(
 			ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
 			AccessibleItemType::DOCUMENT,
-			'uid'
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
 		)
 	)]
 	public function removeAction(string $uid)
@@ -578,7 +589,13 @@ class Member extends \Bitrix\Sign\Engine\Controller
 			);
 		}
 
-		$result = $this->memberService->setupB2eMembers($documentUid, $memberCollection, $representativeId, excludeRejected: $excludeRejected);
+		$result = $this->memberService->setupB2eMembers(
+			$documentUid,
+			$memberCollection,
+			$representativeId,
+			excludeRejected: $excludeRejected,
+			keepSavedReminderTypes: true,
+		);
 		if (!$result->isSuccess())
 		{
 			if ($result->getErrorCollection()->getErrorByCode('COMPANY_DOESNT_EXIST'))
@@ -646,8 +663,18 @@ class Member extends \Bitrix\Sign\Engine\Controller
 	 * @return array
 	 */
 	#[Attribute\Access\LogicOr(
-		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid'),
-		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid')
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
+		),
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
+		)
 	)]
 	public function modifyCommunicationChannelAction(string $uid, string $channelType, string $channelValue): array
 	{
@@ -673,8 +700,18 @@ class Member extends \Bitrix\Sign\Engine\Controller
 	 * @return array
 	 */
 	#[Attribute\Access\LogicOr(
-		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid'),
-		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid')
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
+		),
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
+		)
 	)]
 	public function loadCommunicationsAction(
 		string $uid,
@@ -699,8 +736,18 @@ class Member extends \Bitrix\Sign\Engine\Controller
 	}
 
 	#[Attribute\Access\LogicOr(
-		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid'),
-		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid')
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
+		),
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'uid',
+			ItemIdentifierType::MEMBER_UID,
+		)
 	)]
 	public function loadAppliedCommunicationAction(
 		string $uid,
@@ -728,8 +775,18 @@ class Member extends \Bitrix\Sign\Engine\Controller
 	}
 
 	#[Attribute\Access\LogicOr(
-		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid'),
-		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'uid')
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'memberUid',
+			ItemIdentifierType::MEMBER_UID,
+		),
+		new Attribute\ActionAccess(
+			ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			AccessibleItemType::DOCUMENT,
+			'memberUid',
+			ItemIdentifierType::MEMBER_UID,
+		)
 	)]
 	public function saveStampAction(string $memberUid, string $fileId): array
 	{
@@ -746,13 +803,28 @@ class Member extends \Bitrix\Sign\Engine\Controller
 			return [];
 		}
 		$member = $this->memberService->getByUid($memberUid);
+		if ($member === null)
+		{
+			$pendingFiles->remove();
+			$this->addError(new Error('Member not found'));
+
+			return [];
+		}
+
 		$result = $this->memberService->saveStampFile($stampFileId, $member);
 		if (!$result->isSuccess())
 		{
+			// The upload is deliberately left pending for the cleanup agent instead of being removed
+			// here: by the time the service reports a failure the file may already be referenced by
+			// the requisite of the company, and deleting it would break that reference.
 			$this->addErrors($result->getErrors());
 
 			return [];
 		}
+
+		// The stamp is the uploaded file itself, no copy of it is made: left pending, it would be
+		// dropped by the uploader cleanup agent together with the stamp of the company.
+		$pendingFiles->makePersistent();
 		$savedFileId = (int)$result->getData()['fileId'];
 
 		return [
@@ -761,23 +833,69 @@ class Member extends \Bitrix\Sign\Engine\Controller
 		];
 	}
 
-	public function loadStageAction($memberId): array
+	/**
+	 * The action resolves the document indirectly, by member id, so the coarse prefilters prove nothing
+	 * about it: the stage of a member row is handed out only after the resolved document is checked.
+	 *
+	 * An unresolvable member and a member the caller may not read answer the same way, so member ids
+	 * cannot be enumerated through the difference.
+	 */
+	public function loadStageAction(int $memberId): array
 	{
+		if ($memberId <= 0)
+		{
+			$this->addAccessDeniedError();
+
+			return [];
+		}
+
 		$container = Service\Container::instance();
 		$memberRepository = $container->getMemberRepository();
 		$member = $memberRepository->getById($memberId);
 		if ($member === null)
 		{
+			$this->addAccessDeniedError();
+
 			return [];
 		}
 
 		$document = $container->getDocumentRepository()->getById($member->documentId);
 		if ($document === null)
 		{
+			$this->addAccessDeniedError();
+
+			return [];
+		}
+
+		if (!$this->canLoadMemberStage($member, $document))
+		{
+			$this->addAccessDeniedError();
+
 			return [];
 		}
 
 		return Stage::createInstance($member, $document)->getInfo();
+	}
+
+	/**
+	 * Either branch alone is enough: a signer reads the stage of their own row without any grant on the
+	 * document, and whoever may read the document reads the stage of every member of it. Gating on the
+	 * document grant alone would close the ordinary B2E signer out of their own grid row.
+	 */
+	private function canLoadMemberStage(Item\Member $member, Item\Document $document): bool
+	{
+		$currentUserId = (int)CurrentUser::get()->getId();
+		if ($this->container->getSignMemberUserService()->checkAccessToMember($member, $currentUserId))
+		{
+			return true;
+		}
+
+		$accessController = $this->getAccessController();
+
+		return IterationHelper::any(
+			self::LOAD_STAGE_ACCESS_ACTIONS,
+			static fn(string $action): bool => $accessController->checkByItem($action, $document),
+		);
 	}
 
 	public function getAction(string $uid): array

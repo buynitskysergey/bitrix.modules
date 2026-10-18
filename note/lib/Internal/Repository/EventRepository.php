@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Internal\Repository;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Main\Type\DateTime;
@@ -59,7 +60,7 @@ class EventRepository
 	}
 
 	/**
-	 * [P2.T2] Keyset page of events for one entity, newest first — ordered by
+	 * Keyset page of events for one entity, newest first - ordered by
 	 * (CREATED_AT DESC, ID DESC) via IX_NOTE_EVENT_FEED_TS so a backfilled event
 	 * (old CREATED_AT, new ID) lands at its historical position, not on top.
 	 * $eventTypes is the already role+type-filtered allowlist (see FeedProvider);
@@ -143,7 +144,7 @@ class EventRepository
 	}
 
 	/**
-	 * [P3.T1] Version id of the newest event of the given type, wrapped so a missing event ("no such
+	 * Version id of the newest event of the given type, wrapped so a missing event ("no such
 	 * event") is distinguishable from an event that carries no version (VERSION_ID is NULL). Used by
 	 * compaction to reconstruct the last settled state: clearing a document records an event without a
 	 * version, and the version table alone would still show the text from before the clearing.
@@ -182,7 +183,7 @@ class EventRepository
 	}
 
 	/**
-	 * [P7.T1 / ALG-03] Keyset batch for the notification drainer — strictly
+	 * Keyset batch for the notification drainer - strictly
 	 * ID > $lastId, ordered ID ASC, filtered to the notifiable-type allowlist
 	 * IN THE QUERY (not a post-filter in memory). Mirrors listByEntity's keyset
 	 * shape but walks forward instead of backward.
@@ -191,10 +192,21 @@ class EventRepository
 	 * applied SQL-side: it lets the drainer skip stale/backfilled events (old date,
 	 * new ID) without stranding them behind the cursor — see NotificationDrainAgent.
 	 *
+	 * There is deliberately no upper bound here. Rows too young to be certainly committed are
+	 * recognized by the drainer as it walks the batch (see foldUntilBarrier()), because a row's
+	 * date says where the CURSOR may stop, not what the pass may see: ID and CREATED_AT are not
+	 * monotonic in this table, so filtering a young row out of the query would hand the pass the
+	 * row behind it and carry the cursor over the young one for good.
+	 *
 	 * @param string[] $eventTypes
 	 * @return Event[]
 	 */
-	public function listAfterId(int $lastId, array $eventTypes, int $limit, ?DateTime $createdAfter = null): array
+	public function listAfterId(
+		int $lastId,
+		array $eventTypes,
+		int $limit,
+		?DateTime $createdAfter = null,
+	): array
 	{
 		if ($limit <= 0 || empty($eventTypes))
 		{
@@ -215,6 +227,43 @@ class EventRepository
 		}
 
 		return array_map(self::hydrate(...), $query->fetchAll());
+	}
+
+	/**
+	 * Largest journal ID, 0 on an empty journal. The table-existence probe is what makes this
+	 * usable as a cursor baseline on an install where the migration has not created
+	 * b_note_event yet.
+	 *
+	 * $createdBefore bounds the answer to rows old enough to be certainly committed, because a
+	 * baseline placed on a row that is still in flight would step over everything committing
+	 * behind it. It is a bound on the newest row taken, not a promise about smaller IDs: a row
+	 * with an older date and a larger ID (the 'created' backfill writes exactly that) can still
+	 * carry the baseline past a younger one. That is harmless HERE and nowhere else — the
+	 * baseline is a deliberate cut-off, and everything before it is meant to be skipped. Where
+	 * the same inversion is not harmless, the drainer walks to a safe prefix instead
+	 * (NotificationDrainAgent::foldUntilBarrier()).
+	 */
+	public function getMaxId(?DateTime $createdBefore = null): int
+	{
+		if (!Application::getConnection()->isTableExists(EventTable::getTableName()))
+		{
+			return 0;
+		}
+
+		$query = EventTable::query()
+			->setSelect(['ID'])
+			->addOrder('ID', 'DESC')
+			->setLimit(1)
+		;
+
+		if ($createdBefore !== null)
+		{
+			$query->where('CREATED_AT', '<=', $createdBefore);
+		}
+
+		$row = $query->fetch();
+
+		return $row === false ? 0 : (int)$row['ID'];
 	}
 
 	private static function hydrate(array $row): Event

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\RecycleBin;
 
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
+use Bitrix\Note\Internal\Integration\Disk\DiskGateway;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
@@ -43,7 +44,27 @@ class HardDeleteService
 		private readonly SubtreeAclReconciler $subtreeAclReconciler = new SubtreeAclReconciler(),
 		private readonly DocumentLinkRepository $documentLinkRepository = new DocumentLinkRepository(),
 		private readonly DocumentLinkIndexService $documentLinkIndexService = new DocumentLinkIndexService(),
+		private readonly DiskGateway $diskGateway = new DiskGateway(),
 	) {}
+
+	/**
+	 * Reads both directions of the link graph before the caller opens the delete transaction.
+	 *
+	 * @param int[] $documentIds
+	 * @return array{affectedTargets: int[], mentionSourceIds: int[]}
+	 */
+	public function prepareDelete(array $documentIds): array
+	{
+		$normalized = array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $documentIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+
+		return [
+			'affectedTargets' => $this->documentLinkRepository->collectTargetIdsBySources($normalized),
+			'mentionSourceIds' => $this->documentLinkIndexService->collectMentionSourceIds($normalized),
+		];
+	}
 
 	/**
 	 * Cascade hard-delete for the given document ids — DB-only side effects.
@@ -56,9 +77,10 @@ class HardDeleteService
 	 * Transaction is the caller's responsibility (per MODULE.md).
 	 *
 	 * @param int[] $documentIds
+	 * @param array{affectedTargets: int[], mentionSourceIds: int[]} $preparedLinkChange
 	 * @return array{fileIds: int[], documentIds: int[]} payload to feed into runPostCommitCleanup()
 	 */
-	public function deleteByDocumentIds(array $documentIds): array
+	public function deleteByDocumentIds(array $documentIds, array $preparedLinkChange): array
 	{
 		$normalized = array_values(array_unique(array_filter(
 			array_map(static fn($id): int => (int)$id, $documentIds),
@@ -68,7 +90,6 @@ class HardDeleteService
 		{
 			return ['fileIds' => [], 'documentIds' => []];
 		}
-
 		$fileIds = $this->collectFileIds($normalized);
 
 		// History cascade: this is the ONLY place b_note_event/b_note_event_author are ever
@@ -78,11 +99,11 @@ class HardDeleteService
 		$this->eventRepository->deleteByDocumentIds($normalized);
 		$this->documentVersionRepository->deleteByDocumentIds($normalized);
 		$this->documentViewRepository->deleteByDocumentIds($normalized);
-		// [P6.T1] Subscriptions targeting the removed documents themselves — ancestor
+		// Subscriptions targeting the removed documents themselves - ancestor
 		// subtree subscriptions elsewhere in the tree are unaffected (they never
 		// referenced these ids).
 		$this->subscriptionRepository->deleteByDocumentIds($normalized);
-		// [P3.T2] Favorite rows of every user pointing at the removed documents. Only physical
+		// Favorite rows of every user pointing at the removed documents. Only physical
 		// deletion clears them: the recycle bin and the archive keep the row and its position.
 		$this->favoriteRepository->deleteByDocumentIds($normalized);
 
@@ -91,12 +112,12 @@ class HardDeleteService
 		$this->documentUpdateRepository->deleteByDocumentIds($normalized);
 		$this->importMapRepository->deleteByDocumentIds($normalized);
 		DocumentAccessService::deleteByDocumentIds($normalized);
-		// [P4.T4/T5] Separate cascade step: any hard-deleted document may itself be a subtree source,
+		// Separate cascade step: any hard-deleted document may itself be a subtree source,
 		// whose DERIVED rows live on descendants and are addressed by SOURCE_DOCUMENT_ID — deleting by
 		// DOCUMENT_ID above never reaches them. Routed through the reconciler choke-point.
 		$this->subtreeAclReconciler->revokeSources($normalized);
 
-		// [P2.T5 / C3] Both ends of the link index. Collect the targets these sources point at BEFORE
+		// Both ends of the link index. Collect the targets these sources point at BEFORE
 		// the rows go — after the delete there is nobody left to name — then drop every outgoing row of
 		// the removed sources in one statement and every incoming row pointing at them. This path must
 		// NOT lean on content-repair the way an ordinary edit does: the source is being physically
@@ -104,12 +125,15 @@ class HardDeleteService
 		// caller's transaction and its failure propagates (rolling the delete back), never swallowed.
 		// Only physical deletion clears the index; archiving and the recycle bin are reversible and are
 		// filtered on the read instead.
-		$affectedTargets = $this->documentLinkRepository->collectTargetIdsBySources($normalized);
 		$this->documentLinkRepository->deleteBySourceIds($normalized);
 		$this->documentLinkRepository->deleteByTargetIds($normalized);
 		// One deduplicated fan-out over the union of affected targets (dispatched after commit), instead
 		// of a signal per removed source.
-		$this->documentLinkIndexService->notifyBacklinksChanged($affectedTargets);
+		$this->documentLinkIndexService->notifyBacklinksChanged($preparedLinkChange['affectedTargets'] ?? []);
+		$this->documentLinkIndexService->notifyPreparedMentionTargetsChanged(
+			$preparedLinkChange['mentionSourceIds'] ?? [],
+			$normalized,
+		);
 
 		$this->documentRepository->deleteByIds($normalized);
 		$this->recycleBinRepository->deleteByDocumentIds($normalized);
@@ -118,8 +142,8 @@ class HardDeleteService
 	}
 
 	/**
-	 * Best-effort post-commit cleanup of non-transactional side effects: file storage and
-	 * search index. Must be called only AFTER the surrounding DB transaction has committed,
+	 * Best-effort post-commit cleanup of non-transactional side effects: file storage, search index
+	 * and Disk attachments. Must be called only AFTER the surrounding DB transaction has committed,
 	 * otherwise a rollback would resurrect DB rows whose files/index entries are already gone.
 	 *
 	 * @param int[] $fileIds
@@ -143,6 +167,18 @@ class HardDeleteService
 			try
 			{
 				$this->searchIndexService->deindexDocuments($documentIds);
+			}
+			catch (\Throwable)
+			{
+			}
+
+			// The attachments of a document deleted for good are rows pointing at an entity that no
+			// longer exists, and the projection sync would never see them again — it works off the text
+			// of documents that still are. The files themselves stay on Disk: they were never ours (see
+			// FileReachabilityService), only the attachment was.
+			try
+			{
+				$this->diskGateway->detachAllForDocuments($documentIds);
 			}
 			catch (\Throwable)
 			{

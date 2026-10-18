@@ -8,7 +8,7 @@ use Bitrix\Main\Application;
 class FolderCache
 {
 	private const TTL = 86400;
-	private const BASE_DIR = '/bx/imc/folder/v2/';
+	private const BASE_DIR = '/bx/imc/folder/v3/';
 	private const TAG_SYSTEM = 'folder_feature_system';
 
 	private array $inMemoryCache = [];

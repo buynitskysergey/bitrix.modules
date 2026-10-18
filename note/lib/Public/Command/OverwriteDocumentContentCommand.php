@@ -15,6 +15,7 @@ use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Public\Event\OnDocumentContentSettledEvent;
 use Bitrix\Note\Internal\Service\DomainEventPublisher;
+use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\EventTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
@@ -23,8 +24,10 @@ use Bitrix\Note\Internal\Repository\DocumentVersionRepository;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Service\Collaboration\DocumentLockService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
+use Bitrix\Note\Internal\Service\File\DiskAttachmentSyncService;
 use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
+use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
@@ -34,6 +37,8 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 	// single sub-second write, so the overwrite virtually never blocks; a real timeout means genuine
 	// contention and is surfaced as an error rather than silently proceeding unprotected.
 	private const LOCK_TIMEOUT_SECONDS = 10;
+	private bool $titleChanged = false;
+	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
 
 	public function __construct(
 		private readonly int $documentId,
@@ -55,12 +60,17 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 		private readonly DocumentVersionRepository $documentVersionRepository = new DocumentVersionRepository(),
 		private readonly EventLogService $eventLogService = new EventLogService(),
 		private readonly DocumentLinkIndexService $linkIndexService = new DocumentLinkIndexService(),
+		?BacklinkLifecycleNotifier $backlinkNotifier = null,
 		private readonly DocumentLockService $lockService = new DocumentLockService(),
-	) {}
+		private readonly DiskAttachmentSyncService $diskAttachmentSyncService = new DiskAttachmentSyncService(),
+	)
+	{
+		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier($this->linkIndexService);
+	}
 
 	protected function execute(): Result
 	{
-		// [P3.T2] Serialize with materialization/compaction on the shared 'compact' lock so a concurrent
+		// Serialize with materialization/compaction on the shared 'compact' lock so a concurrent
 		// materialize cannot write the discarded CRDT snapshot back over the overwrite. The durable guard
 		// against a *late* materialize (from a tab unaware of the overwrite) is the cursor watermark set
 		// in writeContent(), not this lock.
@@ -71,14 +81,16 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 
 		try
 		{
-			$collectionId = $this->writeContent();
+			$document = $this->writeContent();
 		}
 		finally
 		{
 			$this->lockService->releaseLock($this->documentId);
 		}
 
-		// [P3.T2] Both of these run outside the lock window on purpose. The link rebuild takes a named lock
+		$collectionId = (int)$document->getCollectionId();
+
+		// Both of these run outside the lock window on purpose. The link rebuild takes a named lock
 		// of its own, and on production MySQL (5.6) a session holds at most one named lock at a time -
 		// GET_LOCK silently releases the previous one - so calling it from under the 'compact' lock would
 		// drop that lock long before the finally above, leaving the rest of the write unprotected while
@@ -87,6 +99,14 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 		// After the content commit and outside its transaction: the rebuild opens its own and absorbs its
 		// own failures, so the overwrite cannot fail because of the index.
 		$this->linkIndexService->rebuild($this->documentId);
+		if ($this->titleChanged)
+		{
+			$this->backlinkNotifier->sourcesChanged([$this->documentId]);
+		}
+
+		// Markdown written from outside the editor lands here, so this is where its Disk attachments
+		// are reconciled — the same reconciliation compaction runs, on the same terms.
+		$this->diskAttachmentSyncService->syncBestEffort($this->documentId, $this->userId);
 
 		// EVENT-NOTE-02 `overwritten` - a single content-settled event; it also covers a title
 		// change made in the same call (title is part of the materialized text and fingerprint).
@@ -96,18 +116,29 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 			$this->documentId,
 		);
 
-		return new Result();
+		// Same key as the neighbouring write commands: the caller that has just overwritten a document
+		// already holds its saved state, and re-reading it to answer is a query nobody needs.
+		$result = new Result();
+		$result->setData(['document' => $document]);
+
+		return $result;
 	}
 
 	/**
 	 * The whole protected part of the overwrite: guards, the content transaction and the journal drain.
-	 * Returns the document's collection id for the lifecycle event emitted after the lock is released.
+	 * Returns the saved document - the lifecycle event needs its collection, the caller needs the rest.
 	 */
-	private function writeContent(): int
+	private function writeContent(): Document
 	{
+		// The guards need IS_ARCHIVED and CONTENT_FORMAT; the rest is the ordinary meta of the row, read
+		// in the same select so the caller gets a whole document back instead of a stub with holes.
 		$document = $this->documentRepository->getMetaById(
 			$this->documentId,
-			['ID', 'COLLECTION_ID', 'TITLE', 'IS_ARCHIVED', 'CONTENT_FORMAT', 'UPDATED_AT'],
+			[
+				'ID', 'COLLECTION_ID', 'PARENT_ID', 'TITLE', 'POSITION', 'IS_ARCHIVED',
+				'CONTENT_FORMAT', 'CREATED_BY', 'UPDATED_BY', 'CREATED_AT', 'UPDATED_AT',
+				'CONTENT_UPDATED_AT',
+			],
 		);
 		if ($document === null)
 		{
@@ -140,6 +171,7 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 		try
 		{
 			$document->setMarkdown($this->markdown);
+			$this->titleChanged = $this->title !== null && $this->title !== (string)$document->getTitle();
 			if ($this->title !== null)
 			{
 				$document->setTitle($this->title);
@@ -154,7 +186,7 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 				$document->setYjsState(null);
 			}
 
-			// [P3.T2] Journal high-water mark for the cursor. The overwrite replaces the whole text, so
+			// Journal high-water mark for the cursor. The overwrite replaces the whole text, so
 			// every patch written so far is settled by definition and the cursor is PINNED to the top of
 			// the range rather than clamped to some claimed value - this command has no incoming cursor to
 			// believe or disbelieve (see DocumentRepository::pinMaterializationCursor).
@@ -182,7 +214,7 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 				$this->updateRepository->deleteByDocumentId($this->documentId);
 			}
 
-			// [P3.T2] Overwrite indexes both derived projections inline (search below + link rebuild after
+			// Overwrite indexes both derived projections inline (search below + link rebuild after
 			// commit), so the derived-stale flag stays 'N'. Content date is now. Unlike materialization,
 			// overwrite goes through save() and deliberately moves UPDATED_AT.
 			$document->setContentUpdatedAt(new DateTime());
@@ -198,7 +230,7 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 				throw new \RuntimeException('Failed to save document: ' . implode(', ', $saveResult->getErrorMessages()));
 			}
 
-			// [P1.T1] Version + content_changed for every overwrite (REST-overwrite and restore
+			// Version + content_changed for every overwrite (REST-overwrite and restore
 			// alike): the actor is always $this->userId, never a race-winning collab client.
 			// Title-change-only overwrites do not get a separate title_changed — the content
 			// event subsumes it (see $titleChanged usage below, which stays push-only).
@@ -239,7 +271,7 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 		$searchIndexService = $this->searchIndexService;
 		$pushService = $this->pushService;
 		$collectionId = (int)$document->getCollectionId();
-		$titleChanged = $this->title !== null;
+		$titleChanged = $this->titleChanged;
 		$newTitle = (string)$document->getTitle();
 		// Both already persisted above — hand them to the indexer so it skips the re-read SELECT.
 		$newMarkdown = $this->markdown;
@@ -285,6 +317,6 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 			}
 		});
 
-		return $collectionId;
+		return $document;
 	}
 }

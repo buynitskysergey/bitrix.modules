@@ -198,6 +198,16 @@ class Container
 		return self::getService('sign.service.integration.im');
 	}
 
+	public function getMessageTextSanitizer(): Service\Integration\Im\MessageTextSanitizer
+	{
+		return self::getService('sign.service.integration.im.messageTextSanitizer');
+	}
+
+	public function getInviteCardService(): Service\Integration\Im\InviteCardService
+	{
+		return self::getService('sign.service.integration.im.inviteCard');
+	}
+
 	public function getDiskService(): Service\Integration\Disk\DiskService
 	{
 		return self::getService('sign.service.integration.disk');

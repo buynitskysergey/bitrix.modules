@@ -7,11 +7,16 @@ use Bitrix\Main\Engine\ActionFilter\CloseSession;
 use Bitrix\Main\Engine\JsonController;
 use Bitrix\Main\Loader;
 use Bitrix\Mobile\Config\Feature;
+use Bitrix\Mobile\Feature\FeedbackRouterFeature;
 use Bitrix\Mobile\Feature\SecuritySettingsFeature;
 use Bitrix\Mobile\Feature\SettingsV2Feature;
 use Bitrix\Mobile\Feature\SupportFeature;
+use Bitrix\Mobile\Feature\TariffMenuDemoModeFeature;
+use Bitrix\Mobile\Feature\TariffMenuFeature;
+use Bitrix\Mobile\Feature\TariffMenuPurchaseCtaFeature;
 use Bitrix\Mobile\Feature\WhatsNewFeature;
 use Bitrix\TimemanMobile\Public\Features\WorkReportsFeature;
+use Bitrix\TimemanMobile\Public\Features\WorkReportsWithAiFeature;
 
 final class FeatureFlag extends JsonController
 {
@@ -36,11 +41,18 @@ final class FeatureFlag extends JsonController
 			'SettingsV2Feature' => (new SettingsV2Feature())->isEnabled(),
 			'SecuritySettingsFeature' => (new SecuritySettingsFeature())->isEnabled(),
 			'SupportFeature' => (new SupportFeature())->isEnabled(),
+			'FeedbackRouterFeature' => (new FeedbackRouterFeature())->isEnabled(),
 			'WhatsNewFeature' => (new WhatsNewFeature())->isEnabled(),
 			'DeveloperMenuEnabled' => Option::get('mobile', 'developers_menu_section', 'N') === 'Y',
 			'WorkReportsFeature' => Loader::includeModule('timeman')
 				&& Loader::includeModule('timemanmobile')
 				&& Feature::isEnabled(WorkReportsFeature::class),
+			'WorkReportsWithAiFeature' => Loader::includeModule('timeman')
+				&& Loader::includeModule('timemanmobile')
+				&& Feature::isEnabled(WorkReportsWithAiFeature::class),
+			'TariffMenuFeature' => (new TariffMenuFeature())->isEnabled(),
+			'TariffMenuPurchaseCtaFeature' => (new TariffMenuPurchaseCtaFeature())->isEnabled(),
+			'TariffMenuDemoModeFeature' => (new TariffMenuDemoModeFeature())->isEnabled(),
 		];
 	}
 }

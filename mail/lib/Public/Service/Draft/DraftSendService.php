@@ -41,6 +41,7 @@ final class DraftSendService
 				$attachment['fileId'],
 				$attachment['sourceFileId'],
 				$attachment['objectId'],
+				$attachment['sourceObjectId'] ?? 0,
 			),
 			(new DraftRepository())->findClaimedAttachments(
 				userId: $claim->userId,
@@ -51,6 +52,36 @@ final class DraftSendService
 				crmEntityTypeId: $claim->crmEntityTypeId,
 				crmEntityId: $claim->crmEntityId,
 			),
+		);
+	}
+
+	/**
+	 * Converted large attachment sets the claimed draft carries, in the order of the draft.
+	 *
+	 * A consumer with its own send path needs them to answer one question: does the draft promise the
+	 * recipients a file the request said nothing about. Sending such a message quietly would leave the
+	 * recipients without the file, so a consumer that cannot confirm a set must refuse the send.
+	 *
+	 * The sets are released under the same claim the attachment copies are: a send that may not have the
+	 * files of a draft may not learn about its sets either.
+	 *
+	 * @return list<array{token: string, publicUrl: string, fileIds: int[], sourceFileIds: int[]}>
+	 */
+	public static function getOwnedLargeAttachments(DraftSendClaim $claim): array
+	{
+		if (!self::isClaimed($claim) || !DraftFeature::isAvailable())
+		{
+			return [];
+		}
+
+		return (new DraftRepository())->findClaimedLargeAttachments(
+			userId: $claim->userId,
+			draftId: self::toId($claim->draftId),
+			contextType: $claim->contextType,
+			expectedRevision: self::toId($claim->expectedRevision),
+			expectedClientId: self::toClientId($claim->expectedClientId),
+			crmEntityTypeId: $claim->crmEntityTypeId,
+			crmEntityId: $claim->crmEntityId,
 		);
 	}
 

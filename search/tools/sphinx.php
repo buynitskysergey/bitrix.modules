@@ -12,6 +12,11 @@ class CSearchSphinx extends CSearchFullText
 		'module' => ['string'],
 		'item_id' => ['uint'],
 		'item' => ['string'],
+		'user_id' => ['uint'],
+		'entity_type' => ['string'],
+		'entity_type_id' => ['uint'],
+		'entity' => ['string'],
+		'entity_id' => ['uint'],
 		'param1_id' => ['uint'],
 		'param1' => ['string'],
 		'param2_id' => ['uint'],
@@ -40,12 +45,26 @@ class CSearchSphinx extends CSearchFullText
 	public $SITE_ID = '';
 	public $connectionIndex = '';
 	public $indexName = '';
+	protected $connected = false;
 
-	public function connect($connectionIndex, $indexName = '', $ignoreErrors = false)
+	public function __construct($config = [])
+	{
+		parent::__construct($config);
+
+		$this->connectionIndex = $this->config['connection'];
+		$this->indexName = $this->config['index_name'];
+	}
+
+	public function connect($ignoreErrors = false)
 	{
 		global $APPLICATION;
 
-		if (!preg_match('/^[a-zA-Z0-9_]+$/', $indexName))
+		if ($this->connected)
+		{
+			return true;
+		}
+
+		if (!preg_match('/^[a-zA-Z0-9_]+$/', $this->indexName))
 		{
 			if ($ignoreErrors)
 			{
@@ -53,7 +72,7 @@ class CSearchSphinx extends CSearchFullText
 			}
 			else
 			{
-				throw new \Bitrix\Main\Db\ConnectionException('Sphinx connect error', GetMessage('SEARCH_SPHINX_CONN_ERROR_INDEX_NAME'));
+				throw new \Bitrix\Main\DB\ConnectionException('Sphinx connect error', GetMessage('SEARCH_SPHINX_CONN_ERROR_INDEX_NAME'));
 			}
 			return false;
 		}
@@ -66,13 +85,13 @@ class CSearchSphinx extends CSearchFullText
 			}
 			else
 			{
-				throw new \Bitrix\Main\Db\ConnectionException('Sphinx connect error', GetMessage('SEARCH_SPHINX_CONN_EXT_IS_MISSING'));
+				throw new \Bitrix\Main\DB\ConnectionException('Sphinx connect error', GetMessage('SEARCH_SPHINX_CONN_EXT_IS_MISSING'));
 			}
 			return false;
 		}
 
 		$error = '';
-		$this->db = $this->internalConnect($connectionIndex, $error);
+		$this->db = $this->internalConnect($this->connectionIndex, $error);
 		if (!$this->db)
 		{
 			if ($ignoreErrors)
@@ -81,7 +100,7 @@ class CSearchSphinx extends CSearchFullText
 			}
 			else
 			{
-				throw new \Bitrix\Main\Db\ConnectionException('Sphinx connect error', GetMessage('SEARCH_SPHINX_CONN_ERROR', ['#ERRSTR#' => $error]));
+				throw new \Bitrix\Main\DB\ConnectionException('Sphinx connect error', GetMessage('SEARCH_SPHINX_CONN_ERROR', ['#ERRSTR#' => $error]));
 			}
 			return false;
 		}
@@ -95,7 +114,7 @@ class CSearchSphinx extends CSearchFullText
 				return false;
 			}
 
-			if ($indexName == '')
+			if ($this->indexName === '')
 			{
 				$APPLICATION->ThrowException(GetMessage('SEARCH_SPHINX_CONN_NO_INDEX'));
 				return false;
@@ -104,26 +123,26 @@ class CSearchSphinx extends CSearchFullText
 			$indexType = '';
 			while ($res = $this->fetch($result))
 			{
-				if ($indexName === $res['Index'])
+				if ($this->indexName === $res['Index'])
 				{
 					$indexType = $res['Type'];
 				}
 			}
 
-			if ($indexType == '')
+			if ($indexType === '')
 			{
 				$APPLICATION->ThrowException(GetMessage('SEARCH_SPHINX_CONN_INDEX_NOT_FOUND'));
 				return false;
 			}
 
-			if ($indexType != 'rt')
+			if ($indexType !== 'rt')
 			{
 				$APPLICATION->ThrowException(GetMessage('SEARCH_SPHINX_CONN_INDEX_WRONG_TYPE'));
 				return false;
 			}
 
 			$indexColumns = [];
-			$result = $this->query('DESCRIBE `' . $indexName . '`');
+			$result = $this->query('DESCRIBE `' . $this->indexName . '`');
 			if (!$result)
 			{
 				$APPLICATION->ThrowException(GetMessage('SEARCH_SPHINX_DESCR_ERROR', ['#ERRSTR#' => $this->getError()]));
@@ -151,8 +170,7 @@ class CSearchSphinx extends CSearchFullText
 			}
 		}
 
-		$this->indexName = $indexName;
-		$this->connectionIndex = $connectionIndex;
+		$this->connected = true;
 
 		return true;
 	}
@@ -160,7 +178,6 @@ class CSearchSphinx extends CSearchFullText
 	public function truncate()
 	{
 		$this->query('truncate rtindex ' . $this->indexName);
-		$this->connect($this->connectionIndex, $this->indexName);
 	}
 
 	public function deleteById($ID)
@@ -170,8 +187,6 @@ class CSearchSphinx extends CSearchFullText
 
 	public function replace($ID, $arFields)
 	{
-		$DB = CDatabase::GetModuleConnection('search');
-
 		if (array_key_exists('~DATE_CHANGE', $arFields))
 		{
 			$arFields['DATE_CHANGE'] = $arFields['~DATE_CHANGE'];
@@ -184,7 +199,7 @@ class CSearchSphinx extends CSearchFullText
 		}
 		elseif (array_key_exists('DATE_CHANGE', $arFields))
 		{
-			$arFields['DATE_CHANGE'] = $DB->FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
+			$arFields['DATE_CHANGE'] = CDatabase::FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
 		}
 
 		$DATE_FROM = intval(MakeTimeStamp($arFields['DATE_FROM']));
@@ -212,6 +227,11 @@ class CSearchSphinx extends CSearchFullText
 				,module
 				,item_id
 				,item
+				,user_id
+				,entity_type
+				,entity_type_id
+				,entity
+				,entity_id
 				,param1_id
 				,param1
 				,param2_id
@@ -228,26 +248,31 @@ class CSearchSphinx extends CSearchFullText
 				,body
 			) VALUES (
 				' . $ID . '
-				,' . sprintf('%u', crc32($arFields['MODULE_ID'])) . "
-				,'" . $this->Escape($arFields['MODULE_ID']) . "'
-				," . sprintf('%u', crc32($arFields['ITEM_ID'])) . "
-				,'" . $this->Escape($arFields['ITEM_ID']) . "'
-				," . sprintf('%u', crc32($arFields['PARAM1'])) . "
-				,'" . $this->Escape($arFields['PARAM1']) . "'
-				," . sprintf('%u', crc32($arFields['PARAM2'])) . "
-				,'" . $this->Escape($arFields['PARAM2']) . "'
-				," . $DATE_CHANGE . '
+				,' . sprintf('%u', crc32($arFields['MODULE_ID'])) . '
+				,\'' . $this->Escape($arFields['MODULE_ID']) . '\'
+				,' . sprintf('%u', crc32($arFields['ITEM_ID'])) . '
+				,\'' . $this->Escape($arFields['ITEM_ID']) . '\'
+				,' . intval($arFields['USER_ID']) . '
+				,\'' . $this->Escape($arFields['ENTITY_TYPE_ID']) . '\'
+				,' . sprintf('%u', crc32($arFields['ENTITY_TYPE_ID'])) . '
+				,\'' . $this->Escape($arFields['ENTITY_ID']) . '\'
+				,' . sprintf('%u', crc32($arFields['ENTITY_ID'])) . '
+				,' . sprintf('%u', crc32($arFields['PARAM1'])) . '
+				,\'' . $this->Escape($arFields['PARAM1']) . '\'
+				,' . sprintf('%u', crc32($arFields['PARAM2'])) . '
+				,\'' . $this->Escape($arFields['PARAM2']) . '\'
+				,' . $DATE_CHANGE . '
 				,' . $DATE_FROM . '
 				,' . $DATE_TO . '
 				,' . intval($arFields['CUSTOM_RANK']) . '
 				,(' . $this->tags($arFields['SITE_ID'], $arFields['TAGS']) . ')
 				,(' . $this->rights($arFields['PERMISSIONS']) . ')
 				,(' . $this->sites($arFields['SITE_ID']) . ')
-				,(' . $this->params($arFields['PARAMS']) . ")
-				,'" . $this->Escape($arFields['TITLE']) . "'
-				,'" . $this->Escape($BODY) . "'
+				,(' . $this->params($arFields['PARAMS']) . ')
+				,\'' . $this->Escape($arFields['TITLE']) . '\'
+				,\'' . $this->Escape($BODY) . '\'
 			)
-		";
+		';
 		$result = $this->query($sql);
 		if ($result)
 		{
@@ -255,7 +280,7 @@ class CSearchSphinx extends CSearchFullText
 		}
 		else
 		{
-			throw new \Bitrix\Main\Db\SqlQueryException('Sphinx select error', $this->getError(), $sql);
+			throw new \Bitrix\Main\DB\SqlQueryException('Sphinx select error', $this->getError(), $sql);
 		}
 	}
 
@@ -285,7 +310,7 @@ class CSearchSphinx extends CSearchFullText
 		}
 		elseif (array_key_exists('DATE_CHANGE', $arFields))
 		{
-			$arFields['DATE_CHANGE'] = $DB->FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
+			$arFields['DATE_CHANGE'] = CDatabase::FormatDate($arFields['DATE_CHANGE'], 'DD.MM.YYYY HH:MI:SS', CLang::GetDateFormat());
 		}
 
 		if (array_key_exists('DATE_CHANGE', $arFields))
@@ -320,7 +345,7 @@ class CSearchSphinx extends CSearchFullText
 
 		if (array_key_exists('CUSTOM_RANK', $arFields))
 		{
-			$arUpdate['custom_rank'] = '' . intval($arFields['CUSTOM_RANK']) . '';
+			$arUpdate['custom_rank'] = (string)intval($arFields['CUSTOM_RANK']);
 		}
 
 		if (array_key_exists('TAGS', $arFields))
@@ -367,29 +392,29 @@ class CSearchSphinx extends CSearchFullText
 				FROM b_search_content
 				WHERE ID = ' . $ID
 			);
-			$searchItem = $dbItem->fetch();
+			$searchItem = $dbItem->Fetch();
 			if ($searchItem)
 			{
 				$dbTags = $DB->Query('SELECT * from b_search_tags WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($tag = $dbTags->fetch())
+				while ($tag = $dbTags->Fetch())
 				{
 					$searchItem['TAGS'] .= $tag['NAME'] . ',';
 				}
 
 				$dbRights = $DB->Query('SELECT * from b_search_content_right WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($right = $dbRights->fetch())
+				while ($right = $dbRights->Fetch())
 				{
 					$searchItem['PERMISSIONS'][] = $right['GROUP_CODE'];
 				}
 
 				$dbSites = $DB->Query('SELECT * from b_search_content_site WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($site = $dbSites->fetch())
+				while ($site = $dbSites->Fetch())
 				{
 					$searchItem['SITE_ID'][$site['SITE_ID']] = $site['URL'];
 				}
 
 				$dbParams = $DB->Query('SELECT * from b_search_content_param WHERE SEARCH_CONTENT_ID=' . $ID);
-				while ($param = $dbParams->fetch())
+				while ($param = $dbParams->Fetch())
 				{
 					$searchItem['PARAMS'][$param['PARAM_NAME']][] = $param['PARAM_VALUE'];
 				}
@@ -399,12 +424,18 @@ class CSearchSphinx extends CSearchFullText
 		}
 	}
 
-	function tags($arLID, $sContent)
+	public function syncPermission($permission, $arFilter)
+	{
+		$message = new \Bitrix\Search\SyncPermissionMessage($permission, $arFilter);
+		$message->send('search_sync_perm');
+	}
+
+	public function tags($arLID, $sContent)
 	{
 		$tags = [];
 		if (is_array($arLID))
 		{
-			foreach ($arLID as $site_id => $url)
+			foreach ($arLID as $site_id => $_)
 			{
 				$arTags = tags_prepare($sContent, $site_id);
 				foreach ($arTags as $tag)
@@ -416,14 +447,14 @@ class CSearchSphinx extends CSearchFullText
 		return implode(',', $tags);
 	}
 
-	function tagsRegister($arLID, $sContent)
+	public function tagsRegister($arLID, $sContent)
 	{
 		$DB = CDatabase::GetModuleConnection('search');
 		static $tagMap = [];
 
 		if (is_array($arLID))
 		{
-			foreach ($arLID as $site_id => $url)
+			foreach ($arLID as $site_id => $_)
 			{
 				$arTags = tags_prepare($sContent, $site_id);
 				foreach ($arTags as $tag)
@@ -437,7 +468,7 @@ class CSearchSphinx extends CSearchFullText
 					if (!isset($tagMap[$tag_id]))
 					{
 						$rs = $DB->Query('select * from b_search_tags where SEARCH_CONTENT_ID=' . $tag_id . " AND SITE_ID='??'");
-						$tagMap[$tag_id] = $rs->fetch();
+						$tagMap[$tag_id] = $rs->Fetch();
 						if (!$tagMap[$tag_id])
 						{
 							$DB->Query('insert into b_search_tags values (' . $tag_id . ", '??', '" . $DB->ForSql($tag) . "')");
@@ -448,7 +479,7 @@ class CSearchSphinx extends CSearchFullText
 		}
 	}
 
-	function tagsFromArray($arTags)
+	public function tagsFromArray($arTags)
 	{
 		$tags = [];
 		if (is_array($arTags))
@@ -461,7 +492,7 @@ class CSearchSphinx extends CSearchFullText
 		return implode(',', $tags);
 	}
 
-	function rights($arRights)
+	public function rights($arRights)
 	{
 		$rights = [];
 		if (is_array($arRights))
@@ -481,12 +512,12 @@ class CSearchSphinx extends CSearchFullText
 		return implode(',', $rights);
 	}
 
-	function sites($arSites)
+	public function sites($arSites)
 	{
 		$sites = [];
 		if (is_array($arSites))
 		{
-			foreach ($arSites as $site_id => $url)
+			foreach ($arSites as $site_id => $_)
 			{
 				$sites[$site_id] = sprintf('%u', crc32($site_id));
 			}
@@ -498,7 +529,7 @@ class CSearchSphinx extends CSearchFullText
 		return implode(',', $sites);
 	}
 
-	function params($arParams)
+	public function params($arParams)
 	{
 		$params = [];
 		if (is_array($arParams))
@@ -506,7 +537,7 @@ class CSearchSphinx extends CSearchFullText
 			foreach ($arParams as $k1 => $v1)
 			{
 				$name = trim($k1);
-				if ($name != '')
+				if ($name !== '')
 				{
 					if (!is_array($v1))
 					{
@@ -516,7 +547,7 @@ class CSearchSphinx extends CSearchFullText
 					foreach ($v1 as $v2)
 					{
 						$value = trim($v2);
-						if ($value != '')
+						if ($value !== '')
 						{
 							$params[] = sprintf('%u', crc32(urlencode($name) . '=' . urlencode($value)));
 						}
@@ -577,13 +608,13 @@ class CSearchSphinx extends CSearchFullText
 		}
 
 		$strQuery = trim($arParams['QUERY']);
-		if ($strQuery != '')
+		if ($strQuery !== '')
 		{
 			$arWhere[] = "MATCH('" . $this->Escape($strQuery) . "')";
 			$this->query = $strQuery;
 		}
 
-		if ($cond1 != '')
+		if ($cond1 !== '')
 		{
 			$arWhere[] = 'cond1 = 1';
 		}
@@ -609,7 +640,7 @@ class CSearchSphinx extends CSearchFullText
 					,max(date_change) dc_tmp
 					,if(date_to, date_to, ' . $ts . ') date_to_nvl
 					,if(date_from, date_from, ' . $ts . ') date_from_nvl
-					' . ($cond1 != '' ? ',' . $cond1 . ' as cond1' : '') . '
+					' . ($cond1 ? ',' . $cond1 . ' as cond1' : '') . '
 					from ' . $this->indexName . '
 					where ' . implode("\nand\t", $arWhere) . '
 					group by tags
@@ -630,7 +661,7 @@ class CSearchSphinx extends CSearchFullText
 
 				if (!$r)
 				{
-					throw new \Bitrix\Main\Db\SqlQueryException('Sphinx select error', $this->getError(), $sql);
+					throw new \Bitrix\Main\DB\SqlQueryException('Sphinx select error', $this->getError(), $sql);
 				}
 				else
 				{
@@ -652,7 +683,7 @@ class CSearchSphinx extends CSearchFullText
 					,date_change
 					,custom_rank
 					,weight() as rank
-					' . ($cond1 != '' ? ',' . $cond1 . ' as cond1' : '') . '
+					' . ($cond1 ? ',' . $cond1 . ' as cond1' : '') . '
 					,if(date_to, date_to, ' . $ts . ') date_to_nvl
 					,if(date_from, date_from, ' . $ts . ') date_from_nvl
 					from ' . $this->indexName . '
@@ -674,7 +705,7 @@ class CSearchSphinx extends CSearchFullText
 
 				if (!$r)
 				{
-					throw new \Bitrix\Main\Db\SqlQueryException('Sphinx select error', $this->getError(), $sql);
+					throw new \Bitrix\Main\DB\SqlQueryException('Sphinx select error', $this->getError(), $sql);
 				}
 				else
 				{
@@ -703,10 +734,10 @@ class CSearchSphinx extends CSearchFullText
 		return $result;
 	}
 
-	function searchTitle($phrase = '', $arPhrase = [], $nTopCount = 5, $arParams = [], $bNotFilter = false, $order = '')
+	public function searchTitle($phrase = '', $arPhrase = [], $nTopCount = 5, $arParams = [], $bNotFilter = false, $order = '')
 	{
 		$sqlWords = [];
-		foreach (array_reverse($arPhrase, true) as $word => $pos)
+		foreach (array_reverse($arPhrase, true) as $word => $_)
 		{
 			$word = $this->Escape($word);
 			if (empty($sqlWords) && !preg_match("/[\\n\\r \\t]$/", $phrase))
@@ -781,7 +812,7 @@ class CSearchSphinx extends CSearchFullText
 
 		if (!$r)
 		{
-			throw new \Bitrix\Main\Db\SqlQueryException('Sphinx select error', $this->getError(), $sql);
+			throw new \Bitrix\Main\DB\SqlQueryException('Sphinx select error', $this->getError(), $sql);
 		}
 		else
 		{
@@ -794,12 +825,12 @@ class CSearchSphinx extends CSearchFullText
 		}
 	}
 
-	function getRowFormatter()
+	public function getRowFormatter()
 	{
 		return new CSearchSphinxFormatter($this);
 	}
 
-	function filterField($field, $value, $inSelect)
+	public function filterField($field, $value, $inSelect)
 	{
 		$arWhere = [];
 		if (is_array($value))
@@ -809,7 +840,7 @@ class CSearchSphinx extends CSearchFullText
 				$s = '';
 				if ($inSelect)
 				{
-					foreach ($value as $i => $v)
+					foreach ($value as $v)
 					{
 						$s .= ',' . sprintf('%u', crc32($v));
 					}
@@ -817,7 +848,7 @@ class CSearchSphinx extends CSearchFullText
 				}
 				else
 				{
-					foreach ($value as $i => $v)
+					foreach ($value as $v)
 					{
 						$s .= ($s ? ' or ' : '') . $field . ' = ' . sprintf('%u', crc32($v));
 					}
@@ -835,7 +866,7 @@ class CSearchSphinx extends CSearchFullText
 		return $arWhere;
 	}
 
-	function prepareFilter($arFilter, $inSelect = false)
+	public function prepareFilter($arFilter, $inSelect = false)
 	{
 		$arWhere = [];
 		if (!is_array($arFilter))
@@ -883,6 +914,27 @@ class CSearchSphinx extends CSearchFullText
 					$arWhere[] = 'module_id = ' . sprintf('%u', crc32($val));
 				}
 				break;
+			case 'USER_ID':
+			case '=USER_ID':
+				if ($val !== false)
+				{
+					$arWhere[] = 'user_id = ' . intval($val);
+				}
+				break;
+			case 'ENTITY_TYPE_ID':
+			case '=ENTITY_TYPE_ID':
+				if ($val !== false)
+				{
+					$arWhere[] = 'entity_type_id = ' . sprintf('%u', crc32($val));
+				}
+				break;
+			case 'ENTITY_ID':
+			case '=ENTITY_ID':
+				if ($val !== false)
+				{
+					$arWhere[] = 'entity_id = ' . sprintf('%u', crc32($val));
+				}
+				break;
 			case 'PARAM1':
 			case '=PARAM1':
 				$arWhere = array_merge($arWhere, $this->filterField('param1_id', $val, $inSelect));
@@ -906,6 +958,7 @@ class CSearchSphinx extends CSearchFullText
 				}
 				break;
 			case 'DATE_CHANGE':
+			case '>=DATE_CHANGE':
 				if ($val <> '')
 				{
 					$arWhere[] = 'date_change >= ' . intval(MakeTimeStamp($val) - CTimeZone::GetOffset());
@@ -915,12 +968,6 @@ class CSearchSphinx extends CSearchFullText
 				if ($val <> '')
 				{
 					$arWhere[] = 'date_change <= ' . intval(MakeTimeStamp($val) - CTimeZone::GetOffset());
-				}
-				break;
-			case '>=DATE_CHANGE':
-				if ($val <> '')
-				{
-					$arWhere[] = 'date_change >= ' . intval(MakeTimeStamp($val) - CTimeZone::GetOffset());
 				}
 				break;
 			case 'SITE_ID':
@@ -957,7 +1004,7 @@ class CSearchSphinx extends CSearchFullText
 				foreach ($arTags as $i => &$strTag)
 				{
 					$strTag = trim($strTag, " \n\r\t\"");
-					if ($strTag == '')
+					if ($strTag === '')
 					{
 						unset($arTags[$i]);
 					}
@@ -970,7 +1017,7 @@ class CSearchSphinx extends CSearchFullText
 				if (is_array($val))
 				{
 					$params = $this->params($val);
-					if ($params != '')
+					if ($params !== '')
 					{
 						if ($inSelect)
 						{
@@ -1030,7 +1077,7 @@ class CSearchSphinx extends CSearchFullText
 		return $arWhere;
 	}
 
-	function CheckPermissions()
+	public function CheckPermissions()
 	{
 		global $USER;
 		$DB = CDatabase::GetModuleConnection('search');
@@ -1057,7 +1104,9 @@ class CSearchSphinx extends CSearchFullText
 		return $this->rights($arResult);
 	}
 
-	function __PrepareSort($aSort = [])
+	protected int $flagsUseRatingSort = 0;
+
+	public function __PrepareSort($aSort = [])
 	{
 		$arOrder = [];
 		if (!is_array($aSort))
@@ -1068,7 +1117,7 @@ class CSearchSphinx extends CSearchFullText
 		$this->flagsUseRatingSort = 0;
 		foreach ($aSort as $key => $ord)
 		{
-			$ord = mb_strtoupper($ord) <> 'ASC' ? 'DESC' : 'ASC';
+			$ord = mb_strtoupper($ord) !== 'ASC' ? 'DESC' : 'ASC';
 			$key = mb_strtolower($key);
 			switch ($key)
 			{
@@ -1219,6 +1268,11 @@ class CSearchSphinx extends CSearchFullText
 
 	public function query($query)
 	{
+		if (!$this->connected)
+		{
+			$this->connect();
+		}
+
 		if (is_object($this->db))
 		{
 			$result = $this->db->query($query);
@@ -1227,6 +1281,7 @@ class CSearchSphinx extends CSearchFullText
 		{
 			$result = false;
 		}
+
 		return $result;
 	}
 
@@ -1262,12 +1317,12 @@ class CSearchSphinxFormatter extends CSearchFormatter
 	/** @var CSearchSphinx */
 	private $sphinx = null;
 
-	function __construct($sphinx)
+	public function __construct($sphinx)
 	{
 		$this->sphinx = $sphinx;
 	}
 
-	function format($r)
+	public function format($r)
 	{
 		if ($r)
 		{
@@ -1282,7 +1337,7 @@ class CSearchSphinxFormatter extends CSearchFormatter
 		}
 	}
 
-	function formatTagsRow($r)
+	public function formatTagsRow($r)
 	{
 		$DB = CDatabase::GetModuleConnection('search');
 
@@ -1303,7 +1358,7 @@ class CSearchSphinxFormatter extends CSearchFormatter
 		$rt = $rs->Fetch();
 		if ($rt)
 		{
-			$rt['NAME'] = htmlspecialcharsex($rt['NAME']);
+			$rt['NAME'] = htmlspecialcharsEx($rt['NAME']);
 			$rt['CNT'] = $r['cnt'];
 			$rt['FULL_DATE_CHANGE'] = ConvertTimeStamp($r['dc_tmp'] + CTimeZone::GetOffset(), 'FULL');
 			$rt['DATE_CHANGE'] = ConvertTimeStamp($r['dc_tmp'] + CTimeZone::GetOffset(), 'SHORT');
@@ -1311,7 +1366,7 @@ class CSearchSphinxFormatter extends CSearchFormatter
 		return $rt;
 	}
 
-	function formatRow($r)
+	public function formatRow($r)
 	{
 		$DB = CDatabase::GetModuleConnection('search');
 		if ($this->sphinx->SITE_ID)
@@ -1369,10 +1424,10 @@ class CSearchSphinxFormatter extends CSearchFormatter
 		$r = $rs->Fetch();
 		if ($r)
 		{
-			$r['TITLE_FORMATED'] = $this->buildExcerpts(htmlspecialcharsex($r['TITLE']));
+			$r['TITLE_FORMATED'] = $this->buildExcerpts(htmlspecialcharsEx($r['TITLE']));
 			$r['TITLE_FORMATED_TYPE'] = 'html';
 			$r['TAGS_FORMATED'] = tags_prepare($r['TAGS'], SITE_ID);
-			$r['BODY_FORMATED'] = $this->buildExcerpts(htmlspecialcharsex($r['BODY']));
+			$r['BODY_FORMATED'] = $this->buildExcerpts(htmlspecialcharsEx($r['BODY']));
 			$r['BODY_FORMATED_TYPE'] = 'html';
 		}
 		return $r;
@@ -1385,8 +1440,8 @@ class CSearchSphinxFormatter extends CSearchFormatter
 			,'" . $this->sphinx->Escape($this->sphinx->indexName) . "'
 			,'" . $this->sphinx->Escape($this->sphinx->query . ' ' . $this->sphinx->tags) . "'
 			,500 as limit
-			" . (version_compare($this->sphinx->db->server_info, '3.0.0') < 0 ? ',1 as query_mode' : '') . "
-		)";
+			" . (version_compare($this->sphinx->db->server_info, '3.0.0') < 0 ? ',1 as query_mode' : '') . '
+		)';
 		$result = $this->sphinx->query($sql);
 
 		if ($result)
@@ -1403,7 +1458,7 @@ class CSearchSphinxFormatter extends CSearchFormatter
 		}
 		else
 		{
-			throw new \Bitrix\Main\Db\SqlQueryException('Sphinx select error', $this->sphinx->getError(), $sql);
+			throw new \Bitrix\Main\DB\SqlQueryException('Sphinx select error', $this->sphinx->getError(), $sql);
 		}
 	}
 }

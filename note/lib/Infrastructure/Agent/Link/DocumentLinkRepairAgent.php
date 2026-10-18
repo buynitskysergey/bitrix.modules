@@ -7,7 +7,7 @@ namespace Bitrix\Note\Infrastructure\Agent\Link;
 use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
 
 /**
- * [P2.T6] Retries the link rebuild of ONE document whose write failed, then removes itself.
+ * Retries the link rebuild of ONE document whose write failed, then removes itself.
  *
  * There is no queue of pending documents: registering the agent IS the record, one b_agent row per
  * document, the id and the attempt number carried by the row's NAME. The string a tick returns

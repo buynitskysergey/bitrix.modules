@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\Bulk;
 
 /**
- * [FEAT-kb2-tree-bulk-archive / P1.T3 / DTO-01] Immutable aggregate report of a bulk
+ * Immutable aggregate report of a bulk
  * operation. Owner of the DTO-01 wire contract: the frontend reads only toArray().
  *
  * Aggregates only — no per-object detail. Access failures, recycle orphans and transient

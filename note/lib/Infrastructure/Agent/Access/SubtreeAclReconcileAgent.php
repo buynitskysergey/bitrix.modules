@@ -7,9 +7,10 @@ namespace Bitrix\Note\Infrastructure\Agent\Access;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
+use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
 
 /**
- * [P4.T6] Durable, resumable background reconciliation of ONE subtree source whose WIDEN pass
+ * Durable, resumable background reconciliation of ONE subtree source whose WIDEN pass
  * exceeded {@see SubtreeAclReconciler::WIDEN_SYNC_THRESHOLD}. Only WIDENING is deferred here —
  * narrowing and lowering are always applied synchronously on the request thread.
  *
@@ -200,6 +201,9 @@ final class SubtreeAclReconcileAgent
 				array_keys($materialisedSubjects),
 				$pushService,
 			);
+			(new DocumentLinkIndexService(
+				pushService: $pushService ?? new PushNotificationService(),
+			))->notifyMentionTargetsChanged($materialised);
 		}
 
 		// Sweep before EVERY exit, not only on convergence. Without it a revoke racing the last chunk

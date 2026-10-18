@@ -41,6 +41,7 @@ enum Action: string
 	case ManageGuestLink = 'MANAGE_GUEST_LINK';
 	case UnpinChat = 'UNPIN_CHAT';
 	case ReadChat = 'READ_CHAT';
+	case OpenSidebarMenu = 'OPEN_SIDEBAR_MENU';
 
 	public function getRelatedGlobalAction(): ?GlobalAction
 	{

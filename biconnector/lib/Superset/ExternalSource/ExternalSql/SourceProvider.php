@@ -16,11 +16,12 @@ final class SourceProvider
 		return [
 			ExternalSource\Type::Mysql->value,
 			ExternalSource\Type::Pgsql->value,
+			ExternalSource\Type::Clickhouse->value,
 		];
 	}
 
 	/**
-	 * @return ExternalSql\Mysql[]|ExternalSql\Pgsql[]
+	 * @return ExternalSql\Mysql[]|ExternalSql\Pgsql[]|ExternalSql\Clickhouse[]
 	 */
 	public static function getSources(): array
 	{
@@ -42,15 +43,25 @@ final class SourceProvider
 
 		$connections = array_flip(array_column($connections, 'TYPE'));
 
-		return [
+		$sources = [
 			ExternalSource\Type::Mysql->value => new ExternalSql\Mysql(isset($connections[ExternalSource\Type::Mysql->value])),
 			ExternalSource\Type::Pgsql->value => new ExternalSql\Pgsql(isset($connections[ExternalSource\Type::Pgsql->value])),
 		];
+
+		if (SourceManager::isClickhouseConnectionsAvailable())
+		{
+			$sources[ExternalSource\Type::Clickhouse->value] = new ExternalSql\Clickhouse(
+				isset($connections[ExternalSource\Type::Clickhouse->value]),
+			);
+		}
+
+		return $sources;
 	}
 
 	/**
 	 * Returns cloud placeholder sources for MySQL/PgSQL.
 	 * Shows helpdesk article block when no REST connector with matching SOURCE_CODE is registered.
+	 * ClickHouse has no cloud card yet: the source ships for the on-premise edition only.
 	 *
 	 * @return ExternalSql\CloudMysql[]|ExternalSql\CloudPgsql[]
 	 */

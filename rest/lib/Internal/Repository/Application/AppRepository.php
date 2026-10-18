@@ -70,6 +70,19 @@ class AppRepository implements RepositoryInterface
 		);
 	}
 
+	public function isVersionInstalledByCode(string $code, string $version): bool
+	{
+		return AppTable::query()
+			->setSelect(['ID'])
+			->where('CODE', $code)
+			->where('VERSION', $version)
+			->where('ACTIVE', AppTable::ACTIVE)
+			->where('INSTALLED', AppTable::INSTALLED)
+			->setLimit(1)
+			->fetch() !== false
+		;
+	}
+
 	public function getByCode(string $code): ?App
 	{
 		$ormModel = AppTable::query()

@@ -10,7 +10,7 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Link\DocumentLinkIndexService;
 
 /**
- * [P4.T2] One-time pass that fills b_note_document_link for content written before the feature
+ * One-time pass that fills b_note_document_link for content written before the feature
  * existed. The live writer only reacts to a save, so without this pass a document nobody touches
  * again would never appear in anyone's backlinks.
  *

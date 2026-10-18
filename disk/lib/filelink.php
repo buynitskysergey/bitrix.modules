@@ -293,7 +293,7 @@ final class FileLink extends File
 	 *
 	 * @param array $file Structure like $_FILES.
 	 * @param int $createdBy Id of user.
-	 * @param bool $disableJoin If set false the method attempts to join version with last version (@see \Bitrix\Disk\File::SECONDS_TO_JOIN_VERSION).
+	 * @param bool $disableJoin If set false the method attempts to join version with last version (@see \Bitrix\Disk\Configuration::getSecondsToJoinVersion()).
 	 * @return Version|null
 	 * @throws \Bitrix\Main\SystemException
 	 */

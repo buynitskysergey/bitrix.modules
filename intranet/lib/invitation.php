@@ -12,6 +12,8 @@ use Bitrix\Intranet\Counters\Synchronizations\TotalInvitationSynchronization;
 use Bitrix\Intranet\Counters\Synchronizations\WaitConfirmationResetSynchronization;
 use Bitrix\Intranet\Counters\Synchronizations\WaitConfirmationSynchronization;
 use Bitrix\Intranet\Integration\HumanResources\PermissionInvitation;
+use Bitrix\Intranet\Internal\Integration\Bitrix24\License\InvitationLimiter;
+use Bitrix\Intranet\Internal\Integration\Bitrix24\PortalCreatorService;
 use Bitrix\Intranet\Internals\InvitationTable;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentOutOfRangeException;
@@ -332,6 +334,17 @@ class Invitation
 		}
 
 		return PermissionInvitation::createByCurrentUser()->canInvite();
+	}
+
+	/**
+	 * Portal-level gate for sending a brand-new invitation: mirrors the two portal prefilters of the
+	 * new-invite action (daily invitation limit and portal creator email confirmation). Does not
+	 * cover the user's invite right or the integrator count limit. Reinvite is not affected.
+	 */
+	public static function isNewInvitationAvailable(): bool
+	{
+		return !(new InvitationLimiter())->isExceeded()
+			&& (new PortalCreatorService())->isPortalCreatorEmailConfirmed();
 	}
 
 	public static function canCurrentUserInviteByPhone(): bool

@@ -60,6 +60,15 @@ abstract class SystemFolder extends BaseFolder
 	 */
 	abstract public function isAvailable(int $userId): bool;
 
+	/**
+	 * Whether legacy global pins can contain chats belonging to this folder.
+	 * New sections with no legacy representation skip migration to avoid scanning every pin.
+	 */
+	public function shouldMigrateLegacyPins(): bool
+	{
+		return true;
+	}
+
 	public function containsChat(Chat $chat): bool
 	{
 		if (!in_array($this->getRecentSection(), $chat->getRecentSections(), true))
@@ -74,11 +83,19 @@ abstract class SystemFolder extends BaseFolder
 	}
 
 	/**
+	 * Placeholders substituted into the title phrase, e.g. ['#COPILOT_NAME#' => 'BitrixGPT'].
+	 */
+	public function getTitleReplacements(): array
+	{
+		return [];
+	}
+
+	/**
 	 * For system folders title is resolved via Loc — DB column TITLE is always NULL.
 	 */
 	public function getTitle(): string
 	{
-		$message = Loc::getMessage($this->getTitleLangKey());
+		$message = Loc::getMessage($this->getTitleLangKey(), $this->getTitleReplacements());
 
 		return is_string($message) && $message !== '' ? $message : '';
 	}

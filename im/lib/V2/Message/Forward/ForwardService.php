@@ -36,10 +36,12 @@ class ForwardService
 	];
 
 	private Chat $toChat;
+	private bool $sentFromUi;
 
-	public function __construct(Chat $toChat)
+	public function __construct(Chat $toChat, bool $sentFromUi = false)
 	{
 		$this->toChat = $toChat;
+		$this->sentFromUi = $sentFromUi;
 	}
 
 	/**
@@ -117,7 +119,7 @@ class ForwardService
 		$paramsResult = $this->buildForwardParams($forwardingMessage, $fileCopyMap);
 		$params = $paramsResult->getResult();
 
-		return [
+		$messageConfig = [
 			'MESSAGE_TYPE' => $this->toChat->getType(),
 			'MESSAGE' => $forwardingMessage->getMessage() !== '' ? $forwardingMessage->getMessage() : null,
 			'PARAMS' => $params['PARAMS'] ?? [],
@@ -128,6 +130,13 @@ class ForwardService
 			'FILE_MODELS' => $params['FILE_MODELS'] ?? [],
 			'WAIT_FULL_EXECUTION' => 'N',
 		];
+
+		if ($this->sentFromUi)
+		{
+			$messageConfig['SENT_FROM_UI'] = true;
+		}
+
+		return $messageConfig;
 	}
 
 	private function buildForwardParams(Message $forwardingMessage, FileCopyMap $fileCopyMap): Result

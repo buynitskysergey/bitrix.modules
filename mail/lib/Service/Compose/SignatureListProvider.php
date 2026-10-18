@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Mail\Service\Compose;
 
+use Bitrix\Mail\Internal\Service\Signature\Image\SignatureImageResourceProvider;
 use Bitrix\Mail\Helper\Config\Feature;
 use Bitrix\Mail\Internal\Service\Signature\Template\Macro\SignatureMacroCatalog;
 use Bitrix\Mail\Internal\Service\Signature\Template\SignatureTemplateContext;
@@ -47,6 +48,7 @@ class SignatureListProvider
 	private SignatureResolver $signatureResolver;
 
 	private SignatureChoiceStorage $choiceStorage;
+	private SignatureImageResourceProvider $imageResourceProvider;
 	private SignatureTemplateResolver $templateResolver;
 	private bool $macrosEnabled;
 
@@ -55,14 +57,16 @@ class SignatureListProvider
 		?SignatureChoiceStorage $choiceStorage = null,
 		?SignatureTemplateProcessor $templateProcessor = null,
 		?bool $macrosEnabled = null,
+		?SignatureImageResourceProvider $imageResourceProvider = null,
 	)
 	{
 		$this->signatureResolver = $signatureResolver ?? new SignatureResolver();
 		$this->choiceStorage = $choiceStorage ?? new SignatureChoiceStorage();
-		$this->templateResolver = new SignatureTemplateResolver(
-			$templateProcessor ?? SignatureTemplateProcessorFactory::create(),
-		);
 		$this->macrosEnabled = $macrosEnabled ?? Feature::isSignatureMacrosAvailable();
+		$this->templateResolver = new SignatureTemplateResolver(
+			$templateProcessor ?? SignatureTemplateProcessorFactory::create(macrosEnabled: $this->macrosEnabled),
+		);
+		$this->imageResourceProvider = $imageResourceProvider ?? new SignatureImageResourceProvider();
 	}
 
 	/**
@@ -91,12 +95,18 @@ class SignatureListProvider
 		}
 
 		$senders ??= $this->loadSenders($userId);
+		$personalRows = $this->loadPersonalSignatureRows($userId);
+		$mailboxIds = $this->collectMailboxIds($senders);
+		$sharedByMailbox = $mailboxIds === [] ? [] : $this->resolveSharedSignatures($mailboxIds);
+		$resources = $this->resolveImageResources($this->collectSignatureIds($personalRows, $sharedByMailbox));
 
 		return [
 			'bySender' => $this->mergeSharedSignatures(
-				$this->collectPersonalSignatures($userId, $senders),
+				$this->collectPersonalSignatures($userId, $senders, $personalRows, $resources),
 				$senders,
 				$userId,
+				$sharedByMailbox,
+				$resources,
 			),
 			'choices' => $this->resolveChoices($userId),
 		];
@@ -105,13 +115,18 @@ class SignatureListProvider
 	/**
 	 * @return array<string, array<array{full: string, preview: string, menuPreview: string, signatureId: int, isShared: bool, assignedAt: null}>>
 	 */
-	private function collectPersonalSignatures(int $userId, array $senders): array
+	private function collectPersonalSignatures(
+		int $userId,
+		array $senders,
+		array $rows,
+		array $resources,
+	): array
 	{
 		$contextBySender = $this->buildContextBySender($userId, $senders);
 		$universalContextBySender = $this->buildUniversalContextBySender($userId, $senders);
 		$bySender = [];
 		$universalRows = [];
-		foreach ($this->loadPersonalSignatureRows($userId) as $row)
+		foreach ($rows as $row)
 		{
 			$senderKey = (string)($row['SENDER'] ?? '');
 			if ($senderKey === '')
@@ -126,13 +141,13 @@ class SignatureListProvider
 				$row,
 				$contextBySender[AssignmentResolver::normalizeSenderKey($senderKey)]
 					?? new SignatureTemplateContext($userId, 0, '', ''),
+				$resources,
 			);
 		}
 
 		$emailToken = $this->macrosEnabled
 			? (new SignatureMacroCatalog())->getTokensById()['employee.email']
-			: null
-		;
+			: null;
 		foreach ($universalRows as $row)
 		{
 			$template = (string)($row['SIGNATURE'] ?? '');
@@ -143,6 +158,7 @@ class SignatureListProvider
 					'',
 					$row,
 					new SignatureTemplateContext($userId, 0, '', ''),
+					$resources,
 				);
 
 				continue;
@@ -150,7 +166,7 @@ class SignatureListProvider
 
 			foreach ($universalContextBySender as $targetSenderKey => $context)
 			{
-				$this->appendPersonalSignature($bySender, $targetSenderKey, $row, $context);
+				$this->appendPersonalSignature($bySender, $targetSenderKey, $row, $context, $resources);
 			}
 		}
 
@@ -162,9 +178,14 @@ class SignatureListProvider
 		string $senderKey,
 		array $row,
 		SignatureTemplateContext $context,
+		array $resources,
 	): void
 	{
-		$signature = $this->resolveTemplate((string)($row['SIGNATURE'] ?? ''), $context);
+		$signatureId = (int)($row['ID'] ?? 0);
+		$signature = $this->resolveTemplate(
+			(string)($row['SIGNATURE'] ?? ''),
+			$context->withImageResources($resources[$signatureId] ?? []),
+		);
 		if ($signature === null)
 		{
 			return;
@@ -174,7 +195,7 @@ class SignatureListProvider
 			'full' => $signature,
 			'preview' => $this->buildPreview($signature),
 			'menuPreview' => $this->buildMenuPreview($signature),
-			'signatureId' => (int)($row['ID'] ?? 0),
+			'signatureId' => $signatureId,
 			'isShared' => false,
 			'assignedAt' => null,
 		];
@@ -184,7 +205,13 @@ class SignatureListProvider
 	 * @param array<string, array> $bySender Personal signatures, already grouped.
 	 * @return array<string, array>
 	 */
-	private function mergeSharedSignatures(array $bySender, array $senders, int $userId): array
+	private function mergeSharedSignatures(
+		array $bySender,
+		array $senders,
+		int $userId,
+		array $sharedByMailbox,
+		array $resources,
+	): array
 	{
 		$senderKeyByMailbox = [];
 		$contextByMailbox = [];
@@ -205,7 +232,6 @@ class SignatureListProvider
 		}
 
 		$seenBySender = [];
-		$sharedByMailbox = $this->resolveSharedSignatures(array_keys($senderKeyByMailbox));
 		foreach ($sharedByMailbox as $mailboxId => $sharedSignatures)
 		{
 			$senderKey = $senderKeyByMailbox[$mailboxId] ?? null;
@@ -225,7 +251,7 @@ class SignatureListProvider
 
 				$signature = $this->resolveTemplate(
 					(string)($item['signature'] ?? ''),
-					$contextByMailbox[$mailboxId],
+					$contextByMailbox[$mailboxId]->withImageResources($resources[$signatureId] ?? []),
 				);
 				if ($signature === null)
 				{
@@ -247,6 +273,57 @@ class SignatureListProvider
 		}
 
 		return $bySender;
+	}
+
+	private function collectMailboxIds(array $senders): array
+	{
+		return array_values(array_unique(array_filter(array_map(
+			static fn(array $sender): int => (int)($sender['mailboxId'] ?? 0),
+			$senders,
+		))));
+	}
+
+	private function collectSignatureIds(array $personalRows, array $sharedByMailbox): array
+	{
+		$ids = [];
+		foreach ($personalRows as $row)
+		{
+			if ($this->hasImageMarker((string)($row['SIGNATURE'] ?? '')))
+			{
+				$ids[] = (int)($row['ID'] ?? 0);
+			}
+		}
+		foreach ($sharedByMailbox as $signatures)
+		{
+			foreach ($signatures as $signature)
+			{
+				if ($this->hasImageMarker((string)($signature['signature'] ?? '')))
+				{
+					$ids[] = (int)($signature['signatureId'] ?? 0);
+				}
+			}
+		}
+
+		return array_values(array_unique(array_filter(array_map('intval', $ids))));
+	}
+
+	private function hasImageMarker(string $template): bool
+	{
+		return str_contains($template, 'data-bx-mail-signature-image=');
+	}
+
+	private function resolveImageResources(array $signatureIds): array
+	{
+		try
+		{
+			return $this->imageResourceProvider->getBySignatureIds($signatureIds);
+		}
+		catch (\Throwable $exception)
+		{
+			Application::getInstance()->getExceptionHandler()->writeToLog($exception);
+
+			return [];
+		}
 	}
 
 	private function resolveTemplate(string $template, SignatureTemplateContext $context): ?string

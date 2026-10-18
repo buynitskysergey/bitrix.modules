@@ -14,7 +14,7 @@ use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\FavoriteTable;
 
 /**
- * [P1.T2] b_note_favorite access: idempotent add, remove, the user's position set for gap
+ * b_note_favorite access: idempotent add, remove, the user's position set for gap
  * math, the keyset page of one user's list and the hard-delete cascades.
  *
  * Favorites are personal, so every method takes $userId explicitly - the repository never

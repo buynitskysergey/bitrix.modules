@@ -18,6 +18,7 @@ class MentionTransformerFactory
 		return match ($sourceType)
 		{
 			'outline' => new OutlineMentionTransformer($mapRepository, $sourceType, $sourceUrl),
+			'landing' => new LandingMentionTransformer($mapRepository, $sourceType, $sourceUrl),
 			'wiki' => new WikiMentionTransformer($mapRepository, $sourceType, $sourceUrl),
 			default => throw new SystemException('No mention transformer for source type: ' . $sourceType),
 		};

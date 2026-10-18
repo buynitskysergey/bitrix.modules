@@ -37,6 +37,11 @@ use Bitrix\Tasks\UI;
 use Bitrix\Tasks\Util;
 use Bitrix\Tasks\Util\User;
 use Bitrix\Tasks\V2\Internal\DI\Container;
+use Bitrix\Tasks\V2\Public\Provider\Params\TaskList\TaskListArrayFilter;
+use Bitrix\Tasks\V2\Public\Provider\Params\TaskList\TaskListParams;
+use Bitrix\Tasks\V2\Public\Provider\Params\TaskList\TaskListSelect;
+use Bitrix\Tasks\V2\Public\Provider\TaskProvider;
+use Bitrix\Main\Provider\Params\Pager;
 use Throwable;
 
 class TaskService implements Errorable
@@ -1408,6 +1413,43 @@ class TaskService implements Errorable
 		}
 		catch (\Exception $exception)
 		{
+			$message = $exception->getMessage().$exception->getTraceAsString();
+			$this->errorCollection->setError(new Error($message, self::ERROR_COULD_NOT_READ_TASK));
+		}
+
+		return [];
+	}
+
+	public function getResponsibles(array $taskIds): array
+	{
+		if (empty($taskIds))
+		{
+			return [];
+		}
+
+		try
+		{
+			$params = new TaskListParams(
+				userId: 0,
+				pagination: new Pager(limit: count($taskIds)),
+				filter: new TaskListArrayFilter([['id', 'in', array_values($taskIds)]]),
+				select: new TaskListSelect(['id', 'responsibleId']),
+				skipAccessCheck: true,
+			);
+
+			$responsibles = [];
+			foreach ((new TaskProvider())->getList($params) as $task)
+			{
+				$responsibles[(int)$task->getId()] = [
+					'RESPONSIBLE_ID' => (int)($task->responsible?->getId() ?? 0),
+				];
+			}
+
+			return $responsibles;
+		}
+		catch (\Throwable $exception)
+		{
+			LogFacade::logThrowable($exception);
 			$message = $exception->getMessage().$exception->getTraceAsString();
 			$this->errorCollection->setError(new Error($message, self::ERROR_COULD_NOT_READ_TASK));
 		}

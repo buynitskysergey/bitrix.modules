@@ -73,6 +73,9 @@ class WorkDayService extends BaseService
 		$localDate = date('Y-m-d', $timestamp + $timezoneOffset);
 		$todayLocalDate = date('Y-m-d', time() + $timezoneOffset);
 
+		$windowStart = strtotime($localDate . ' 00:00:00 UTC') - $timezoneOffset;
+		$windowEnd = $windowStart + 86400;
+
 		if ($localDate === $todayLocalDate)
 		{
 			$record = (new RecordProvider())->getCurrentRecord($userId);
@@ -82,11 +85,14 @@ class WorkDayService extends BaseService
 				return null;
 			}
 
-			return $record?->endTime;
-		}
+			$endTime = $record?->endTime;
+			if ($endTime === null || $endTime < $windowStart || $endTime >= $windowEnd)
+			{
+				return null;
+			}
 
-		$windowStart = strtotime($localDate . ' 00:00:00 UTC') - $timezoneOffset;
-		$windowEnd = $windowStart + 86400;
+			return $endTime;
+		}
 
 		$recordCollection = (new RecordProvider())->getRecords(
 			new ListParams(

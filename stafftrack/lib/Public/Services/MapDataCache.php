@@ -12,11 +12,12 @@ class MapDataCache
 {
 	private const CACHE_TTL = 2592000;
 	private const CACHE_DIR = '/stafftrack/map_data';
+	private const CACHE_VERSION = 'v2';
 	private const ENC_PREFIX = 'enc:';
 
 	/**
 	 * @param int[] $contributorUserIds
-	 * @return array{checkIns: array<int, array>, stats: array<int, int>}|null
+	 * @return array{checkIns: array<int, array>, stats: array<int, int>, manualStats: array<int, int>, checkInRolloutEnabled: array<int, bool>}|null
 	 */
 	public static function get(int $currentUserId, string $localDate, array $contributorUserIds): ?array
 	{
@@ -47,15 +48,27 @@ class MapDataCache
 			return null;
 		}
 
+		if (!isset($payload['manualStats']) || !is_array($payload['manualStats']))
+		{
+			return null;
+		}
+
+		if (!isset($payload['checkInRolloutEnabled']) || !is_array($payload['checkInRolloutEnabled']))
+		{
+			return null;
+		}
+
 		return [
 			'checkIns' => $payload['checkIns'],
 			'stats' => $payload['stats'],
+			'manualStats' => $payload['manualStats'],
+			'checkInRolloutEnabled' => $payload['checkInRolloutEnabled'],
 		];
 	}
 
 	/**
 	 * @param int[] $contributorUserIds
-	 * @param array{checkIns: array<int, array>, stats: array<int, int>} $data
+	 * @param array{checkIns: array<int, array>, stats: array<int, int>, manualStats: array<int, int>, checkInRolloutEnabled: array<int, bool>} $data
 	 */
 	public static function set(int $currentUserId, string $localDate, array $contributorUserIds, array $data): void
 	{
@@ -82,6 +95,11 @@ class MapDataCache
 		}
 
 		$cache->endDataCache(['payload' => $encoded]);
+	}
+
+	public static function invalidateAll(): void
+	{
+		Cache::createInstance()->cleanDir(self::CACHE_DIR);
 	}
 
 	public static function invalidateForViewers(array $viewerIds): void
@@ -131,7 +149,7 @@ class MapDataCache
 		$normalized = array_unique(array_map('intval', $contributorUserIds));
 		sort($normalized);
 
-		return 'map_' . $currentUserId . '_' . $localDate . '_' . md5(implode(',', $normalized));
+		return 'map_' . self::CACHE_VERSION . '_' . $currentUserId . '_' . $localDate . '_' . md5(implode(',', $normalized));
 	}
 
 	private static function getCacheDir(int $viewerId): string

@@ -12,7 +12,7 @@ use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Service\Document\Position\PositionCalculator;
 
 /**
- * [P1.T3] Manual order of one user's favorites, by the same mechanics as
+ * Manual order of one user's favorites, by the same mechanics as
  * CollectionPositionService: gap positions, transactional renumber when the gaps are exhausted
  * and affectedPositions for the client. Documents and knowledge bases share one sequence, so
  * every read and write is scoped by $userId only.

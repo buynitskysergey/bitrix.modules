@@ -16,6 +16,7 @@ use Bitrix\HumanResources\Repository;
 use Bitrix\HumanResources\Repository\Access\PermissionRestrictedNodeRepository;
 use Bitrix\HumanResources\Repository\NodeSettingsRepository;
 use Bitrix\HumanResources\Type\StructureAction;
+use Bitrix\HumanResources\Integration\Bizproc\ProcessLauncherInterface;
 use Bitrix\HumanResources\Integration\Im\ChatService;
 use Bitrix\HumanResources\Integration\Pull\PushMessageService;
 use Bitrix\HumanResources\Service;
@@ -320,6 +321,11 @@ class Container
 	public static function getPushMessageService(): PushMessageService
 	{
 		return self::getService('humanresources.intergation.pull.pushMessageService');
+	}
+
+	public static function getBizprocProcessLauncher(): ProcessLauncherInterface
+	{
+		return self::getService('humanresources.integration.bizproc.processLauncher');
 	}
 
 	public static function getStructureAuthProvider(): StructureAuthProvider

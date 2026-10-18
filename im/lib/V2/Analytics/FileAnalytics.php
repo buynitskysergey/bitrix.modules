@@ -6,6 +6,9 @@ namespace Bitrix\Im\V2\Analytics;
 
 use Bitrix\Im\V2\Analytics\Event\FileMessageEvent;
 use Bitrix\Im\V2\Analytics\Event\MediaMessageEvent;
+use Bitrix\Im\V2\Chat\ChannelChat;
+use Bitrix\Im\V2\Chat\CollabChat;
+use Bitrix\Im\V2\Chat\CommentChat;
 use Bitrix\Im\V2\Entity\File\Param\ParamName;
 use Bitrix\Im\V2\Entity\File\ParamCollection;
 use Bitrix\Im\V2\Integration\AI\Transcription\LaunchType;
@@ -82,11 +85,38 @@ class FileAnalytics extends AbstractAnalytics
 
 		if ($category !== null)
 		{
-			$this->createMediaMessageEvent($eventName, $category)
+			$event = $this->createMediaMessageEvent($eventName, $category)
 				?->setStatus($statusCode)
 				?->setP2($this->formatLaunchType($launchType))
-				?->send();
+			;
+
+			if ($this->hasProjectP4())
+			{
+				// transcripts do not report the project; p4 values of other chats stay untouched
+				$event?->setP4(null);
+			}
+
+			$event?->send();
 		}
+	}
+
+	/**
+	 * Mirrors the branches of ChatEvent::setChatP4() that resolve to projectId_: the project chat
+	 * itself and any chat under it except channels and comments, which keep their parentChatId_.
+	 */
+	private function hasProjectP4(): bool
+	{
+		if ($this->chat instanceof CollabChat)
+		{
+			return true;
+		}
+
+		if ($this->chat instanceof ChannelChat || $this->chat instanceof CommentChat)
+		{
+			return false;
+		}
+
+		return $this->chat->hasParent() && $this->chat->getParentChat() instanceof CollabChat;
 	}
 
 	protected function createMediaMessageEvent(string $eventName, string $category): ?MediaMessageEvent

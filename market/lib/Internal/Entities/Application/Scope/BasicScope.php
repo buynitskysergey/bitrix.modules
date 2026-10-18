@@ -34,12 +34,12 @@ class BasicScope
 
 	public function getTitle(): string
 	{
-		return $this->title ??= $this->getLocMessage();
+		return $this->title ??= $this->getLocMessage() ?? ($this->getName() ?: $this->getKey());
 	}
 
 	public function getDescription(): string
 	{
-		return $this->description ??= $this->getLocMessage('_DESCRIPTION');
+		return $this->description ??= $this->getLocMessage('_DESCRIPTION') ?? '';
 	}
 
 	public function getIcon(): string
@@ -79,10 +79,25 @@ class BasicScope
 		}
 	}
 
-	protected function getLocMessage(?string $suffix = null): string
+	protected function getLocMessage(?string $suffix = null): ?string
 	{
-		$locKey = mb_strtoupper('REST_SCOPE_' . $this->getKey() . ($suffix ?? ''));
+		$baseKey = mb_strtoupper('REST_SCOPE_' . $this->getKey() . ($suffix ?? ''));
+		$message = static::getLocMessageByKey($baseKey);
+		$version = 1;
 
-		return Main\Localization\Loc::getMessage($locKey) ?? '';
+		while (($versionedMessage = static::getLocMessageByKey($baseKey . '_MSGVER_' . $version)) !== null)
+		{
+			$message = $versionedMessage;
+			$version++;
+		}
+
+		return $message;
+	}
+
+	protected static function getLocMessageByKey(string $locKey): ?string
+	{
+		$message = Main\Localization\Loc::getMessage($locKey);
+
+		return ($message === null || $message === '') ? null : $message;
 	}
 }

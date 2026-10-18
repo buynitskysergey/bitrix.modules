@@ -49,6 +49,7 @@ final class GetDashboardMetaTool extends BaseBiTool
 				'dashboardId' => [
 					'type' => 'integer',
 					'description' => 'Dashboard ID from the list_dashboards tool result.',
+					'minimum' => 1,
 				],
 				'appliedFilters' => [
 					'type' => 'array',
@@ -74,6 +75,7 @@ final class GetDashboardMetaTool extends BaseBiTool
 							],
 						],
 						'required' => ['name', 'value'],
+						'additionalProperties' => false,
 					],
 				],
 				'urlParams' => [

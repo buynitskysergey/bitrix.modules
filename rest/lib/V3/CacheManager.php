@@ -10,7 +10,7 @@ use Bitrix\Rest\V3\Schema\ModuleManager;
 
 final class CacheManager
 {
-	private const CACHE_DIR = 'rest/v3.0.4'; // cache directory
+	private const CACHE_DIR = 'rest/v3.0.5'; // cache directory
 
 	private const CACHE_TTL = 31536000; // One year TTL
 
@@ -52,18 +52,30 @@ final class CacheManager
 		return true;
 	}
 
+	public static function delete(string $key): void
+	{
+		if (self::isCacheDisabled())
+		{
+			return;
+		}
+
+		$cache = Application::getInstance()->getManagedCache();
+		$cache->clean(self::getCacheKey($key), self::CACHE_DIR);
+	}
+
 	private static function getCacheKey(string $key): string
 	{
 		if (self::$globalCacheKeyPart === null)
 		{
 			$modulesConfig = ServiceLocator::getInstance()->get(ModuleManager::class)->getConfigs();
-			$keyParts = [];
-			/** @var ModuleConfig $moduleConfig */
-			foreach ($modulesConfig as $moduleConfig)
-			{
-				$keyParts[] = join('_', [$moduleConfig->id, $moduleConfig->version, $moduleConfig->modificationDateTime?->format('YmdHis')]);
-			}
-			self::$globalCacheKeyPart = md5(join('|', $keyParts));
+			ksort($modulesConfig);
+
+			$signature = array_map(
+				static fn(ModuleConfig $moduleConfig): array => $moduleConfig->toArray(),
+				$modulesConfig,
+			);
+
+			self::$globalCacheKeyPart = md5((string)json_encode($signature));
 		}
 
 		return self::$globalCacheKeyPart . $key;
@@ -78,17 +90,6 @@ final class CacheManager
 		}
 
 		return self::$isCacheDisabled;
-	}
-
-	public static function delete(string $key): void
-	{
-		if (self::isCacheDisabled())
-		{
-			return;
-		}
-
-		$cache = Application::getInstance()->getManagedCache();
-		$cache->clean(self::getCacheKey($key), self::CACHE_DIR);
 	}
 
 	public static function getWithDir(string $key, string $initDir): mixed

@@ -20,9 +20,12 @@ use Bitrix\Main\Text\Emoji;
 use Bitrix\StaffTrack\Internal\Geo\Geohash;
 use Bitrix\StaffTrack\Public\Services\AddressCache;
 use Bitrix\StaffTrack\Public\Services\DailyStatsUpdater;
+use Bitrix\StaffTrack\Public\Services\FirstManualCheckInCache;
 
 class Add extends AbstractCommand
 {
+	private array $addDelta = [];
+
 	public function execute(CheckInDto $checkInDto, array $uploadedFiles = []): Result
 	{
 		$result = new Result();
@@ -44,9 +47,19 @@ class Add extends AbstractCommand
 			return $result->addError(new Error($e->getMessage()));
 		}
 
+		// Before the message is sent and the files are saved: a point refused by the window must leave
+		// nothing behind.
+		$dateError = self::fitDateCreateToWindow($this->checkInDto);
+		if ($dateError !== null)
+		{
+			return $result->addError($dateError);
+		}
+
 		$this->normalizeFileIds();
 		$this->processUploadedFiles($uploadedFiles);
 		$this->fillAddressFromCache();
+
+		$this->checkInDto->messageIds = [];
 
 		if ($this->checkInDto->dialogIds && $this->checkInDto->snapshotUrl)
 		{
@@ -75,7 +88,7 @@ class Add extends AbstractCommand
 		{
 			WorkDayService::startWorkDay();
 		}
-		$this->sendPushToDepartment(Pull\PushCommand::CHECK_IN_ADD);
+		$this->sendPushToDepartment(Pull\PushCommand::CHECK_IN_ADD, $this->addDelta);
 
 		return $result->setData([
 			'checkIn' => $this->prepareResult(),
@@ -147,6 +160,10 @@ class Add extends AbstractCommand
 			$this->checkInDto->setDateCreate(new DateTime());
 		}
 
+		// Resolving the rollout flags can walk the department tree, so it is done before the transaction.
+		$isDeltaNeeded = $this->isDeltaNeededByRecipients($this->checkInDto->userId);
+		$statsUpdater = new DailyStatsUpdater();
+
 		$connection = Application::getConnection();
 		$connection->startTransaction();
 
@@ -162,24 +179,40 @@ class Add extends AbstractCommand
 			}
 
 			$this->checkInDto->id = (int)$saveResult->getId();
-			$this->updateDailyStats();
+			$addState = $this->applyDailyStats($statsUpdater);
 			$connection->commitTransaction();
+
+			if ($this->checkInDto->entityType === CheckInType::MANUAL->value)
+			{
+				FirstManualCheckInCache::invalidate($this->checkInDto->userId);
+			}
 		}
-		catch (\Bitrix\Main\DB\SqlException $e)
+		catch (\Throwable $e)
 		{
+			// the daily-stats write fails a unique-index race with a SystemException, which is a parent
+			// of SqlException: a narrower catch would leave the transaction open and return no Result
 			$connection->rollbackTransaction();
 
+			AddMessage2Log('Add::saveCheckIn error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+
 			return $result->addError(new Error('Failed to save check-in'));
+		}
+
+		// The delta only reads, and a rolled back check-in never reaches this point, so it is built
+		// after the commit: the transaction holds no day-wide read or aggregation.
+		if ($isDeltaNeeded)
+		{
+			$this->addDelta = $statsUpdater->buildAddDelta($addState);
 		}
 
 		return $result;
 	}
 
-	private function updateDailyStats(): void
+	private function applyDailyStats(DailyStatsUpdater $statsUpdater): array
 	{
 		$timestamp = $this->checkInDto->dateCreate?->getTimestamp() ?? time();
 
-		(new DailyStatsUpdater())->update(
+		return $statsUpdater->applyAdd(
 			$this->checkInDto->userId,
 			$this->checkInDto->id,
 			$this->checkInDto->entityType,
