@@ -4,10 +4,13 @@ namespace Bitrix\Crm\Integration\Rest\Configuration\Entity;
 
 use Bitrix\Crm\AutomatedSolution\AutomatedSolutionManager;
 use Bitrix\Crm\AutomatedSolution\Entity\AutomatedSolutionTable;
+use Bitrix\Crm\Integration\Analytics\Builder\Automation\AutomatedSolution\CreateEvent;
+use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Crm\Integration\IntranetManager;
 use Bitrix\Crm\Integration\Rest\Configuration\Helper;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Intranet\CustomSection\Entity\CustomSectionTable;
+use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
 use Bitrix\Rest\Configuration\Manifest;
@@ -189,6 +192,22 @@ class AutomatedSolution
 			CustomSectionTable::delete($intranetSectionId);
 
 			return $result->addErrors($automatedSolutionResult->getErrors());
+		}
+
+		try
+		{
+			(new CreateEvent())
+				->setSection(Dictionary::SECTION_AUTOMATION)
+				->setStatus(Dictionary::STATUS_SUCCESS)
+				->setId($automatedSolution->getId())
+				->setSource($params[Dictionary::CONTEXT_APPLICATION_SOURCE] ?? null)
+				->buildEvent()
+				->send()
+			;
+		}
+		catch (\Throwable $exception)
+		{
+			Application::getInstance()->getExceptionHandler()->writeToLog($exception);
 		}
 
 		$result->setData(

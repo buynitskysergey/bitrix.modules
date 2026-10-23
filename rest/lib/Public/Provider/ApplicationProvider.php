@@ -17,13 +17,22 @@ use Bitrix\Rest\Internal\Repository\Application\AppPager;
 use Bitrix\Rest\Internal\Repository\Application\AppSelect;
 use Bitrix\Rest\Internal\Repository\Application\AppSort;
 use Bitrix\Rest\Public\Contract\Application\OAuthToken;
+use Bitrix\Rest\Public\Provider\Dto\ApplicationData;
 use Bitrix\Rest\Public\Provider\Dto\OAuthTokenDto;
+use Bitrix\Rest\Public\Provider\Mapper\ApplicationDataMapper;
 use Bitrix\Rest\Public\Provider\Params\ApplicationSelect;
 use Bitrix\Rest\Internal\Repository;
 use Bitrix\Main\DI\ServiceLocator;
 
 class ApplicationProvider
 {
+	public function __construct(
+		private readonly ?Repository\Application\AppRepository $repository = null,
+		private readonly ApplicationDataMapper $mapper = new ApplicationDataMapper(),
+	)
+	{
+	}
+
 	public function getInstalledCount(): int
 	{
 		return $this->getRepo()->getInstalledAppsCount();
@@ -146,6 +155,52 @@ class ApplicationProvider
 		return OAuthTokenDto::fromArray($authResult);
 	}
 
+	public function findById(int $id, bool $withLanguages = false): ?ApplicationData
+	{
+		return $this->findProjection(
+			fn(): ?array => $this->getRepo()->findRowById($id),
+			$withLanguages,
+		);
+	}
+
+	/**
+	 * Costs more than findById() and findByClientId(): b_rest_app has no index on CODE.
+	 */
+	public function findByCode(string $code, bool $withLanguages = false): ?ApplicationData
+	{
+		return $this->findProjection(
+			fn(): ?array => $this->getRepo()->findRowByCode($code),
+			$withLanguages,
+		);
+	}
+
+	public function findByClientId(string $clientId, bool $withLanguages = false): ?ApplicationData
+	{
+		return $this->findProjection(
+			fn(): ?array => $this->getRepo()->findRowByClientId($clientId),
+			$withLanguages,
+		);
+	}
+
+	/**
+	 * @param \Closure(): ?array<string, mixed> $readRow
+	 */
+	private function findProjection(\Closure $readRow, bool $withLanguages): ?ApplicationData
+	{
+		$row = $readRow();
+		if ($row === null)
+		{
+			return null;
+		}
+
+		$languageRows = $withLanguages
+			? $this->getRepo()->findLangRowsByAppId((int)$row[ApplicationDataMapper::ORM_FIELD_ID])
+			: null
+		;
+
+		return $this->mapper->convertFromRow($row, $languageRows);
+	}
+
 	private function getAccessChecker(int $userId): AppAccessChecker
 	{
 		return new AppAccessChecker($userId);
@@ -153,6 +208,6 @@ class ApplicationProvider
 
 	private function getRepo(): Repository\Application\AppRepository
 	{
-		return ServiceLocator::getInstance()->get('rest.repository.app');
+		return $this->repository ?? ServiceLocator::getInstance()->get('rest.repository.app');
 	}
 }

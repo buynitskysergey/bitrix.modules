@@ -3,7 +3,7 @@
 namespace Bitrix\Rest\V3\Realisation\Controller;
 
 use Bitrix\Rest\V3\Controller\RestController;
-use Bitrix\Rest\V3\Dto\Dto;
+use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Exception\AccessDeniedException;
 use Bitrix\Rest\V3\Interaction\Response\GetResponse;
 use Bitrix\Rest\V3\Interaction\Response\ListResponse;
@@ -18,7 +18,7 @@ final class Field extends RestController
 
 	public function listAction(ListRequest $request): ListResponse
 	{
-		if (!class_exists($request->getDtoClass()) || !is_subclass_of($request->getDtoClass(), Dto::class))
+		if (!TypeHelper::isDto($request->getDtoClass()))
 		{
 			throw new AccessDeniedException();
 		}
@@ -31,7 +31,7 @@ final class Field extends RestController
 
 	public function getAction(GetRequest $request): GetResponse
 	{
-		if (!class_exists($request->getDtoClass()) || !is_subclass_of($request->getDtoClass(), Dto::class))
+		if (!TypeHelper::isDto($request->getDtoClass()))
 		{
 			throw new AccessDeniedException();
 		}

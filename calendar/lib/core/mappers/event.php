@@ -3,6 +3,8 @@
 namespace Bitrix\Calendar\Core\Mappers;
 
 use Bitrix\Calendar\Core;
+use Bitrix\Calendar\Core\Builders\EventBuilderFromArray;
+use Bitrix\Calendar\Core\Builders\OccupancyAwareRecurringEventRules;
 use Bitrix\Calendar\Internals\EO_Event;
 use Bitrix\Calendar\Internals\EventTable;
 use Bitrix\Main\ArgumentException;
@@ -45,7 +47,7 @@ class Event extends Mapper
 
 		while ($event = $eventDM->fetch())
 		{
-			$collection->add((new Core\Builders\EventBuilderFromArray($event))->build());
+			$collection->add((new EventBuilderFromArray($event, EventBuilderFromArray::RRULE_SOURCE_PERSISTED))->build());
 		}
 
 		return $collection;
@@ -82,7 +84,7 @@ class Event extends Mapper
 	protected function updateEntity($entity, array $params = []): ?Core\Base\EntityInterface
 	{
 		$entity->setDateModified(new Core\Base\Date());
-		$data = $this->convertToArray($entity);
+		$data = $this->convertToArrayForSave($entity);
 
 		$params = array_merge($params, [
 			'arFields' => $data,
@@ -163,7 +165,7 @@ class Event extends Mapper
 	 */
 	private function save(Core\Event\Event $event, array $params = []): AddResult
 	{
-		$data = $this->convertToArray($event);
+		$data = $this->convertToArrayForSave($event);
 
 		$params = array_merge($params, [
 			'arFields' => $data,
@@ -290,6 +292,23 @@ class Event extends Mapper
 		];
 	}
 
+	private function convertToArrayForSave(Core\Event\Event $event): array
+	{
+		$data = $this->convertToArray($event);
+		$recurringRule = $event->getRecurringRule();
+
+		if (
+			$recurringRule instanceof OccupancyAwareRecurringEventRules
+			&& $recurringRule->getSourceType() === \CCalendarEvent::OCCUPANCY_RRULE_SOURCE_REQUEST_STRING
+		)
+		{
+			$data[\CCalendarEvent::OCCUPANCY_RRULE_SOURCE_FIELD]
+				= \CCalendarEvent::OCCUPANCY_RRULE_SOURCE_REQUEST_STRING;
+		}
+
+		return $data;
+	}
+
 	/**
 	 * @param array $filter
 	 *
@@ -386,7 +405,7 @@ class Event extends Mapper
 
 		while ($event = $eventDM->fetch())
 		{
-			$eventMap->add((new Core\Builders\EventBuilderFromArray($event))->build(), (int)$event['ID']);
+			$eventMap->add((new EventBuilderFromArray($event, EventBuilderFromArray::RRULE_SOURCE_PERSISTED))->build(), (int)$event['ID']);
 		}
 
 		return $eventMap;
@@ -497,7 +516,7 @@ class Event extends Mapper
 	 */
 	protected function convertFromArray(array $fields): Core\Event\Event
 	{
-		return (new Core\Builders\EventBuilderFromArray($fields))->build();
+		return (new EventBuilderFromArray($fields, EventBuilderFromArray::RRULE_SOURCE_PERSISTED))->build();
 	}
 
 	/**

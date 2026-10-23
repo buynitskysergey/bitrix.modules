@@ -7,6 +7,7 @@ use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoCollection;
 use Bitrix\Rest\V3\Dto\DtoValidatorHelper;
 use Bitrix\Rest\V3\Dto\PropertyHelper;
+use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Exception\UnknownDtoPropertyException;
 use Bitrix\Rest\V3\Exception\Validation\DtoValidationException;
 use Bitrix\Rest\V3\Exception\Validation\InvalidRequestFieldTypeException;
@@ -140,7 +141,7 @@ final class FieldsStructure extends Structure
 				continue;
 			}
 
-			if (is_subclass_of($propertyType, Dto::class))
+			if (TypeHelper::isDto($propertyType))
 			{
 				$subDto = Structure::getDto($propertyType);
 				if ($subDto === null)
@@ -163,7 +164,7 @@ final class FieldsStructure extends Structure
 			if ($propertyType === DtoCollection::class)
 			{
 				$elementType = $field->getElementType();
-				if ($elementType !== null && is_subclass_of($elementType, Dto::class))
+				if (TypeHelper::isDto($elementType))
 				{
 					$collection = new DtoCollection($elementType);
 					if (Structure::getDto($elementType) === null)

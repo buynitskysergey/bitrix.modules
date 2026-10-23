@@ -8,6 +8,7 @@
 namespace Bitrix\Crm\WebForm\Internals;
 
 use Bitrix\Main\ORM;
+use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
 use Bitrix\Main\Localization\Loc;
 
 Loc::loadMessages(__FILE__);
@@ -32,6 +33,8 @@ Loc::loadMessages(__FILE__);
  */
 class AgreementTable extends ORM\Data\DataManager
 {
+	use DeleteByFilterTrait;
+
 	public static function getTableName()
 	{
 		return 'b_crm_webform_agreement';

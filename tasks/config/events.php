@@ -21,6 +21,7 @@ return [
 		\Bitrix\Im\V2\Chat\ExternalChat\Event\AfterSendMessageEvent::class => [
 			Im\EventHandler\OnAfterSendMessageEvent\UpdateLastActivityDate::class,
 			Im\EventHandler\OnAfterSendMessageEvent\AddUserToAuditors::class,
+			Im\EventHandler\OnAfterSendMessageEvent\AutoUnmuteAuditor::class,
 			Im\EventHandler\OnAfterSendMessageEvent\UpdateCounters::class,
 			Im\EventHandler\OnAfterSendMessageEvent\SendPushNotification::class,
 			Rest\EventHandler\OnAfterSendMessageEvent\ExecuteRestEvent::class,

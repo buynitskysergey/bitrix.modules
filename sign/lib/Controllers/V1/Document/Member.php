@@ -29,7 +29,9 @@ use Bitrix\Sign\Type\Access\ItemIdentifierType;
 use Bitrix\Sign\Type\DocumentScenario;
 use Bitrix\Sign\Type\Member\EntityType;
 use Bitrix\Sign\Type\Member\Role;
+use Bitrix\Sign\Type\Member\SigningMethod;
 use Bitrix\Sign\Type\MemberStatus;
+use Bitrix\Sign\Type\ProviderCode;
 use Bitrix\Sign\Ui\Member\Stage;
 
 class Member extends \Bitrix\Sign\Engine\Controller
@@ -125,6 +127,8 @@ class Member extends \Bitrix\Sign\Engine\Controller
 				'presetId' => $member->presetId,
 				'party' => $member->party,
 				'role' => $member->role,
+				// The wizard preselects the stored signing method when the setup is reopened.
+				'signingMethod' => $member->signingMethod,
 				'reminderType' => $member->reminder->type->value,
 			];
 		}
@@ -581,6 +585,16 @@ class Member extends \Bitrix\Sign\Engine\Controller
 		$memberCollection = $result->members;
 		$departmentEntities = $result->departments;
 		$assigneeEntityType = $result->assigneeEntityType;
+		$memberCollection = $this->fillSigningMethods(
+			$memberCollection,
+			$members,
+			$assigneeEntityType,
+			$document,
+		);
+		if ($this->getErrors())
+		{
+			return [];
+		}
 
 		if (!$document->isTemplated())
 		{
@@ -629,6 +643,142 @@ class Member extends \Bitrix\Sign\Engine\Controller
 			$this->addErrors($result->getErrors());
 
 			return [];
+		}
+
+		return [];
+	}
+
+	private function fillSigningMethods(
+		\Bitrix\Sign\Item\MemberCollection $memberCollection,
+		array $members,
+		string $assigneeEntityType,
+		\Bitrix\Sign\Item\Document $document,
+	): \Bitrix\Sign\Item\MemberCollection
+	{
+		foreach ($members as $memberData)
+		{
+			if (($memberData['role'] ?? null) !== Role::ASSIGNEE)
+			{
+				continue;
+			}
+
+			$signingMethod = $memberData['signingMethod'] ?? null;
+			if (!is_string($signingMethod) || $signingMethod === '')
+			{
+				continue;
+			}
+
+			// The value goes straight to the member row and signsafe reads an unknown one as "no method
+			// chosen", which means ukep. Refusing is louder than storing a method nobody can honour.
+			if (!SigningMethod::isValid($signingMethod))
+			{
+				$this->addError(new Error('Invalid `signingMethod` value'));
+
+				continue;
+			}
+
+			if (
+				$signingMethod === SigningMethod::GOS_KEY
+				&& !$this->canAssigneeUseGoskey($assigneeEntityType, $document)
+			)
+			{
+				$this->addError(new Error(
+					Loc::getMessage('SIGN_CONTROLLER_MEMBER_DIRECTOR_SIGNING_NOT_ALLOWED'),
+					'SIGNING_METHOD_PERMISSION_REQUIRED',
+				));
+
+				continue;
+			}
+
+			$assignee = $memberCollection->findFirstByRole(Role::ASSIGNEE);
+			if ($assignee !== null)
+			{
+				$assignee->signingMethod = $signingMethod;
+			}
+		}
+
+		return $memberCollection;
+	}
+
+	/**
+	 * Goskey is the signing method of the company representative, so it requires a representative who
+	 * is a person. A representative given as a structure role is refused: a role is a position and
+	 * `$representativeId` holds the role id, so there is nobody to sign.
+	 *
+	 * The provider is checked here as well: the company is chosen on an earlier wizard step, which
+	 * stores its provider on the document, and only goskey-lite has a head-signing branch. The wizard
+	 * shows no control for the other providers, so the value can only arrive without it.
+	 *
+	 * Whether the branch is open for this portal is not asked here: the signing service owns that
+	 * rollout by client id and already answers it per company through
+	 * `goskey_representative_signing_available`, which is what hides the control in the wizard.
+	 */
+	private function canAssigneeUseGoskey(
+		string $assigneeEntityType,
+		\Bitrix\Sign\Item\Document $document,
+	): bool
+	{
+		return $assigneeEntityType === EntityType::COMPANY
+			&& $document->providerCode === ProviderCode::GOS_KEY_LITE
+		;
+	}
+
+	/**
+	 * The wizard asks this on the step where the representative and his signing method are chosen, so a
+	 * refusal names the person who caused it while he is still on the screen. The parties are stored by
+	 * another action, and it makes the same check: the answer here is advice for the wizard, not the
+	 * permission itself.
+	 */
+	#[Attribute\Access\LogicOr(
+		new Attribute\ActionAccess(ActionDictionary::ACTION_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'documentUid'),
+		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT, AccessibleItemType::DOCUMENT, 'documentUid')
+	)]
+	public function checkRepresentativeSigningMethodAction(
+		string $documentUid,
+		int $representativeId,
+		string $signingMethod,
+		string $representativeEntityType = EntityType::USER,
+	): array
+	{
+		if ($representativeId <= 0)
+		{
+			$this->addError(new Error("Invalid `representativeId` value"));
+
+			return [];
+		}
+
+		if (!SigningMethod::isValid($signingMethod))
+		{
+			$this->addError(new Error('Invalid `signingMethod` value'));
+
+			return [];
+		}
+
+		if ($signingMethod !== SigningMethod::GOS_KEY)
+		{
+			return [];
+		}
+
+		$document = $this->documentService->getByUid($documentUid);
+		if (!$document)
+		{
+			$this->addError(new Error(Loc::getMessage('SIGN_CONTROLLER_MEMBER_DOCUMENT_NOT_FOUND')));
+
+			return [];
+		}
+
+		// The assignee of a b2e document is the company itself, unless the representative is given as a
+		// structure role - the same mapping the parties go through on their way to being stored.
+		$assigneeEntityType = $representativeEntityType === EntityType::USER
+			? EntityType::COMPANY
+			: $representativeEntityType
+		;
+		if (!$this->canAssigneeUseGoskey($assigneeEntityType, $document))
+		{
+			$this->addError(new Error(
+				Loc::getMessage('SIGN_CONTROLLER_MEMBER_DIRECTOR_SIGNING_NOT_ALLOWED'),
+				'SIGNING_METHOD_PERMISSION_REQUIRED',
+			));
 		}
 
 		return [];
@@ -829,7 +979,7 @@ class Member extends \Bitrix\Sign\Engine\Controller
 
 		return [
 			'id' => $savedFileId,
-			'srcUri' => \CFile::GetPath($stampFileId),
+			'srcUri' => \CFile::getPath($stampFileId),
 		];
 	}
 
@@ -1258,6 +1408,6 @@ class Member extends \Bitrix\Sign\Engine\Controller
 
 	private function getSyncMembersLockName(string $docUid): string
 	{
-		return "sign_sync_members_{$docUid}";
+		return 'sign_sync_members_' . $docUid;
 	}
 }

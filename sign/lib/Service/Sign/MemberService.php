@@ -101,6 +101,7 @@ class MemberService
 		Type\Member\Notification\ReminderType $reminderType = Type\Member\Notification\ReminderType::NONE,
 		?int $employeeId = null,
 		bool $skipPermissionCheck = false,
+		?string $signingMethod = null,
 	): Main\Result
 	{
 		$document = $this->documentRepository->getByUid($documentUid);
@@ -146,6 +147,7 @@ class MemberService
 				type: $reminderType,
 			),
 			employeeId: $employeeId,
+			signingMethod: $signingMethod,
 		));
 
 		if (!$addResult->isSuccess())
@@ -449,6 +451,7 @@ class MemberService
 					reminderType: $member->reminder->type,
 					employeeId: $member->employeeId,
 					skipPermissionCheck: $skipPermissionCheck,
+					signingMethod: $member->signingMethod,
 				);
 
 				if (!$result->isSuccess())

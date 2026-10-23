@@ -12,6 +12,7 @@ use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Integration\Rest\EventHandlers\PasswordEventHandler;
 use Bitrix\Rest\Internal\Model\IncomingWebhookAttributeTable;
 use Bitrix\Rest\Internal\Model\Trait\UpdateByFilterTrait;
+use Bitrix\Rest\Internal\Service\PasswordPermission\PermissionListNormalizer;
 use Bitrix\Rest\Internal\Service\SystemUserService;
 use Bitrix\Rest\Preset\EventController;
 use Bitrix\Rest\Enum;
@@ -152,7 +153,7 @@ class PasswordTable extends ORM\Data\DataManager
 
 		if($res->isSuccess())
 		{
-			$scopeList = array_unique($scopeList);
+			$scopeList = (new PermissionListNormalizer())->normalize($scopeList);
 			foreach($scopeList as $scope)
 			{
 				PermissionTable::add(array(

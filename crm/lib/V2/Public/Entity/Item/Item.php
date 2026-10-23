@@ -95,6 +95,7 @@ abstract class Item implements EntityInterface
 
 	private array $changedFields = [];
 	private bool $restricted = false;
+	private bool $baseFieldsReadable = false;
 
 	// Identity (read-only, set by Mapper/Handler)
 	private ?int $id = null;
@@ -154,7 +155,7 @@ abstract class Item implements EntityInterface
 	 */
 	public function getCaption(): string
 	{
-		if (!$this->canRead())
+		if (!$this->canRead() && !$this->baseFieldsReadable)
 		{
 			return $this->getRestrictedCaption();
 		}
@@ -185,6 +186,15 @@ abstract class Item implements EntityInterface
 	public function markAsRestricted(): void
 	{
 		$this->restricted = true;
+	}
+
+	/**
+	 * @internal Used by Provider when only base fields are readable.
+	 */
+	public function markAsRestrictedWithBaseFields(): void
+	{
+		$this->restricted = true;
+		$this->baseFieldsReadable = true;
 	}
 
 	// --- Changed-tracking ---

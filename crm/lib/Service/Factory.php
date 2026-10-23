@@ -1387,6 +1387,7 @@ abstract class Factory
 	{
 		$this->categories = null;
 		self::clearPermissionEntityTypesCache();
+		\CCrmStatus::invalidateStageGroups();
 
 		return $this;
 	}
@@ -2104,6 +2105,16 @@ abstract class Factory
 	public function isCountersEnabled(): bool
 	{
 		return $this->entityTypeSettings()?->hasCounters() ?? false;
+	}
+
+	/**
+	 * Returns true if this entity supports the item list view.
+	 *
+	 * @param string $listView one of Router::LIST_VIEW_* constants
+	 */
+	public function isListViewSupported(string $listView): bool
+	{
+		return $listView !== Router::LIST_VIEW_DEADLINES;
 	}
 
 	/**

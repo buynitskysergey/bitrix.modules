@@ -3,6 +3,7 @@
 namespace Bitrix\Rest\V3\Schema;
 
 use Bitrix\Main\Localization\LocalizableMessage;
+use Bitrix\Rest\V3\Mcp\McpToolMetadata;
 
 class MethodDescription implements \Serializable
 {
@@ -18,7 +19,18 @@ class MethodDescription implements \Serializable
 		public readonly bool $isEnabled = true,
 		public readonly ?array $queryParams = null,
 		public readonly bool $isHidden = false,
+		public readonly ?McpToolMetadata $mcpTool = null,
+		public readonly bool $isDeprecated = false,
 	) {
+	}
+
+	/**
+	 * Whether the route is excluded from the MCP export: ControllerDataManager drops its
+	 * mcpTool, so a null metadata on such a route means "removed", not "never declared".
+	 */
+	public function isMcpExportSuppressed(): bool
+	{
+		return $this->isHidden || $this->isDeprecated || !$this->isEnabled;
 	}
 
 	public function serialize(): ?string
@@ -45,6 +57,8 @@ class MethodDescription implements \Serializable
 			'isEnabled' => $this->isEnabled,
 			'queryParams' => $this->queryParams,
 			'isHidden' => $this->isHidden,
+			'mcpTool' => $this->mcpTool?->toArray(),
+			'isDeprecated' => $this->isDeprecated,
 		];
 	}
 
@@ -61,5 +75,7 @@ class MethodDescription implements \Serializable
 		$this->isEnabled = $data['isEnabled'];
 		$this->queryParams = $data['queryParams'];
 		$this->isHidden = $data['isHidden'] ?? false;
+		$this->mcpTool = McpToolMetadata::fromArray($data['mcpTool'] ?? null);
+		$this->isDeprecated = $data['isDeprecated'] ?? false;
 	}
 }

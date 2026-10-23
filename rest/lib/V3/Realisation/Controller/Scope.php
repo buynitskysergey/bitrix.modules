@@ -54,6 +54,7 @@ final class Scope extends RestController
 					if ($methodDescription->dtoFqcn && empty($dtos[$methodDescription->dtoFqcn]))
 					{
 						$dtos[$methodDescription->dtoFqcn] = $methodDescription->dtoFqcn::create();
+						$dtoFields[$methodDescription->dtoFqcn] = [];
 
 						/** @var DtoField $dtoField */
 						foreach ($dtos[$methodDescription->dtoFqcn]->getFields() as $dtoField)

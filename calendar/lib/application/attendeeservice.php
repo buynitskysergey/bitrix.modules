@@ -32,14 +32,33 @@ class AttendeeService
 	 */
 	private function filterViewableTeams(array $attendeesEntityList, int $userId): array
 	{
-		$teamAccessService = null;
+		$teamNodeIds = [];
+		foreach ($attendeesEntityList as $entity)
+		{
+			if (is_array($entity) && ($entity['entityId'] ?? null) === 'structure-node')
+			{
+				$nodeId = (int)($entity['id'] ?? 0);
+				if ($nodeId > 0)
+				{
+					$teamNodeIds[$nodeId] = $nodeId;
+				}
+			}
+		}
+
+		$viewableTeamIndex = empty($teamNodeIds)
+			? []
+			: array_fill_keys(
+				(new TeamAccessService())->getViewableTeamIds(array_values($teamNodeIds), $userId),
+				true,
+			)
+		;
+
 		$filtered = [];
 		foreach ($attendeesEntityList as $entity)
 		{
 			if (is_array($entity) && ($entity['entityId'] ?? null) === 'structure-node')
 			{
-				$teamAccessService ??= new TeamAccessService();
-				if (!$teamAccessService->canViewTeam((int)($entity['id'] ?? 0), $userId))
+				if (!isset($viewableTeamIndex[(int)($entity['id'] ?? 0)]))
 				{
 					continue;
 				}

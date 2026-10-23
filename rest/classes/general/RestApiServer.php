@@ -19,6 +19,7 @@ use Bitrix\Rest\UsageStatTable;
 use Bitrix\Rest\V3\Attribute\ResolvedBy;
 use Bitrix\Rest\V3\Controller\RestController;
 use Bitrix\Rest\V3\DefaultLanguage;
+use Bitrix\Rest\V3\Enum\CallChannel;
 use Bitrix\Rest\V3\Exception\AccessDeniedException;
 use Bitrix\Rest\V3\Exception\HttpsRequiredException;
 use Bitrix\Rest\V3\Exception\InsufficientScopeException;
@@ -443,6 +444,7 @@ class CRestApiServer extends CRestServer
 		$controller->setResponseLanguage($this->responseLanguage);
 		$controller->setServer($this);
 		$controller->setQueryParams($request->getQuery());
+		$controller->setCallChannel(CallChannel::RestTransport);
 
 		$manager = new RestManager();
 		$autoWirings = $manager->getAutoWirings();

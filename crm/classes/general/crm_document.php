@@ -9,6 +9,8 @@ use Bitrix\Crm;
 use Bitrix\Crm\AutomatedSolution\CapabilityAccessChecker;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\UserPermissions\ConfigurationCallSite;
+use Bitrix\Crm\Service\UserPermissions\ConfigurationScope;
 use Bitrix\Main\Localization\Loc;
 
 class CCrmDocument
@@ -1361,7 +1363,7 @@ class CCrmDocument
 		}
 	}
 
-	protected static function InternalizeEnumerationField($entityTypeID, array &$fields, $name)
+	public static function InternalizeEnumerationField($entityTypeID, array &$fields, $name)
 	{
 		if(!isset($fields[$name]))
 		{
@@ -1620,6 +1622,30 @@ class CCrmDocument
 			return false;
 		}
 
+		if (
+			$operation == CBPCanUserOperateOperation::CreateAutomation
+			&& array_key_exists('DocumentStatus', $arParameters)
+		)
+		{
+			$factory = Container::getInstance()->getFactory($entityTypeId);
+			if ($factory === null)
+			{
+				return false;
+			}
+
+			if ($factory->isCategoriesSupported())
+			{
+				$stage = $factory->getStage((string)$arParameters['DocumentStatus']);
+				$categoryId = $stage?->getCategoryId();
+				if ($categoryId === null || $factory->getCategory((int)$categoryId) === null)
+				{
+					return false;
+				}
+
+				$arParameters['DocumentCategoryId'] = (int)$categoryId;
+			}
+		}
+
 		$userId = intval($userId);
 		if (!array_key_exists('AllUserGroups', $arParameters))
 		{
@@ -1644,10 +1670,26 @@ class CCrmDocument
 		$permissionEntity = static::ResolvePermissionEntity($arDocumentID, $arParameters);
 		$userPermissions = CCrmPerms::GetUserPermissions($userId);
 
-		if (
-			$operation == \CBPCanUserOperateOperation::CreateWorkflow
-			|| $operation === CBPCanUserOperateOperation::DebugAutomation
-		)
+		// Templates belong to the document type, so the category of $arParameters is not part of the scope.
+		if ($operation == \CBPCanUserOperateOperation::CreateWorkflow)
+		{
+			$effectiveUserId = $userPermissions->GetUserID();
+			if (($arParameters['GlobalFieldAccess'] ?? null) === true)
+			{
+				return Container::getInstance()->getUserPermissions($effectiveUserId)->admin()->isCrmAdmin();
+			}
+
+			return Container::getInstance()
+				->getUserPermissions($effectiveUserId)
+				->configuration()
+				->canManageBizprocTemplates(
+					ConfigurationCallSite::BizprocDocument,
+					ConfigurationScope::ofEntityType($entityTypeId),
+				)
+			;
+		}
+
+		if ($operation === CBPCanUserOperateOperation::DebugAutomation)
 		{
 			return \CCrmAuthorizationHelper::CheckConfigurationUpdatePermission($userPermissions);
 		}
@@ -2170,7 +2212,7 @@ class CCrmDocument
 
 		return array();
 	}
-	protected static function PrepareEntityMultiFields(&$arFields, $typeName)
+	public static function PrepareEntityMultiFields(&$arFields, $typeName)
 	{
 		/*
 		--- Var.#1 (invalid) ---
@@ -2890,7 +2932,7 @@ class CCrmDocument
 		return in_array($feature, $supported);
 	}
 
-	protected static function sanitizeCommentsValue($comments)
+	public static function sanitizeCommentsValue($comments)
 	{
 		if ($comments !== '')
 		{
@@ -2912,7 +2954,7 @@ class CCrmDocument
 		return (COption::GetOptionString("crm", "bizproc_use_transaction", "N") === "Y");
 	}
 
-	protected static function castFileFieldValues($id, $typeId, $fieldId, $values)
+	public static function castFileFieldValues($id, $typeId, $fieldId, $values)
 	{
 		$arFileOptions = ['ENABLE_ID' => true];
 		$prevValue = null;

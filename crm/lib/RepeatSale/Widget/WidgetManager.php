@@ -19,7 +19,7 @@ final class WidgetManager
 {
 	use Singleton;
 
-	public function showBanner(): void
+	public function showBanner(array $dealFilterParams = []): void
 	{
 		$widgetConfig = $this->getWidgetConfig();
 		if ($widgetConfig === null)
@@ -34,12 +34,15 @@ final class WidgetManager
 		$isGlowingSettingsButton = $widgetConfig['isGlowingSettingsButton'] ?? false;
 		$showSettingsButton = $widgetConfig['showSettingsButton'] ?? true;
 
-		$params = Json::encode([
-			'showConfetti' => $showConfetti,
-			'periodTypeId' => $periodTypeId,
-			'isGlowingSettingsButton' => $isGlowingSettingsButton,
-			'showSettingsButton' => $showSettingsButton,
-		]);
+		$params = Json::encode(array_merge(
+			[
+				'showConfetti' => $showConfetti,
+				'periodTypeId' => $periodTypeId,
+				'isGlowingSettingsButton' => $isGlowingSettingsButton,
+				'showSettingsButton' => $showSettingsButton,
+			],
+			$dealFilterParams,
+		));
 
 		if ($type && $executeImmediately):
 			Extension::load([
@@ -104,8 +107,12 @@ final class WidgetManager
 			$isNeedShowConfetti = (new Confetti())->isNeedShowConfetti();
 			$isGlowingSettingsButton = ConfigureSegment::getInstance()->isGlowingSettingsButton();
 
-			$periodTypeId = CUserOptions::GetOption('crm', 'repeat-sale')['statistics-period-type-id']
-				?? PeriodType::Day30->value;
+			// User options keep the saved period as a string, and the widget compares it with the numeric
+			// period ids of its own enum.
+			$periodTypeId = (int)(
+				CUserOptions::GetOption('crm', 'repeat-sale')['statistics-period-type-id']
+				?? PeriodType::Day30->value
+			);
 
 			return [
 				'type' => 'statistics',

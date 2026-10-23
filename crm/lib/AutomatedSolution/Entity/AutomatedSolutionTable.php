@@ -8,6 +8,7 @@ use Bitrix\Main\Entity\DataManager;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\ORM\Event;
 use Bitrix\Main\ORM\EventResult;
+use Bitrix\Main\ORM\Fields\BooleanField;
 use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\Relations\CascadePolicy;
@@ -108,6 +109,19 @@ class AutomatedSolutionTable extends DataManager
 
 			(new IntegerField('SOURCE_ID'))
 				->configureDefaultValue(self::SOURCE_MANUAL)
+			,
+
+			(new IntegerField('VIBE_ID'))
+				->configureDefaultValue(0)
+			,
+
+			(new BooleanField('IS_VIBE_ENABLED'))
+				->configureStorageValues('N', 'Y')
+				->configureDefaultValue('N')
+			,
+
+			(new StringField('VIBE_CREATION_TOKEN'))
+				->configureSize(36)
 			,
 		];
 	}

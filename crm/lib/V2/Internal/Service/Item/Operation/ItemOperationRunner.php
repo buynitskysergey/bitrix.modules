@@ -47,6 +47,10 @@ final class ItemOperationRunner
 			$legacyItem = null;
 			$preparedOperation = $this->prepareInternal($command, $legacyItem, ['*']);
 		}
+		catch (CategoryDependentFieldException $exception)
+		{
+			return (new Result())->addError($exception->getError());
+		}
 		catch (\Throwable $throwable)
 		{
 			$observer?->onPreparationThrowable($legacyItem, $throwable);
@@ -62,6 +66,20 @@ final class ItemOperationRunner
 		$legacyItem = null;
 
 		return $this->prepareInternal($command, $legacyItem, $fieldsToSelect);
+	}
+
+	public function validateChangedFields(AbstractItemCommand $command, LegacyItem $legacyItem): Result
+	{
+		try
+		{
+			$this->throwIfChangedFieldDisabledInCategory($command->getItem(), $legacyItem);
+		}
+		catch (CategoryDependentFieldException $exception)
+		{
+			return (new Result())->addError($exception->getError());
+		}
+
+		return new Result();
 	}
 
 	private function prepareInternal(
@@ -88,6 +106,7 @@ final class ItemOperationRunner
 		$factory = $this->getFactory($entityTypeId);
 		$legacyItem = $factory->createItem();
 		$preparedLegacyItem = $legacyItem;
+		$this->throwIfChangedFieldDisabledInCategory($v2Item, $legacyItem);
 
 		ItemFieldMapper::copyToLegacy($v2Item, $legacyItem);
 
@@ -125,6 +144,7 @@ final class ItemOperationRunner
 			throw new ObjectNotFoundException("Item not found: {$entityTypeId}:{$itemId}");
 		}
 		$preparedLegacyItem = $legacyItem;
+		$this->throwIfChangedFieldDisabledInCategory($v2Item, $legacyItem);
 
 		ItemFieldMapper::copyChangedToLegacy($v2Item, $legacyItem);
 
@@ -139,6 +159,18 @@ final class ItemOperationRunner
 			$context,
 			$this->container->getUserPermissions($command->getUserId()),
 		);
+	}
+
+	private function throwIfChangedFieldDisabledInCategory(
+		\Bitrix\Crm\V2\Public\Entity\Item\Item $v2Item,
+		LegacyItem $legacyItem,
+	): void
+	{
+		$fieldName = ItemFieldMapper::findChangedFieldDisabledInCategory($v2Item, $legacyItem);
+		if ($fieldName !== null)
+		{
+			throw new CategoryDependentFieldException($fieldName);
+		}
 	}
 
 	private function getFactory(int $entityTypeId): Factory

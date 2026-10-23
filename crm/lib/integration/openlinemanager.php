@@ -79,6 +79,15 @@ class OpenLineManager
 		return self::$isEnabled;
 	}
 
+	/**
+	 * An imopenlines that cannot publish the actual chat close must not expose the close trigger.
+	 */
+	public static function isCloseTriggerEnabled(): bool
+	{
+		return self::isEnabled()
+			&& method_exists(\Bitrix\ImOpenLines\Crm::class, 'executeAutomationCloseTrigger');
+	}
+
 	public static function getSupportedConnectors(): array
 	{
 		if (!self::isEnabled())

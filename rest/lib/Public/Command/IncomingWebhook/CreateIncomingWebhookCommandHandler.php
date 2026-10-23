@@ -8,28 +8,10 @@ use Bitrix\Main\AccessDeniedException;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\ObjectNotFoundException;
 use Bitrix\Rest\Internal\Access\WebhookAccessChecker;
-use Bitrix\Rest\Internal\Contract\Repository\IncomingWebhookRepositoryInterface;
 use Bitrix\Rest\Internal\Entity\IncomingWebhook\IncomingWebhook;
-use Bitrix\Rest\Internal\Repository\IncomingWebhookRepository;
-use Bitrix\Rest\Internal\Repository\IntegrationRepository;
-use Bitrix\Rest\Internal\Service\VibePlus\TariffAccessService;
-use Bitrix\Rest\Service\ServiceContainer;
 
 final class CreateIncomingWebhookCommandHandler extends AbstractCreateIncomingWebhookCommandHandler
 {
-	private TariffAccessService $tariffAccessService;
-
-	public function __construct(
-		IncomingWebhookRepositoryInterface $repository = new IncomingWebhookRepository(),
-		IntegrationRepository $integrationRepository = new IntegrationRepository(),
-		?TariffAccessService $tariffAccessService = null,
-	)
-	{
-		parent::__construct($repository, $integrationRepository);
-		$this->tariffAccessService = $tariffAccessService
-			?? ServiceContainer::getInstance()->getVibePlusTariffAccessService();
-	}
-
 	/**
 	 * @throws AccessDeniedException
 	 * @throws ObjectNotFoundException
@@ -62,8 +44,6 @@ final class CreateIncomingWebhookCommandHandler extends AbstractCreateIncomingWe
 			}
 			$ownerUserId = $command->userId;
 		}
-
-		$this->tariffAccessService->ensurePresetAvailable();
 
 		return $this->createIntegration(
 			initiatorUserId: $command->userId,

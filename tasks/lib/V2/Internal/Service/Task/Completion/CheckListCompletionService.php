@@ -21,7 +21,7 @@ class CheckListCompletionService
 	{
 	}
 
-	public function completeForTask(int $taskId, int $userId): Result
+	public function completeForTask(int $taskId, int $userId, bool $useBatch = false): Result
 	{
 		$result = new Result();
 
@@ -45,6 +45,7 @@ class CheckListCompletionService
 			taskId: $taskId,
 			taskItemsFields: $taskItemsFields,
 			existingCheckList: $checkList,
+			useBatch: $useBatch,
 		);
 		if (!$completionResult->isSuccess())
 		{

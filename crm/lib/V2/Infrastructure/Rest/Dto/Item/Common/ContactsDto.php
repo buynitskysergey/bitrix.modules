@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common;
 
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Attribute\CrmRelation;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Provider\ItemProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Rule\ElementsInArrayFrom;
 use Bitrix\Crm\V2\Infrastructure\Rest\Validation\Rule\ElementsType;
@@ -23,6 +24,7 @@ class ContactsDto extends Dto
 	public ?int $contactId;
 
 	#[RelationToOne('contactId', 'id')]
+	#[CrmRelation(OwnerType::CONTACT)]
 	public ?ItemDto $contact;
 
 	#[Editable]
@@ -33,5 +35,6 @@ class ContactsDto extends Dto
 
 	#[RelationToMany('contactsId', 'id', ['id' => 'ASC'])]
 	#[ElementType(ItemDto::class)]
+	#[CrmRelation(OwnerType::CONTACT)]
 	public ?DtoCollection $contacts;
 }

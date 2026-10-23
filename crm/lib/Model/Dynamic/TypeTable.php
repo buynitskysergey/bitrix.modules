@@ -11,6 +11,7 @@ use Bitrix\Crm\EventRelationsTable;
 use Bitrix\Crm\Field;
 use Bitrix\Crm\Integration;
 use Bitrix\Crm\Integration\IntranetManager;
+use Bitrix\Crm\MessageSender\CustomTemplate\CrmZone;
 use Bitrix\Crm\Model\AssignedTable;
 use Bitrix\Crm\Model\FieldContentTypeTable;
 use Bitrix\Crm\Model\ItemCategoryTable;
@@ -28,6 +29,7 @@ use Bitrix\Crm\Service\Timeline\Monitor;
 use Bitrix\Crm\StatusTable;
 use Bitrix\Crm\Timeline\TimelineEntry;
 use Bitrix\Crm\V2\Internal\Integration\Rest\V3\SchemaCacheInvalidator;
+use Bitrix\Crm\V2\Internal\Service\Ai\FieldFillPolicyService;
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentNullException;
 use Bitrix\Main\Config\Option;
@@ -445,6 +447,8 @@ class TypeTable extends UserField\Internal\TypeDataManager
 		EntityConversionMapTable::deleteByEntityTypeId($entityTypeId);
 		EntityRelationTable::deleteByEntityTypeId($entityTypeId);
 		IntranetManager::deleteCustomPagesByEntityTypeId($entityTypeId);
+		FieldFillPolicyService::getInstance()->clearByEntityTypeId($entityTypeId);
+		CrmZone::cleanupTemplatesByEntityType($entityTypeId);
 
 		DynamicController::getInstance($entityTypeId)->eraseAll();
 

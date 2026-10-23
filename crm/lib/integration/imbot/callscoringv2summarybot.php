@@ -242,7 +242,7 @@ final class CallScoringV2SummaryBot extends Base
 	public static function uploadAvatar($lang = LANGUAGE_ID)
 	{
 		$avatarPath = Application::getDocumentRoot()
-			. '/bitrix/modules/' . self::MODULE_ID . '/install/avatar/' . self::BOT_CODE . '/default.png';
+			. '/bitrix/modules/' . self::MODULE_ID . '/install/avatar/' . self::BOT_CODE . '/default.webp';
 
 		return \CFile::makeFileArray($avatarPath);
 	}

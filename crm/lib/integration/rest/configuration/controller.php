@@ -4,6 +4,7 @@
 namespace Bitrix\Crm\Integration\Rest\Configuration;
 
 
+use Bitrix\Crm\Integration\Analytics\Dictionary;
 use Bitrix\Main\Event;
 use Bitrix\Main\Localization\Loc;
 use Exception;
@@ -248,6 +249,18 @@ class Controller
 		if (static::check($event))
 		{
 			$data = $event->getParameters();
+			if (in_array(
+				$data['CODE'] ?? null,
+				[
+					Entity\AutomatedSolution::ENTITY_CODE,
+					Entity\DynamicTypes::ENTITY_CODE,
+				],
+				true,
+			))
+			{
+				$data[Dictionary::CONTEXT_APPLICATION_SOURCE] = static::resolveApplicationSource($data);
+			}
+
 			try
 			{
 				switch ($data['CODE'])
@@ -299,5 +312,26 @@ class Controller
 		}
 
 		return $result;
+	}
+
+	private static function resolveApplicationSource(array $data): ?string
+	{
+		$appId = (int)($data['APP_ID'] ?? 0);
+		if ($appId <= 0)
+		{
+			return null;
+		}
+
+		try
+		{
+			$app = \Bitrix\Rest\AppTable::getByClientId($appId);
+			$clientId = $app['CLIENT_ID'] ?? null;
+
+			return is_string($clientId) ? Dictionary::getApplicationSource($clientId) : null;
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
 	}
 }

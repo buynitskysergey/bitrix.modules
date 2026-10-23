@@ -24,6 +24,8 @@ use Bitrix\Crm\Rest;
 use Bitrix\Crm\Security\EntityAuthorization;
 use Bitrix\Crm\Service;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\UserPermissions\ConfigurationCallSite;
+use Bitrix\Crm\Service\UserPermissions\ConfigurationScope;
 use Bitrix\Crm\Settings\RestSettings;
 use Bitrix\Crm\Tracking;
 use Bitrix\Crm\WebForm;
@@ -440,6 +442,7 @@ final class CCrmRestService extends IRestService
 	private static $PROXIES = array();
 	private const SYSTEM_FILE_FIELDS = array(
 		CCrmOwnerType::Contact => array('PHOTO'),
+		CCrmOwnerType::Company => array('LOGO'),
 	);
 
 	public static function onRestServiceBuildDescription()
@@ -6995,7 +6998,7 @@ class CCrmDealCategoryProxy extends CCrmRestProxyBase
 	}
 	protected function innerAdd(&$fields, &$errors, array $params = null)
 	{
-		if (!\Bitrix\Crm\Service\Container::getInstance()->getUserPermissions()->isCrmAdmin())
+		if (!$this->canManageFunnels())
 		{
 			$errors[] = 'Access denied.';
 			$this->sendCreateAnalyticsEvent(Dictionary::STATUS_ERROR);
@@ -7019,6 +7022,18 @@ class CCrmDealCategoryProxy extends CCrmRestProxyBase
 		}
 	}
 
+	private function canManageFunnels(): bool
+	{
+		return Container::getInstance()
+			->getUserPermissions()
+			->configuration()
+			->canManageFunnels(
+				ConfigurationCallSite::LegacyRestDealCategory,
+				ConfigurationScope::ofEntityType(\CCrmOwnerType::Deal)
+			)
+		;
+	}
+
 	protected function sendCreateAnalyticsEvent(string $status): void
 	{
 		(new Funnel\CreateEvent(section: Dictionary::SECTION_REST))
@@ -7030,7 +7045,7 @@ class CCrmDealCategoryProxy extends CCrmRestProxyBase
 
 	protected function innerUpdate($ID, &$fields, &$errors, array $params = null)
 	{
-		if (!\Bitrix\Crm\Service\Container::getInstance()->getUserPermissions()->isCrmAdmin())
+		if (!$this->canManageFunnels())
 		{
 			$errors[] = 'Access denied.';
 			$this->sendRenameAnalyticsEvent(Dictionary::STATUS_ERROR);
@@ -7074,7 +7089,7 @@ class CCrmDealCategoryProxy extends CCrmRestProxyBase
 	protected function innerDelete($ID, &$errors, array $params = null)
 	{
 		$container = \Bitrix\Crm\Service\Container::getInstance();
-		if (!$container->getUserPermissions()->isCrmAdmin())
+		if (!$this->canManageFunnels())
 		{
 			$errors[] = 'Access denied.';
 			$this->sendDeleteAnalyticsEvent(Dictionary::STATUS_ERROR);
@@ -9176,15 +9191,16 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 	}
 	protected function innerAdd(&$fields, &$errors, array $params = null)
 	{
-		if(!CCrmStatus::CheckCreatePermission())
+		$entityID = $fields['ENTITY_ID'] ?? '';
+		$statusID = $fields['STATUS_ID'] ?? '';
+		$color = $fields['COLOR'] ?? $fields['EXTRA']['COLOR'] ?? '';
+
+		if(!CCrmStatus::CheckCreatePermission(is_string($entityID) ? $entityID : null))
 		{
 			$errors[] = 'Access denied.';
 			return false;
 		}
 
-		$entityID = $fields['ENTITY_ID'] ?? '';
-		$statusID = $fields['STATUS_ID'] ?? '';
-		$color = $fields['COLOR'] ?? $fields['EXTRA']['COLOR'] ?? '';
 		if($entityID === '' || $statusID === '')
 		{
 			if($entityID === '')
@@ -9283,14 +9299,17 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 	}
 	protected function innerUpdate($ID, &$fields, &$errors, array $params = null)
 	{
-		if(!CCrmStatus::CheckUpdatePermission($ID))
+		// Read before the check and answered after it: the dictionary of the status is what tells whether
+		// the stage right applies at all, and a status nobody may touch must not report its existence.
+		$dbResult = CCrmStatus::GetList(array(), array('ID' => $ID));
+		$currentFields = $dbResult ? $dbResult->Fetch() : null;
+
+		if(!CCrmStatus::CheckUpdatePermission($ID, is_array($currentFields) ? $currentFields['ENTITY_ID'] : null))
 		{
 			$errors[] = 'Access denied.';
 			return false;
 		}
 
-		$dbResult = CCrmStatus::GetList(array(), array('ID' => $ID));
-		$currentFields = $dbResult ? $dbResult->Fetch() : null;
 		if(!is_array($currentFields))
 		{
 			$errors[] = 'Status is not found.';
@@ -9326,14 +9345,16 @@ class CCrmStatusRestProxy extends CCrmRestProxyBase
 	}
 	protected function innerDelete($ID, &$errors, array $params = null)
 	{
-		if(!CCrmStatus::CheckDeletePermission($ID))
+		// Read before the check and answered after it, as in innerUpdate().
+		$dbResult = CCrmStatus::GetList(array(), array('ID' => $ID));
+		$currentFields = $dbResult ? $dbResult->Fetch() : null;
+
+		if(!CCrmStatus::CheckDeletePermission($ID, is_array($currentFields) ? $currentFields['ENTITY_ID'] : null))
 		{
 			$errors[] = 'Access denied.';
 			return false;
 		}
 
-		$dbResult = CCrmStatus::GetList(array(), array('ID' => $ID));
-		$currentFields = $dbResult ? $dbResult->Fetch() : null;
 		if(!is_array($currentFields))
 		{
 			$errors[] = 'Status is not found.';
@@ -9496,7 +9517,7 @@ class CCrmStatusInvoiceRestProxy extends CCrmRestProxyBase
 		/** @global CMain $APPLICATION */
 		global $APPLICATION;
 
-		if(!CCrmStatus::CheckCreatePermission())
+		if(!CCrmStatus::CheckCreatePermission('INVOICE_STATUS'))
 		{
 			$errors[] = 'Access denied.';
 			return false;
@@ -9557,7 +9578,7 @@ class CCrmStatusInvoiceRestProxy extends CCrmRestProxyBase
 		/** @global CMain $APPLICATION */
 		global $APPLICATION;
 
-		if(!CCrmStatus::CheckUpdatePermission($ID))
+		if(!CCrmStatus::CheckUpdatePermission($ID, 'INVOICE_STATUS'))
 		{
 			$errors[] = 'Access denied.';
 			return false;
@@ -9588,7 +9609,7 @@ class CCrmStatusInvoiceRestProxy extends CCrmRestProxyBase
 		/** @global CMain $APPLICATION */
 		global $APPLICATION;
 
-		if(!CCrmStatus::CheckDeletePermission($ID))
+		if(!CCrmStatus::CheckDeletePermission($ID, 'INVOICE_STATUS'))
 		{
 			$errors[] = 'Access denied.';
 			return false;

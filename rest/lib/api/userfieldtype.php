@@ -121,9 +121,9 @@ class UserFieldType extends \IRestService
 			throw new Exceptions\ArgumentNullException("HANDLER");
 		}
 
-		$appInfo = AppTable::getByClientId($server->getClientId());;
+		$appInfo = AppTable::getByClientId($server->getClientId());
 
-		HandlerHelper::checkCallback($placementHandler, $appInfo);
+		HandlerHelper::checkCallback($placementHandler);
 
 		$placementBind = array(
 			'APP_ID' => $appInfo['ID'],
@@ -216,8 +216,7 @@ class UserFieldType extends \IRestService
 		$updateFields = array();
 		if(!empty($param['HANDLER']))
 		{
-			$appInfo = AppTable::getByClientId($server->getClientId());;
-			HandlerHelper::checkCallback($param['HANDLER'], $appInfo);
+			HandlerHelper::checkCallback($param['HANDLER']);
 
 			$updateFields['PLACEMENT_HANDLER'] = $param['HANDLER'];
 		}

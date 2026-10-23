@@ -43,6 +43,10 @@ class ResultService
 	public const RESULT_EDIT = 'RESULT_EDIT';
 	public const RESULT_REMOVE = 'RESULT_REMOVE';
 
+	// Each normalization pass peels one nesting level of empty blocks, so an unbounded walk costs
+	// O(length x depth) on crafted deep nesting. Mirrored in result-editor.js getPreparedText().
+	private const MAX_EMPTY_BLOCK_PASSES = 16;
+
 	public function __construct(
 		private readonly UpdateTaskService $updateTaskService,
 		private readonly PushService $pushService,
@@ -114,6 +118,8 @@ class ResultService
 		{
 			throw new InvalidArgumentException('Task id must be set');
 		}
+
+		$this->assertNotEmpty($result->text, $result->fileIds);
 
 		// check if task exists
 		$this->getTask((int)$result->taskId);
@@ -227,6 +233,8 @@ class ResultService
 			previewId: $result->previewId ?? $resultInDb->previewId,
 			messageId: $resultInDb->messageId,
 		);
+
+		$this->assertNotEmpty($updatedResult->text, $updatedResult->fileIds);
 
 		$this->taskResultRepository->save($updatedResult, $userId);
 
@@ -389,6 +397,50 @@ class ResultService
 				'resultId' => $result->getId(),
 			],
 		);
+	}
+
+	private function assertNotEmpty(?string $text, ?array $fileIds): void
+	{
+		// a file alone satisfies the invariant, so the text does not have to be normalized at all
+		if (!empty($fileIds))
+		{
+			return;
+		}
+
+		// Mirror the frontend emptiness rule (result-editor.js getPreparedText):
+		// strip empty BBCode paragraphs, block containers and lists so they count as empty.
+		// Keep the whitespace set aligned with JavaScript trim(); PCRE \s also matches U+0085.
+		$preparedText = preg_replace(
+			'/\[p]\n|\[p][\x{0009}-\x{000D}\p{Z}\x{FEFF}]*\[\/p]|\[\/p]/iu',
+			'',
+			(string)$text,
+		) ?? '';
+
+		$passes = 0;
+		do
+		{
+			$previousText = $preparedText;
+			$preparedText = preg_replace(
+				'/\[(quote|code|spoiler)][\x{0009}-\x{000D}\p{Z}\x{FEFF}]*\[\/\1]/iu',
+				'',
+				$preparedText,
+			) ?? '';
+			$preparedText = preg_replace(
+				'/\[list(?:=[^\]]+)?](?:[\x{0009}-\x{000D}\p{Z}\x{FEFF}]*\[\*])*[\x{0009}-\x{000D}\p{Z}\x{FEFF}]*\[\/list]/iu',
+				'',
+				$preparedText,
+			) ?? '';
+			++$passes;
+		}
+		while ($preparedText !== $previousText && $passes < self::MAX_EMPTY_BLOCK_PASSES);
+
+		$isTextEmpty = preg_match('/[^\x{0009}-\x{000D}\p{Z}\x{FEFF}]/u', $preparedText) !== 1;
+
+		// a result must contain either non-empty text or at least one file (files are handled above)
+		if ($isTextEmpty)
+		{
+			throw new InvalidArgumentException(Loc::getMessage('TASKS_RESULT_SERVICE_EMPTY_RESULT'));
+		}
 	}
 
 	private function getTask(int $taskId): Task

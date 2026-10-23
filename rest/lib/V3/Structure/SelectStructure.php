@@ -6,6 +6,7 @@ use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\DtoCollection;
 use Bitrix\Rest\V3\Dto\DtoField;
 use Bitrix\Rest\V3\Dto\PropertyHelper;
+use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Exception\InvalidSelectException;
 use Bitrix\Rest\V3\Exception\UnknownDtoPropertyException;
 use Bitrix\Rest\V3\Interaction\Relation;
@@ -146,7 +147,7 @@ final class SelectStructure extends Structure
 	private static function isNestedDtoField(DtoField $field): bool
 	{
 		$type = $field->getPropertyType();
-		if (is_subclass_of($type, Dto::class))
+		if (TypeHelper::isDto($type))
 		{
 			return true;
 		}
@@ -155,7 +156,7 @@ final class SelectStructure extends Structure
 		{
 			$elementType = $field->getElementType();
 
-			return $elementType !== null && is_subclass_of($elementType, Dto::class);
+			return TypeHelper::isDto($elementType);
 		}
 
 		return false;
@@ -340,8 +341,7 @@ final class SelectStructure extends Structure
 
 			$type = $relationDtoField->getPropertyType();
 			$isMultipleDto = $type === DtoCollection::class &&
-				$relationDtoField->getElementType() !== null &&
-				is_subclass_of($relationDtoField->getElementType(), Dto::class);
+				TypeHelper::isDto($relationDtoField->getElementType());
 
 			if ($isMultipleDto)
 			{

@@ -641,7 +641,14 @@ abstract class CheckListFacade
 		}
 
 		$traversedItems = [];
-		$newItemsTree = static::getObjectStructuredRoots($newItems, $entityId, $userId, 'PARENT_NODE_ID');
+		$newItems = static::normalizeInvalidSortIndexesByPayloadOrder($newItems, 'PARENT_NODE_ID');
+		$newItemsTree = static::getObjectStructuredRoots(
+			$newItems,
+			$entityId,
+			$userId,
+			'PARENT_NODE_ID',
+			shouldRecountSortIndexes: false,
+		);
 
 		foreach ($newItemsTree as $item)
 		{
@@ -1076,23 +1083,80 @@ abstract class CheckListFacade
 	}
 
 	/**
+	 * Keeps unique integer indexes, including sparse ones, and normalizes only invalid sibling sets.
+	 * Empty parent identifiers belong to the root sibling set.
+	 */
+	private static function normalizeInvalidSortIndexesByPayloadOrder(array $items, string $keyToParent): array
+	{
+		$siblingItemKeys = [];
+
+		foreach ($items as $itemKey => $item)
+		{
+			$parentNodeId = (string)($item[$keyToParent] ?? 0);
+			$parentNodeId = $parentNodeId === '' ? '0' : $parentNodeId;
+			$siblingItemKeys[$parentNodeId][] = $itemKey;
+		}
+
+		foreach ($siblingItemKeys as $itemKeys)
+		{
+			$uniqueSortIndexes = [];
+
+			foreach ($itemKeys as $itemKey)
+			{
+				$sortIndex = $items[$itemKey]['SORT_INDEX'] ?? null;
+				$sortIndex = filter_var($sortIndex, FILTER_VALIDATE_INT);
+				if ($sortIndex === false || isset($uniqueSortIndexes[$sortIndex]))
+				{
+					break;
+				}
+
+				$uniqueSortIndexes[$sortIndex] = true;
+			}
+
+			if (count($uniqueSortIndexes) === count($itemKeys))
+			{
+				continue;
+			}
+
+			foreach ($itemKeys as $sortIndex => $itemKey)
+			{
+				$items[$itemKey]['SORT_INDEX'] = $sortIndex;
+			}
+		}
+
+		return $items;
+	}
+
+	/**
 	 * Returns array of roots with subtrees as object structures.
 	 *
 	 * @param array $items
 	 * @param int $entityId
 	 * @param int $userId
 	 * @param string $keyToParent
+	 * @param bool $shouldRecountSortIndexes
 	 * @return array
 	 * @throws NotImplementedException
 	 */
-	public static function getObjectStructuredRoots($items, $entityId, $userId, $keyToParent = 'PARENT_ID')
+	public static function getObjectStructuredRoots(
+		$items,
+		$entityId,
+		$userId,
+		$keyToParent = 'PARENT_ID',
+		bool $shouldRecountSortIndexes = true
+	)
 	{
 		$result = [];
 
 		$arrayStructuredRoots = static::getArrayStructuredRoots($items, $keyToParent);
 		foreach ($arrayStructuredRoots as $root)
 		{
-			$checkList = static::makeCheckListItem($root, $entityId, $userId);
+			$checkList = static::makeCheckListItem(
+				$root,
+				$entityId,
+				$userId,
+				$shouldRecountSortIndexes,
+			);
 			$checkList->setFields(['PARENT_ID' => 0]);
 
 			$result[] = $checkList;
@@ -1105,10 +1169,16 @@ abstract class CheckListFacade
 	 * @param array $root
 	 * @param int $entityId
 	 * @param int $userId
+	 * @param bool $shouldRecountSortIndexes
 	 * @return CheckList
 	 * @throws NotImplementedException
 	 */
-	private static function makeCheckListItem($root, $entityId, $userId)
+	private static function makeCheckListItem(
+		$root,
+		$entityId,
+		$userId,
+		bool $shouldRecountSortIndexes = true
+	)
 	{
 		static::$nodeId++;
 
@@ -1118,11 +1188,11 @@ abstract class CheckListFacade
 		/** @var CheckListFacade $facade */
 		$facade = static::class;
 
-		$tree = new CheckList($nodeId, $userId, $facade, $fields);
+		$tree = new CheckList($nodeId, $userId, $facade, $fields, $shouldRecountSortIndexes);
 
 		foreach ($root['SUB_TREE'] as $item)
 		{
-			$tree->add(static::makeCheckListItem($item, $entityId, $userId));
+			$tree->add(static::makeCheckListItem($item, $entityId, $userId, $shouldRecountSortIndexes));
 		}
 
 		return $tree;

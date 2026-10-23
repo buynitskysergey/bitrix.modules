@@ -10,6 +10,7 @@ use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\CategoriesDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\CompanyDto as CommonCompanyDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\ContactsDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\ItemDto;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Attribute\CrmRelation;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\MultifieldsDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\ObserversDto;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\Common\ProductsDto;
@@ -37,7 +38,12 @@ use Bitrix\Rest\V3\Schema\GeneratedDto;
 
 class ItemDtoGenerator implements DtoGeneratorInterface
 {
+	private const GENERATED_CLASS_PREFIX = 'EntityType';
+	private const GENERATED_CLASS_SUFFIX = 'Dto';
+
 	private ?RestIntegrationFactory $restIntegrationFactory = null;
+	/** @var array<string, EntityType|null> */
+	private static array $entityTypeByGeneratedDtoClass = [];
 
 	public function __construct(?RestIntegrationFactory $restIntegrationFactory = null)
 	{
@@ -51,11 +57,10 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 
 		$entityType = EntityType::fromId($entityTypeId);
 		$isFileContractAvailable = $this->getRestIntegrationFactory()->isFileContractAvailable();
-		$cacheKey = static::class . ':' . ($isFileContractAvailable ? $entityTypeId : $entityTypeId . ':file-unavailable');
+		$cacheKey = $this->getCacheKey($entityType, $isFileContractAvailable);
 		if (!isset($dtoByEntityType[$cacheKey]))
 		{
 			$entityTypeSettings = $this->getEntityTypeSettings($entityType);
-
 			$fields = $this->filterFieldsByRegisteredItemFields(
 				$entityType,
 				$this->getEntitySpecificFields($entityType),
@@ -64,6 +69,7 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 			{
 				$fields = array_merge($fields, $this->getSmartProcessFields($entityType));
 			}
+			$fields = array_merge($fields, $this->getCommonReadFields($entityType));
 			$fields = array_merge($fields, $this->getCustomFields($entityType));
 			if ($entityTypeSettings->hasStages())
 			{
@@ -73,7 +79,11 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 			{
 				$fields = array_merge($fields, $this->getBeginCloseDatesFields());
 			}
-			if ($entityTypeSettings->hasCategories() && $entityType->getId() !== OwnerType::CONTACT)
+			if (
+				$entityTypeSettings->hasCategories()
+				&& $entityType->getId() !== OwnerType::CONTACT
+				&& $entityType->getId() !== OwnerType::COMPANY
+			)
 			{
 				$fields = array_merge($fields, $this->getCategoriesFields());
 			}
@@ -143,6 +153,12 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 		return $dtoByEntityType[$cacheKey];
 	}
 
+	protected function getCacheKey(EntityType $entityType, bool $isFileContractAvailable): string
+	{
+		return static::class . ':' . $entityType->getId()
+			. ($isFileContractAvailable ? '' : ':file-unavailable');
+	}
+
 	public function getGeneratedNamespace(): string
 	{
 		return __NAMESPACE__;
@@ -150,7 +166,31 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 
 	public function getGeneratedClassName(EntityType $entityType): string
 	{
-		return 'EntityType' . $entityType->getCode() . 'Dto';
+		return self::GENERATED_CLASS_PREFIX . $entityType->getCode() . self::GENERATED_CLASS_SUFFIX;
+	}
+
+	public function getEntityTypeByGeneratedDtoClass(string $dtoClass): ?EntityType
+	{
+		$cacheKey = static::class . ':' . $dtoClass;
+		if (array_key_exists($cacheKey, self::$entityTypeByGeneratedDtoClass))
+		{
+			return self::$entityTypeByGeneratedDtoClass[$cacheKey];
+		}
+
+		$prefix = $this->getGeneratedNamespace() . '\\' . self::GENERATED_CLASS_PREFIX;
+		if (!str_starts_with($dtoClass, $prefix) || !str_ends_with($dtoClass, self::GENERATED_CLASS_SUFFIX))
+		{
+			return self::$entityTypeByGeneratedDtoClass[$cacheKey] = null;
+		}
+
+		$code = substr($dtoClass, strlen($prefix), -strlen(self::GENERATED_CLASS_SUFFIX));
+
+		return self::$entityTypeByGeneratedDtoClass[$cacheKey] = EntityType::fromCode($code);
+	}
+
+	public function isGeneratedDtoClass(string $dtoClass): bool
+	{
+		return $this->getEntityTypeByGeneratedDtoClass($dtoClass) !== null;
 	}
 
 	protected function getEntityTypeSettings(EntityType $entityType): EntityTypeSettings
@@ -165,16 +205,16 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	{
 		if ($entityType->getId() === OwnerType::LEAD)
 		{
-			return $this->dtoFieldsCollectionToArray((new LeadDto($entityType))->getFields());
+			return $this->dtoFieldsCollectionToArray((new LeadDto($entityType))->getFields(), LeadDto::class);
 		}
 		if ($entityType->getId() === OwnerType::DEAL)
 		{
-			return $this->dtoFieldsCollectionToArray((new DealDto($entityType))->getFields());
+			return $this->dtoFieldsCollectionToArray((new DealDto($entityType))->getFields(), DealDto::class);
 		}
 		if ($entityType->getId() === OwnerType::CONTACT)
 		{
 			return array_merge(
-				$this->dtoFieldsCollectionToArray((new ContactDto($entityType))->getFields()),
+				$this->dtoFieldsCollectionToArray((new ContactDto($entityType))->getFields(), ContactDto::class),
 				[
 					new DtoField(
 						propertyName: 'type',
@@ -188,11 +228,11 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 		}
 		if ($entityType->getId() === OwnerType::COMPANY)
 		{
-			return $this->dtoFieldsCollectionToArray((new CompanyDto($entityType))->getFields());
+			return $this->dtoFieldsCollectionToArray((new CompanyDto($entityType))->getFields(), CompanyDto::class);
 		}
 		if ($entityType->getId() === OwnerType::QUOTE)
 		{
-			return $this->dtoFieldsCollectionToArray((new QuoteDto($entityType))->getFields());
+			return $this->dtoFieldsCollectionToArray((new QuoteDto($entityType))->getFields(), QuoteDto::class);
 		}
 		if ($entityType->getId() === OwnerType::SMART_INVOICE)
 		{
@@ -210,6 +250,22 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 				type: DtoField::DTO_FIELD_TYPE_PROPERTY,
 			),
 		];
+	}
+
+	/** @return DtoField[] */
+	protected function getCommonReadFields(EntityType $entityType): array
+	{
+		$fields = [
+			new DtoField(propertyName: 'entityTypeId', propertyType: 'int', type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD, nullable: true),
+			new DtoField(propertyName: 'canRead', propertyType: 'bool', type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD),
+			new DtoField(propertyName: 'url', propertyType: 'string', type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD, nullable: true),
+		];
+		if ($entityType->getId() === OwnerType::CONTACT)
+		{
+			$fields[] = new DtoField(propertyName: 'title', propertyType: 'string', type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD, nullable: true);
+		}
+
+		return $fields;
 	}
 
 	/**
@@ -317,9 +373,11 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	 */
 	protected function getCustomFields(EntityType $entityType): array
 	{
+		$customFieldRegistry = CustomFieldRegistry::getInstance();
 		$customFieldGenerator = new CustomFieldDtoGenerator(
-			CustomFieldRegistry::getInstance(),
+			$customFieldRegistry,
 			$this->getRestIntegrationFactory(),
+			new RestCustomFieldDescriptorProvider($customFieldRegistry),
 		);
 
 		return $customFieldGenerator->generateCustomFields($entityType);
@@ -367,7 +425,7 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	 */
 	protected function getContactsFields(): array
 	{
-		return $this->dtoFieldsCollectionToArray((new ContactsDto())->getFields());
+		return $this->dtoFieldsCollectionToArray((new ContactsDto())->getFields(), ContactsDto::class);
 	}
 
 	/**
@@ -375,7 +433,7 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	 */
 	protected function getCompanyFields(): array
 	{
-		return $this->dtoFieldsCollectionToArray((new CommonCompanyDto())->getFields());
+		return $this->dtoFieldsCollectionToArray((new CommonCompanyDto())->getFields(), CommonCompanyDto::class);
 	}
 
 	/**
@@ -391,6 +449,20 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 	 */
 	protected function getMyCompanyFields(): array
 	{
+		$myCompanyField = $this->setCrmRelationTarget(
+			new DtoField(
+				propertyName: 'myCompany',
+				propertyType: ItemDto::class,
+				type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD,
+				nullable: true,
+				relation: new DtoFieldRelation(
+					thisField: 'myCompanyId',
+					refField: 'id',
+				),
+			),
+			OwnerType::COMPANY,
+		);
+
 		return [
 			new DtoField(
 				propertyName: 'myCompanyId',
@@ -402,16 +474,7 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 				filterable: true,
 				sortable: true,
 			),
-			new DtoField(
-				propertyName: 'myCompany',
-				propertyType: ItemDto::class,
-				type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD,
-				nullable: true,
-				relation: new DtoFieldRelation(
-					thisField: 'myCompanyId',
-					refField: 'id',
-				),
-			),
+			$myCompanyField,
 		];
 	}
 
@@ -464,9 +527,10 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 					new InArrayFrom(ItemProvider::class, ['entityTypeId' => $parentEntityType->getId()]),
 				],
 				editableGroups: [],
+				filterable: true,
 				nullable: true,
 			);
-			$result[] = new DtoField(
+			$result[] = $this->setCrmRelationTarget(new DtoField(
 				propertyName: 'related' . $parentEntityType->getCode(),
 				propertyType: ItemDto::class,
 				type: DtoField::DTO_FIELD_TYPE_DYNAMIC_FIELD,
@@ -475,13 +539,13 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 					thisField: 'related' . $parentEntityType->getCode() . 'Id',
 					refField: 'id',
 				),
-			);
+			), $parentEntityType->getId());
 		}
 
 		return $result;
 	}
 
-	protected function dtoFieldsCollectionToArray(DtoFieldsCollection $fields): array
+	protected function dtoFieldsCollectionToArray(DtoFieldsCollection $fields, ?string $dtoClass = null): array
 	{
 		$result = [];
 		/** @var DtoField $field */
@@ -493,10 +557,52 @@ class ItemDtoGenerator implements DtoGeneratorInterface
 				static fn(object $rule): object => clone $rule,
 				$fieldData['validationRules'] ?? [],
 			);
-			$result[] = DtoField::fromArray($fieldData);
+			$field = DtoField::fromArray($fieldData);
+			if ($dtoClass !== null)
+			{
+				$field = $this->applyCrmRelationTarget($field, $dtoClass);
+			}
+			$result[] = $field;
 		}
 
 		return $result;
+	}
+
+	private function applyCrmRelationTarget(DtoField $field, string $dtoClass): DtoField
+	{
+		$reflectionClass = new \ReflectionClass($dtoClass);
+		if (!$reflectionClass->hasProperty($field->getPropertyName()))
+		{
+			return $field;
+		}
+
+		$attributes = $reflectionClass
+			->getProperty($field->getPropertyName())
+			->getAttributes(CrmRelation::class);
+		if ($attributes === [])
+		{
+			return $field;
+		}
+
+		return $this->setCrmRelationTarget($field, $attributes[0]->newInstance()->targetEntityTypeId);
+	}
+
+	private function setCrmRelationTarget(DtoField $field, int $targetEntityTypeId): DtoField
+	{
+		$targetEntityType = EntityType::fromId($targetEntityTypeId);
+		$targetDtoClass = $this->getGeneratedNamespace() . '\\' . $this->getGeneratedClassName($targetEntityType);
+		$fieldData = $field->toArray();
+		if ($field->getPropertyType() === \Bitrix\Rest\V3\Dto\DtoCollection::class || $field->isMultiple())
+		{
+			$fieldData['elementType'] = $targetDtoClass;
+		}
+		else
+		{
+			$fieldData['propertyType'] = $targetDtoClass;
+			$fieldData['elementType'] = null;
+		}
+
+		return DtoField::fromArray($fieldData);
 	}
 
 	protected function addEntityTypeContextArg(DtoField $field, EntityType $entityType): void

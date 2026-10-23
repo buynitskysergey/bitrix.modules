@@ -101,6 +101,7 @@ CModule::AddAutoloadClasses(
 		'CCrmFileProxy' => 'classes/general/file_proxy.php',
 		'CAllCrmMailTemplate' => 'classes/general/mail_template.php',
 		'CCrmMailTemplate' => 'classes/mysql/mail_template.php',
+		'CCrmMailTemplateError' => 'classes/general/mail_template.php',
 		'CCrmMailTemplateScope' =>  'classes/general/mail_template.php',
 		'CCrmTemplateAdapter' =>  'classes/general/template_adapter.php',
 		'CCrmTemplateMapper' =>  'classes/general/template_mapper.php',

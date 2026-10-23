@@ -242,6 +242,10 @@ class Form
 			return false;
 		}
 
+		// The whole row is read, but the configuration version is not part of the form document:
+		// it belongs to the storage layer, and FormTable::onBeforeUpdate() is its only author
+		unset($result['DATE_MODIFY']);
+
 		if (!is_array($result['FORM_SETTINGS']))
 		{
 			$result['FORM_SETTINGS'] = [];
@@ -268,6 +272,25 @@ class Form
 		}
 
 		$this->params = $result;
+		return true;
+	}
+
+	public function loadOnlySecurityData($id): bool
+	{
+		$this->setId($id);
+		$result = Internals\FormTable::query()
+			->setSelect(['ACTIVE', 'SECURITY_CODE'])
+			->where('ID', $id)
+			->setLimit(1)
+			->fetch()
+		;
+		if (!$result)
+		{
+			return false;
+		}
+
+		$this->params = $result;
+
 		return true;
 	}
 
@@ -497,7 +520,10 @@ class Form
 			}
 
 			$formResult = new Main\Entity\Result;
+			// Both dates are required columns the storage fills itself, and the editor document
+			// carries neither, so the pre-check is given the values the write would store
 			$result['DATE_CREATE'] = new Main\Type\DateTime();
+			$result['DATE_MODIFY'] = new Main\Type\DateTime();
 			Internals\FormTable::checkFields($formResult, $this->id, $result);
 			$this->prepareResult('FIELDS', $formResult);
 
@@ -602,6 +628,8 @@ class Form
 		if ($this->id)
 		{
 			unset($result['ID']);
+			// FormTable::onBeforeUpdate() advances the version only when the fields omit it
+			unset($result['DATE_MODIFY']);
 			$formResult = Internals\FormTable::update($this->id, $result);
 			$isAdded = false;
 		}
@@ -615,6 +643,8 @@ class Form
 
 		if (!$formResult->isSuccess())
 		{
+			$this->prepareResult('FIELDS', $formResult);
+
 			return;
 		}
 
@@ -1245,7 +1275,14 @@ class Form
 			return null;
 		}
 
-		unset($form['ID'], $form['DATE_CREATE'], $form['ACTIVE_CHANGE_DATE'], $form['SECURITY_CODE'], $form['XML_ID']);
+		unset(
+			$form['ID'],
+			$form['DATE_CREATE'],
+			$form['DATE_MODIFY'],
+			$form['ACTIVE_CHANGE_DATE'],
+			$form['SECURITY_CODE'],
+			$form['XML_ID']
+		);
 		$form['NAME'] = Loc::getMessage('CRM_WEBFORM_FORM_COPY_NAME_PREFIX') . ' ' . $form['NAME'];
 		$form['ACTIVE'] = 'N';
 		$form['IS_SYSTEM'] = 'N';
@@ -1955,10 +1992,19 @@ class Form
 			static::activate($form['ID'], false);
 		}
 
-		if (!self::canRemoveCopyright())
+		if (!static::canRemoveCopyright())
 		{
 			$connection = Main\Application::getConnection();
-			$connection->query("UPDATE b_crm_webform SET COPYRIGHT_REMOVED='N'");
+			$sqlHelper = $connection->getSqlHelper();
+			$modifiedTimeColumn = $sqlHelper->quote('DATE_MODIFY');
+			$currentTime = $sqlHelper->convertToDbDateTime(new Main\Type\DateTime());
+			$incrementedModifiedTime = $sqlHelper->addSecondsToDateTime(1, $modifiedTimeColumn);
+			$connection->queryExecute(
+				"UPDATE b_crm_webform SET COPYRIGHT_REMOVED = 'N', {$modifiedTimeColumn} ="
+				. " CASE WHEN {$modifiedTimeColumn} IS NULL OR {$modifiedTimeColumn} < {$currentTime}"
+				. " THEN {$currentTime} ELSE {$incrementedModifiedTime} END"
+				. " WHERE COPYRIGHT_REMOVED = 'Y'",
+			);
 		}
 	}
 

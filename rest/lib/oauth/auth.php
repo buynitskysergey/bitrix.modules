@@ -13,7 +13,6 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
 use Bitrix\Rest\Application;
-use Bitrix\Rest\AppTable;
 use Bitrix\Rest\AuthStorageInterface;
 use Bitrix\Rest\Engine\Access;
 use Bitrix\Rest\Engine\Access\HoldEntity;
@@ -21,6 +20,7 @@ use Bitrix\Rest\Event\Session;
 use Bitrix\Rest\Internal\Access\UserAccessChecker;
 use Bitrix\Rest\Internal\Exception\VibePlus\FeatureNotAvailableOnCurrentPlanExceptionInterface;
 use Bitrix\Rest\OAuthService;
+use Bitrix\Rest\Public\Provider\ApplicationProvider;
 use Bitrix\Main\SystemException;
 use Throwable;
 
@@ -145,13 +145,13 @@ class Auth
 
 				if(!$error)
 				{
-					$clientInfo = AppTable::getByClientId($tokenInfo['client_id']);
-					if(is_array($clientInfo))
+					$application = (new ApplicationProvider())->findByClientId((string)$tokenInfo['client_id']);
+					if($application !== null)
 					{
-						\CRestUtil::updateAppStatus($tokenInfo);
+						\CRestUtil::updateAppStatus($tokenInfo, $application);
 					}
 
-					if(!is_array($clientInfo) || $clientInfo['ACTIVE'] !== 'Y')
+					if($application === null || $application->isActive() !== true)
 					{
 						$tokenInfo = array('error' => 'APPLICATION_NOT_FOUND', 'error_description' => 'Application not found');
 						$error = true;
@@ -189,12 +189,12 @@ class Auth
 							$error = true;
 						}
 					}
-					elseif (!\CRestUtil::makeAuth($tokenInfo, self::AUTH_TYPE, $clientInfo['ID'] ?? 0))
+					elseif (!\CRestUtil::makeAuth($tokenInfo, self::AUTH_TYPE, $application->getId() ?? 0))
 					{
 						$tokenInfo = array('error' => 'authorization_error', 'error_description' => 'Unable to authorize user');
 						$error = true;
 					}
-					elseif(!\CRestUtil::checkAppAccess($tokenInfo['client_id']))
+					elseif(!\CRestUtil::checkAppAccess($tokenInfo['client_id'], ['ACCESS' => (string)$application->getAccess()]))
 					{
 						$tokenInfo = array('error' => 'user_access_error', 'error_description' => 'The user does not have access to the application.');
 						$error = true;

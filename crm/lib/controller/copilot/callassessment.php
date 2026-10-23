@@ -4,6 +4,8 @@ namespace Bitrix\Crm\Controller\Copilot;
 
 use Bitrix\Crm\Controller\Base;
 use Bitrix\Crm\Controller\ErrorCode;
+use Bitrix\Crm\Copilot\CallAssessment\Analytics\CreateScriptEvent;
+use Bitrix\Crm\Copilot\CallAssessment\Analytics\CriteriaGenEvent;
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentCriteriaController;
@@ -66,6 +68,8 @@ final class CallAssessment extends Base
 		?int $id = null,
 		array $criteria = [],
 		?string $eventId = null,
+		bool $criteriaGeneratedByAi = false,
+		?int $aiGeneratedCriteriaCount = null,
 	): Result
 	{
 		if (!Container::getInstance()->getUserPermissions()->copilotCallAssessment()->canEdit())
@@ -77,7 +81,13 @@ final class CallAssessment extends Base
 
 		if (AIManager::isCallScoringV2Enabled())
 		{
-			return $this->saveV2($id ?? 0, $callAssessmentItem, $criteria);
+			return $this->saveV2(
+				$id ?? 0,
+				$callAssessmentItem,
+				$criteria,
+				$criteriaGeneratedByAi,
+				$aiGeneratedCriteriaCount,
+			);
 		}
 
 		return $this->saveV1($callAssessmentItem, $id, $eventId);
@@ -381,13 +391,24 @@ final class CallAssessment extends Base
 		return (int)$addResult->getId();
 	}
 
-	private function saveV2(int $id, CallAssessmentItem $patch, array $criteria): Result
+	private function saveV2(
+		int $id,
+		CallAssessmentItem $patch,
+		array $criteria,
+		bool $criteriaGeneratedByAi = false,
+		?int $aiGeneratedCriteriaCount = null,
+	): Result
 	{
 		$result = new Result();
 
 		if ($id <= 0)
 		{
-			return $this->createV2($patch, $criteria);
+			return $this->createV2(
+				$patch,
+				$criteria,
+				$criteriaGeneratedByAi,
+				$aiGeneratedCriteriaCount,
+			);
 		}
 
 		$entity = CopilotCallAssessmentController::getInstance()->getById($id);
@@ -465,7 +486,12 @@ final class CallAssessment extends Base
 		return $result;
 	}
 
-	private function createV2(CallAssessmentItem $patch, array $criteria): Result
+	private function createV2(
+		CallAssessmentItem $patch,
+		array $criteria,
+		bool $criteriaGeneratedByAi = false,
+		?int $aiGeneratedCriteriaCount = null,
+	): Result
 	{
 		$result = new Result();
 
@@ -528,6 +554,36 @@ final class CallAssessment extends Base
 			$this->addError(new Error($e->getMessage()));
 
 			return $result;
+		}
+
+		(new CreateScriptEvent())
+			->setCallAssessmentId($newId)
+			->setIsManualLaunch(true)
+			->buildEvent()
+			->send()
+		;
+
+		if ($criteriaGeneratedByAi)
+		{
+			$persistedCriteriaCount = count(CopilotCallAssessmentCriteriaController::getInstance()->getList([
+				'select' => ['ID'],
+				'filter' => ['=ASSESSMENT_ID' => $newId],
+			]));
+			$criteriaCount = $aiGeneratedCriteriaCount === null
+				? $persistedCriteriaCount
+				: max(0, min($aiGeneratedCriteriaCount, $persistedCriteriaCount))
+			;
+
+			if ($criteriaCount > 0)
+			{
+				(new CriteriaGenEvent())
+					->setCallAssessmentId($newId)
+					->setCriteriaCount($criteriaCount)
+					->setIsManualLaunch(true)
+					->buildEvent()
+					->send()
+				;
+			}
 		}
 
 		$result->setData(['data' => (new V2ScriptDataLoader())->loadById($newId)]);

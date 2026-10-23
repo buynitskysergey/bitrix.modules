@@ -9,6 +9,7 @@ use Bitrix\Sign\Operation\Result\ConfigureResult;
 use Bitrix\Sign\Operation\Result\FillFieldsResult;
 use Bitrix\Sign\Repository\DocumentRepository;
 use Bitrix\Sign\Service\Container;
+use Bitrix\Sign\Service\Sign\Document\DirectorSigningGuardService;
 use Bitrix\Sign\Service\Sign\DocumentAgentService;
 use Bitrix\Sign\Service\Sign\PlaceholderBlockService;
 use Bitrix\Sign\Type\DocumentStatus;
@@ -18,18 +19,23 @@ class ConfigureFillAndStart implements Operation
 	private readonly Document $document;
 	private readonly DocumentRepository $documentRepository;
 	private readonly PlaceholderBlockService $placeholderBlockService;
+	private readonly DirectorSigningGuardService $directorSigningGuardService;
 	private readonly DocumentAgentService $documentAgentService;
 
 	public function __construct(
 		private readonly string $uid,
 		?DocumentRepository $documentRepository = null,
 		?PlaceholderBlockService $placeholderBlockService = null,
+		?DirectorSigningGuardService $directorSigningGuardService = null,
 		?DocumentAgentService $documentAgentService = null,
 	)
 	{
 		$container = Container::instance();
 		$this->documentRepository = $documentRepository ?? $container->getDocumentRepository();
 		$this->placeholderBlockService = $placeholderBlockService ?? $container->getPlaceholderBlockService();
+		$this->directorSigningGuardService = $directorSigningGuardService
+			?? $container->getDirectorSigningGuardService()
+		;
 		$this->documentAgentService = $documentAgentService ?? $container->getDocumentAgentService();
 	}
 
@@ -47,6 +53,13 @@ class ConfigureFillAndStart implements Operation
 		if ($this->document->status === DocumentStatus::SIGNING)
 		{
 			return new ConfigureResult(true);
+		}
+
+		// Also checked in ConfigureDocument; a document already in the READY status skips it entirely.
+		$directorSigningResult = $this->directorSigningGuardService->check($this->document);
+		if (!$directorSigningResult->isSuccess())
+		{
+			return $directorSigningResult;
 		}
 
 		if ($this->document->status !== DocumentStatus::READY)

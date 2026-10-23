@@ -182,6 +182,23 @@ class Task implements \IBPWorkflowDocument
 		return null;
 	}
 
+	/**
+	 * Status code => name map of the STATUS document field. Public so that an activity needing only these
+	 * options does not have to build the whole field set.
+	 *
+	 * @return array<int, string>
+	 */
+	public static function getStatusOptions(): array
+	{
+		return [
+			Status::PENDING => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_PENDING_1'),
+			Status::IN_PROGRESS => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_IN_PROGRESS'),
+			Status::SUPPOSEDLY_COMPLETED => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_SUPPOSEDLY_COMPLETED'),
+			Status::COMPLETED => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_COMPLETED'),
+			Status::DEFERRED => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_DEFERRED'),
+		];
+	}
+
 	public static function getDocumentFields($documentType)
 	{
 		$fields = [
@@ -208,13 +225,7 @@ class Task implements \IBPWorkflowDocument
 				'Name' => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS'),
 				'Type' => 'select',
 				//'Editable' => true,
-				'Options' => [
-					Status::PENDING => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_PENDING_1'),
-					Status::IN_PROGRESS => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_IN_PROGRESS'),
-					Status::SUPPOSEDLY_COMPLETED => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_SUPPOSEDLY_COMPLETED'),
-					Status::COMPLETED => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_COMPLETED'),
-					Status::DEFERRED => Loc::getMessage('TASKS_BP_DOCUMENT_STATUS_DEFERRED'),
-				],
+				'Options' => static::getStatusOptions(),
 			],
 			'RESPONSIBLE_ID' => [
 				'Name' => Loc::getMessage('TASKS_BP_DOCUMENT_ASSIGNEE_ID'),

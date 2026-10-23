@@ -35,6 +35,7 @@ use Bitrix\Crm\Integration\Bitrix24Manager;
 use Bitrix\Crm\Integration\Market\Router;
 use Bitrix\Crm\Integration\StorageType;
 use Bitrix\Crm\ItemIdentifier;
+use Bitrix\Crm\Settings\CopilotSettings;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
@@ -142,6 +143,13 @@ class AIManager
 		$item = self::$globalSettingsTuningManager->getItem($setting->value);
 
 		return isset($item) && $item->getValue();
+	}
+
+	public static function isFillFieldsEnabledForEntityType(int $entityTypeId): bool
+	{
+		return self::isEnabledInGlobalSettings(GlobalSetting::FillItemFromCall)
+			&& CopilotSettings::getCurrent()->isFillFieldsEnabledFor($entityTypeId)
+		;
 	}
 
 	public static function isCallTranscriptionEngineConfigured(): bool
@@ -291,6 +299,7 @@ class AIManager
 		?int $storageElementId = null,
 		bool $isManualLaunch = true,
 		?string $launchSource = null,
+		array $contextExtra = [],
 	): Result
 	{
 		$result = new Result(TranscribeCallRecording::TYPE_ID);
@@ -333,7 +342,7 @@ class AIManager
 			return $result->addError(ErrorCode::getFileNotFoundError());
 		}
 
-		return (new TranscribeCallRecording(
+		$operation = (new TranscribeCallRecording(
 			$itemIdentifier,
 			$storageTypeId,
 			$storageElementId,
@@ -342,8 +351,13 @@ class AIManager
 			->setLaunchSource($launchSource)
 			->setIsManualLaunch($isManualLaunch)
 			->setScenario($scenario)
-			->launch()
 		;
+		foreach ($contextExtra as $key => $value)
+		{
+			$operation->setContextExtra($key, $value);
+		}
+
+		return $operation->launch();
 	}
 
 	public static function launchExtractScoringCriteria(int $entityId, string $prompt, ?int $userId = null, bool $isManualLaunch = true): Result
@@ -427,6 +441,7 @@ class AIManager
 		ItemIdentifier $targetItemIdentifier,
 		int $segmentId = 0,
 		array $clientIdentifiers = [],
+		bool $isManualLaunch = false,
 	): Result
 	{
 		$result = new Result(ScreeningRepeatSaleItem::TYPE_ID);
@@ -445,6 +460,7 @@ class AIManager
 		return (new ScreeningRepeatSaleItem($targetItemIdentifier))
 			->setSegmentId($segmentId)
 			->setClientIdentifiers($clientIdentifiers)
+			->setIsManualLaunch($isManualLaunch)
 			->setScenario(Scenario::REPEAT_SALE_SCREENING_SCENARIO)
 			->launch()
 		;

@@ -15,6 +15,7 @@ use Bitrix\Crm\Timeline\SignDocument\MessageData;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Web\Uri;
+use Bitrix\Sign\Config\Feature;
 use Bitrix\Sign\Item\Document;
 use Bitrix\Sign\Item\Member;
 use Bitrix\Sign\Service\Container;
@@ -77,6 +78,7 @@ class SignB2eDocument extends LogMessage
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_SIGNING_EXPIRED => Icon::ATTENTION,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_SNILS_ERROR => Icon::ATTENTION,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_SIGNING_ERROR => Icon::ATTENTION,
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_DOCUMENT_PREPARATION_FAILED => Icon::ATTENTION,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_ASSIGNEE => $this->getChannelIcon(),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_REVIEWER => $this->getChannelIcon(),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_EDITOR => $this->getChannelIcon(),
@@ -109,6 +111,7 @@ class SignB2eDocument extends LogMessage
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_SIGNING_EXPIRED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_MEMBER_SIGNING_EXPIRED'),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_SNILS_ERROR => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_MEMBER_SNILS_ERROR'),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_SIGNING_ERROR => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_MEMBER_SIGNING_ERROR'),
+			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_DOCUMENT_PREPARATION_FAILED => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_PREPARATION_FAILED'),
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_ASSIGNEE,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_REVIEWER,
 			Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_MEMBER_STOPPED_BY_EDITOR => Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_EMPLOYEE_STOPPED'),
@@ -148,6 +151,8 @@ class SignB2eDocument extends LogMessage
 		{
 			$blocks['uid'] = $this->getDocumentUidBlock($document->uid);
 		}
+
+		$blocks += $this->getDocumentMessageBlocks($document);
 
 		if ($this->model->getTypeCategoryId() === Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_SIGNED_BY_RESPONSIBILITY_PERSON)
 		{
@@ -241,6 +246,114 @@ class SignB2eDocument extends LogMessage
 				(new Layout\Body\ContentBlock\Text())
 					->setValue($uid)
 			)
+		;
+	}
+
+	/**
+	 * Message the company attached to the signing invitation, together with whoever sent it.
+	 *
+	 * The text is a single attribute of the document, so it is rendered on the document creation
+	 * entry, which the current B2E flow writes once per document. The message sent entry repeats
+	 * for every member and would show the same text as many times as there are signers.
+	 *
+	 * Read from the document instead of the entry: the text is written while the document is still
+	 * editable, which is after the entry has been stored.
+	 *
+	 * Shown in the timeline of the document itself only. The entry is also bound to the client and
+	 * the own company of the item, so on those timelines it is visible to whoever reads the parent
+	 * rather than the document, and the text is written for the signers.
+	 *
+	 * @return array<string, Layout\Body\ContentBlock\ContentBlockWithTitle>
+	 */
+	private function getDocumentMessageBlocks(Document $document): array
+	{
+		if (
+			$this->model->getTypeCategoryId() !== Timeline\SignB2eDocument\Entry::TYPE_CATEGORY_CREATED
+			|| !$this->isItemAboutCurrentEntity()
+		)
+		{
+			return [];
+		}
+
+		if (!$this->isDocumentMessageEnabled())
+		{
+			return [];
+		}
+
+		// The property arrives with the same sign feature as the flag, so it is read after the check.
+		$message = (string)$document->inviteMessage;
+		if ($message === '')
+		{
+			return [];
+		}
+
+		$blocks = ['documentMessage' => $this->getDocumentMessageBlock($message)];
+		if ($document->createdById)
+		{
+			$blocks['documentMessageSender'] = $this->getDocumentMessageSenderBlock($document->createdById);
+		}
+
+		return $blocks;
+	}
+
+	protected function isDocumentMessageEnabled(): bool
+	{
+		if (!Loader::includeModule('sign'))
+		{
+			return false;
+		}
+
+		return method_exists(Feature::class, 'isDocumentMessageEnabled')
+			&& Feature::instance()->isDocumentMessageEnabled();
+	}
+
+	/**
+	 * The value is typed by a user, so it is rendered as plain text: the text block encodes it
+	 * before it reaches the markup, unlike the html string and chat message blocks.
+	 */
+	private function getDocumentMessageBlock(string $message): Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline(true)
+			->setWordWrap()
+			->setFixedWidth(false)
+			->setTitle(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_MESSAGE_TITLE'))
+			->setContentBlock(
+				(new Layout\Body\ContentBlock\Text())
+					->setValue($this->preserveTypedText($message))
+					->setIsMultiline()
+			)
+		;
+	}
+
+	/**
+	 * The text block decodes html entities while it serializes itself, so an entity a user typed
+	 * literally would reach the page as markup. That block is shared by every timeline record and
+	 * is fixed under task 737138, hence the local pre-encoding: the decoding gives the text back
+	 * unchanged, and the probe drops the compensation as soon as the block stops decoding.
+	 */
+	private function preserveTypedText(string $message): string
+	{
+		static $isDecodedOnSerialization = null;
+		if ($isDecodedOnSerialization === null)
+		{
+			$probe = (new Layout\Body\ContentBlock\Text())->setValue('&lt;');
+			$isDecodedOnSerialization = (($probe->toArray()['properties']['value'] ?? null) === '<');
+		}
+
+		return $isDecodedOnSerialization
+			? htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+			: $message
+		;
+	}
+
+	private function getDocumentMessageSenderBlock(int $userId): Layout\Body\ContentBlock\ContentBlockWithTitle
+	{
+		return (new Layout\Body\ContentBlock\ContentBlockWithTitle())
+			->setInline(true)
+			->setFixedWidth(false)
+			->setTitle(Loc::getMessage('CRM_SERVICE_TIMELINE_LAYOUT_SIGNB2EDOCUMENT_DOCUMENT_MESSAGE_SENDER_TITLE'))
+			->setContentBlock($this->getUserNameLink($userId))
 		;
 	}
 

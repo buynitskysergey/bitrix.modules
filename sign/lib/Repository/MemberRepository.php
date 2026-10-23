@@ -203,6 +203,7 @@ class MemberRepository
 			signatureFileId: $model->getSignatureFileId(),
 			stampFileId: $model->getStampFileId(),
 			role: $role,
+			signingMethod: $model->getSigningMethod(),
 			configured: $model->getConfigured(),
 			reminder: new Item\Member\Reminder(
 				lastSendDate: $model->getReminderLastSendDate(),
@@ -289,6 +290,7 @@ class MemberRepository
 			->setSignatureFileId($item->signatureFileId)
 			->setModifiedById(Main\Engine\CurrentUser::get()->getId())
 			->setCreatedById(Main\Engine\CurrentUser::get()->getId())
+			->setSigningMethod($item->signingMethod)
 			->setContactId($item->entityType === EntityType::CONTACT ? $item->entityId : 0)
 			->setMute('N')
 			->setSigned($item->status)

@@ -401,6 +401,11 @@ class Container
 		return static::getService('sign.service.sign.document.providerCode');
 	}
 
+	public function getDirectorSigningGuardService(): Service\Sign\Document\DirectorSigningGuardService
+	{
+		return static::getService('sign.service.sign.document.directorSigningGuard');
+	}
+
 	public function getRequiredFieldRepository(): Repository\RequiredFieldRepository
 	{
 		return static::getService('sign.repository.required_field');

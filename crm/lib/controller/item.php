@@ -451,6 +451,13 @@ class Item extends Base
 				{
 					$value = $this->prepareBooleanFieldValue($value);
 				}
+				elseif (
+					$field->isUserField()
+					&& $field->getType() === 'money'
+				)
+				{
+					$value = \CCrmUserType::NormalizeMoneyFieldValueForSave($value);
+				}
 				$item->set($fieldName, $value);
 			}
 		}

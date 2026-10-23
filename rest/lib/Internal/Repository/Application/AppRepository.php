@@ -104,6 +104,79 @@ class AppRepository implements RepositoryInterface
 		);
 	}
 
+	public function getByIds(array $ids, ?AppSelect $select = null): AppCollection
+	{
+		if (empty($ids))
+		{
+			return new AppCollection();
+		}
+
+		return $this->getList(
+			filter: (new AppFilter())->ids($ids),
+			select: $select,
+			pager: new AppPager(0, count($ids)),
+		);
+	}
+
+	/**
+	 * @return ?array<string, mixed>
+	 */
+	public function findRowById(int $id): ?array
+	{
+		return $this->findRow('ID', $id);
+	}
+
+	/**
+	 * @return ?array<string, mixed>
+	 */
+	public function findRowByCode(string $code): ?array
+	{
+		return $this->findRow('CODE', $code);
+	}
+
+	/**
+	 * @return ?array<string, mixed>
+	 */
+	public function findRowByClientId(string $clientId): ?array
+	{
+		return $this->findRow('CLIENT_ID', $clientId);
+	}
+
+	/**
+	 * @return list<array{LANGUAGE_ID: string, MENU_NAME: ?string}>
+	 */
+	public function findLangRowsByAppId(int $appId): array
+	{
+		return AppLangTable::query()
+			->setSelect(['LANGUAGE_ID', 'MENU_NAME'])
+			->where('APP_ID', $appId)
+			->setOrder(['LANGUAGE_ID' => 'ASC'])
+			->fetchAll()
+		;
+	}
+
+	/**
+	 * @return ?array<string, mixed>
+	 */
+	private function findRow(string $ormField, int|string $value): ?array
+	{
+		return AppRowCache::remember(
+			$ormField,
+			$value,
+			static function () use ($ormField, $value): ?array {
+				$row = AppTable::query()
+					->setSelect(['*'])
+					->where($ormField, $value)
+					->setOrder(['ID' => 'ASC'])
+					->setLimit(1)
+					->fetch()
+				;
+
+				return $row === false ? null : $row;
+			},
+		);
+	}
+
 	/**
 	 * @param App $entity
 	 *
@@ -435,6 +508,19 @@ class AppRepository implements RepositoryInterface
 		if ($filter->getWhere() !== null)
 		{
 			$query->where($filter->getWhere());
+		}
+
+		$ids = $filter->getIds();
+		if ($ids !== null)
+		{
+			if (empty($ids))
+			{
+				$query->whereNull('ID');
+			}
+			else
+			{
+				$query->whereIn('ID', $ids);
+			}
 		}
 
 		return $query;

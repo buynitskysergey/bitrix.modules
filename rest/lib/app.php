@@ -14,6 +14,7 @@ use Bitrix\Main\SystemException;
 use Bitrix\Main\Web\Uri;
 use Bitrix\Rest\Internal\Integration\Bitrix24\LicenseScannerStateInvalidator;
 use Bitrix\Rest\Internal\Model\AppAttributeTable;
+use Bitrix\Rest\Internal\Repository\Application\AppRowCache;
 use Bitrix\Rest\Internal\Service\Application\AccessCacheInvalidator;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\FormConfig\EventType;
@@ -205,10 +206,15 @@ class AppTable extends Internal\Model\AppTable
 	 */
 	public static function onAfterAdd(Main\Entity\Event $event)
 	{
+		$data = $event->getParameters();
+		AppRowCache::forget(
+			$data['id'],
+			$data['fields']['CLIENT_ID'] ?? null,
+			$data['fields']['CODE'] ?? null,
+		);
 		Main\Application::getInstance()->getCache()->cleanDir('rest/market_subscription');
 		LicenseScannerStateInvalidator::reset();
 		EventController::onAddApp($event);
-		$data = $event->getParameters();
 		if(!static::$skipRemoteUpdate)
 		{
 			if(
@@ -300,11 +306,21 @@ class AppTable extends Internal\Model\AppTable
 		{
 			LicenseScannerStateInvalidator::reset();
 		}
-		static::clearClientCache($data['primary']['ID']);
+		static::clearClientCache(
+			$data['primary']['ID'],
+			$fields['CLIENT_ID'] ?? null,
+			$fields['CODE'] ?? null,
+		);
 
 		if (static::hasAccessCacheSensitiveChanges($data['fields'] ?? []))
 		{
 			AccessCacheInvalidator::clear();
+		}
+		if (array_key_exists('ACCESS', $data['fields'] ?? []))
+		{
+			(new Internal\Service\Embedding\EmbeddingAccessSynchronizer())
+				->syncApp((int)$data['primary']['ID'])
+			;
 		}
 
 		if(!static::$skipRemoteUpdate)
@@ -415,8 +431,46 @@ class AppTable extends Internal\Model\AppTable
 		$data = $event->getParameters();
 
 		static::clearClientCache($data['primary']['ID']);
+		static::deleteAppBindings((int)$data['primary']['ID']);
 		AppLangTable::deleteByApp($data['primary']['ID']);
 		AppAttributeTable::deleteByAppId((int)$data['primary']['ID']);
+		(new Internal\Service\Embedding\EmbeddingAccessSynchronizer())
+			->deleteCodesOfApp((int)$data['primary']['ID'])
+		;
+	}
+
+	private static function deleteAppBindings(int $appId): void
+	{
+		if ($appId <= 0)
+		{
+			return;
+		}
+
+		$cleanupList = [
+			'event handlers' => static fn() => EventTable::deleteByApp($appId),
+			'offline event handlers' => static fn() => EventOfflineTable::deleteByApp($appId),
+			'placements' => static fn() => PlacementTable::deleteByApp($appId),
+		];
+
+		foreach ($cleanupList as $bindings => $cleanup)
+		{
+			try
+			{
+				$cleanup();
+			}
+			catch (\Throwable $e)
+			{
+				Main\Application::getInstance()->getExceptionHandler()->writeToLog(
+					new Main\SystemException(
+						'Rest: cleanup of ' . $bindings . ' failed after deleting application #' . $appId,
+						0,
+						__FILE__,
+						__LINE__,
+						$e,
+					),
+				);
+			}
+		}
 	}
 
 	public static function isInstalled(int $appId): bool
@@ -506,7 +560,7 @@ class AppTable extends Internal\Model\AppTable
 		if($appInfo)
 		{
 			(new DeactivateSystemUserCommand((int)$appInfo['ID']))->run();
-			\CRestUtil::cleanApp($appId, $clean);
+			\CRestUtil::cleanApp((int)$appInfo['ID'], $clean);
 
 			if($appInfo['STATUS'] !== static::STATUS_LOCAL)
 			{
@@ -992,11 +1046,17 @@ class AppTable extends Internal\Model\AppTable
 		return static::$applicationCache[$clientId] ?? null;
 	}
 
-	protected static function clearClientCache($clientId)
+	protected static function clearClientCache(
+		$key,
+		?string $clientId = null,
+		?string $code = null,
+	)
 	{
-		if(array_key_exists($clientId, static::$applicationCache))
+		AppRowCache::forget($key, $clientId, $code);
+
+		if(array_key_exists($key, static::$applicationCache))
 		{
-			$app = static::$applicationCache[$clientId];
+			$app = static::$applicationCache[$key];
 			if(is_array($app))
 			{
 				unset(static::$applicationCache[$app['ID']]);
@@ -1004,7 +1064,7 @@ class AppTable extends Internal\Model\AppTable
 			}
 			else
 			{
-				unset(static::$applicationCache[$clientId]);
+				unset(static::$applicationCache[$key]);
 			}
 		}
 	}

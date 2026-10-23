@@ -67,20 +67,101 @@ abstract class AbstractFillRepeatSaleTips extends AbstractOperation
 			return new FillRepeatSaleTipsPayload([]);
 		}
 
-		return new FillRepeatSaleTipsPayload([
-			'customerInfo' => self::underscoreToCamelCase($json['customer_info'] ?? []),
-			'actionPlan' => self::underscoreToCamelCase($json['action_plan'] ?? []),
-		]);
+		$customerInfo = self::readSectionFields($json, 'customer_info');
+		$actionPlan = self::readSectionFields($json, 'action_plan');
+
+		$fields = [];
+		if (!empty($customerInfo))
+		{
+			$fields['customerInfo'] = $customerInfo;
+		}
+
+		if (!empty($actionPlan))
+		{
+			$fields['actionPlan'] = $actionPlan;
+		}
+
+		if (empty($fields) && self::isAnswerSayingThereIsNothingToRecommend($json))
+		{
+			$fields['noRecommendation'] = true;
+		}
+
+		return new FillRepeatSaleTipsPayload($fields);
 	}
 
-	private static function underscoreToCamelCase(array $input): array
+	/**
+	 * An answer nobody could read carries no verdict and stays a parse error.
+	 */
+	private static function isAnswerSayingThereIsNothingToRecommend(array $json): bool
 	{
-		return array_combine(
-			array_map(
-				static fn(string $key) => lcfirst(str_replace('_', '', ucwords($key, '_'))),
-				array_keys($input),
-			),
-			array_values($input),
-		);
+		return (self::isSectionPresent($json, 'customer_info') || self::isSectionPresent($json, 'action_plan'))
+			&& self::isSectionReadable($json, 'customer_info')
+			&& self::isSectionReadable($json, 'action_plan')
+		;
+	}
+
+	/**
+	 * Blank is not unreadable: a section stays readable while it is absent, null or an object of
+	 * scalars, and only blank values are dropped from its fields.
+	 *
+	 * @return array<string, scalar>
+	 */
+	private static function readSectionFields(array $json, string $key): array
+	{
+		$section = $json[$key] ?? null;
+		if (!is_array($section))
+		{
+			return [];
+		}
+
+		$fields = [];
+		foreach ($section as $name => $value)
+		{
+			if (!is_string($name) || ($value !== null && !is_scalar($value)))
+			{
+				continue;
+			}
+
+			if ($value !== null && trim((string)$value) !== '')
+			{
+				$fields[self::underscoreToCamelCase($name)] = $value;
+			}
+		}
+
+		return $fields;
+	}
+
+	private static function isSectionPresent(array $json, string $key): bool
+	{
+		return array_key_exists($key, $json);
+	}
+
+	private static function isSectionReadable(array $json, string $key): bool
+	{
+		$section = $json[$key] ?? null;
+		if ($section === null)
+		{
+			return true;
+		}
+
+		if (!is_array($section))
+		{
+			return false;
+		}
+
+		foreach ($section as $name => $value)
+		{
+			if (!is_string($name) || ($value !== null && !is_scalar($value)))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private static function underscoreToCamelCase(string $key): string
+	{
+		return lcfirst(str_replace('_', '', ucwords($key, '_')));
 	}
 }

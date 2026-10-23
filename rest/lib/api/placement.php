@@ -180,6 +180,11 @@ class Placement extends \IRestService
 				}
 			};
 
+			if (array_key_exists('LANG_ALL', $params) && !is_array($params['LANG_ALL']))
+			{
+				throw new Exceptions\ArgumentTypeException('LANG_ALL', 'array');
+			}
+
 			if (empty($params['LANG_ALL']))
 			{
 				if (!empty($params['TITLE']))
@@ -209,6 +214,11 @@ class Placement extends \IRestService
 				];
 				foreach ($params['LANG_ALL'] as $langCode => $langItem)
 				{
+					if (!is_array($langItem))
+					{
+						throw new Exceptions\ArgumentTypeException('LANG_ALL.' . $langCode, 'array');
+					}
+
 					foreach ($fieldList as $field)
 					{
 						$ensureValueIsString($langItem[$field] ?? '', 'LANG_ALL.' . $langCode . '.' . $field);

@@ -9,6 +9,7 @@ use Bitrix\Crm\RepeatSale\Logger;
 use Bitrix\Crm\RepeatSale\Queue\Controller\RepeatSaleQueueController;
 use Bitrix\Crm\RepeatSale\Segment\Entity\RepeatSaleSegment;
 use Bitrix\Crm\RepeatSale\Segment\Entity\RepeatSaleSegmentTable;
+use Bitrix\Crm\RepeatSale\Segment\Field;
 use Bitrix\Crm\RepeatSale\Segment\SegmentAssignmentUserItem;
 use Bitrix\Crm\RepeatSale\Segment\SegmentItem;
 use Bitrix\Crm\RepeatSale\Service\Handler\Result;
@@ -40,6 +41,8 @@ final class RepeatSaleSegmentController
 			return $result;
 		}
 
+		Field::clearPreparedDataForFilter();
+
 		$jobItem = JobItem::createFromArray([
 			'segmentId' => $result->getId(),
 			'scheduleType' => SystemHandler::getTypeValue(),
@@ -70,6 +73,8 @@ final class RepeatSaleSegmentController
 		{
 			return $result;
 		}
+
+		Field::clearPreparedDataForFilter();
 
 		$updateUsersResult = $this->updateAssignmentUsers($id, $segmentItem);
 		if (!$updateUsersResult->isSuccess())
@@ -192,6 +197,8 @@ final class RepeatSaleSegmentController
 	public function delete(int $id): DeleteResult
 	{
 		$result = RepeatSaleSegmentTable::delete($id);
+
+		Field::clearPreparedDataForFilter();
 
 		RepeatSaleSegmentAssignmentUserController::getInstance()->deleteBySegmentId($id);
 

@@ -6,17 +6,22 @@ use Bitrix\Crm\AutomatedSolution\Action\Read\Fetch;
 use Bitrix\Crm\AutomatedSolution\AutomatedSolutionManager;
 use Bitrix\Crm\AutomatedSolution\CapabilityAccessChecker;
 use Bitrix\Crm\AutomatedSolution\Entity\AutomatedSolutionTable;
+use Bitrix\Crm\Feature;
+use Bitrix\Crm\Feature\AutomatedSolutionVibe;
 use Bitrix\Crm\Field;
 use Bitrix\Crm\Integration\Analytics\Builder\Automation\AutomatedSolution\CreateEvent;
 use Bitrix\Crm\Integration\Analytics\Builder\Automation\AutomatedSolution\DeleteEvent;
 use Bitrix\Crm\Integration\Analytics\Builder\Automation\AutomatedSolution\EditEvent;
 use Bitrix\Crm\Integration\Analytics\Dictionary;
+use Bitrix\Crm\Integration\Landing\Vibe\VibeRepository;
 use Bitrix\Crm\Restriction\RestrictionManager;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Service\Converter;
 use Bitrix\Crm\Service\DynamicTypesMap;
 use Bitrix\Crm\Service\UserPermissions;
+use Bitrix\Main\Engine\Response\Component;
 use Bitrix\Main\Engine\Response\DataType\Page;
+use Bitrix\Main\Engine\Response\AjaxJson;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Result;
@@ -116,6 +121,18 @@ final class AutomatedSolution extends Base
 				],
 				'NORMALIZER' => intval(...),
 			],
+
+			'VIBE_ID' => [
+				'TYPE' => Field::TYPE_INTEGER,
+				'ATTRIBUTES' => [\CCrmFieldInfoAttr::Hidden, \CCrmFieldInfoAttr::NotDisplayed],
+				'NORMALIZER' => intval(...),
+			],
+
+			'IS_VIBE_ENABLED' => [
+				'TYPE' => Field::TYPE_BOOLEAN,
+				'ATTRIBUTES' => [\CCrmFieldInfoAttr::Hidden, \CCrmFieldInfoAttr::NotDisplayed],
+				'NORMALIZER' => AutomatedSolutionVibe::normalizeValue(...),
+			],
 		];
 	}
 
@@ -139,7 +156,7 @@ final class AutomatedSolution extends Base
 		];
 	}
 
-	public function addAction(array $fields = []): ?array
+	public function addAction(array $fields = [], ?\CRestServer $server = null): mixed
 	{
 		$builder = (new CreateEvent())
 			->setSection(Dictionary::SECTION_REST)
@@ -147,6 +164,8 @@ final class AutomatedSolution extends Base
 
 		if ($this->isRest())
 		{
+			$builder->setSource(Dictionary::getApplicationSource($server?->getClientId()));
+
 			$builder
 				->setStatus(Dictionary::STATUS_ATTEMPT)
 				->buildEvent()
@@ -155,6 +174,15 @@ final class AutomatedSolution extends Base
 		}
 
 		$result = $this->add($fields);
+		if ($result instanceof AjaxJson)
+		{
+			if ($this->isRest())
+			{
+				$builder->setStatus(Dictionary::STATUS_ERROR)->buildEvent()->send();
+			}
+
+			return $result;
+		}
 
 		if ($this->isRest())
 		{
@@ -185,7 +213,7 @@ final class AutomatedSolution extends Base
 		return $result;
 	}
 
-	private function add(array $fields = []): ?array
+	private function add(array $fields = []): mixed
 	{
 		if (!$this->checkPermissions())
 		{
@@ -209,6 +237,11 @@ final class AutomatedSolution extends Base
 		$addResult = $this->manager->addAutomatedSolution($fieldsToAdd);
 		if (!$addResult->isSuccess())
 		{
+			if (isset($addResult->getData()['fields']['ID']))
+			{
+				return $this->createLifecycleErrorResponse($addResult);
+			}
+
 			$this->addErrors($addResult->getErrors());
 
 			return null;
@@ -225,7 +258,7 @@ final class AutomatedSolution extends Base
 		return $this->getAction($solutionId);
 	}
 
-	public function updateAction(int $id, array $fields = []): ?array
+	public function updateAction(int $id, array $fields = []): mixed
 	{
 		$builder = (new EditEvent())
 			->setSection(Dictionary::SECTION_REST)
@@ -242,6 +275,15 @@ final class AutomatedSolution extends Base
 		}
 
 		$result = $this->update($id, $fields);
+		if ($result instanceof AjaxJson)
+		{
+			if ($this->isRest())
+			{
+				$builder->setStatus(Dictionary::STATUS_ERROR)->buildEvent()->send();
+			}
+
+			return $result;
+		}
 
 		if ($this->isRest())
 		{
@@ -268,7 +310,7 @@ final class AutomatedSolution extends Base
 		return $result;
 	}
 
-	private function update(int $id, array $fields = []): ?array
+	private function update(int $id, array $fields = []): mixed
 	{
 		if (!$this->checkPermissions($id))
 		{
@@ -299,6 +341,11 @@ final class AutomatedSolution extends Base
 		$updateResult = $this->manager->updateAutomatedSolution($id, $fieldsToUpdate);
 		if (!$updateResult->isSuccess())
 		{
+			if (isset($updateResult->getData()['fields']['ID']))
+			{
+				return $this->createLifecycleErrorResponse($updateResult);
+			}
+
 			$this->addErrors($updateResult->getErrors());
 		}
 
@@ -309,6 +356,26 @@ final class AutomatedSolution extends Base
 		}
 
 		return $this->getAction($id);
+	}
+
+	private function createLifecycleErrorResponse(Result $result): AjaxJson
+	{
+		$this->addErrors($result->getErrors());
+
+		$fields = $result->getData()['fields'];
+
+		return AjaxJson::createError(
+			$result->getErrorCollection(),
+			[
+				'automatedSolution' => [
+					'id' => (int)$fields['ID'],
+					'title' => (string)$fields['TITLE'],
+					'typeIds' => array_map('intval', (array)($fields['TYPE_IDS'] ?? [])),
+					'vibeId' => (int)($fields['VIBE_ID'] ?? 0),
+					'isVibeEnabled' => AutomatedSolutionVibe::isEnabledForAutomatedSolution($fields),
+				],
+			],
+		);
 	}
 
 	public function deleteAction(int $id): void
@@ -378,6 +445,11 @@ final class AutomatedSolution extends Base
 
 	private function filterOutUnknownFields(array $snakeCaseFields): array
 	{
+		if ($this->isRest())
+		{
+			unset($snakeCaseFields['IS_VIBE_ENABLED']);
+		}
+
 		$knownFields = array_keys($this->getFieldsInfo());
 
 		return array_filter(
@@ -415,7 +487,7 @@ final class AutomatedSolution extends Base
 		);
 	}
 
-	public function listAction(array $order = null, array $filter = null, PageNavigation $pageNavigation = null): ?Page
+	public function listAction(?array $order = null, ?array $filter = null, ?PageNavigation $pageNavigation = null): ?Page
 	{
 		if (!$this->checkPermissions())
 		{
@@ -459,6 +531,56 @@ final class AutomatedSolution extends Base
 			array_map($this->converter->toJson(...), $solutions),
 			fn() => AutomatedSolutionTable::getCount($snakeCaseFilter),
 		);
+	}
+
+	public function getVibeSettingsAction(int $automatedSolutionId): ?Component
+	{
+		if (!$this->checkPermissions($automatedSolutionId))
+		{
+			return null;
+		}
+
+		if (!Feature::enabled(AutomatedSolutionVibe::class) || !VibeRepository::isVibeAvailable())
+		{
+			$this->addVibeSettingsUnavailableError();
+
+			return null;
+		}
+
+		$automatedSolution = $this->manager->getAutomatedSolution($automatedSolutionId);
+		if (
+			$automatedSolution === null
+			|| (int)($automatedSolution['VIBE_ID'] ?? 0) <= 0
+		)
+		{
+			$this->addVibeSettingsUnavailableError();
+
+			return null;
+		}
+
+		$vibe = Container::getInstance()
+			->getVibeRepository()
+			?->findById((int)$automatedSolution['VIBE_ID'])
+		;
+		if ($vibe === null)
+		{
+			$this->addVibeSettingsUnavailableError();
+
+			return null;
+		}
+
+		return $this->renderComponentAjax(
+			'bitrix:crm.automated_solution.start.settings',
+			'',
+			[
+				'automatedSolutionId' => $automatedSolutionId,
+			],
+		);
+	}
+
+	private function addVibeSettingsUnavailableError(): void
+	{
+		$this->addError(new Error('Vibe settings are unavailable.', 'VIBE_SETTINGS_UNAVAILABLE'));
 	}
 
 	private function checkAccessToTypeIds(array $typeIds, array $currentTypeIds = [], ?int $targetAutomatedSolutionId = null): bool

@@ -56,7 +56,16 @@ IncludeModuleLangFile(__FILE__);
 require_once($_SERVER['DOCUMENT_ROOT'].BX_ROOT.'/modules/crm/functions.php');
 require_once __DIR__.'/autoload.php';
 
-\Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\GeneratedDtoClassLoader::register();
+// E2e provisioning controllers live under dev/e2e, which is not part of a shipped portal,
+// so they exist only in a developer checkout. Registration is scoped to dev/e2e, not the
+// whole dev/ directory: the resolver routes any action name into a class under this
+// namespace via Loader::autoLoad(), which require_once()s the matched file before
+// Authentication/Csrf/processBeforeAction run - a wider namespace would autoload arbitrary
+// non-controller scripts under dev/ (e.g. one-off snippets) as unauthenticated actions.
+if (is_dir(__DIR__ . '/dev/e2e'))
+{
+	Main\Loader::registerNamespace('Bitrix\\Crm\\Controller\\Dev\\E2e', __DIR__ . '/dev/e2e');
+}
 
 CJSCore::RegisterExt('crm_common', array(
 	'js' => [

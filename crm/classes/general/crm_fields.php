@@ -666,7 +666,7 @@ class CCrmFields
 			$this->cUFM->CleanCache();
 			$this->arUFList = $this->GetUserFields($this->sUFEntityID, 0, LANGUAGE_ID);
 
-			UserFieldHistory::processCreation(CCrmOwnerType::ResolveIDByUFEntityID($this->sUFEntityID), $ID);
+			UserFieldHistory::processCreation(CCrmOwnerType::ResolveIDByUFEntityID($this->sUFEntityID), $ID, false);
 		}
 		else
 		{

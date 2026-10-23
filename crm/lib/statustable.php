@@ -163,6 +163,11 @@ class StatusTable extends ORM\Data\DataManager
 			}
 		}
 
+		if (empty(trim($fields['NAME'] ?? '')))
+		{
+			$result->modifyFields(array_merge($result->getModified(), ['NAME' => '']));
+		}
+
 		return $result;
 	}
 
@@ -207,6 +212,11 @@ class StatusTable extends ORM\Data\DataManager
 		$result = new ORM\EventResult();
 		$id = $event->getParameter('id');
 		$fields = $event->getParameter('fields');
+		if (array_key_exists('NAME', $fields) && empty(trim($fields['NAME'] ?? '')))
+		{
+			$result->modifyFields(['NAME' => '']);
+		}
+
 		$data = null;
 		if(isset($fields['ENTITY_ID']))
 		{
@@ -300,20 +310,6 @@ class StatusTable extends ORM\Data\DataManager
 
 		static::removeStatusesFromCache($entityId);
 
-		$entityTypeId = $entity['ENTITY_TYPE_ID'] ?? null;
-		if (!$entityTypeId)
-		{
-			return $result;
-		}
-		$entityScope = $entity['FIELD_ATTRIBUTE_SCOPE'] ?? '';
-
-		FieldAttributeManager::processPhaseModification(
-			$data['STATUS_ID'],
-			$entityTypeId,
-			$entityScope,
-			static::getStatusesByEntityId($entityId)
-		);
-
 		return $result;
 	}
 
@@ -380,7 +376,10 @@ class StatusTable extends ORM\Data\DataManager
 
 		if ($itemsOnStageCount > 0)
 		{
+			// The error cancels the deletion, so the settings of the stage must stay as they are.
 			$result->addError(new ORM\EntityError(Loc::getMessage('CRM_STATUS_STAGE_WITH_ITEMS_ERROR')));
+
+			return $result;
 		}
 
 		$entityTypeId = $entity['ENTITY_TYPE_ID'] ?? null;
@@ -512,6 +511,12 @@ class StatusTable extends ORM\Data\DataManager
 	protected static function clearStatusesCache(): void
 	{
 		static::$statusesCache = [];
+	}
+
+	public static function cleanCache(): void
+	{
+		parent::cleanCache();
+		static::clearStatusesCache();
 	}
 
 	protected static function getSuccessStageSort(string $entityId): ?int

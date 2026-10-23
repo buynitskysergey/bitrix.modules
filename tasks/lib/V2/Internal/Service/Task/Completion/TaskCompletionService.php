@@ -6,12 +6,13 @@ namespace Bitrix\Tasks\V2\Internal\Service\Task\Completion;
 
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
-use Bitrix\Tasks\Access\ActionDictionary;
+use Bitrix\Tasks\V2\Internal\Entity\Task\Status;
+use Bitrix\Tasks\V2\Internal\Access\Task\ActionDictionary;
+use Bitrix\Tasks\V2\Internal\Service\Task\StatusService;
 use Bitrix\Tasks\V2\Internal\Access\Service\TaskAccessService;
 use Bitrix\Tasks\V2\Internal\Access\Task\Status\CompletionAccessRule;
 use Bitrix\Tasks\V2\Internal\Repository\TaskStatusRepository;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\Config\UpdateConfig;
-use Bitrix\Tasks\V2\Public\Command\Task\Status\CompleteTaskCommand;
 
 class TaskCompletionService
 {
@@ -19,12 +20,19 @@ class TaskCompletionService
 		private readonly CheckListCompletionService $checkListCompletionService,
 		private readonly TaskStatusRepository $taskStatusRepository,
 		private readonly TaskAccessService $taskAccessService,
+		private readonly StatusService $statusService,
 	)
 	{
 	}
 
-	public function complete(int $taskId, UpdateConfig $config, bool $withCheckList = true): Result
+	public function complete(
+		int $taskId,
+		UpdateConfig $config,
+		bool $withCheckList = true,
+		?CompletionConfig $completionConfig = null,
+	): Result
 	{
+		$completionConfig ??= new CompletionConfig();
 		$result = new Result();
 		$task = $this->taskStatusRepository->getById($taskId);
 
@@ -37,12 +45,15 @@ class TaskCompletionService
 
 		if ($task->status?->isCompleted() === true)
 		{
-			if (!$this->taskAccessService->can($userId, ActionDictionary::ACTION_TASK_READ, $taskId))
+			if (!$this->taskAccessService->can($userId, ActionDictionary::TASK_ACTIONS['read'], $taskId))
 			{
 				return $result->addError($this->getAccessError());
 			}
 
-			return $result;
+			if (!$completionConfig->completeCheckListForFinalTask)
+			{
+				return $result;
+			}
 		}
 
 		if (!$this->canCompleteWithChecklist($taskId, $userId))
@@ -52,7 +63,11 @@ class TaskCompletionService
 
 		if ($withCheckList)
 		{
-			$checkListResult = $this->checkListCompletionService->completeForTask($taskId, $userId);
+			$checkListResult = $this->checkListCompletionService->completeForTask(
+				taskId: $taskId,
+				userId: $userId,
+				useBatch: $completionConfig->useBatchCheckListCompletion,
+			);
 			if (!$checkListResult->isSuccess())
 			{
 				return $result->addErrors($checkListResult->getErrors());
@@ -66,6 +81,54 @@ class TaskCompletionService
 		}
 
 		return $result;
+	}
+
+	public function approve(int $taskId, UpdateConfig $config): Result
+	{
+		$result = new Result();
+		$task = $this->taskStatusRepository->getById($taskId);
+		$userId = $config->getUserId();
+		if ($task === null)
+		{
+			return $result->addError(new Error('Task not found', 'TASK_NOT_FOUND'));
+		}
+
+		if (!$this->taskAccessService->can($userId, ActionDictionary::TASK_ACTIONS['read'], $taskId))
+		{
+			return $result->addError($this->getAccessError());
+		}
+
+		if ($task->status === Status::Completed)
+		{
+			return $result;
+		}
+
+		if (
+			$task->status !== Status::SupposedlyCompleted
+			|| !$this->taskAccessService->can($userId, ActionDictionary::TASK_ACTIONS['approve'], $taskId)
+		)
+		{
+			return $result->addError($this->getAccessError());
+		}
+
+		$commandResult = $this->runApproveTaskCommand($taskId, $config);
+
+		return $commandResult->isSuccess() ? $result : $result->addErrors($commandResult->getErrors());
+	}
+
+	protected function runApproveTaskCommand(int $taskId, UpdateConfig $config): Result
+	{
+		$result = new Result();
+		try
+		{
+			$this->statusService->approve($taskId, $config);
+
+			return $result;
+		}
+		catch (\Throwable $exception)
+		{
+			return $result->addError(Error::createFromThrowable($exception));
+		}
 	}
 
 	public function canCompleteWithChecklist(int $taskId, int $userId): bool
@@ -82,10 +145,17 @@ class TaskCompletionService
 
 	protected function runCompleteTaskCommand(int $taskId, UpdateConfig $config): Result
 	{
-		return (new CompleteTaskCommand(
-			taskId: $taskId,
-			config: $config,
-		))->run();
+		$result = new Result();
+		try
+		{
+			$this->statusService->complete($taskId, $config);
+
+			return $result;
+		}
+		catch (\Throwable $exception)
+		{
+			return $result->addError(Error::createFromThrowable($exception));
+		}
 	}
 
 	private function getAccessError(): Error

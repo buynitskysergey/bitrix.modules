@@ -115,10 +115,8 @@ final class RelationFieldResolver implements \Bitrix\Bizproc\Public\Activity\Int
 	 */
 	private function resolveCustomParentField(int $sourceTypeId, int $targetTypeId, string $sourcePropertyId): array
 	{
-		$parentFields = $this->getParentFieldManager()->getParentFieldsInfo($targetTypeId);
-		$parentFieldName = ParentFieldManager::getParentFieldName($sourceTypeId);
-
-		if (!isset($parentFields[$parentFieldName]))
+		$parentFieldName = $this->findCustomParentField($sourceTypeId, $targetTypeId);
+		if ($parentFieldName === null)
 		{
 			return [];
 		}
@@ -129,6 +127,24 @@ final class RelationFieldResolver implements \Bitrix\Bizproc\Public\Activity\Int
 				'required' => false,
 			],
 		];
+	}
+
+	/**
+	 * Name of the target field that holds the id of the source item, or null when the relation is not
+	 * carried by a field of the target. Runtime callers filter children of an item by it instead of
+	 * fetching every binding first.
+	 */
+	public function findCustomParentField(int $sourceTypeId, int $targetTypeId): ?string
+	{
+		if ($sourceTypeId <= 0 || $targetTypeId <= 0 || $sourceTypeId === $targetTypeId)
+		{
+			return null;
+		}
+
+		$parentFields = $this->getParentFieldManager()->getParentFieldsInfo($targetTypeId);
+		$parentFieldName = ParentFieldManager::getParentFieldName($sourceTypeId);
+
+		return isset($parentFields[$parentFieldName]) ? $parentFieldName : null;
 	}
 
 	/**

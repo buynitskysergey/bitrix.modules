@@ -25,6 +25,7 @@ use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\Analytic;
 use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
+use Bitrix\Rest\Internal\Service\PasswordPermission\PermissionListNormalizer;
 use Bitrix\Rest\Service\ServiceContainer;
 use Bitrix\Im\Model\BotTable;
 use Bitrix\Im\Bot;
@@ -447,7 +448,7 @@ class Provider
 			'ELEMENT_CODE' => $elementCode,
 			'USER_ID' => $userId,
 			'TITLE' => $requestData['TITLE'],
-			'SCOPE' => (isset($requestData['SCOPE']) && is_array($requestData['SCOPE'])) ? $requestData['SCOPE'] : [],
+			'SCOPE' => (isset($requestData['SCOPE']) && is_array($requestData['SCOPE'])) ? (new PermissionListNormalizer())->normalize($requestData['SCOPE']) : [],
 			'QUERY' => $requestData['QUERY'] ?? '',
 			'OUTGOING_HANDLER_URL' => trim($requestData['OUTGOING_HANDLER_URL'] ?? null),
 			'OUTGOING_EVENTS' => isset($requestData['OUTGOING_EVENTS']) && is_array($requestData['OUTGOING_EVENTS']) ? $requestData['OUTGOING_EVENTS'] : [],
@@ -1288,37 +1289,48 @@ class Provider
 			);
 			if ($passwordData = $passData->fetch())
 			{
-				$scopeListOld = [];
-				$scopeIdList = [];
-				$permData = PermissionTable::getList(
-					[
-						'filter' => [
-							'=PASSWORD_ID' => $passwordData['ID']
-						]
-					]
-				);
-				while ($scopeItem = $permData->fetch())
-				{
-					$scopeIdList[$scopeItem['PERM']] = $scopeItem['ID'];
-					$scopeListOld[] = $scopeItem['PERM'];
-				}
-				$resultList = array_diff($scopeList, $scopeListOld);
-				foreach ($resultList as $scope)
-				{
-					PermissionTable::add(
+				$scopeListOld = array_column(
+					PermissionTable::getList(
 						[
-							'PASSWORD_ID' => $passwordData['ID'],
-							'PERM' => $scope,
+							'filter' => [
+								'=PASSWORD_ID' => $passwordData['ID']
+							],
+							'select' => ['PERM'],
 						]
-					);
-				}
-				$resultList = array_diff($scopeListOld, $scopeList);
-				foreach ($resultList as $scope)
+					)->fetchAll(),
+					'PERM'
+				);
+				$obsolete = array_diff($scopeListOld, $scopeList);
+				$added = array_diff($scopeList, $scopeListOld);
+
+				if (!empty($obsolete) || !empty($added))
 				{
-					if (isset($scopeIdList[$scope]))
-					{
-						PermissionTable::delete($scopeIdList[$scope]);
-					}
+					self::runInTransaction(function () use ($obsolete, $added, $passwordData): void {
+						if (!empty($obsolete))
+						{
+							PermissionTable::deleteByFilter([
+								'=PASSWORD_ID' => $passwordData['ID'],
+								'@PERM' => array_values($obsolete),
+							]);
+						}
+						if (!empty($added))
+						{
+							PermissionTable::addMulti(
+								array_map(
+									static fn (string $scope): array => [
+										'PASSWORD_ID' => $passwordData['ID'],
+										'PERM' => $scope,
+									],
+									array_values($added)
+								),
+								true
+							);
+						}
+					});
+
+					// Repeat invalidation: the one done inside the transaction may be outrun by a
+					// parallel request caching the uncommitted state for the whole cache TTL.
+					PermissionTable::cleanCache();
 				}
 
 				if ($title !== '' && $passwordData['TITLE'] !== $title)
@@ -1355,6 +1367,30 @@ class Provider
 		}
 
 		return $password;
+	}
+
+	private static function runInTransaction(callable $operation): void
+	{
+		$connection = Main\Application::getConnection();
+		$connection->startTransaction();
+
+		try
+		{
+			$operation();
+			$connection->commitTransaction();
+		}
+		catch (\Throwable $exception)
+		{
+			try
+			{
+				$connection->rollbackTransaction();
+			}
+			catch (Main\DB\TransactionException)
+			{
+			}
+
+			throw $exception;
+		}
 	}
 
 	private static function deleteWebHook($id)

@@ -8,15 +8,19 @@ use Bitrix\Main\Loader;
 use Bitrix\Rest\V3\Attribute\Description;
 use Bitrix\Rest\V3\Attribute\DtoType;
 use Bitrix\Rest\V3\Attribute\Enabled;
+use Bitrix\Rest\V3\Attribute\McpTool;
 use Bitrix\Rest\V3\Attribute\OrmEntity;
 use Bitrix\Rest\V3\Attribute\Scope;
 use Bitrix\Rest\V3\Attribute\Title;
 use Bitrix\Rest\V3\CacheManager;
 use Bitrix\Rest\V3\Controller\RestController;
+use Bitrix\Rest\V3\Documentation\Attributes\Deprecated;
 use Bitrix\Rest\V3\Documentation\Attributes\Hidden;
 use Bitrix\Rest\V3\Dto\Dto;
 use Bitrix\Rest\V3\Dto\Generator;
+use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Exception\TooManyAttributesException;
+use Bitrix\Rest\V3\Mcp\McpToolMetadata;
 use Bitrix\Rest\V3\Interaction\Response\Response;
 use Bitrix\Rest\V3\Realisation\Controller\Field;
 use Bitrix\Rest\V3\Realisation\Controller\Field\Custom;
@@ -110,6 +114,7 @@ final class ControllerDataManager
 				);
 
 				$customControllerData = [];
+				$discoveredControllersData = [];
 
 				if (
 					$moduleConfig->schemaProviderClass !== null
@@ -148,51 +153,53 @@ final class ControllerDataManager
 
 						$dtoClass = $this->getDtoClassFromAttributes($controllerReflection);
 						$isEnabled = $this->resolveControllerEnabled($controllerReflection);
+						$providerControllerData = $customControllerData[$controllerClass] ?? null;
 
-						$controllerData = new ControllerData(
+						$controllerData = $this->createDiscoveredControllerData(
 							module: $moduleId,
 							controllerFqcn: $controllerClass,
-							dtoFqcn: $dtoClass,
 							namespace: $namespace,
-							enabled: $isEnabled,
+							dtoFqcn: $dtoClass,
+							isEnabled: $isEnabled,
+							providerControllerData: $providerControllerData,
 						);
 
 						$this->addMethodDescriptionsByControllerReflection($controllerData, $controllerReflection);
 
-						$dto = $this->getDtoByClass($dtoClass);
-						if ($dto !== null)
+						if ($providerControllerData !== null)
 						{
-							$this->addDtoFieldMethods($dto, $controllerData);
-						}
-
-						if (isset($customControllerData[$controllerClass]))
-						{
-							foreach ($customControllerData[$controllerClass]->getMethods() as $customMethodDescription)
+							foreach ($providerControllerData->getMethods() as $customMethodDescription)
 							{
 								$controllerData->addMethod($customMethodDescription);
 							}
 							unset($customControllerData[$controllerClass]);
 						}
 
-						$controllerCacheData = $controllerData->toArray();
-
-						CacheManager::set($this->getControllerCacheKey($controllerReflection->getName()), $controllerCacheData, CacheManager::ONE_HOUR_TTL);
-						$controllersCacheData[$controllerReflection->getName()] = $controllerCacheData;
-
-						self::$byName[$controllerReflection->getName()] = $controllerData;
-						self::$byModule[$controllerData->module][$controllerReflection->getName()] = $controllerData;
+						$discoveredControllersData[$controllerReflection->getName()] = $controllerData;
 					}
+				}
+
+				// generated field methods must not shadow routes another controller of the module declares itself
+				$declaredActionUris = $this->collectDeclaredActionUris(
+					array_merge($discoveredControllersData, $customControllerData),
+				);
+
+				foreach ($discoveredControllersData as $controllerName => $controllerData)
+				{
+					$dto = $this->getDtoByClass($controllerData->dtoFqcn);
+					if ($dto !== null)
+					{
+						$this->addDtoFieldMethods($dto, $controllerData, $declaredActionUris);
+					}
+
+					$this->registerControllerData($controllerName, $controllerData, $controllersCacheData);
 				}
 
 				foreach ($customControllerData as $controllerData)
 				{
-					$controllerCacheData = $controllerData->toArray();
+					$this->addDtoFieldMethodsForCustomController($controllerData, $declaredActionUris);
 
-					CacheManager::set($this->getControllerCacheKey($controllerData->controllerFqcn), $controllerCacheData, CacheManager::ONE_HOUR_TTL);
-					$controllersCacheData[$controllerData->controllerFqcn] = $controllerCacheData;
-
-					self::$byName[$controllerData->controllerFqcn] = $controllerData;
-					self::$byModule[$controllerData->module][$controllerData->controllerFqcn] = $controllerData;
+					$this->registerControllerData($controllerData->controllerFqcn, $controllerData, $controllersCacheData);
 				}
 
 				$this->saveGeneratedDtosByModuleId($moduleId, $generatedDtoCacheData);
@@ -216,6 +223,57 @@ final class ControllerDataManager
 			'byName' => self::$byName,
 			'byModule' => self::$byModule,
 		];
+	}
+
+	/**
+	 * A schema provider may describe a controller that is also discovered by the namespace scan.
+	 * Its dto wins over the #[DtoType] attribute, while disabling is a veto on both sides.
+	 */
+	private function createDiscoveredControllerData(
+		string $module,
+		string $controllerFqcn,
+		?string $namespace,
+		?string $dtoFqcn,
+		bool $isEnabled,
+		?ControllerData $providerControllerData,
+	): ControllerData
+	{
+		return new ControllerData(
+			module: $module,
+			controllerFqcn: $controllerFqcn,
+			dtoFqcn: $providerControllerData?->dtoFqcn ?? $dtoFqcn,
+			namespace: $namespace,
+			enabled: $isEnabled && ($providerControllerData?->enabled ?? true),
+		);
+	}
+
+	/**
+	 * @param array<string, ControllerData> $controllersData
+	 * @return array<string, true>
+	 */
+	private function collectDeclaredActionUris(array $controllersData): array
+	{
+		$actionUris = [];
+		foreach ($controllersData as $controllerData)
+		{
+			foreach ($controllerData->getMethods() as $methodDescription)
+			{
+				$actionUris[$methodDescription->actionUri] = true;
+			}
+		}
+
+		return $actionUris;
+	}
+
+	private function registerControllerData(string $controllerName, ControllerData $controllerData, array &$controllersCacheData): void
+	{
+		$controllerCacheData = $controllerData->toArray();
+
+		CacheManager::set($this->getControllerCacheKey($controllerName), $controllerCacheData, CacheManager::ONE_HOUR_TTL);
+		$controllersCacheData[$controllerName] = $controllerCacheData;
+
+		self::$byName[$controllerName] = $controllerData;
+		self::$byModule[$controllerData->module][$controllerName] = $controllerData;
 	}
 
 	private function getDtoClassFromAttributes(ReflectionClass $controllerReflection): ?string
@@ -310,43 +368,108 @@ final class ControllerDataManager
 		return $this->dtos[$dtoClass];
 	}
 
-	private function addDtoFieldMethods(Dto $dto, ControllerData $controllerData): void
+	/**
+	 * @param array<string, true> $declaredActionUris
+	 */
+	private function addDtoFieldMethods(Dto $dto, ControllerData $controllerData, array $declaredActionUris): void
 	{
-		$listMethodUri = $controllerData->getMethodUri('field.list');
+		$this->addDtoFieldMethodsForResourceUri($dto, $controllerData->module, $controllerData->getUri(), $declaredActionUris);
+	}
 
-		$listMethodDescription = new MethodDescription(
-			module: $controllerData->module,
-			controllerFqcn: Field::class,
-			method: 'list',
-			dtoFqcn: DtoFieldDto::class,
-			scopes: $this->getScopesFromActionUri($listMethodUri),
-			actionUri: $listMethodUri,
-			title: null,
-			description: null,
-			queryParams: [
-				'dtoClass' => $dto::class
-			]
-		);
+	/**
+	 * @param array<string, true> $declaredActionUris
+	 */
+	private function addDtoFieldMethodsForCustomController(ControllerData $controllerData, array $declaredActionUris): void
+	{
+		$dtoByResourceUri = [];
+		foreach ($controllerData->getMethods() as $methodDescription)
+		{
+			$resourceUri = $this->getResourceUriByCrudMethod($methodDescription);
+			if ($resourceUri === null || isset($dtoByResourceUri[$resourceUri]))
+			{
+				continue;
+			}
 
-		$this->systemControllersData[Field::class]->addMethod($listMethodDescription);
+			$dto = $this->getDtoByClass($methodDescription->dtoFqcn ?? $controllerData->dtoFqcn);
+			if ($dto !== null)
+			{
+				$dtoByResourceUri[$resourceUri] = $dto;
+			}
+		}
 
-		$getMethodUri = $controllerData->getMethodUri('field.get');
+		foreach ($dtoByResourceUri as $resourceUri => $dto)
+		{
+			$this->addDtoFieldMethodsForResourceUri($dto, $controllerData->module, $resourceUri, $declaredActionUris);
+		}
+	}
 
-		$getMethodDescription = new MethodDescription(
-			module: $controllerData->module,
-			controllerFqcn: Field::class,
-			method: 'get',
-			dtoFqcn: DtoFieldDto::class,
-			scopes: $this->getScopesFromActionUri($getMethodUri),
-			actionUri: $getMethodUri,
-			title: null,
-			description: null,
-			queryParams: [
-				'dtoClass' => $dto::class
-			]
-		);
+	private function getResourceUriByCrudMethod(MethodDescription $methodDescription): ?string
+	{
+		if (
+			!in_array($methodDescription->method, ['add', 'delete', 'get', 'list', 'update'], true)
+			|| str_contains($methodDescription->actionUri, '.field.')
+		)
+		{
+			return null;
+		}
 
-		$this->systemControllersData[Field::class]->addMethod($getMethodDescription);
+		$methodSuffix = '.' . $methodDescription->method;
+		if (!str_ends_with($methodDescription->actionUri, $methodSuffix))
+		{
+			return null;
+		}
+
+		$resourceUri = substr($methodDescription->actionUri, 0, -strlen($methodSuffix));
+
+		return $resourceUri === '' ? null : $resourceUri;
+	}
+
+	/**
+	 * @param array<string, true> $declaredActionUris
+	 */
+	private function addDtoFieldMethodsForResourceUri(Dto $dto, string $module, string $resourceUri, array $declaredActionUris): void
+	{
+		$listMethodUri = $resourceUri . '.field.list';
+
+		if (!isset($declaredActionUris[$listMethodUri]))
+		{
+			$listMethodDescription = new MethodDescription(
+				module: $module,
+				controllerFqcn: Field::class,
+				method: 'list',
+				dtoFqcn: DtoFieldDto::class,
+				scopes: $this->getScopesFromActionUri($listMethodUri),
+				actionUri: $listMethodUri,
+				title: null,
+				description: null,
+				queryParams: [
+					'dtoClass' => $dto::class
+				]
+			);
+
+			$this->systemControllersData[Field::class]->addMethod($listMethodDescription);
+		}
+
+		$getMethodUri = $resourceUri . '.field.get';
+
+		if (!isset($declaredActionUris[$getMethodUri]))
+		{
+			$getMethodDescription = new MethodDescription(
+				module: $module,
+				controllerFqcn: Field::class,
+				method: 'get',
+				dtoFqcn: DtoFieldDto::class,
+				scopes: $this->getScopesFromActionUri($getMethodUri),
+				actionUri: $getMethodUri,
+				title: null,
+				description: null,
+				queryParams: [
+					'dtoClass' => $dto::class
+				]
+			);
+
+			$this->systemControllersData[Field::class]->addMethod($getMethodDescription);
+		}
 
 		if ($dto->issetUserFields())
 		{
@@ -355,32 +478,39 @@ final class ControllerDataManager
 			foreach ($customMethods as $customMethod)
 			{
 				$fieldsMethod = in_array($customMethod, ['add', 'update'], true);
-				$customMethodUri = $controllerData->getMethodUri('field.custom.' . $customMethod);
-				$customMethodDescription = new MethodDescription(
-					module: $controllerData->module,
-					controllerFqcn: Custom::class,
-					method: $customMethod,
-					dtoFqcn: CustomDto::class,
-					scopes: $this->getScopesFromActionUri($customMethodUri),
-					actionUri: $customMethodUri,
-					title: null,
-					description: null,
-					queryParams: $fieldsMethod ? ['fields' => ['entityId' => $entityId]] : ['entityId' => $entityId],
-				);
-				$this->systemControllersData[Custom::class]->addMethod($customMethodDescription);
-				$enumMethodUri = $controllerData->getMethodUri('field.custom.enum.' . $customMethod);
-				$customEnumMethodDescription = new MethodDescription(
-					module: $controllerData->module,
-					controllerFqcn: Custom\Enum::class,
-					method: $customMethod,
-					dtoFqcn: EnumDto::class,
-					scopes: $this->getScopesFromActionUri($enumMethodUri),
-					actionUri: $enumMethodUri,
-					title: null,
-					description: null,
-					queryParams: $fieldsMethod ? ['fields' => ['entityId' => $entityId]] : ['entityId' => $entityId],
-				);
-				$this->systemControllersData[Custom\Enum::class]->addMethod($customEnumMethodDescription);
+				$customMethodUri = $resourceUri . '.field.custom.' . $customMethod;
+				if (!isset($declaredActionUris[$customMethodUri]))
+				{
+					$customMethodDescription = new MethodDescription(
+						module: $module,
+						controllerFqcn: Custom::class,
+						method: $customMethod,
+						dtoFqcn: CustomDto::class,
+						scopes: $this->getScopesFromActionUri($customMethodUri),
+						actionUri: $customMethodUri,
+						title: null,
+						description: null,
+						queryParams: $fieldsMethod ? ['fields' => ['entityId' => $entityId]] : ['entityId' => $entityId],
+					);
+					$this->systemControllersData[Custom::class]->addMethod($customMethodDescription);
+				}
+
+				$enumMethodUri = $resourceUri . '.field.custom.enum.' . $customMethod;
+				if (!isset($declaredActionUris[$enumMethodUri]))
+				{
+					$customEnumMethodDescription = new MethodDescription(
+						module: $module,
+						controllerFqcn: Custom\Enum::class,
+						method: $customMethod,
+						dtoFqcn: EnumDto::class,
+						scopes: $this->getScopesFromActionUri($enumMethodUri),
+						actionUri: $enumMethodUri,
+						title: null,
+						description: null,
+						queryParams: $fieldsMethod ? ['fields' => ['entityId' => $entityId]] : ['entityId' => $entityId],
+					);
+					$this->systemControllersData[Custom\Enum::class]->addMethod($customEnumMethodDescription);
+				}
 			}
 		}
 	}
@@ -450,7 +580,7 @@ final class ControllerDataManager
 			$methodName = str_replace('Action', '', $method->name);
 			$returnType = $method->getReturnType()?->getName();
 
-			if ($returnType === null || !is_subclass_of($returnType, Response::class))
+			if (!TypeHelper::isSubclassOf($returnType, Response::class))
 			{
 				continue;
 			}
@@ -470,7 +600,10 @@ final class ControllerDataManager
 				'isEnabled' => true,
 				'queryParams' => null,
 				'isHidden' => false,
+				'mcpTool' => null,
 			];
+			$isHidden = false;
+			$isDeprecated = false;
 
 			foreach ($method->getAttributes() as $attribute)
 			{
@@ -482,13 +615,20 @@ final class ControllerDataManager
 					Scope::class => $methodDescriptionData['scopes'][] = $attributeInstance->value,
 					Title::class => $methodDescriptionData['title'] = $attributeInstance->value,
 					Description::class => $methodDescriptionData['description'] = $attributeInstance->value,
+					McpTool::class => $methodDescriptionData['mcpTool'] = McpToolMetadata::fromAttribute($attributeInstance),
+					Hidden::class => $isHidden = $methodDescriptionData['isHidden'] = true,
+					Deprecated::class => $isDeprecated = true,
 					Enabled::class => call_user_func(function () use ($attributeInstance, &$methodDescriptionData) {
 						$provider = new $attributeInstance->provider();
 						$methodDescriptionData['isEnabled'] = $provider->isEnabled();
 					}),
-					Hidden::class => $methodDescriptionData['isHidden'] = true,
 					default => null,
 				};
+			}
+
+			if ($isHidden || $isDeprecated || !$methodDescriptionData['isEnabled'])
+			{
+				$methodDescriptionData['mcpTool'] = null;
 			}
 
 			$methodDescription = new MethodDescription(
@@ -503,6 +643,8 @@ final class ControllerDataManager
 				isEnabled: $methodDescriptionData['isEnabled'],
 				queryParams: $methodDescriptionData['queryParams'],
 				isHidden: $methodDescriptionData['isHidden'],
+				mcpTool: $methodDescriptionData['mcpTool'],
+				isDeprecated: $isDeprecated,
 			);
 
 			$controllerData->addMethod($methodDescription);

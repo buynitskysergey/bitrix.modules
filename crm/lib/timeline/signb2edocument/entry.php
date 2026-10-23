@@ -39,6 +39,7 @@ class Entry extends TimelineEntry
 	public const TYPE_CATEGORY_CONFIGURATION_ERROR = 23; // log
 	public const TYPE_CATEGORY_ANNULLED = 24; // log
 	public const TYPE_CATEGORY_ANNULMENT_CANCELED = 25; // log
+	public const TYPE_CATEGORY_MEMBER_DOCUMENT_PREPARATION_FAILED = 26; // log
 
 	public static function create(array $params): ?int
 	{

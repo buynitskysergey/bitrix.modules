@@ -580,8 +580,9 @@ class CCrmViewHelper
 							'calendarSettings' => $calendarSettings,
 							'colorSettings' => $colorSettings,
 						]);
+						$analytics = htmlspecialcharsbx(CUtil::PhpToJSObject($arParams['ANALYTICS'] ?? []));
 
-						$jsOnClick = "BX.CrmUIGridExtension.showActivityAddingPopup(this, '" . $preparedGridId . "', " . (int)$entityTypeId . ", " . (int)$entityID . ", " . $currentUser . ", " . $settings . ");";
+						$jsOnClick = "BX.CrmUIGridExtension.showActivityAddingPopup(this, '" . $preparedGridId . "', " . (int)$entityTypeId . ", " . (int)$entityID . ", " . $currentUser . ", " . $settings . ", " . $analytics . ");";
 					}
 					else
 					{
@@ -662,8 +663,9 @@ class CCrmViewHelper
 						'calendarSettings' => $calendarSettings,
 						'colorSettings' => $colorSettings,
 					]);
+					$analytics = htmlspecialcharsbx(CUtil::PhpToJSObject($arParams['ANALYTICS'] ?? []));
 
-					$jsOnClick = "BX.CrmUIGridExtension.showActivityAddingPopup(this, '" . $preparedGridId . "', " . (int)$entityTypeId . ", " . (int)$entityID . ", " . $currentUser . ", " . $settings . ");";
+					$jsOnClick = "BX.CrmUIGridExtension.showActivityAddingPopup(this, '" . $preparedGridId . "', " . (int)$entityTypeId . ", " . (int)$entityID . ", " . $currentUser . ", " . $settings . ", " . $analytics . ");";
 				}
 				else
 				{

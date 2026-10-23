@@ -72,7 +72,8 @@ class AppTable extends DataManager
 				->configureDefaultValue(AppInstallCompletionMode::Deferred->value),
 
 			(new StringField('URL'))
-				->configureSize(1000),
+				->configureSize(1000)
+				->configureDefaultValue(''),
 
 			(new StringField('URL_DEMO'))
 				->configureSize(1000),

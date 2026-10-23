@@ -191,10 +191,17 @@ class AccessibilityManager
 	 */
 	public static function getAdditionalLocationAccessibilityConnection(int $roomId): array
 	{
+		$decodedOption = self::getFullAdditionalLocationAccessibilityConnection();
+
+		return $decodedOption[$roomId] ?? [];
+	}
+
+	public static function getFullAdditionalLocationAccessibilityConnection(): array
+	{
 		$currentOption = Option::get('calendar', self::ADDITIONAL_LOCATION_CONNECTION_OPTION);
 		$decodedOption = unserialize($currentOption, ['allowed_classes' => false]);
 
-		return $decodedOption[$roomId] ?? [];
+		return is_array($decodedOption) ? $decodedOption : [];
 	}
 
 
@@ -220,13 +227,7 @@ class AccessibilityManager
 	 */
 	public static function setAdditionalLocationAccessibilityConnection(int $roomId, array $additionalRoomId): void
 	{
-		$currentOption = Option::get('calendar', self::ADDITIONAL_LOCATION_CONNECTION_OPTION);
-		$decodedOption = unserialize($currentOption, ['allowed_classes' => false]);
-
-		if (!is_array($decodedOption))
-		{
-			$decodedOption = [];
-		}
+		$decodedOption = self::getFullAdditionalLocationAccessibilityConnection();
 
 		$decodedOption[$roomId] = $additionalRoomId;
 		$result = serialize($decodedOption);

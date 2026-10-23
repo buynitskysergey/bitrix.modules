@@ -28,6 +28,8 @@ class App implements EntityInterface, RestApplicationInterface
 
 	private ?DateTime $dateInstall = null;
 
+	private bool $statusChanged = false;
+
 	public function __construct(
 		private ?string $clientId,
 		private ?string $code,
@@ -52,6 +54,7 @@ class App implements EntityInterface, RestApplicationInterface
 		private ?string $applicationToken = null,
 		private bool $mobile = false,
 		private bool $userInstall = false,
+		private readonly ?string $storedStatus = null,
 	)
 	{
 	}
@@ -205,8 +208,19 @@ class App implements EntityInterface, RestApplicationInterface
 		return $this->origin;
 	}
 
+	public function getStoredStatus(): ?string
+	{
+		return $this->storedStatus;
+	}
+
+	public function isStatusChanged(): bool
+	{
+		return $this->statusChanged;
+	}
+
 	public function setOrigin(AppOrigin $origin): self
 	{
+		$this->statusChanged = $this->statusChanged || $this->origin !== $origin;
 		$this->origin = $origin;
 
 		return $this;
@@ -219,6 +233,7 @@ class App implements EntityInterface, RestApplicationInterface
 
 	public function setPricingModel(?AppPricingModel $pricingModel): self
 	{
+		$this->statusChanged = $this->statusChanged || $this->pricingModel !== $pricingModel;
 		$this->pricingModel = $pricingModel;
 
 		return $this;
@@ -231,6 +246,7 @@ class App implements EntityInterface, RestApplicationInterface
 
 	public function setLicenseState(?AppLicenseState $licenseState): self
 	{
+		$this->statusChanged = $this->statusChanged || $this->licenseState !== $licenseState;
 		$this->licenseState = $licenseState;
 
 		return $this;

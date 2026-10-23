@@ -20,6 +20,7 @@ use Bitrix\Rest\AppTable;
 use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
 use Bitrix\Rest\Internal\Repository\Application\AppRepository;
 use Bitrix\Rest\Public\Command\Application\Access\SetAppAccessCommand;
+use Bitrix\Rest\Public\Provider\ApplicationProvider;
 use CRestUtil;
 
 Loc::loadMessages(__FILE__);
@@ -227,19 +228,21 @@ class Application
 						}
 
 						$shouldFinalizeInstallation = $appFields['INSTALLED'] === AppTable::INSTALLED;
-						$existingApp = AppTable::getByClientId($appFields['CLIENT_ID']);
+						$existingApp = (new ApplicationProvider())->findByClientId(
+							(string)$appFields['CLIENT_ID']
+						);
 						$appFieldsToSave = $appFields;
 						$requiresFinalization = $shouldFinalizeInstallation
-							&& (!$existingApp || $existingApp['INSTALLED'] !== AppTable::INSTALLED);
+							&& ($existingApp === null || $existingApp->isInstalled() !== true);
 						if ($requiresFinalization)
 						{
 							$appFieldsToSave['ACTIVE'] = AppTable::INACTIVE;
 							$appFieldsToSave['INSTALLED'] = AppTable::NOT_INSTALLED;
 						}
 
-						if ($existingApp)
+						if ($existingApp !== null)
 						{
-							$addResult = AppTable::update($existingApp['ID'], $appFieldsToSave);
+							$addResult = AppTable::update($existingApp->getId(), $appFieldsToSave);
 						}
 						else
 						{
@@ -261,7 +264,7 @@ class Application
 
 						if ($addResult->isSuccess())
 						{
-							if ($existingApp)
+							if ($existingApp !== null)
 							{
 								AppLogTable::log($appId, AppLogTable::ACTION_TYPE_UPDATE);
 							}
@@ -676,15 +679,15 @@ class Application
 			return [];
 		}
 
-		$appInfo = AppTable::getByClientId($appId);
-		if (!$appInfo)
+		$appInfo = (new ApplicationProvider())->findById((int)$appId);
+		if ($appInfo === null)
 		{
 			return [];
 		}
 
-		if ($appInfo['CODE'])
+		if ((string)$appInfo->getCode() !== '')
 		{
-			Analytic::logToFile('setAppRight', $appInfo['CODE'], $appInfo['CODE']);
+			Analytic::logToFile('setAppRight', $appInfo->getCode(), $appInfo->getCode());
 		}
 
 		$codes = [];
@@ -705,7 +708,7 @@ class Application
 		{
 			$commandResult = (new SetAppAccessCommand(
 				userId: $userId,
-				clientId: $appInfo['CLIENT_ID'],
+				clientId: (string)$appInfo->getClientId(),
 				accessCodes: $codes,
 			))->run();
 		}

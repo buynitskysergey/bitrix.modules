@@ -49,6 +49,7 @@ class ConfigureDocument implements Contract\Operation
 	private readonly Service\Api\Document\SigningService $apiDocumentSigningService;
 	private readonly Service\Sign\BlockService $signBlockService;
 	private readonly Service\Sign\Document\ProviderCodeService $providerCodeService;
+	private readonly Service\Sign\Document\DirectorSigningGuardService $directorSigningGuardService;
 	private readonly LoggerInterface $logger;
 	private readonly Service\Integration\HumanResources\HcmLinkService $hcmLinkService;
 	private readonly Service\Integration\HumanResources\HcmLinkFieldService $hcmLinkFieldService;
@@ -77,6 +78,7 @@ class ConfigureDocument implements Contract\Operation
 		$this->apiDocumentSigningService = $container->getApiDocumentSigningService();
 		$this->signBlockService = $container->getSignBlockService();
 		$this->providerCodeService = $container->getProviderCodeService();
+		$this->directorSigningGuardService = $container->getDirectorSigningGuardService();
 		$this->logger = $container->getLogger('Operation');
 		$this->hcmLinkService = $container->getHcmLinkService();
 		$this->hcmLinkFieldService = $container->getHcmLinkFieldService();
@@ -120,6 +122,12 @@ class ConfigureDocument implements Contract\Operation
 					'expected' => [DocumentStatus::UPLOADED],
 				],
 			));
+		}
+
+		$directorSigningResult = $this->directorSigningGuardService->check($document);
+		if (!$directorSigningResult->isSuccess())
+		{
+			return $directorSigningResult;
 		}
 
 		$members = $this->memberRepository
@@ -195,6 +203,7 @@ class ConfigureDocument implements Contract\Operation
 				name: $this->getMemberNameToSend($member),
 				role: $member->role ?? Role::createByParty($member->party),
 				gender: $this->getMemberGenderToSend($userId),
+				signingMethod: $member->signingMethod,
 			);
 
 			if (DocumentScenario::isB2EScenario($document->scenario))
@@ -541,7 +550,7 @@ class ConfigureDocument implements Contract\Operation
 			return $fieldsCollection;
 		}
 
-		$requiredFields = $apiResult->collection;
+		$requiredFields = $this->prepareRequiredFieldsForRepresentative($apiResult->collection, $memberCollection);
 		$this->requiredFieldRepository->replaceRequiredItemsCollectionForDocumentId($requiredFields, $document->id);
 
 		foreach ($requiredFields as $requiredField)
@@ -560,6 +569,32 @@ class ConfigureDocument implements Contract\Operation
 		}
 
 		return $fieldsCollection;
+	}
+
+	private function prepareRequiredFieldsForRepresentative(
+		Item\B2e\RequiredFieldsCollection $requiredFields,
+		Item\MemberCollection $memberCollection,
+	): Item\B2e\RequiredFieldsCollection
+	{
+		$representative = $memberCollection->findFirstByRole(Type\Member\Role::ASSIGNEE);
+		$result = new Item\B2e\RequiredFieldsCollection();
+
+		foreach ($requiredFields as $requiredField)
+		{
+			if ($requiredField->type === FieldType::SNILS && $requiredField->role === Type\Member\Role::ASSIGNEE)
+			{
+				if ($representative?->signingMethod !== Type\Member\SigningMethod::GOS_KEY)
+				{
+					continue;
+				}
+
+				$requiredField->required = true;
+			}
+
+			$result->add($requiredField);
+		}
+
+		return $result;
 	}
 
 	/**

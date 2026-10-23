@@ -7,7 +7,10 @@ use Bitrix\Main\Security;
 use Bitrix\Rest\Event\Sender;
 use Bitrix\Rest\EventTable;
 use Bitrix\Rest\Internal\Entity\Application\AppInstallCompletionMode;
+use Bitrix\Rest\Internal\Model\AppStatus;
 use Bitrix\Rest\Public;
+use Bitrix\Rest\Public\Provider\ApplicationProvider;
+use Bitrix\Rest\Public\Provider\Dto\ApplicationData;
 use Bitrix\Rest;
 use Bitrix\Main;
 use Bitrix\Main\Config\Option;
@@ -622,35 +625,43 @@ class CRestUtil
 		return $hasAccess;
 	}
 
-	public static function updateAppStatus(array $tokenInfo): ?Main\Result
+	/**
+	 * @throws Main\ArgumentException
+	 */
+	public static function updateAppStatus(array $tokenInfo, ?ApplicationData $application = null): ?Main\Result
 	{
-		if (
-			array_key_exists('status', $tokenInfo)
-			&& array_key_exists('client_id', $tokenInfo)
-			&& ($appInfo = Rest\AppTable::getByClientId($tokenInfo['client_id']))
-		)
+		if (!array_key_exists('status', $tokenInfo) || !array_key_exists('client_id', $tokenInfo))
 		{
-			$updateFields = [];
-			if (!empty($tokenInfo['status']) && $tokenInfo['status'] !== $appInfo['STATUS'])
+			return null;
+		}
+
+		$application ??= (new ApplicationProvider())->findByClientId((string)$tokenInfo['client_id']);
+
+		if ($application === null)
+		{
+			return null;
+		}
+
+		$updateFields = [];
+		if (!empty($tokenInfo['status']) && AppStatus::toPublicStatus((string)$tokenInfo['status']) !== $application->getStatus())
+		{
+			$updateFields['STATUS'] = $tokenInfo['status'];
+		}
+		if (isset($tokenInfo['date_finish']))
+		{
+			$willingToUpdateDateFinish = (int)$tokenInfo['date_finish'];
+			$currentDateFinish = $application->getDateFinish()?->getTimestamp() ?? 0;
+			if ($willingToUpdateDateFinish !== $currentDateFinish)
 			{
-				$updateFields['STATUS'] = $tokenInfo['status'];
+				$updateFields['DATE_FINISH'] = $willingToUpdateDateFinish > 0 ?
+					\Bitrix\Main\Type\DateTime::createFromTimestamp($willingToUpdateDateFinish) :
+					''
+				;
 			}
-			if (isset($tokenInfo['date_finish']))
-			{
-				$willingToUpdateDateFinish = (int)$tokenInfo['date_finish'];
-				$currentDateFinish = $appInfo['DATE_FINISH'] ? $appInfo['DATE_FINISH']->getTimestamp() : 0;
-				if ($willingToUpdateDateFinish !== $currentDateFinish)
-				{
-					$updateFields['DATE_FINISH'] = $willingToUpdateDateFinish > 0 ?
-						\Bitrix\Main\Type\DateTime::createFromTimestamp($willingToUpdateDateFinish) :
-						''
-					;
-				}
-			}
-			if (!empty($updateFields))
-			{
-				return Rest\AppTable::update($appInfo['ID'], $updateFields);
-			}
+		}
+		if (!empty($updateFields))
+		{
+			return Rest\AppTable::update($application->getId(), $updateFields);
 		}
 
 		return null;
@@ -805,20 +816,20 @@ class CRestUtil
 					}
 
 					$shouldFinalizeInstallation = $appFields['INSTALLED'] === \Bitrix\Rest\AppTable::INSTALLED;
-					$existingApp = \Bitrix\Rest\AppTable::getByClientId($appFields['CLIENT_ID']);
+					$existingApp = (new ApplicationProvider())->findByClientId((string)$appFields['CLIENT_ID']);
 					$appFieldsToSave = $appFields;
 					$requiresFinalization = $shouldFinalizeInstallation
-						&& (!$existingApp || $existingApp['INSTALLED'] !== \Bitrix\Rest\AppTable::INSTALLED);
+						&& ($existingApp === null || $existingApp->isInstalled() !== true);
 					if ($requiresFinalization)
 					{
 						$appFieldsToSave['ACTIVE'] = \Bitrix\Rest\AppTable::INACTIVE;
 						$appFieldsToSave['INSTALLED'] = \Bitrix\Rest\AppTable::NOT_INSTALLED;
 					}
 
-					if($existingApp)
+					if($existingApp !== null)
 					{
-						$addResult = \Bitrix\Rest\AppTable::update($existingApp['ID'], $appFieldsToSave);
-						\Bitrix\Rest\AppLangTable::deleteByApp($existingApp['ID']);
+						$addResult = \Bitrix\Rest\AppTable::update($existingApp->getId(), $appFieldsToSave);
+						\Bitrix\Rest\AppLangTable::deleteByApp($existingApp->getId());
 					}
 					else
 					{

@@ -11,6 +11,8 @@ use Bitrix\Rest\AppTable;
 use Bitrix\Rest\OAuth\Auth;
 use Bitrix\Rest\OAuthService;
 use Bitrix\Rest\Preset\IntegrationTable;
+use Bitrix\Rest\Public\Provider\Mapper\ApplicationDataMapper;
+use Bitrix\Rest\Public\Service\ApplicationStatusCalculator;
 use Bitrix\Rest\Sqs;
 use Bitrix\Rest\Service\ServiceContainer;
 use Bitrix\Rest\Tools\Diagnostics\Event\Logger;
@@ -214,6 +216,8 @@ class Sender
 		$userOwnedLegacyCustomBotTokens = $isUserWebhookDenied
 			? static::getUserOwnedLegacyCustomBotTokens($handlersList)
 			: [];
+		$applicationDataMapper = new ApplicationDataMapper();
+		$statusCalculator = new ApplicationStatusCalculator();
 
 		foreach($handlersList as $handlerInfo)
 		{
@@ -293,8 +297,11 @@ class Sender
 					$application = static::getApplicationData($appId);
 				}
 
-				$appStatus = \Bitrix\Rest\AppTable::getAppStatusInfo($application, '');
-				if($appStatus['PAYMENT_ALLOW'] === 'Y')
+				$applicationProjection = is_array($application)
+					? $applicationDataMapper->convertFromRow($application)
+					: null
+				;
+				if ($applicationProjection !== null && $statusCalculator->calculate($applicationProjection)->isPaymentAllowed())
 				{
 					$authData = array(
 						Session::PARAM_SESSION => $session,

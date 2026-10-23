@@ -1872,7 +1872,7 @@ abstract class Entity
 		];
 	}
 
-	public function getGridFilter(?string $filterId = null): array
+	public function getGridFilter(?string $filterId = null, array $extraFieldIds = []): array
 	{
 		$result = [];
 
@@ -1887,6 +1887,12 @@ abstract class Entity
 		{
 			$usedFields[] = $fieldName;
 		}
+		foreach ($this->getAllowedExtraFilterFieldIds($extraFieldIds) as $fieldName)
+		{
+			$usedFields[] = $fieldName;
+		}
+		$usedFields = array_unique($usedFields);
+
 		foreach ($usedFields as $filterFieldID)
 		{
 			$filterField = $filter->getField($filterFieldID);
@@ -1897,6 +1903,33 @@ abstract class Entity
 		}
 
 		return $result;
+	}
+
+	protected function getAllowedExtraFilterFieldIds(array $extraFieldIds): array
+	{
+		if (empty($extraFieldIds))
+		{
+			return [];
+		}
+
+		$restrictedFieldIds = array_fill_keys($this->getFieldsRestrictions(), true);
+		$result = [];
+
+		foreach ($extraFieldIds as $fieldName)
+		{
+			if (
+				!is_string($fieldName)
+				|| $fieldName === ''
+				|| isset($restrictedFieldIds[$fieldName])
+			)
+			{
+				continue;
+			}
+
+			$result[] = $fieldName;
+		}
+
+		return array_unique($result);
 	}
 
 	public function getFilterLazyLoadParams(): ?array
@@ -2175,6 +2208,16 @@ abstract class Entity
 					$factory = Service\Container::getInstance()->getFactory($typeId);
 					if ($factory)
 					{
+						if (
+							$viewMode === ViewMode::MODE_DEADLINES
+							&& !$factory->isListViewSupported(Service\Router::LIST_VIEW_DEADLINES)
+						)
+						{
+							// no deadline-oriented read-model for this type: fail loudly instead of
+							// silently falling back to the stage-based one
+							return null;
+						}
+
 						$alias = $viewMode === ViewMode::MODE_ACTIVITIES
 							? 'crm.kanban.entity.dynamic.activities'
 							: 'crm.kanban.entity.dynamic';
@@ -2844,6 +2887,16 @@ abstract class Entity
 	public function getSemanticIds(): array
 	{
 		return [];
+	}
+
+	public function shouldShowFinalStagesWithDefaultFilter(): bool
+	{
+		return false;
+	}
+
+	public function shouldShowFinalStagesWithEmptyFilter(): bool
+	{
+		return $this->shouldShowFinalStagesWithDefaultFilter();
 	}
 
 	public function getAllowStages(array $filter = []): array

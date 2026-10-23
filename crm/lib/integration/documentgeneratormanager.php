@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Integration;
 
 use Bitrix\Crm\Integration\DocumentGenerator\CustomField\FieldController;
+use Bitrix\Crm\Integration\DocumentGenerator\CreationOperationContext;
 use Bitrix\Crm\Integration\DocumentGenerator\DataProvider;
 use Bitrix\Crm\Integration\DocumentGenerator\ProductLoader;
 use Bitrix\Crm\Integration\DocumentGenerator\Template;
@@ -24,7 +25,9 @@ use Bitrix\DocumentGenerator\Nameable;
 use Bitrix\DocumentGenerator\Service\ActualizeQueue;
 use Bitrix\DocumentGenerator\VirtualDocument;
 use Bitrix\Main\DB\DuplicateEntryException;
+use Bitrix\Main\DB\Exception as DbException;
 use Bitrix\Main\DB\SqlQueryException;
+use Bitrix\Main\Data\Storage\Exception\StorageException;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Error;
 use Bitrix\Main\Event;
@@ -289,6 +292,20 @@ class DocumentGeneratorManager
 		/** @var Document $document */
 		if($document)
 		{
+			$creationOperationContext = CreationOperationContext::getCurrent();
+			$documentId = (int)$document->ID;
+			if ($creationOperationContext !== null && $documentId > 0)
+			{
+				$creationOperationContext->rememberDocumentId($documentId);
+				try
+				{
+					$creationOperationContext->persistDocumentId();
+				}
+				catch (StorageException | DbException)
+				{
+				}
+			}
+
 			$provider = $document->getProvider();
 			if($provider && $provider instanceof DataProvider\CrmEntityDataProvider)
 			{

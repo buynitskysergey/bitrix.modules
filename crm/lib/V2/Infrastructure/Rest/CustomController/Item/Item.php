@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace Bitrix\Crm\V2\Infrastructure\Rest\CustomController\Item;
 
 use Bitrix\Crm\V2\Infrastructure\Rest\CustomController\AbstractController;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Item\AggregateItemRequestMapper;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Item\ItemDtoMapper;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Item\FieldValueElementMapper;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Item\ItemFilterMapper;
 use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Mapping\Item\ItemListRequestMapper;
+use Bitrix\Crm\V2\Infrastructure\Rest\Dto\Item\ItemDtoGenerator;
 use Bitrix\Crm\V2\Infrastructure\Rest\Provider\Item\RestItemProvider;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\AbstractItemRequest;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\AddFieldValueRequest;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\AddItemRequest;
+use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\AggregateItemRequest;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\DeleteItemRequest;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\DeleteFieldValueRequest;
 use Bitrix\Crm\V2\Infrastructure\Rest\Request\Item\GetItemRequest;
@@ -38,33 +41,65 @@ use Bitrix\Crm\V2\Public\ItemId;
 use Bitrix\Crm\V2\Public\Provider\Item\Exception\UnknownFilterFieldException;
 use Bitrix\Crm\V2\Public\Provider\Item\Exception\UnknownSelectFieldException;
 use Bitrix\Crm\V2\Public\Provider\Item\Exception\UnknownSortFieldException;
+use Bitrix\Main\Error;
+use Bitrix\Main\Engine\Action;
 use Bitrix\Main\ObjectNotFoundException;
 use Bitrix\Main\Result;
 use Bitrix\Rest\V3\Attribute\RequiredGroup;
+use Bitrix\Rest\V3\Dto\Generator;
 use Bitrix\Rest\V3\Exception\EntityNotFoundException;
 use Bitrix\Rest\V3\Exception\UnknownDtoPropertyException;
 use Bitrix\Rest\V3\Exception\Validation\RequestValidationException;
 use Bitrix\Rest\V3\Interaction\Response\AddResponse;
+use Bitrix\Rest\V3\Interaction\Response\AggregateResponse;
 use Bitrix\Rest\V3\Interaction\Response\DeleteResponse;
 use Bitrix\Rest\V3\Interaction\Response\GetResponse;
 use Bitrix\Rest\V3\Interaction\Response\ListResponse;
 use Bitrix\Rest\V3\Interaction\Response\UpdateResponse;
 use Bitrix\Rest\V3\Structure\Structure;
+use Bitrix\Rest\V3\Structure\Aggregation\AggregationResultStructure;
+use Bitrix\Rest\V3\Structure\Aggregation\AggregationType;
+use Bitrix\Rest\V3\Structure\Aggregation\ResultItem;
 use ReflectionClass;
 
 class Item extends AbstractController
 {
+	protected function processBeforeAction(Action $action): bool
+	{
+		if (!parent::processBeforeAction($action))
+		{
+			return false;
+		}
+		if (!in_array($action->getName(), ['get', 'list', 'aggregate'], true))
+		{
+			return true;
+		}
+
+		$generatedDto = (new ItemDtoGenerator())->generate($this->getEntityType()->getId());
+		$dtoClass = Generator::generateByDto($generatedDto);
+		if (Structure::getDto($dtoClass) === null)
+		{
+			Structure::addDto($dtoClass::create());
+		}
+
+		return true;
+	}
+
 	public function addAction(AddItemRequest $request, EntityType $entityType): AddResponse
 	{
 		$fileFields = $this->extractFileFields($request, $entityType, FileFieldInputExtractor::OPERATION_ADD);
 		$dto = $request->fields->convertToDto((RequiredGroup::Add)->value);
 
 		$item = $this->getMapper($entityType)->getItemByDto($dto, validateForAdd: true);
+		$this->prepareItemForAdd($item);
 		$result = $this->runAddItemCommand($item, $fileFields);
 
 		if (!$result->isSuccess())
 		{
-			throw new RequestValidationException($result->getErrors());
+			throw new RequestValidationException(self::normalizeWriteErrors(
+				$result->getErrors(),
+				$this->getWriteErrorFieldNameResolver($request, $entityType, $fileFields),
+			));
 		}
 
 		return new AddResponse($item->getId());
@@ -99,7 +134,10 @@ class Item extends AbstractController
 
 		if (!$result->isSuccess())
 		{
-			throw new RequestValidationException($result->getErrors());
+			throw new RequestValidationException(self::normalizeWriteErrors(
+				$result->getErrors(),
+				$this->getWriteErrorFieldNameResolver($request, $entityType, $fileFields),
+			));
 		}
 
 		return new UpdateResponse();
@@ -124,12 +162,11 @@ class Item extends AbstractController
 
 		try
 		{
-			$result =
-				(new AddFieldValueCommand(
-					$itemId,
-					$fieldValueElement,
-					$this->userId,
-				))
+			$result = (new AddFieldValueCommand(
+				$itemId,
+				$fieldValueElement,
+				$this->userId,
+			))
 				->setScope(Scope::Rest)
 				->withoutRequiredUserFieldsCheck(!$this->isRequiredCheckEnabled())
 				->run()
@@ -142,7 +179,10 @@ class Item extends AbstractController
 
 		if (!$result->isSuccess())
 		{
-			throw new RequestValidationException($result->getErrors());
+			throw new RequestValidationException(self::normalizeWriteErrors(
+				$result->getErrors(),
+				$this->getWriteErrorFieldNameResolver($request, $entityType),
+			));
 		}
 
 		return new UpdateResponse();
@@ -158,10 +198,9 @@ class Item extends AbstractController
 
 		try
 		{
-			$result =
-				(new DeleteItemCommand($itemId, $this->userId))
-					->setScope(Scope::Rest)
-					->run()
+			$result = (new DeleteItemCommand($itemId, $this->userId))
+				->setScope(Scope::Rest)
+				->run()
 			;
 		}
 		catch (ObjectNotFoundException)
@@ -171,7 +210,10 @@ class Item extends AbstractController
 
 		if (!$result->isSuccess())
 		{
-			throw new RequestValidationException($result->getErrors());
+			throw new RequestValidationException(self::normalizeWriteErrors(
+				$result->getErrors(),
+				$this->getWriteErrorFieldNameResolver($request, $entityType),
+			));
 		}
 
 		return new DeleteResponse();
@@ -198,12 +240,11 @@ class Item extends AbstractController
 
 		try
 		{
-			$result =
-				(new DeleteFieldValueCommand(
-					$itemId,
-					$fieldValueElement,
-					$this->userId,
-				))
+			$result = (new DeleteFieldValueCommand(
+				$itemId,
+				$fieldValueElement,
+				$this->userId,
+			))
 				->setScope(Scope::Rest)
 				->withoutRequiredUserFieldsCheck(!$this->isRequiredCheckEnabled())
 				->run()
@@ -216,10 +257,78 @@ class Item extends AbstractController
 
 		if (!$result->isSuccess())
 		{
-			throw new RequestValidationException($result->getErrors());
+			throw new RequestValidationException(self::normalizeWriteErrors(
+				$result->getErrors(),
+				$this->getWriteErrorFieldNameResolver($request, $entityType),
+			));
 		}
 
 		return new UpdateResponse();
+	}
+
+	/**
+	 * @param Error[] $errors
+	 * @return Error[]
+	 */
+	private static function normalizeWriteErrors(array $errors, ?callable $fieldNameResolver = null): array
+	{
+		return array_map(
+			static function(Error $error) use ($fieldNameResolver): Error
+			{
+				$fieldName = (string)($error->getCustomData()['field'] ?? $error->getCode());
+				if ($fieldNameResolver !== null)
+				{
+					$fieldName = $fieldNameResolver($fieldName);
+				}
+
+				return new Error(
+					$error->getLocalizableMessage() ?? $error->getMessage(),
+					$fieldName,
+					$error->getCustomData(),
+				);
+			},
+			$errors,
+		);
+	}
+
+	private function getWriteErrorFieldNameResolver(
+		AbstractItemRequest $request,
+		EntityType $entityType,
+		?FileFieldInputBag $fileFields = null,
+	): ?\Closure
+	{
+		$fieldNames = self::getWriteRequestFieldNames($request);
+		$systemFieldNames = $fileFields?->getInputFieldNamesByItemFieldName() ?? [];
+		if ($fieldNames === [] && $systemFieldNames === [])
+		{
+			return null;
+		}
+
+		$mapper = $this->getMapper($entityType);
+
+		return static function (string $fieldName) use ($mapper, $fieldNames, $systemFieldNames): string
+		{
+			return $systemFieldNames[$fieldName]
+				?? $mapper->getDtoFieldNameByItemFieldName($fieldName, $fieldNames);
+		};
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private static function getWriteRequestFieldNames(AbstractItemRequest $request): array
+	{
+		if ($request instanceof AddItemRequest || $request instanceof UpdateItemRequest)
+		{
+			return array_keys(array_merge($request->fields->getItems(), $request->fields->getUserFields()));
+		}
+
+		if ($request instanceof AddFieldValueRequest || $request instanceof DeleteFieldValueRequest)
+		{
+			return [$request->fieldName];
+		}
+
+		return [];
 	}
 
 	public function getAction(GetItemRequest $request, EntityType $entityType): GetResponse
@@ -255,7 +364,7 @@ class Item extends AbstractController
 		$itemDtoMapper = $this->getReadMapper($entityType);
 		$requestMapper = new ItemListRequestMapper(
 			$itemDtoMapper,
-			new ItemFilterMapper($settings, $itemDtoMapper),
+			new ItemFilterMapper($settings, $itemDtoMapper, userId: $this->userId),
 		);
 		$select = $requestMapper->mapSelect($request);
 		$filter = $requestMapper->mapFilter($request);
@@ -270,10 +379,34 @@ class Item extends AbstractController
 		return new ListResponse($itemDtoMapper->getDtoCollectionByItemsAndRequest($items, $request));
 	}
 
+	public function aggregateAction(AggregateItemRequest $request, EntityType $entityType): AggregateResponse
+	{
+		$settings = EntityTypeSettings::of($entityType);
+		$itemDtoMapper = $this->getReadMapper($entityType);
+		$requestMapper = new AggregateItemRequestMapper(
+			new ItemFilterMapper($settings, $itemDtoMapper, userId: $this->userId),
+		);
+		$requestMapper->mapSelect($request);
+		$count = $this->executeListProviderCall(
+			fn(): int => $this->getRestItemProvider($entityType)->getCount(
+				$requestMapper->mapFilter($request),
+			),
+			$request->getDtoClass(),
+		);
+		$result = new AggregationResultStructure();
+		$result->add(new ResultItem(
+			AggregationType::Count,
+			'id',
+			$count,
+		));
+
+		return new AggregateResponse($result);
+	}
+
 	/**
-	 * @param callable(): ItemCollection $providerCall
+	 * @param callable(): mixed $providerCall
 	 */
-	private function executeListProviderCall(callable $providerCall, string $dtoClass): ItemCollection
+	private function executeListProviderCall(callable $providerCall, string $dtoClass): mixed
 	{
 		try
 		{
@@ -338,6 +471,10 @@ class Item extends AbstractController
 		;
 
 		return $this->runItemWriteCommand($command, $fileFields);
+	}
+
+	protected function prepareItemForAdd(\Bitrix\Crm\V2\Public\Entity\Item\Item $item): void
+	{
 	}
 
 	protected function runUpdateItemCommand(

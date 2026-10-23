@@ -65,6 +65,7 @@ class EventHandler
 				'crm_copilot_call_assessment',
 				'crm_entity_stage_history',
 				'crm_last_communication',
+				'crm_address',
 			];
 
 			if (!in_array($eventTableName, $tableNames, true))
@@ -77,13 +78,14 @@ class EventHandler
 				'crm_smart_proc' => DynamicTypeMapping::getMapping(),
 				'crm_stages' => StagesMapping::getMapping($helper, $languageId),
 				'crm_entity_relation' => EntityRelationMapping::getMapping(),
-				'crm_quote' => QuoteMapping::getMapping(),
+				'crm_quote' => QuoteMapping::getMapping($helper),
 				'crm_quote_product_row' => QuoteProductMapping::getMapping($helper),
 				'crm_activity_relation' => ActivityRelationMapping::getMapping(),
 				'crm_ai_quality_assessment' => AiQualityAssessmentMapping::getMapping(),
 				'crm_copilot_call_assessment' => CopilotCallAssessmentMapping::getMapping(),
 				'crm_entity_stage_history' => EntityStageHistoryMapping::getMapping($helper),
 				'crm_last_communication' => LastCommunicationMapping::getMapping(),
+				'crm_address' => AddressMapping::getMapping($helper, $languageId),
 			};
 
 			self::addDescriptions([
@@ -96,13 +98,14 @@ class EventHandler
 		$result['crm_smart_proc'] = DynamicTypeMapping::getMapping();
 		$result['crm_stages'] = StagesMapping::getMapping($helper, $languageId);
 		$result['crm_entity_relation'] = EntityRelationMapping::getMapping();
-		$result['crm_quote'] = QuoteMapping::getMapping();
+		$result['crm_quote'] = QuoteMapping::getMapping($helper);
 		$result['crm_quote_product_row'] = QuoteProductMapping::getMapping($helper);
 		$result['crm_activity_relation'] = ActivityRelationMapping::getMapping();
 		$result['crm_ai_quality_assessment'] = AiQualityAssessmentMapping::getMapping();
 		$result['crm_copilot_call_assessment'] = CopilotCallAssessmentMapping::getMapping();
 		$result['crm_entity_stage_history'] = EntityStageHistoryMapping::getMapping($helper);
 		$result['crm_last_communication'] = LastCommunicationMapping::getMapping();
+		$result['crm_address'] = AddressMapping::getMapping($helper, $languageId);
 		$result = array_merge(
 			$result,
 			AutomatedSolutionMapping::getMapping($languageId),
@@ -125,6 +128,7 @@ class EventHandler
 			'crm_copilot_call_assessment',
 			'crm_entity_stage_history',
 			'crm_last_communication',
+			'crm_address',
 		], $result, $languageId);
 	}
 
@@ -134,7 +138,7 @@ class EventHandler
 		{
 			$entityName = strtoupper($key);
 			$mapping[$key]['TABLE_DESCRIPTION'] = Localization::getMessage($entityName . '_TABLE', $languageId) ?: $key;
-			$mapping[$key]['TABLE_DESCRIPTION_FULL'] = Localization::getMessage($entityName . '_TABLE_DESCRIPTION_FULL', $languageId) ?? '';
+			$mapping[$key]['TABLE_DESCRIPTION_FULL'] = Localization::getMessage($entityName . '_TABLE_DESCRIPTION_FULL_MSGVER_1', $languageId) ?? '';
 			foreach ($mapping[$key]['FIELDS'] as $fieldCode => &$fieldInfo)
 			{
 				$fieldInfo['FIELD_DESCRIPTION'] =  Localization::getMessage($entityName . '_FIELD_' . $fieldCode, $languageId) ?: $fieldCode;

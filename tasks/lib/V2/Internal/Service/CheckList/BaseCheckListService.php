@@ -77,6 +77,7 @@ abstract class BaseCheckListService
 		int $entityId,
 		array $entityItemsFields,
 		?Entity\CheckList $existingCheckList = null,
+		bool $useBatch = false,
 	): CheckListStatusResult
 	{
 		$ids = $this->normalizeIds($ids);
@@ -102,6 +103,7 @@ abstract class BaseCheckListService
 			existingCheckList: $existingCheckList,
 			stopOnError: true,
 			expectedEntityId: $entityId,
+			useBatch: $useBatch,
 		);
 	}
 
@@ -153,6 +155,7 @@ abstract class BaseCheckListService
 		?Entity\CheckList $existingCheckList,
 		bool $stopOnError,
 		?int $expectedEntityId = null,
+		bool $useBatch = false,
 	): CheckListStatusResult
 	{
 		$entityId = $this->resolveEntityId($itemsFieldsById);
@@ -177,6 +180,7 @@ abstract class BaseCheckListService
 
 		$result = new CheckListStatusResult();
 		$changedIds = [];
+		$itemsToChange = [];
 		foreach ($ids as $id)
 		{
 			$itemFields = $itemsFieldsById[$id] ?? null;
@@ -185,31 +189,67 @@ abstract class BaseCheckListService
 				continue;
 			}
 
-			$item = new CheckList(0, $userId, $facade, $itemFields);
+			$itemsToChange[$id] = $itemFields;
+		}
 
-			$operationResult
-				= $isComplete
-					? $facade::complete($entityId, $userId, $item)
-					: $facade::renew($entityId, $userId, $item);
-
-			if (!$operationResult->isSuccess())
+		if (
+			$useBatch
+			&& $stopOnError
+			&& $isComplete
+			&& $facade === TaskCheckListCompletionFacade::class
+			&& !empty($itemsToChange)
+		)
+		{
+			$operationResult = $facade::completeBatch($entityId, $userId, $itemsToChange);
+			if ($operationResult->isSuccess())
 			{
-				if ($stopOnError)
+				$changedIds = array_keys($itemsToChange);
+			}
+			else
+			{
+				$result->addErrors($operationResult->getErrors());
+			}
+		}
+		else
+		{
+			foreach ($itemsToChange as $id => $itemFields)
+			{
+				$item = new CheckList(0, $userId, $facade, $itemFields);
+
+				$operationResult
+					= $isComplete
+						? $facade::complete($entityId, $userId, $item)
+						: $facade::renew($entityId, $userId, $item);
+
+				if (!$operationResult->isSuccess())
 				{
-					$result->addErrors($operationResult->getErrors()->toArray());
+					if ($stopOnError)
+					{
+						$result->addErrors($operationResult->getErrors()->toArray());
+
+						break;
+					}
+
+					$this->logger->logWarning($operationResult->getErrors());
+
+					continue;
+				}
+
+				if ($stopOnError && !$useBatch && $this->getPersistedStatusIds($facade, [$id], $isComplete) !== [$id])
+				{
+					$result->addError(new Error(
+						self::ERROR_STATUS_UPDATE_FAILED,
+						self::ERROR_STATUS_UPDATE_FAILED_CODE,
+					));
 
 					break;
 				}
 
-				$this->logger->logWarning($operationResult->getErrors());
-
-				continue;
+				$changedIds[] = $id;
 			}
-
-			$changedIds[] = $id;
 		}
 
-		if ($stopOnError && !empty($changedIds))
+		if ($stopOnError && $useBatch && !empty($changedIds))
 		{
 			$persistedIds = $this->getPersistedStatusIds($facade, $changedIds, $isComplete);
 			if (count($persistedIds) !== count($changedIds))

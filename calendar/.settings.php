@@ -2,8 +2,12 @@
 
 use Bitrix\Calendar\Integration\UI\EntitySelector;
 use Bitrix\Calendar\Integration;
+use Bitrix\Calendar\Internal\Integration\Crm\CrmWebFormBookingSource;
+use Bitrix\Calendar\Internal\Service\PublicBooking\PublicBookingFormDataService;
+use Bitrix\Calendar\Internal\Service\PublicBooking\Source\SourceContextResolver;
 use Bitrix\Calendar\Internals\Container;
 use Bitrix\Calendar\Internals\EventManager\EventManagerInterface;
+use Bitrix\Main\DI\ServiceLocator;
 
 return [
 	'controllers' => [
@@ -49,6 +53,24 @@ return [
 			],
 			'calendar.container' => [
 				'className' => Container::class,
+			],
+			SourceContextResolver::class => [
+				'className' => SourceContextResolver::class,
+				'constructorParams' => static function (): array {
+					return [
+						[
+							new CrmWebFormBookingSource(),
+						],
+					];
+				},
+			],
+			PublicBookingFormDataService::class => [
+				'className' => PublicBookingFormDataService::class,
+				'constructorParams' => static function (): array {
+					return [
+						ServiceLocator::getInstance()->get(SourceContextResolver::class),
+					];
+				},
 			],
 		],
 		'readonly' => true,

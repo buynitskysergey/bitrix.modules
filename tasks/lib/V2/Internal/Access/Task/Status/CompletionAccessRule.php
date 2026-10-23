@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Tasks\V2\Internal\Access\Task\Status;
 
-use Bitrix\Tasks\Access\ActionDictionary;
+use Bitrix\Tasks\V2\Internal\Access\Task\ActionDictionary;
 
 /**
  * Single definition of the "may move the task to a final status" rule.
@@ -19,9 +19,9 @@ final class CompletionAccessRule
 	 */
 	public static function isSatisfiedBy(callable $canPerform): bool
 	{
-		$canClose = $canPerform(ActionDictionary::ACTION_TASK_COMPLETE)
-			|| $canPerform(ActionDictionary::ACTION_TASK_APPROVE);
+		$canClose = $canPerform(ActionDictionary::TASK_ACTIONS['complete'])
+			|| $canPerform(ActionDictionary::TASK_ACTIONS['approve']);
 
-		return $canClose && $canPerform(ActionDictionary::ACTION_TASK_COMPLETE_RESULT);
+		return $canClose && $canPerform(ActionDictionary::TASK_ACTIONS['completeResult']);
 	}
 }

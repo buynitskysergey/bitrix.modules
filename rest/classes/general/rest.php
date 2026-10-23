@@ -17,7 +17,6 @@ use Bitrix\Main\Config\Option;
 use Bitrix\Main\Engine\Response\BFile;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main\SystemException;
-use Bitrix\Rest\AppTable;
 use Bitrix\Rest\Engine\Access\LoadLimiter;
 use Bitrix\Rest\Engine\RestManager;
 use Bitrix\Rest\Event\Session;
@@ -25,6 +24,7 @@ use Bitrix\Rest\Internal\Repository\Application\AppRepository;
 use Bitrix\Rest\LicenseException;
 use Bitrix\Rest\Notify;
 use Bitrix\Rest\OAuthService;
+use Bitrix\Rest\Public\Provider\ApplicationProvider;
 use Bitrix\Rest\Public\Services\AppScopeRequestService;
 use Bitrix\Rest\RestException;
 use Bitrix\Rest\AccessException;
@@ -400,8 +400,8 @@ class CRestServer
 	{
 		$signature = '';
 
-		$arRes = AppTable::getByClientId($this->clientId);
-		if (is_array($arRes) && $arRes['SHARED_KEY'] <> '')
+		$application = (new ApplicationProvider())->findByClientId((string)$this->clientId);
+		if ($application !== null && (string)$application->getSharedKey() !== '')
 		{
 			$methodState = is_array($this->securityMethodState)
 				? $this->securityMethodState
@@ -409,7 +409,7 @@ class CRestServer
 
 			$methodState['state'] = $this->securityClientState;
 
-			$signature = $this->makeSignature($arRes['SHARED_KEY'], $methodState);
+			$signature = $this->makeSignature($application->getSharedKey(), $methodState);
 		}
 
 		return $signature;

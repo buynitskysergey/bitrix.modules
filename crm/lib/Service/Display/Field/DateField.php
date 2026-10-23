@@ -22,7 +22,7 @@ class DateField extends BaseSimpleField
 
 	protected function getFormattedValueForKanban($fieldValue, int $itemId, Options $displayOptions)
 	{
-		if ($this->isUserField())
+		if ($this->isUserField() && !$this->isMultiple())
 		{
 			return parent::getFormattedValueForKanban($fieldValue, $itemId, $displayOptions);
 		}
@@ -146,6 +146,11 @@ class DateField extends BaseSimpleField
 	 */
 	protected function getTimestamp($value, int $timeZoneOffset): int
 	{
+		if ($value instanceof DateTime && !$value->isUserTimeEnabled())
+		{
+			return $value->getTimestamp();
+		}
+
 		if ($value instanceof DateTime || $value instanceof \DateTime)
 		{
 			return $value->getTimestamp() + $timeZoneOffset;

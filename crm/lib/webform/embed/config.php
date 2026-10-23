@@ -88,6 +88,7 @@ class Config
 			'views' => $this->getViews(),
 			'data' => [
 				'language' => $this->form->getLanguageId(),
+				'editMode' => $this->editMode,
 				'design' => $this->getDesign(),
 				'title' => $data['CAPTION'],
 				'desc' => $this->getDescription(),

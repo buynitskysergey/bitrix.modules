@@ -68,6 +68,11 @@ class Dynamic extends Kanban\Entity
 		return $this->factory->isStagesEnabled();
 	}
 
+	public function shouldShowFinalStagesWithDefaultFilter(): bool
+	{
+		return $this->factory->isStagesEnabled();
+	}
+
 	public function isCustomPriceFieldsSupported(): bool
 	{
 		return false;

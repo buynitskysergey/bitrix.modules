@@ -33,6 +33,7 @@ use Bitrix\Crm\Service\EditorAdapter\Normalizer\FieldValueNormalizer;
 use Bitrix\Crm\Service\EditorAdapter\Normalizer\UserFieldValueNormalizer;
 use Bitrix\Crm\StatusTable;
 use Bitrix\Crm\UI\EntitySelector;
+use Bitrix\Crm\V2\Internal\Service\Ai\FieldFillPolicyService;
 use Bitrix\Currency\CurrencyTable;
 use Bitrix\Main\InvalidOperationException;
 use Bitrix\Main\Loader;
@@ -1305,6 +1306,7 @@ class EditorAdapter
 		$entityUserFields = [];
 		$enumerationFields = [];
 		$userFieldEntityID = CCrmOwnerType::ResolveUserFieldEntityID($entityTypeId);
+		$aiFillPolicyConfigs = static::prepareEntityFieldAiFillPolicyConfigs($entityTypeId, $userFields);
 		foreach($userFields as $userField)
 		{
 			$fieldName = $userField['FIELD_NAME'];
@@ -1372,6 +1374,11 @@ class EditorAdapter
 			{
 				$entityUserFields[$fieldName]['data']['visibilityConfigs'] = $visibilityConfig[$fieldName];
 			}
+
+			if (isset($aiFillPolicyConfigs[$fieldName]))
+			{
+				$entityUserFields[$fieldName]['data']['aiFillPolicy'] = $aiFillPolicyConfigs[$fieldName];
+			}
 		}
 
 		if(!empty($enumerationFields))
@@ -1388,6 +1395,44 @@ class EditorAdapter
 		}
 
 		return $entityUserFields;
+	}
+
+	/**
+	 * Generates the BitrixGPT fill policy of $userFields for the editor, keyed by field name.
+	 * A field gets an entry only while the setting exists for it - the supported types of an entity
+	 * type the policy covers; the editor shows no switch for the fields left out.
+	 *
+	 * @param int $entityTypeId
+	 * @param array $userFields
+	 * @return array<string, array{available: bool, enabled: bool}>
+	 */
+	public static function prepareEntityFieldAiFillPolicyConfigs(int $entityTypeId, array $userFields): array
+	{
+		$policy = FieldFillPolicyService::getInstance();
+		if (!$policy->isEntityTypeAvailable($entityTypeId))
+		{
+			return [];
+		}
+
+		$supportedFieldTypeMap = array_flip($policy->getSupportedFieldTypes());
+		$disabledFieldNameMap = $policy->getDisabledFieldNameMap($entityTypeId);
+
+		$configs = [];
+		foreach ($userFields as $userField)
+		{
+			$fieldName = (string)($userField['FIELD_NAME'] ?? '');
+			if ($fieldName === '' || !isset($supportedFieldTypeMap[$userField['USER_TYPE_ID'] ?? '']))
+			{
+				continue;
+			}
+
+			$configs[$fieldName] = [
+				'available' => true,
+				'enabled' => !isset($disabledFieldNameMap[$fieldName]),
+			];
+		}
+
+		return $configs;
 	}
 
 	protected function normalizeFieldValue($value, string $fieldType): mixed

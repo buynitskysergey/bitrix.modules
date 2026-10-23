@@ -218,7 +218,7 @@ class LeadConversionMapper extends EntityConversionMapper
 	 * @param array|null $options Mapping options.
 	 * @return array
 	 */
-	public function map(EntityConversionMap $map, array $options = null)
+	public function map(EntityConversionMap $map, ?array $options = null)
 	{
 		$srcFields = $this->getSourceFields();
 		if(empty($srcFields))

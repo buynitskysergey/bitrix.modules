@@ -1195,7 +1195,14 @@ class User extends \IRestService
 
 	private static function prepareUserGetOrder($sort, $order): array
 	{
-		if ($sort && $order)
+		if (
+			is_string($sort)
+			&& $sort !== ''
+			&& $sort !== '0'
+			&& is_string($order)
+			&& $order !== ''
+			&& $order !== '0'
+		)
 		{
 			return [$sort => $order];
 		}

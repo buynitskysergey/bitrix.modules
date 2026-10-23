@@ -10,6 +10,7 @@ use Bitrix\Crm\Badge;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Controller\AiQualityAssessmentController;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Entity\AiQualityAssessmentItem;
 use Bitrix\Crm\Copilot\AiQualityAssessment\Entity\AiQualityAssessmentTable;
+use Bitrix\Crm\Copilot\CallAssessment\Analytics\CallScoringEvent;
 use Bitrix\Crm\Copilot\CallAssessment\CallAssessmentItem;
 use Bitrix\Crm\Copilot\CallAssessment\Controller\CopilotCallAssessmentController;
 use Bitrix\Crm\Copilot\CallAssessment\ItemFactory;
@@ -33,6 +34,7 @@ use Bitrix\Crm\MultiValueStoreService;
 use Bitrix\Crm\Service\Container;
 use Bitrix\Crm\Timeline\AI\Controller;
 use Bitrix\Main;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\Web\Json;
 use CCrmActivity;
 use CCrmOwnerType;
@@ -515,6 +517,13 @@ final class ScoreCallV2 extends AbstractOperation
 				$assessmentSettings?->getLowBorder(),
 			);
 
+			self::sendCallScoringAnalytics(
+				(int)$result->getJobId(),
+				$assessmentSettings?->getId() ?? 0,
+				$assessment,
+				$activityId,
+			);
+
 			if ($prevRatedItemIdList)
 			{
 				AiQualityAssessmentTable::updateMulti(
@@ -530,6 +539,39 @@ final class ScoreCallV2 extends AbstractOperation
 		{
 			self::cleanupJobCallAssessmentBinding($result->getParentJobId(), $activityId);
 		}
+	}
+
+	private static function sendCallScoringAnalytics(
+		int $jobId,
+		int $callAssessmentId,
+		int $callScore,
+		int $activityId,
+	): void
+	{
+		$event = (new CallScoringEvent())
+			->setCallAssessmentId($callAssessmentId)
+			->setCallScore((string)$callScore)
+			->setActivityId($activityId)
+		;
+
+		if ($jobId > 0)
+		{
+			$row = QueueTable::getList([
+				'select' => ['CREATED_TIME', 'FINISHED_TIME'],
+				'filter' => ['=ID' => $jobId],
+				'limit' => 1,
+			])->fetch();
+			$createdTime = $row['CREATED_TIME'] ?? null;
+			$finishedTime = $row['FINISHED_TIME'] ?? null;
+			if ($createdTime instanceof DateTime && $finishedTime instanceof DateTime)
+			{
+				$event->setStepDurationSeconds(
+					$finishedTime->getTimestamp() - $createdTime->getTimestamp(),
+				);
+			}
+		}
+
+		$event->buildEvent()->send();
 	}
 
 	private static function getAssessmentSettings(int $activityId, ?int $assessmentSettingsId = null, ?int $parentJobId = null): ?CallAssessmentItem

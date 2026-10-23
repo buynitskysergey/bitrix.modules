@@ -13,6 +13,7 @@ use Bitrix\Rest\V3\DefaultLanguage;
 use Bitrix\Rest\V3\DeferredModeAwareInterface;
 use Bitrix\Rest\V3\Dto\Mapping\Mapper;
 use Bitrix\Rest\V3\Dto\Mapping\MapperRegistry;
+use Bitrix\Rest\V3\Enum\CallChannel;
 use Bitrix\Rest\V3\Exception\ClassRequireAttributeException;
 use Bitrix\Rest\V3\Exception\Internal\InternalException;
 use Bitrix\Rest\V3\Exception\LogicException;
@@ -54,6 +55,8 @@ abstract class RestController extends Controller
 	protected ?array $queryParams = null;
 
 	protected ?CRestServer $server = null;
+
+	private CallChannel $callChannel = CallChannel::RestTransport;
 
 	/**
 	 * Cached idempotency filter instance, shared between pre- and post-filter
@@ -369,6 +372,18 @@ abstract class RestController extends Controller
 	public function getServer(): ?CRestServer
 	{
 		return $this->server;
+	}
+
+	public function setCallChannel(CallChannel $channel): self
+	{
+		$this->callChannel = $channel;
+
+		return $this;
+	}
+
+	public function getCallChannel(): CallChannel
+	{
+		return $this->callChannel;
 	}
 
 	protected function isOrmDeferredMode(): bool

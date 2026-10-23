@@ -11,6 +11,8 @@ use Bitrix\Crm\Relation\Collection;
 use Bitrix\Crm\RelationIdentifier;
 use Bitrix\Crm\Restriction\RestrictionManager;
 use Bitrix\Crm\Service\Container;
+use Bitrix\Crm\Service\UserPermissions\ConfigurationCallSite;
+use Bitrix\Crm\Service\UserPermissions\ConfigurationScope;
 use Bitrix\Crm\UserField\UserFieldManager;
 use Bitrix\Main\Engine\AutoWire\ExactParameter;
 use Bitrix\Main\Engine\Response\Converter;
@@ -50,7 +52,11 @@ class Type extends Base
 	public function fieldsAction(): ?array
 	{
 		$userPermissions = Container::getInstance()->getUserPermissions($this->getCurrentUser()->getId());
-		if (!$userPermissions->isCrmAdmin())
+		$hasPermissions = $userPermissions->configuration()->canManageDynamicTypes(
+			ConfigurationCallSite::TypeControllerRead,
+			ConfigurationScope::ofDynamicTypeTarget(null),
+		);
+		if (!$hasPermissions)
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
 			return null;
@@ -68,6 +74,10 @@ class Type extends Base
 		if (
 			!$userPermissions->isAdminForEntity($type->getEntityTypeId())
 			&& !$userPermissions->entityType()->canReadItems($type->getEntityTypeId())
+			&& !$userPermissions->configuration()->canManageDynamicTypes(
+				ConfigurationCallSite::DynamicTypePermissions,
+				ConfigurationScope::ofEntityType($type->getEntityTypeId()),
+			)
 		)
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
@@ -87,6 +97,10 @@ class Type extends Base
 			!$userPermissions->isAdminForEntity($entityTypeId)
 			&& !$userPermissions->isCrmAdmin()
 			&& !$userPermissions->entityType()->canReadItems($entityTypeId)
+			&& !$userPermissions->configuration()->canManageDynamicTypes(
+				ConfigurationCallSite::DynamicTypePermissions,
+				ConfigurationScope::ofEntityType($entityTypeId),
+			)
 		)
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
@@ -109,15 +123,21 @@ class Type extends Base
 
 	public function listAction(array $order = null, array $filter = null, PageNavigation $pageNavigation = null): ?Page
 	{
+		$parameters = [];
+
+		$parameters['filter'] = $this->removeDotsFromKeys($this->convertKeysToUpper((array)$filter));
+
 		$userPermissions = Container::getInstance()->getUserPermissions($this->getCurrentUser()->getId());
-		if (!$userPermissions->isCrmAdmin())
+		$automatedSolutionId = $this->singleAutomatedSolutionOfFilter($parameters['filter']);
+		$hasPermissions = $userPermissions->configuration()->canManageDynamicTypes(
+			ConfigurationCallSite::TypeControllerRead,
+			ConfigurationScope::ofDynamicTypeTarget($automatedSolutionId),
+		);
+		if (!$hasPermissions)
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
 			return null;
 		}
-		$parameters = [];
-
-		$parameters['filter'] = $this->removeDotsFromKeys($this->convertKeysToUpper((array)$filter));
 
 		$typeTable = Container::getInstance()->getDynamicTypeDataClass();
 
@@ -128,7 +148,35 @@ class Type extends Base
 			return null;
 		}
 
-		$parameters['filter'][] = [
+		$scopeFilter = ['=CUSTOM_SECTION_ID' => $automatedSolutionId];
+		if ($automatedSolutionId === null)
+		{
+			$allowedSolutionIds = [0];
+			$automatedSolutions = Container::getInstance()->getAutomatedSolutionManager()->getAutomatedSolutionsForPermissions();
+			$userPermissions->configuration()->preloadPermissions(array_map(
+				static fn(array $solution): ConfigurationScope =>
+					ConfigurationScope::ofDynamicTypeTarget((int)$solution['ID']),
+				$automatedSolutions,
+			));
+			foreach ($automatedSolutions as $solution)
+			{
+				if ($userPermissions->configuration()->canManageDynamicTypes(
+					ConfigurationCallSite::TypeControllerRead,
+					ConfigurationScope::ofDynamicTypeTarget((int)$solution['ID']),
+				))
+				{
+					$allowedSolutionIds[] = (int)$solution['ID'];
+				}
+			}
+			$scopeFilter = [
+				'LOGIC' => 'OR',
+				'=CUSTOM_SECTION_ID' => null,
+				'@CUSTOM_SECTION_ID' => $allowedSolutionIds,
+			];
+		}
+		$parameters['filter'] = [
+			$parameters['filter'],
+			$scopeFilter,
 			'!@ENTITY_TYPE_ID' => \CCrmOwnerType::getDynamicTypeBasedStaticEntityTypeIds(),
 		];
 
@@ -165,7 +213,35 @@ class Type extends Base
 		});
 	}
 
-	public function addAction(array $fields): ?array
+	/**
+	 * The workplace a normalised filter narrows the list down to, and `null` - the CRM contour - for a
+	 * list that names no single one.
+	 *
+	 * Only the plain key with a scalar positive identifier narrows the answer to one contour. An
+	 * operator prefix keeps a key of its own (`=CUSTOM_SECTION_ID`), an array of identifiers names
+	 * several workplaces, and a disjunction of the whole filter leaves rows of every contour in the
+	 * answer - so each of those is asked of CRM, which is the contour this action used to ask about as a
+	 * whole.
+	 */
+	private function singleAutomatedSolutionOfFilter(array $filter): ?int
+	{
+		if (isset($filter['LOGIC']))
+		{
+			return null;
+		}
+
+		$customSectionId = $filter['CUSTOM_SECTION_ID'] ?? null;
+		if (!is_int($customSectionId) && !is_string($customSectionId))
+		{
+			return null;
+		}
+
+		$automatedSolutionId = (int)$customSectionId;
+
+		return $automatedSolutionId > 0 ? $automatedSolutionId : null;
+	}
+
+	public function addAction(array $fields, ?\CRestServer $server = null): ?array
 	{
 		$builder = (new Integration\Analytics\Builder\Automation\Type\CreateEvent())
 			->setSection(Integration\Analytics\Dictionary::SECTION_REST)
@@ -173,6 +249,8 @@ class Type extends Base
 
 		if ($this->isRest())
 		{
+			$builder->setSource(Integration\Analytics\Dictionary::getApplicationSource($server?->getClientId()));
+
 			$builder
 				->setStatus(Integration\Analytics\Dictionary::STATUS_ATTEMPT)
 				->buildEvent()
@@ -209,17 +287,27 @@ class Type extends Base
 
 	private function add(array $fields): ?array
 	{
-		$entityTypeId = $fields['entityTypeId'] ?? 0;
+		$originalFields = $fields;
+		$fields = $this->normalizeFields($fields);
+
+		$entityTypeId = $fields['ENTITY_TYPE_ID'] ?? 0;
 		$userPermissions = Container::getInstance()->getUserPermissions($this->getCurrentUser()->getId());
-		$automatedSolutionId = $fields['customSectionId'] ?? 0;
-		$hasPermissions = $automatedSolutionId ? $userPermissions->automatedSolution()->isAutomatedSolutionAdmin($automatedSolutionId) : $userPermissions->isCrmAdmin();
+		$automatedSolutionId = $this->resolveAutomatedSolutionId($fields);
+		if ($automatedSolutionId === null)
+		{
+			return null;
+		}
+		$hasPermissions = $userPermissions->configuration()->canManageDynamicTypes(
+			ConfigurationCallSite::TypeControllerAdd,
+			ConfigurationScope::ofDynamicTypeTarget($automatedSolutionId),
+		);
 		if (!$hasPermissions)
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
 			return null;
 		}
 		$dataClass = Container::getInstance()->getDynamicTypeDataClass();
-		$fields['name'] = $dataClass::generateName($fields['title']);
+		$fields['NAME'] = $dataClass::generateName($fields['TITLE']);
 		if (
 			!empty($entityTypeId)
 			&& in_array((int)$entityTypeId, \CCrmOwnerType::getDynamicTypeBasedStaticEntityTypeIds(), true)
@@ -232,7 +320,7 @@ class Type extends Base
 
 		$type = $dataClass::createObject();
 
-		return $this->update($type, $fields);
+		return $this->update($type, $fields, $originalFields);
 	}
 
 	public function updateAction(?Dynamic\Type $type = null, array $fields = []): ?array
@@ -276,23 +364,43 @@ class Type extends Base
 		return $result;
 	}
 
-	private function update(?Dynamic\Type $type = null, array $fields = []): ?array
+	private function update(
+		?Dynamic\Type $type = null,
+		array $fields = [],
+		?array $originalFields = null,
+	): ?array
 	{
 		if($type === null)
 		{
 			return null;
 		}
+		if ($originalFields === null)
+		{
+			$originalFields = $fields;
+			$fields = $this->normalizeFields($fields);
+		}
+
 		$isNew = ($type->getId() <= 0);
 
 		$userPermissions = Container::getInstance()->getUserPermissions($this->getCurrentUser()->getId());
-		$automatedSolutionId = (int)($fields['customSectionId'] ?? 0);
+		$automatedSolutionId = $this->resolveAutomatedSolutionId($fields);
+		if ($automatedSolutionId === null)
+		{
+			return null;
+		}
 		if ($isNew)
 		{
-			$hasPermissions = $automatedSolutionId ? $userPermissions->automatedSolution()->isAutomatedSolutionAdmin($automatedSolutionId) : $userPermissions->isCrmAdmin();
+			$hasPermissions = $userPermissions->configuration()->canManageDynamicTypes(
+				ConfigurationCallSite::TypeControllerUpdate,
+				ConfigurationScope::ofDynamicTypeTarget($automatedSolutionId),
+			);
 		}
 		else
 		{
-			$hasPermissions = $userPermissions->isAdminForEntity($type->getEntityTypeId());
+			$hasPermissions = $userPermissions->configuration()->canManageDynamicTypes(
+				ConfigurationCallSite::TypeControllerUpdate,
+				ConfigurationScope::ofEntityType($type->getEntityTypeId()),
+			);
 		}
 
 		$currentCustomSectionId = $type->getCustomSectionId();
@@ -300,7 +408,7 @@ class Type extends Base
 		{
 			$currentAutomatedSolution = Container::getInstance()->getAutomatedSolutionManager()->getAutomatedSolution($currentCustomSectionId);
 			if (
-				(int)($currentAutomatedSolution['INTRANET_CUSTOM_SECTION_ID'] !== $automatedSolutionId)
+				(int)($currentAutomatedSolution['INTRANET_CUSTOM_SECTION_ID'] !== (int)($fields['CUSTOM_SECTION_ID'] ?? 0))
 				&& AutomatedSolutionTable::isImportedFromMarketplace($currentAutomatedSolution['SOURCE_ID'] ?? 0)
 			)
 			{
@@ -317,9 +425,21 @@ class Type extends Base
 
 			return null;
 		}
+		if (
+			array_key_exists('CUSTOM_SECTIONS', $fields)
+			&& !$userPermissions->automatedSolution()->canEdit()
+		)
+		{
+			if ($this->hasCustomSectionsChanges($fields['CUSTOM_SECTIONS']))
+			{
+				$this->addError(ErrorCode::getAccessDeniedError());
 
-		$originalFields = $fields;
-		$fields = $this->convertKeysToUpper($fields);
+				return null;
+			}
+
+			unset($fields['CUSTOM_SECTIONS']);
+		}
+
 		$fieldKeysToUnset = ['ID', 'IS_EXTERNAL', 'CREATED_TIME', 'CREATED_BY', 'UPDATED_TIME', 'UPDATED_BY'];
 		$fieldKeysToNotSetToType = ['CUSTOM_SECTION_ID'];
 
@@ -336,14 +456,17 @@ class Type extends Base
 			return null;
 		}
 
-		// if try to change CustomSectionId in existed smart process, user must be both admins in old and new automated solutions
+		// Changing the contour of an existing type needs the right of both ends of the move, in either
+		// direction. The right of the source contour is asked above, of the type itself; this is the right
+		// of the contour the type is moved to, CRM included. A request that names no target contour at all
+		// moves nothing - that is the key the binding itself is rebound by ({@see saveCustomSections()}).
 		if (
 			!$isNew
+			&& array_key_exists('CUSTOM_SECTION_ID', $fields)
 			&& (int)$type->getCustomSectionId() !== (int)$automatedSolutionId
-			&& (
-				(!$type->getCustomSectionId() && !$userPermissions->isCrmAdmin())
-				||
-				(!$type->getCustomSectionId() && !$userPermissions->automatedSolution()->isAutomatedSolutionAdmin($automatedSolutionId))
+			&& !$userPermissions->configuration()->canManageDynamicTypes(
+				ConfigurationCallSite::TypeControllerUpdate,
+				ConfigurationScope::ofDynamicTypeTarget($automatedSolutionId),
 			)
 		)
 		{
@@ -427,6 +550,39 @@ class Type extends Base
 		return null;
 	}
 
+	private function normalizeFields(array $fields): array
+	{
+		if (array_key_exists('CUSTOM_SECTION_ID', $fields))
+		{
+			$fields['customSectionId'] = $fields['CUSTOM_SECTION_ID'];
+			unset($fields['CUSTOM_SECTION_ID']);
+		}
+
+		return $this->convertKeysToUpper($fields);
+	}
+
+	private function resolveAutomatedSolutionId(array $fields): ?int
+	{
+		$customSectionId = (int)($fields['CUSTOM_SECTION_ID'] ?? 0);
+		if ($customSectionId <= 0)
+		{
+			return $customSectionId;
+		}
+
+		$automatedSolutionId = AutomatedSolutionTable::query()
+			->setSelect(['ID'])
+			->where('INTRANET_CUSTOM_SECTION_ID', $customSectionId)
+			->fetchObject()
+			?->getId()
+		;
+		if ($automatedSolutionId === null)
+		{
+			$this->addError(new Error('customSectionId is invalid', ErrorCode::INVALID_ARG_VALUE));
+		}
+
+		return $automatedSolutionId;
+	}
+
 	public function deleteAction(?Dynamic\Type $type = null): ?array
 	{
 		$builder = (new Integration\Analytics\Builder\Automation\Type\DeleteEvent())
@@ -475,7 +631,11 @@ class Type extends Base
 			return null;
 		}
 		$userPermissions = Container::getInstance()->getUserPermissions($this->getCurrentUser()->getId());
-		if (!$userPermissions->isAdminForEntity($type->getEntityTypeId()) && !$userPermissions->isCrmAdmin())
+		$hasPermissions = $userPermissions->configuration()->canManageDynamicTypes(
+			ConfigurationCallSite::TypeControllerDelete,
+			ConfigurationScope::ofEntityType($type->getEntityTypeId()),
+		);
+		if (!$hasPermissions)
 		{
 			$this->addError(ErrorCode::getAccessDeniedError());
 			return null;
@@ -668,6 +828,53 @@ class Type extends Base
 		}
 
 		return new Result();
+	}
+
+	private function hasCustomSectionsChanges(mixed $providedCustomSections): bool
+	{
+		if (!is_array($providedCustomSections))
+		{
+			return false;
+		}
+
+		$manager = Container::getInstance()->getAutomatedSolutionManager();
+		$automatedSolutions = $manager->getExistingAutomatedSolutions();
+		$providedIds = [];
+		foreach ($providedCustomSections as $providedCustomSection)
+		{
+			$id = $providedCustomSection['ID'] ?? null;
+			if ($id === null || (is_string($id) && str_starts_with($id, 'new')))
+			{
+				return true;
+			}
+
+			$id = (int)$id;
+			if ($id <= 0)
+			{
+				continue;
+			}
+
+			$providedIds[] = $id;
+			$automatedSolution = $automatedSolutions[$id] ?? null;
+			if (
+				$automatedSolution !== null
+				&& ($providedCustomSection['TITLE'] ?? null) !== $automatedSolution['TITLE']
+			)
+			{
+				return true;
+			}
+		}
+
+		foreach ($manager->getExistingIntranetCustomSections() as $customSection)
+		{
+			$id = $customSection->getId();
+			if (isset($automatedSolutions[$id]) && !in_array($id, $providedIds, true))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

@@ -7,6 +7,7 @@ use Bitrix\Main\HttpRequest;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Validation\ValidationService;
 use Bitrix\Rest\V3\Dto\Dto;
+use Bitrix\Rest\V3\Dto\TypeHelper;
 use Bitrix\Rest\V3\Exception\InvalidJsonException;
 use Bitrix\Rest\V3\Exception\Validation\InvalidRequestFieldTypeException;
 use Bitrix\Rest\V3\Exception\Validation\RequestValidationException;
@@ -118,7 +119,7 @@ abstract class Request
 				}
 			}
 
-			if (is_subclass_of($propertyType, Structure::class))
+			if (TypeHelper::isSubclassOf($propertyType, Structure::class))
 			{
 				// validate with Dto
 				$value = $propertyType::create($input[$propertyName], $dtoClass, $request);

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use \Bitrix\Rest;
+use Bitrix\Rest\Public\Provider\Application\AppEmbeddingOwnerProvider;
 
 return [
 	'rest' => [
@@ -25,7 +26,13 @@ return [
 					\Bitrix\Rest\V3\Event\Provider\SubscribableEventProvider::class,
 				],
 			],
-		]
+		],
+	],
+	'rest.embedding.ownerProviders' => [
+		'value' => [
+			'app' => AppEmbeddingOwnerProvider::class,
+		],
+		'readonly' => true,
 	],
 	'controllers' => [
 		'value' => [
@@ -47,6 +54,15 @@ return [
 	],
 	'services' => [
 		'value' => [
+			Rest\Internal\Service\OAuth\RegistrationService::class => [
+				'constructor' => static function () {
+					return new Rest\Internal\Service\OAuth\RegistrationService(
+						\Bitrix\Main\DI\ServiceLocator::getInstance()->get(Rest\OAuth\Engine::class),
+						Rest\OAuthService::SERVICE_URL . Rest\OAuthService::REGISTER,
+					);
+				},
+				'singleton' => true,
+			],
 			Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class => [
 				'className' => Rest\Public\Service\VibePlusMarketApplicationLimitProvider::class,
 			],

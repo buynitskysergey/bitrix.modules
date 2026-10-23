@@ -120,6 +120,20 @@ final class B2eController extends Timeline\Controller
 		);
 	}
 
+	public function onMemberDocumentPreparationFailed(
+		ItemIdentifier $identifier,
+		DocumentData $documentData,
+		MessageData $messageData
+	): array
+	{
+		return $this->handleSignEvent(
+			Entry::TYPE_CATEGORY_MEMBER_DOCUMENT_PREPARATION_FAILED,
+			$identifier,
+			$documentData,
+			$messageData,
+		);
+	}
+
 	public function onMemberSnilsError(
 		ItemIdentifier $identifier,
 		DocumentData $documentData,
@@ -431,6 +445,7 @@ final class B2eController extends Timeline\Controller
 			Entry::TYPE_CATEGORY_CONFIGURATION_ERROR => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 			Entry::TYPE_CATEGORY_ANNULLED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 			Entry::TYPE_CATEGORY_ANNULMENT_CANCELED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
+			Entry::TYPE_CATEGORY_MEMBER_DOCUMENT_PREPARATION_FAILED => [TimelineEntry\Facade::SIGN_B2E_DOCUMENT_LOG,],
 		];
 	}
 

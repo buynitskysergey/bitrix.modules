@@ -32,8 +32,8 @@ final class ItemSelect implements SelectInterface
 	private bool $loadAllCustomFields = false;
 	private bool $loadParents = false;
 	private bool $loadUtm = false;
-	/** @var array<string, string[]> */
-	private array $loadRelatedCrmObjectsSelect = [];
+	/** @var array<string, array{fieldName: string, entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}> */
+	private array $loadRelatedCrmObjects = [];
 	/** @var array<string, string[]> */
 	private array $loadDictionariesSelect = [];
 	private bool $loadLastCommunication = false;
@@ -191,10 +191,17 @@ final class ItemSelect implements SelectInterface
 		return $this;
 	}
 
-	/** @param array<string, string[]> $selectMapByField */
+	/**
+	 * @param array<string, string[]|array{entityTypeId?: int|null, multiple?: bool, dtoClass?: string|null, select?: string[], fields?: string[]}> $selectMapByField
+	 */
 	public function withRelatedCrmObjects(array $selectMapByField): static
 	{
-		$this->loadRelatedCrmObjectsSelect = $selectMapByField;
+		$this->loadRelatedCrmObjects = [];
+		foreach ($selectMapByField as $fieldName => $select)
+		{
+			$this->loadRelatedCrmObjects[$fieldName] = $this->normalizeRelatedCrmObject($fieldName, $select);
+		}
+
 		$this->addFields(...$this->getRelatedCrmObjectSourceFields(array_keys($selectMapByField)));
 		if (isset($selectMapByField['contact']) || isset($selectMapByField['contacts']))
 		{
@@ -344,13 +351,27 @@ final class ItemSelect implements SelectInterface
 
 	public function shouldLoadRelatedCrmObjects(): bool
 	{
-		return $this->loadRelatedCrmObjectsSelect !== [];
+		return $this->loadRelatedCrmObjects !== [];
 	}
 
 	/** @return array<string, string[]> */
 	public function getRelatedCrmObjectsSelect(): array
 	{
-		return $this->loadRelatedCrmObjectsSelect;
+		$result = [];
+		foreach ($this->loadRelatedCrmObjects as $fieldName => $descriptor)
+		{
+			$result[$fieldName] = $descriptor['select'];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * @return array<string, array{fieldName: string, entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}>
+	 */
+	public function getRelatedCrmObjects(): array
+	{
+		return $this->loadRelatedCrmObjects;
 	}
 
 	public function shouldLoadDictionaries(): bool
@@ -392,6 +413,46 @@ final class ItemSelect implements SelectInterface
 	}
 
 	/**
+	 * @param string[]|array{entityTypeId?: int|null, multiple?: bool, dtoClass?: string|null, select?: string[], fields?: string[]} $select
+	 * @return array{fieldName: string, entityTypeId: int|null, multiple: bool, dtoClass: string|null, select: string[], loaders: array{multifields: string[], utm: bool, lastCommunication: bool}}
+	 */
+	private function normalizeRelatedCrmObject(string $fieldName, array $select): array
+	{
+		$isDescriptor = array_intersect(
+			['entityTypeId', 'multiple', 'dtoClass', 'select', 'fields'],
+			array_keys($select),
+		) !== [];
+		$selectedFields = $isDescriptor ? ($select['select'] ?? $select['fields'] ?? []) : $select;
+		$selectedFields = array_values(array_unique(array_filter(
+			$selectedFields,
+			static fn(mixed $field): bool => is_string($field),
+		)));
+
+		$multifields = [];
+		foreach ($selectedFields as $selectedField)
+		{
+			[$topLevelField] = explode('.', $selectedField, 2);
+			if (in_array($topLevelField, ['phone', 'email', 'web', 'im'], true))
+			{
+				$multifields[$topLevelField] = true;
+			}
+		}
+
+		return [
+			'fieldName' => $fieldName,
+			'entityTypeId' => isset($select['entityTypeId']) ? (int)$select['entityTypeId'] : null,
+			'multiple' => (bool)($select['multiple'] ?? in_array($fieldName, ['contacts', 'companies'], true)),
+			'dtoClass' => isset($select['dtoClass']) && is_string($select['dtoClass']) ? $select['dtoClass'] : null,
+			'select' => $selectedFields,
+			'loaders' => [
+				'multifields' => array_keys($multifields),
+				'utm' => in_array('utm', array_map(static fn(string $field): string => explode('.', $field, 2)[0], $selectedFields), true),
+				'lastCommunication' => in_array('lastCommunication', array_map(static fn(string $field): string => explode('.', $field, 2)[0], $selectedFields), true),
+			],
+		];
+	}
+
+	/**
 	 * @param string[] $fields
 	 * @return string[]
 	 */
@@ -404,6 +465,7 @@ final class ItemSelect implements SelectInterface
 			{
 				$field === 'company' => $result[] = 'companyId',
 				$field === 'myCompany' => $result[] = 'myCompanyId',
+				$field === 'deal' => $result[] = 'dealId',
 				$field === 'lead' => $result[] = 'leadId',
 				$field === 'quote' => $result[] = 'quoteId',
 				$field === 'contact', $field === 'contacts' => $result[] = 'contactBindings',

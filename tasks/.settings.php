@@ -1,6 +1,12 @@
 <?php
 
 return [
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Tasks\\Feature',
+		],
+		'readonly' => true,
+	],
 	'controllers' => require __DIR__ . '/config/controllers.php',
 	'ui.uploader' => require __DIR__ . '/config/uploader.php',
 	'ui.entity-selector' => require __DIR__ . '/config/entity-selector.php',

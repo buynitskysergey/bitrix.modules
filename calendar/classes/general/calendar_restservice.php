@@ -11,10 +11,14 @@ use Bitrix\Calendar\Access\Model\TypeModel;
 use Bitrix\Calendar\Access\SectionAccessController;
 use Bitrix\Calendar\Access\TypeAccessController;
 use Bitrix\Calendar\Core\Event\Tools\Dictionary;
+use Bitrix\Calendar\Rooms\OccupancyCheckerException;
+use Bitrix\Calendar\Rooms\OccupancyLockedException;
+use Bitrix\Calendar\Rooms\Manager;
 use Bitrix\Main\Loader;
 use Bitrix\Rest\RestException;
 use Bitrix\Calendar\Internals;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Web\Uri;
 
 IncludeModuleLangFile(__FILE__);
 /**
@@ -408,6 +412,7 @@ final class CCalendarRestService extends IRestService
 	{
 		$userId = CCalendar::GetCurUserId();
 		$methodName = "calendar.event.add";
+		$occupancyCheckMode = self::getOccupancyCheckMode($params);
 
 		$skipTime = false;
 
@@ -704,6 +709,7 @@ final class CCalendarRestService extends IRestService
 		}
 
 		$saveParams['arFields'] = $arFields;
+		$saveParams['checkLocationOccupancy'] = $occupancyCheckMode;
 		if ($sectionId <= 0 || ($params['auto_detect_section'] ?? null) === 'Y')
 		{
 			$saveParams['autoDetectSection'] = true;
@@ -712,7 +718,18 @@ final class CCalendarRestService extends IRestService
 
 		CCalendar::GetAndClearErrors();
 
-		$newId = CCalendar::SaveEvent($saveParams);
+		try
+		{
+			$newId = CCalendar::SaveEvent($saveParams);
+		}
+		catch (OccupancyCheckerException $exception)
+		{
+			throw self::createOccupancyConflictRestException($exception);
+		}
+		catch (OccupancyLockedException $exception)
+		{
+			throw self::createOccupancyLockedRestException($exception);
+		}
 
 		if (!$newId)
 		{
@@ -803,6 +820,7 @@ final class CCalendarRestService extends IRestService
 	{
 		$userId = CCalendar::GetCurUserId();
 		$methodName = "calendar.event.update";
+		$occupancyCheckMode = self::getOccupancyCheckMode($params);
 
 		$necessaryParams = [
 			'id',
@@ -1085,7 +1103,7 @@ final class CCalendarRestService extends IRestService
 				'LANGUAGE_ID' => CCalendar::getUserLanguageId($userId),
 			];
 
-			$saveParams['userId'] = $arFields['MEETING_HOST'];
+			$saveParams['userId'] = $userId;
 		}
 
 		if (
@@ -1142,7 +1160,19 @@ final class CCalendarRestService extends IRestService
 		}
 
 		$saveParams['arFields'] = $arFields;
-		$newId = CCalendar::SaveEvent($saveParams);
+		$saveParams['checkLocationOccupancy'] = $occupancyCheckMode;
+		try
+		{
+			$newId = CCalendar::SaveEvent($saveParams);
+		}
+		catch (OccupancyCheckerException $exception)
+		{
+			throw self::createOccupancyConflictRestException($exception);
+		}
+		catch (OccupancyLockedException $exception)
+		{
+			throw self::createOccupancyLockedRestException($exception);
+		}
 
 		if (!$newId)
 		{
@@ -1150,6 +1180,79 @@ final class CCalendarRestService extends IRestService
 		}
 
 		return $newId;
+	}
+
+	private static function getOccupancyCheckMode(array $params): string
+	{
+		if (!array_key_exists('doCheckOccupancy', $params))
+		{
+			return 'Y';
+		}
+
+		$mode = $params['doCheckOccupancy'];
+		if (!is_string($mode) || !in_array($mode, ['Y', 'N'], true))
+		{
+			throw new RestException(Loc::getMessage('CAL_REST_PARAM_ERROR', [
+				'#PARAM_NAME#' => 'doCheckOccupancy',
+			]));
+		}
+
+		return $mode;
+	}
+
+	private static function createOccupancyConflictRestException(OccupancyCheckerException $exception): RestException
+	{
+		if ($exception->isInvalidInterval())
+		{
+			return new RestException(
+				$exception->getMessage(),
+				OccupancyCheckerException::INVALID_INTERVAL_ERROR_CODE,
+				\CRestServer::STATUS_OK,
+			);
+		}
+
+		$occupancyData = $exception->getOccupancyData();
+		$dates = array_values(array_filter(
+			(array)($occupancyData['dates'] ?? []),
+			static fn($date): bool => is_string($date) && preg_match(
+				'/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/D',
+				$date,
+			) === 1,
+		));
+		if (!self::canExposeOccupancyDates($occupancyData))
+		{
+			$dates = [];
+		}
+
+		$restException = new RestException(
+			Loc::getMessage('CAL_REST_LOCATION_OCCUPANCY_CONFLICT'),
+			OccupancyCheckerException::ERROR_CODE,
+			\CRestServer::STATUS_OK,
+		);
+		$restException->setAdditional([
+			'additional' => [
+				'occupancy' => [
+					'dates' => $dates,
+					'truncated' => (bool)($occupancyData['truncated'] ?? false),
+				],
+			],
+		]);
+
+		return $restException;
+	}
+
+	private static function canExposeOccupancyDates(array $occupancyData): bool
+	{
+		return Manager::canExposeOccupancyDates($occupancyData);
+	}
+
+	private static function createOccupancyLockedRestException(OccupancyLockedException $exception): RestException
+	{
+		return new RestException(
+			Loc::getMessage('CAL_REST_LOCATION_OCCUPANCY_LOCKED') ?: $exception->getMessage(),
+			OccupancyLockedException::ERROR_CODE,
+			\CRestServer::STATUS_OK,
+		);
 	}
 
 	/*
@@ -1263,7 +1366,7 @@ final class CCalendarRestService extends IRestService
 
 				foreach ($arEvents as $i => $event)
 				{
-					$arEvents[$i]['~detailUrl'] = CHTTP::urlAddParams($params['detailUrl'], ['EVENT_ID' => $event['ID'], 'EVENT_DATE' => $event['DATE_FROM']]);
+					$arEvents[$i]['~detailUrl'] = (string)(new Uri($params['detailUrl']))->addParams(['EVENT_ID' => $event['ID'], 'EVENT_DATE' => $event['DATE_FROM']]);
 				}
 			}
 

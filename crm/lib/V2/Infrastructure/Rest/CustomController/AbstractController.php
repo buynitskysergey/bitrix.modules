@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace Bitrix\Crm\V2\Infrastructure\Rest\CustomController;
 
+use Bitrix\Crm\Restriction\RestrictionManager;
+use Bitrix\Crm\Settings\LeadSettings;
 use Bitrix\Crm\V2\Public\EntityType;
+use Bitrix\Crm\V2\Public\OwnerType;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Main\Engine\Action;
 use Bitrix\Main\Engine\AutoWire\Parameter;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Rest\V3\Controller\RestController;
+use Bitrix\Rest\V3\Exception\AccessDeniedException;
 use Bitrix\Rest\V3\Exception\EntityNotFoundException;
+use Bitrix\Rest\V3\Exception\FeatureNotAvailableOnCurrentPlanException;
 use Bitrix\Rest\V3\Exception\Validation\RequiredFieldInRequestException;
 
 abstract class AbstractController extends RestController
@@ -18,9 +24,52 @@ abstract class AbstractController extends RestController
 
 	protected function init(): void
 	{
-		$this->userId = (int)CurrentUser::get()->getId();
-
 		parent::init();
+
+		$this->syncUserId();
+	}
+
+	protected function processBeforeAction(Action $action): bool
+	{
+		// The user is injected after init(), so resolve it after the action is known.
+		$this->syncUserId();
+
+		if (!parent::processBeforeAction($action))
+		{
+			return false;
+		}
+
+		$sourceParameters = $this->getSourceParametersList()[0] ?? [];
+		// only SchemaProvider sets entityTypeId as int (trusted value), a string comes from the client query
+		if (is_int($sourceParameters['entityTypeId'] ?? null))
+		{
+			$this->checkEntityAvailability($this->getEntityType());
+		}
+
+		return true;
+	}
+
+	protected function checkEntityAvailability(EntityType $entityType): void
+	{
+		if ($entityType->getId() !== OwnerType::LEAD)
+		{
+			return;
+		}
+
+		$this->checkLeadAvailability();
+	}
+
+	protected function checkLeadAvailability(): void
+	{
+		if (!RestrictionManager::getLeadsRestriction()->hasPermission())
+		{
+			throw new FeatureNotAvailableOnCurrentPlanException();
+		}
+
+		if (!LeadSettings::isEnabled())
+		{
+			throw new AccessDeniedException();
+		}
 	}
 
 	public function getAutoWiredParameters(): array
@@ -71,5 +120,12 @@ abstract class AbstractController extends RestController
 		}
 
 		parent::writeToLogException($e);
+	}
+
+	private function syncUserId(): void
+	{
+		$injectedUserId = (int)($this->getCurrentUser()?->getId() ?? 0);
+
+		$this->userId = $injectedUserId > 0 ? $injectedUserId : (int)CurrentUser::get()->getId();
 	}
 }
