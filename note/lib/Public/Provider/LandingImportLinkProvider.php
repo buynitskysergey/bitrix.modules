@@ -162,6 +162,9 @@ class LandingImportLinkProvider
 	 * same audience that saw the KB is redirected, while anonymous / no-access
 	 * visitors keep seeing the old page (landing KBs can be public - a blind redirect
 	 * would push them into a note 403).
+	 *
+	 * A deleted base answers "no" for everybody, for the same reason: the old page is a
+	 * better answer than a base that is not there.
 	 */
 	public function currentUserCanView(int $collectionId): bool
 	{

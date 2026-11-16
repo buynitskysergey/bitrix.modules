@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Internal\Service\Provisioning\ApplicationKey;
 
 use Bitrix\Rest\Public\Contract\Application\RestApplicationInterface;
+use Bitrix\Vibecodeconnector\Internal\Exception\HandlerUrlSchemeForbiddenException;
 use Bitrix\Vibecodeconnector\Internal\Integration\Rest\PersonalApplicationInstaller;
 use Bitrix\Vibecodeconnector\Internal\Service\Licensing\ProvisioningAccessGate;
 use Bitrix\Vibecodeconnector\Internal\Service\Provisioning\EntryPoint;
@@ -42,6 +43,11 @@ final class Issuer
 	): RestApplicationInterface
 	{
 		$this->accessGate->ensureRestProvisioningAvailable($this->entryPoint, $userId);
+
+		if (!in_array(strtolower((string)parse_url($handlerUrl, PHP_URL_SCHEME)), ['http', 'https'], true))
+		{
+			throw new HandlerUrlSchemeForbiddenException();
+		}
 
 		return $this->permissionSource->isVibecodeSource()
 			? $this->installer->forceInstall(

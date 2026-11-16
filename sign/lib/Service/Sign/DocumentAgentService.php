@@ -3,8 +3,11 @@
 namespace Bitrix\Sign\Service\Sign;
 
 use Bitrix\Main\ArgumentException;
+use Bitrix\Sign\Config\Storage;
 use Bitrix\Sign\Integration\CRM\Model\EventData;
+use Bitrix\Sign\Item;
 use Bitrix\Sign\Item\Member;
+use Bitrix\Sign\Operation\Placeholder\PrecomputeDocumentPlaceholders;
 use Bitrix\Sign\Operation\Result\ConfigureResult;
 use Bitrix\Sign\Service\Container;
 use Bitrix\Sign\Type;
@@ -30,6 +33,8 @@ class DocumentAgentService
 		'UNSUPPORTED_FILE_TYPE',
 		'UPLOAD_FILE_NOT_DECODED',
 	];
+	private const PLACEHOLDER_WARMUP_RETRY_LIMIT = 4;
+	private const PLACEHOLDER_WARMUP_AGENT_SORT = 400;
 
 	/**
 	 * A blank has already been sent in this hit.
@@ -41,6 +46,7 @@ class DocumentAgentService
 	 * hits.
 	 */
 	private static bool $blankSentInThisHit = false;
+	private static bool $rawPlaceholderWarmupRunInThisHit = false;
 
 	/**
 	 * Add agent for start signing
@@ -127,7 +133,7 @@ class DocumentAgentService
 		// second chain next to it and double the cost of a hit.
 		if (!$this->hasUploadGroupBlanksChain($groupId))
 		{
-			$this->addAgent($this->getUploadGroupBlanksAgentName($groupId));
+			$this->addOrReactivateAgent($this->getUploadGroupBlanksAgentName($groupId));
 		}
 	}
 
@@ -147,8 +153,45 @@ class DocumentAgentService
 			['ID' => 'DESC'],
 			[
 				'MODULE_ID' => 'sign',
+				// An inactive failed chain must not keep the UI waiting.
 				'ACTIVE' => 'Y',
 				'NAME' => "\\" . __CLASS__ . "::uploadGroupBlanks($groupId,%",
+			],
+		)->fetch();
+	}
+
+	public function hasRawPlaceholderWarmupChain(int $groupId): bool
+	{
+		return (bool)(new \CAgent())->getList(
+			['ID' => 'DESC'],
+			[
+				'MODULE_ID' => 'sign',
+				'ACTIVE' => 'Y',
+				'NAME' => "\\" . __CLASS__ . "::precomputeRawPlaceholders($groupId,%",
+			],
+		)->fetch();
+	}
+
+	public function hasRawPlaceholderWarmupChainForDocument(
+		int $groupId,
+		string $documentUid,
+		int $documentId,
+		int $blankId,
+	): bool
+	{
+		return (bool)(new \CAgent())->getList(
+			['ID' => 'DESC'],
+			[
+				'MODULE_ID' => 'sign',
+				'ACTIVE' => 'Y',
+				'NAME' => sprintf(
+					'\\%s::precomputeRawPlaceholders(%d, %s, %d, %d, %%',
+					__CLASS__,
+					$groupId,
+					var_export($documentUid, true),
+					$documentId,
+					$blankId,
+				),
 			],
 		)->fetch();
 	}
@@ -168,7 +211,12 @@ class DocumentAgentService
 	{
 		$container = Container::instance();
 		$agentService = $container->getDocumentAgentService();
-		if (self::$blankSentInThisHit)
+		$placeholderRestrictionEnabled = Storage::instance()->isPlaceholderRestrictionEnabled();
+		if (
+			self::$blankSentInThisHit
+			|| self::$rawPlaceholderWarmupRunInThisHit
+			|| ($placeholderRestrictionEnabled && $agentService->hasRawPlaceholderWarmupChain($groupId))
+		)
 		{
 			return $agentService->getUploadGroupBlanksAgentName($groupId, $retryCount, $afterId);
 		}
@@ -212,6 +260,12 @@ class DocumentAgentService
 
 		if ($result->isSuccess())
 		{
+			$uploadedDocument = $result->getData()['document'] ?? $document;
+			if ($uploadedDocument instanceof Item\Document)
+			{
+				$agentService->scheduleRawPlaceholderWarmup($groupId, $uploadedDocument);
+			}
+
 			// The chain moves on only because a sent blank leaves the `new` status behind. Should
 			// that ever stop being true, the same document would be sent on every hit for good.
 			$next = $container->getDocumentRepository()->getFirstByGroupIdAndStatus(
@@ -248,7 +302,7 @@ class DocumentAgentService
 
 		if (!$isPermanentFailure && $retryCount < self::UPLOAD_RETRY_LIMIT)
 		{
-			$agentService->addAgent(
+			$agentService->addOrReactivateAgent(
 				agentName: $agentService->getUploadGroupBlanksAgentName($groupId, ++$retryCount, $afterId),
 				nextDateExec: \ConvertTimeStamp(time() + \CTimeZone::GetOffset() + self::ERROR_RETRY_DELAY, 'FULL'),
 			);
@@ -300,6 +354,137 @@ class DocumentAgentService
 		}
 
 		return $agentService->getUploadGroupBlanksAgentName($groupId, 0, (int)$document->id);
+	}
+
+	public function scheduleRawPlaceholderWarmup(int $groupId, Item\Document $document): void
+	{
+		if (
+			!Storage::instance()->isPlaceholderRestrictionEnabled()
+			|| $document->uid === null
+			|| $document->id === null
+			|| $document->blankId === null
+		)
+		{
+			return;
+		}
+		$this->addOrReactivateAgent(
+			agentName: $this->getRawPlaceholderWarmupAgentName(
+				$groupId,
+				$document->uid,
+				$document->id,
+				$document->blankId,
+			),
+			nextDateExec: \ConvertTimeStamp(time() + \CTimeZone::GetOffset(), 'FULL'),
+			sort: self::PLACEHOLDER_WARMUP_AGENT_SORT,
+		);
+	}
+
+	public static function precomputeRawPlaceholders(
+		int $groupId,
+		string $documentUid,
+		int $documentId,
+		int $blankId,
+		int $retryCount = 0,
+	): string
+	{
+		$agentService = Container::instance()->getDocumentAgentService();
+		if (self::$rawPlaceholderWarmupRunInThisHit || self::$blankSentInThisHit)
+		{
+			return $agentService->getRawPlaceholderWarmupAgentName(
+				$groupId,
+				$documentUid,
+				$documentId,
+				$blankId,
+				$retryCount,
+			);
+		}
+		$operation = null;
+		try
+		{
+			$operation = new PrecomputeDocumentPlaceholders($documentUid, $documentId, $blankId);
+			$result = $operation->launch();
+		}
+		catch (\Throwable $exception)
+		{
+			$result = (new Main\Result())->addError(new Main\Error($exception->getMessage()));
+		}
+		self::$rawPlaceholderWarmupRunInThisHit = $operation?->wasPlaceholderServiceCalled() ?? false;
+
+		if ($result->isSuccess())
+		{
+			return '';
+		}
+
+		if ($retryCount < self::PLACEHOLDER_WARMUP_RETRY_LIMIT)
+		{
+			Container::instance()->getLogger('Agent')->warning(
+				'SIGN: raw placeholder warmup failed for document {uid} on attempt {attempt}: {errors}',
+				[
+					'uid' => $documentUid,
+					'attempt' => $retryCount + 1,
+					'errors' => implode('; ', $result->getErrorMessages()),
+				],
+			);
+			$agentService->addOrReactivateAgent(
+				agentName: $agentService->getRawPlaceholderWarmupAgentName(
+					$groupId,
+					$documentUid,
+					$documentId,
+					$blankId,
+					++$retryCount,
+				),
+				nextDateExec: \ConvertTimeStamp(
+					time() + \CTimeZone::GetOffset() + self::ERROR_RETRY_DELAY,
+					'FULL',
+				),
+				sort: self::PLACEHOLDER_WARMUP_AGENT_SORT,
+			);
+
+			return '';
+		}
+
+		$container = Container::instance();
+		$currentDocument = $container->getDocumentRepository()->getById($documentId);
+		if ($currentDocument?->blankId === $blankId)
+		{
+			$cacheService = $container->getDocumentPlaceholderCacheService();
+			$cacheService->setRawPlaceholders($documentId, $blankId, []);
+
+			$currentDocument = $container->getDocumentRepository()->getById($documentId);
+			if ($currentDocument?->blankId !== $blankId)
+			{
+				$cacheService->deleteRawPlaceholders($documentId, $blankId);
+			}
+		}
+		$container->getLogger('Agent')->error(
+			'SIGN: raw placeholder warmup failed for document {uid} after {attempts} attempts: {errors}',
+			[
+				'uid' => $documentUid,
+				'attempts' => $retryCount + 1,
+				'errors' => implode('; ', $result->getErrorMessages()),
+			],
+		);
+
+		return '';
+	}
+
+	public function getRawPlaceholderWarmupAgentName(
+		int $groupId,
+		string $documentUid,
+		int $documentId,
+		int $blankId,
+		int $retryCount = 0,
+	): string
+	{
+		return sprintf(
+			'\\%s::precomputeRawPlaceholders(%d, %s, %d, %d, %d);',
+			__CLASS__,
+			$groupId,
+			var_export($documentUid, true),
+			$documentId,
+			$blankId,
+			$retryCount,
+		);
 	}
 
 	private static function handleSigningConfigureErrors(string $documentUid, Main\ErrorCollection $errors): void
@@ -376,17 +561,73 @@ class DocumentAgentService
 		}
 	}
 
-	private function addAgent(string $agentName, int $interval = 1, string $nextDateExec = '')
+	private function addAgent(string $agentName, int $interval = 1, string $nextDateExec = '', int $sort = 300)
 	{
 		$agent = new \CAgent();
-			$agent->AddAgent(
+		$agent->AddAgent(
 				name: $agentName,
 				module: "sign",
 				period: "Y",
 				interval: $interval,
 				next_exec: $nextDateExec ?: \ConvertTimeStamp(time()+\CTimeZone::GetOffset()+$interval, "FULL"),
-				sort: 300,
+				sort: $sort,
 			);
+	}
+
+	private function addOrReactivateAgent(
+		string $agentName,
+		int $interval = 1,
+		string $nextDateExec = '',
+		int $sort = 300,
+	): void
+	{
+		$nextDateExec = $nextDateExec
+			?: \ConvertTimeStamp(time() + \CTimeZone::GetOffset() + $interval, 'FULL')
+		;
+		$agent = new \CAgent();
+		$agentId = $agent->AddAgent(
+			name: $agentName,
+			module: 'sign',
+			period: 'Y',
+			interval: $interval,
+			next_exec: $nextDateExec,
+			sort: $sort,
+			existError: false,
+		);
+
+		$existingAgent = $agent->getList(
+			['ID' => 'DESC'],
+			[
+				'ID' => (int)$agentId,
+				'MODULE_ID' => 'sign',
+				'=NAME' => $agentName,
+			],
+		)->fetch();
+		if (($existingAgent['ACTIVE'] ?? null) === 'Y')
+		{
+			return;
+		}
+		if (
+			$existingAgent !== false
+			&& $agent->update(
+				(int)$existingAgent['ID'],
+				[
+					'ACTIVE' => 'Y',
+					'AGENT_INTERVAL' => $interval,
+					'IS_PERIOD' => 'Y',
+					'NEXT_EXEC' => $nextDateExec,
+					'SORT' => $sort,
+				],
+			) !== false
+		)
+		{
+			return;
+		}
+
+		Container::instance()->getLogger('Agent')->error(
+			'SIGN: failed to schedule background agent {name}',
+			['name' => $agentName],
+		);
 	}
 
 	private function removeAgent(string $agentName)

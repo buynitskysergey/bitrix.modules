@@ -791,6 +791,11 @@ class Analytics extends Common
 			->setStatus($status ? self::STATUS_SUCCESS : self::STATUS_ERROR)
 		;
 
+		if ($this->getUserId() > 0)
+		{
+			$analyticsEvent->setUserId($this->getUserId());
+		}
+
 		if (in_array($section, self::SECTION, true))
 		{
 			$analyticsEvent->setSection($section);

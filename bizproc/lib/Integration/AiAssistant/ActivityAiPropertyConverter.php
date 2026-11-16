@@ -147,6 +147,11 @@ class ActivityAiPropertyConverter
 			return null;
 		}
 
+		// No key mode is declared here: the children of a properties map are a snapshot of this portal - user
+		// fields included - rather than a contract of the activity, and closing the keys on them would hold every
+		// auto-described activity of every module to the fields one portal happens to have, well past the blocks
+		// BRIEF § 4.4 lists as tightened. An activity whose map really is a contract says so in its own
+		// `.ai.php`, which {@see ActivityAiDescriptionMerger::merge()} prefers over this one.
 		return new Setting(
 			name: $name,
 			description: $field[static::PROPERTY_FIELD_AI_DESCRIPTION] ?? static::DEFAULT_MAP_DESCRIPTION,

@@ -3,6 +3,7 @@
 namespace Bitrix\Bizproc\Integration\AiAssistant;
 
 use Bitrix\Bizproc\Internal\Entity\Activity\Setting;
+use Bitrix\Bizproc\Internal\Entity\Activity\SettingCategory;
 use Bitrix\Bizproc\Internal\Entity\Activity\SettingCollection;
 use Bitrix\Bizproc\Internal\Entity\Activity\SettingOption;
 use Bitrix\Bizproc\Internal\Entity\Activity\SettingOptionCollection;
@@ -107,6 +108,9 @@ class ActivityAiDescriptionMerger
 	 *
 	 * Structural attributes (required, multiple, defaultValue, allowSelection) always come from the map.
 	 * Quality attributes (description, special type, curated option labels) come from .ai.php.
+	 * Declared attributes (lifecycle category, map key mode, unique child key, numeric bounds) are the map's
+	 * blind spot - it derives none of them - so a value stated by .ai.php wins over the default the map leaves
+	 * behind.
 	 */
 	private function mergeSetting(Setting $map, Setting $ai): Setting
 	{
@@ -120,6 +124,11 @@ class ActivityAiDescriptionMerger
 			children: $this->mergeChildren($map->children, $ai->children),
 			defaultValue: $map->defaultValue ?? $ai->defaultValue,
 			allowSelection: $map->allowSelection,
+			category: $ai->category === SettingCategory::EditableTyped ? $map->category : $ai->category,
+			keyMode: $ai->keyMode ?? $map->keyMode,
+			uniqueChildKey: $ai->uniqueChildKey ?? $map->uniqueChildKey,
+			minimum: $ai->minimum ?? $map->minimum,
+			maximum: $ai->maximum ?? $map->maximum,
 		);
 	}
 

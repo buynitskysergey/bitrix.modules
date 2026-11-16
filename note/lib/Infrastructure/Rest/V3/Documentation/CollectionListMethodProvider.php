@@ -23,6 +23,20 @@ class CollectionListMethodProvider extends MethodProvider
 		return ['content' => ['application/json' => ['schema' => [
 			'type' => 'object',
 			'properties' => [
+				'filter' => [
+					'type' => 'object',
+					'description' =>
+						'Narrows the list. `state` accepts `=` and `in`; omitted, it answers with the '
+						. 'live collections alone. `trashed` answers only with the collections the '
+						. 'caller disposes of in the recycle bin - the right to moderate them.'
+					,
+					'properties' => [
+						'state' => [
+							'type' => 'string',
+							'enum' => ['live', 'archived', 'trashed'],
+						],
+					],
+				],
 				'pagination' => [
 					'type' => 'object',
 					'description' => 'Page of the list. Omit entirely to read the first page.',
@@ -86,6 +100,7 @@ class CollectionListMethodProvider extends MethodProvider
 					'position' => 4,
 					'policyLevel' => 'portal',
 					'accessLevel' => 'full',
+					'state' => 'live',
 					'isArchived' => false,
 					'createdBy' => 1,
 					'createdAt' => '2026-08-11T10:15:00+03:00',
@@ -109,8 +124,8 @@ class CollectionListMethodProvider extends MethodProvider
 			Lists the collections the caller may open, newest position first, page by page.
 
 			Invisible collections are absent rather than refused, so an empty list is a normal answer
-			and never means "no rights to use the method". Archived collections are left out as well:
-			they are read through note.collection.get by their id.
+			and never means "no rights to use the method". Archived collections and the ones lying in
+			the recycle bin are left out as well, until `filter.state` asks for them by name.
 
 			Two fields say what the caller is looking at: `policyLevel` tells whether the collection is
 			open to the whole portal (`portal`) or only to the people named in its access rows

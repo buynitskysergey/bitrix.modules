@@ -14,6 +14,7 @@ use Bitrix\Tasks\Integration\UI\EntitySelector\TaskTemplateProvider;
 use Bitrix\Tasks\Integration\UI\EntitySelector\TaskTemplateWithIdProvider;
 use Bitrix\Tasks\Integration\UI\EntitySelector\TaskWithIdProvider;
 use Bitrix\Tasks\Integration\UI\EntitySelector\TemplateTagProvider;
+use Bitrix\Tasks\V2\Infrastructure\Provider\EntitySelector\ScrumItemProvider;
 
 return [
 	'value' => [
@@ -65,6 +66,13 @@ return [
 				'provider' => [
 					'moduleId' => 'tasks',
 					'className' => SprintSelectorProvider::class,
+				],
+			],
+			[
+				'entityId' => 'scrum-item',
+				'provider' => [
+					'moduleId' => 'tasks',
+					'className' => ScrumItemProvider::class,
 				],
 			],
 			[

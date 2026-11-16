@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Tasks\V2\Internal\Service\Task;
 
+use Bitrix\Tasks\Deadline\Entity\DeadlineUserOption;
 use Bitrix\Tasks\Deadline\Internals\Repository\DeadlineUserOptionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Entity\State\StateFlags;
 use Bitrix\Tasks\V2\Internal\Entity\Task\State;
@@ -24,21 +25,29 @@ class StateService
 	public function set(State $state, int $userId): ?array
 	{
 		$deadlineUserOption = null;
-
-		if ($state->defaultDeadline !== null)
+		$matchesWorkTime = null;
+		if (array_filter($state->getFlags(), static fn(?bool $flag): bool => $flag !== null) !== [])
 		{
-			$state->defaultDeadline->userId = $userId;
-			$deadlineUserOption = $this->defaultDeadlineService->set($state->defaultDeadline);
+			$matchesWorkTime = $state->matchesWorkTime ?? $this->get($userId)->matchesWorkTime;
 		}
 
 		$flags = new StateFlags(
 			needsControl: $state->needsControl,
-			matchesWorkTime: $state->matchesWorkTime,
+			matchesWorkTime: $matchesWorkTime,
 			defaultRequireResult: $state->defaultRequireResult,
 			allowsTimeTracking: $state->allowsTimeTracking,
 		);
 
 		$this->stateFlagsService->set($flags, OptionDictionary::StateFlags, $userId);
+
+		if ($state->defaultDeadline !== null)
+		{
+			$state->defaultDeadline->userId = $userId;
+			$deadlineUserOption = $this->defaultDeadlineService->set(
+				$state->defaultDeadline,
+				fn(int $savedUserId): DeadlineUserOption => $this->get($savedUserId)->defaultDeadline,
+			);
+		}
 
 		return $deadlineUserOption;
 	}

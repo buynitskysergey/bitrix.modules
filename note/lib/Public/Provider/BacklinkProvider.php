@@ -14,6 +14,7 @@ use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\DocumentLinkRepository;
+use Bitrix\Note\Internal\Service\Link\BacklinkCountLimit;
 
 /**
  * Incoming links of a document: the counter for the widget badge and the paged
@@ -32,7 +33,9 @@ use Bitrix\Note\Internal\Repository\DocumentLinkRepository;
  */
 class BacklinkProvider
 {
-	public const COUNT_CAP = 99;
+	// Published for the clients of the provider; the value itself belongs to the domain, where the
+	// public circuit reads it too.
+	public const COUNT_CAP = BacklinkCountLimit::CAP;
 
 	private const MAX_LIMIT = 50;
 	private const DEFAULT_LIMIT = 20;
@@ -106,9 +109,13 @@ class BacklinkProvider
 	}
 
 	/**
-	 * The visibility predicate of the current user, or null for a portal admin (who sees every
-	 * incoming link). Admins used to fall out of {@see DocumentAccessService::batchGetEffectiveLevels()}
-	 * for free; with the check moved into SQL the bypass has to be spelled out here.
+	 * The visibility predicate of the current user. A portal admin sees every incoming link and is
+	 * left with the state gate alone; admins used to fall out of
+	 * {@see DocumentAccessService::batchGetEffectiveLevels()} for free, and with the check moved into
+	 * SQL the bypass has to be spelled out here.
+	 *
+	 * The bypass is a bypass of the access level and never of the state, so a link out of a deleted
+	 * base goes dark for the administrator too - the same order the point snapshot keeps.
 	 *
 	 * Protected, like the target check above, so the paging arithmetic can be exercised without a
 	 * live access layer.
@@ -119,7 +126,10 @@ class BacklinkProvider
 
 		if (PortalAdmin::isAdmin($userId))
 		{
-			return null;
+			return DocumentAccessService::buildCollectionStateFilter(
+				'SOURCE.COLLECTION_ID',
+				[DocumentAccessService::STATE_ARCHIVED],
+			);
 		}
 
 		// Collection levels are resolved in PHP: getAllUserLevels() already folds the '*' policy and
@@ -131,6 +141,9 @@ class BacklinkProvider
 			DocumentAccessService::accessibleCollectionIds(
 				CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [],
 			),
+			// The same allowance the point snapshot below asks for: an archived document opens,
+			// so the links leading to it must not vanish from the list. A deleted base stays closed.
+			[DocumentAccessService::STATE_ARCHIVED],
 		);
 	}
 
@@ -148,7 +161,11 @@ class BacklinkProvider
 			throw new AccessDeniedException();
 		}
 
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $ownership['collectionId']);
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$ownership['collectionId'],
+			allowStates: [DocumentAccessService::STATE_ARCHIVED],
+		);
 		if (!$snapshot['canView'])
 		{
 			throw new AccessDeniedException();

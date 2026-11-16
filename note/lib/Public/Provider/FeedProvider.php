@@ -18,6 +18,7 @@ use Bitrix\Note\Internal\Service\History\AuthorResolver;
 use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\History\EventVisibilityPolicy;
 use Bitrix\Note\Internal\Service\User\IdentityColor;
+use Bitrix\Note\Internal\Util\CursorDate;
 
 /**
  * Reads the activity feed of one document. Role visibility
@@ -57,7 +58,8 @@ final class FeedProvider
 	 * @return array{
 	 *   id: int, type: string, actor: array{id:int,name:string,avatar:?string,color:string},
 	 *   createdAt: string, versionId: ?int, versionAvailable: bool,
-	 *   authors?: array<int, array{id:int,name:string,avatar:?string,color:string}>
+	 *   authors?: array<int, array{id:int,name:string,avatar:?string,color:string}>,
+	 *   source?: array{type: string, id?: int}
 	 * }
 	 */
 	public function enrichOne(Event $event): array
@@ -75,7 +77,8 @@ final class FeedProvider
 	 *   events: array<int, array{
 	 *     id: int, type: string, actor: array{id:int,name:string,avatar:?string,color:string},
 	 *     createdAt: string, versionId: ?int, versionAvailable: bool,
-	 *     authors?: array<int, array{id:int,name:string,avatar:?string,color:string}>
+	 *     authors?: array<int, array{id:int,name:string,avatar:?string,color:string}>,
+	 *     source?: array{type: string, id?: int}
 	 *   }>,
 	 *   nextCursor: ?array{createdAt: string, id: int},
 	 *   allowedTypes: string[]
@@ -91,7 +94,11 @@ final class FeedProvider
 			throw new DocumentNotFoundException();
 		}
 
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $ownership['collectionId']);
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$ownership['collectionId'],
+			allowStates: [DocumentAccessService::STATE_ARCHIVED],
+		);
 		if (!$snapshot['canView'])
 		{
 			throw new AccessDeniedException();
@@ -177,21 +184,7 @@ final class FeedProvider
 			return [null, null];
 		}
 
-		$createdAt = null;
-		$rawCreatedAt = $afterCursor['createdAt'] ?? null;
-		if (is_string($rawCreatedAt) && $rawCreatedAt !== '')
-		{
-			try
-			{
-				$createdAt = DateTime::createFromPhp(new \DateTime($rawCreatedAt));
-			}
-			catch (\Throwable)
-			{
-				$createdAt = null;
-			}
-		}
-
-		return [$createdAt, $id];
+		return [CursorDate::parse($afterCursor['createdAt'] ?? null), $id];
 	}
 
 	private function backfillCreatedEvent(int $documentId, array $ownership): void
@@ -286,6 +279,11 @@ final class FeedProvider
 					fn(int $id): array => $resolvedUsers[$id] ?? $this->fallbackActor($id),
 					$authorIds,
 				));
+			}
+
+			if ($event->getSource() !== null)
+			{
+				$item['source'] = $event->getSource()->toArray();
 			}
 
 			$result[] = $item;

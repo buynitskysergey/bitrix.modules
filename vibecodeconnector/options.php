@@ -14,6 +14,7 @@ use Bitrix\Vibecodeconnector\Internal\Exception\RegistrationFailedException;
 use Bitrix\Vibecodeconnector\Internal\Repository\Pairing\PairingRepository;
 use Bitrix\Vibecodeconnector\Internal\Service\Bot\BotService;
 use Bitrix\Vibecodeconnector\Internal\Service\Catalog\OpenApp\OpenAppSettings;
+use Bitrix\Vibecodeconnector\Internal\Service\Embed\EmbedCoworkAdminSettings;
 use Bitrix\Vibecodeconnector\Internal\Service\Embed\EmbedCreateSettings;
 use Bitrix\Vibecodeconnector\Internal\Service\Diagnostic\CloudSharedKeyLog;
 use Bitrix\Vibecodeconnector\Internal\Service\Diagnostic\IncomingJwtLog;
@@ -66,6 +67,7 @@ $permissionSourceSettings = ServiceLocator::getInstance()->get(PermissionSourceS
 $permissionSourcePolicy = ServiceLocator::getInstance()->get(PermissionSourcePolicy::class);
 $openAppSettings = ServiceLocator::getInstance()->get(OpenAppSettings::class);
 $embedCreateSettings = ServiceLocator::getInstance()->get(EmbedCreateSettings::class);
+$embedCoworkAdminSettings = ServiceLocator::getInstance()->get(EmbedCoworkAdminSettings::class);
 $pairingKeyRefresher = ServiceLocator::getInstance()->get(PairingKeyRefresher::class);
 $pairingSettings = ServiceLocator::getInstance()->get(PairingSettings::class);
 $cloudSharedKeyProvisioner = ServiceLocator::getInstance()->get(CloudSharedKeyProvisioner::class);
@@ -147,6 +149,7 @@ if (
 			Feature::disable(CabinetSeamlessEntry::class);
 		}
 		$embedCreateSettings->setEnabled($request->getPost('embed_create_in_iframe') !== null);
+		$embedCoworkAdminSettings->setEnabled($request->getPost('embed_cowork_admin_enabled') !== null);
 
 		$permissionSourceSettings->setVibecodeSource($request->getPost('permission_source') !== null);
 		$ttlInput = trim((string)$request->getPost('pairing_max_ttl_seconds'));
@@ -374,6 +377,7 @@ $isEnabled = $availabilityService->isEnabled();
 $isOpenAppInIframeEnabled = $openAppSettings->isOpenInIframeEnabled();
 $isCabinetSeamlessEntryEnabled = Feature::isEnabled(CabinetSeamlessEntry::class);
 $isEmbedCreateEnabled = $embedCreateSettings->isEnabled();
+$isEmbedCoworkAdminEnabled = $embedCoworkAdminSettings->isEnabled();
 $isRegistered = $registrationService->isRegistered();
 $isCloudSharedConfigured = $registrationService->isCloudSharedConfigured();
 $isCloudSharedAvailable = $registrationService->isCloudSharedAvailable();
@@ -416,10 +420,7 @@ if (IsModuleInstalled('bitrix24'))
 	$addKnownEndpoint($cloudSharedUrl, 'VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_CLOUD');
 }
 
-foreach ($baseEndpointProvider->getAvailableUrls() as $availableUrl)
-{
-	$addKnownEndpoint($availableUrl, 'VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_DEFAULT');
-}
+$addKnownEndpoint($baseEndpointProvider->getDefaultUrl(), 'VIBECODECONNECTOR_OPT_ACTIVE_CONNECTION_KNOWN_DEFAULT');
 $showDiagnosticLinks = Loader::includeModule('rest');
 
 $registerUrlDefault = (string)$request->getPost('register_endpoint_url');
@@ -523,6 +524,26 @@ $cloudSharedKeyLogUrl = $eventLogUrl(CloudSharedKeyLog::AUDIT_TYPE_ID);
 			>
 			<label for="vibecodeconnector_embed_create_in_iframe">
 				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_EMBED_CREATE_IN_IFRAME_HINT') ?>
+			</label>
+		</td>
+	</tr>
+	<tr>
+		<td style="width: 30%;">
+			<label for="vibecodeconnector_embed_cowork_admin_enabled">
+				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_EMBED_COWORK_ADMIN') ?>:
+			</label>
+		</td>
+		<td style="width: 70%;">
+			<input
+				type="checkbox"
+				id="vibecodeconnector_embed_cowork_admin_enabled"
+				name="embed_cowork_admin_enabled"
+				value="Y"
+				<?= $isEmbedCoworkAdminEnabled ? 'checked' : '' ?>
+				<?= $moduleAccess >= 'W' ? '' : 'disabled' ?>
+			>
+			<label for="vibecodeconnector_embed_cowork_admin_enabled">
+				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_EMBED_COWORK_ADMIN_HINT') ?>
 			</label>
 		</td>
 	</tr>
@@ -714,10 +735,8 @@ $cloudSharedKeyLogUrl = $eventLogUrl(CloudSharedKeyLog::AUDIT_TYPE_ID);
 			?>
 			<?=BeginNote()?><?= Loc::getMessage($cloudSharedHint) ?>
 				<br><br>
-				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_AVAILABLE_SERVERS') ?>
-				<?php foreach ($baseEndpointProvider->getAvailableUrls() as $availableUrl): ?>
-					<br><?= htmlspecialcharsbx($availableUrl) ?>
-				<?php endforeach; ?>
+				<?= Loc::getMessage('VIBECODECONNECTOR_OPT_CLOUD_SHARED_DEFAULT_SERVER') ?>
+				<br><?= htmlspecialcharsbx($baseEndpointProvider->getDefaultUrl()) ?>
 			<?=EndNote();?>
 		</td>
 	</tr>

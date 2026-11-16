@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Rest\V3\Read;
 
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Note\Infrastructure\Rest\V3\Access\EntityState;
 
 /**
  * What a REST answer about a single document is built from.
@@ -30,6 +31,8 @@ final class DocumentReadModel
 		// REST that is the canon's own serializer.
 		public readonly DateTime $createdAt,
 		public readonly DateTime $updatedAt,
+		// One of {@see EntityState}: what the three markers below say together, said in one word.
+		public readonly string $state,
 		// Moment the returned markdown was built; null until the projection materializes.
 		public readonly ?DateTime $contentUpdatedAt = null,
 		public readonly bool $isArchived = false,

@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Integration\Landing;
 
 use Bitrix\Landing\Internals\FolderTable;
 use Bitrix\Landing\Internals\LandingTable;
+use Bitrix\Landing\Internals\SiteTable;
 use Bitrix\Main\Loader;
 
 /**
@@ -24,36 +25,16 @@ class PageReader
 	public const MAX_PAGE_LIMIT = 100;
 
 	/**
-	 * Non-system-page filter fragment with the site's index (home) page opted back in.
-	 *
-	 * Content pages are SYS='N', but a knowledge base's home page
-	 * (b_landing_site.LANDING_ID_INDEX) is always a SYS='Y' landing page. It carries the
-	 * KB's primary navigation - link lists whose in-body `#landing<id>` hrefs are the
-	 * cross-page links the import rewrites - so it must be enumerated like any other
-	 * document. Every OTHER system page (header/footer/sidebar/search) stays excluded.
-	 * When no index id is supplied the plain SYS='N' filter is used.
-	 *
-	 * @return array ORM filter sub-expression (AND'd into the caller's filter)
-	 */
-	private static function systemPageFilter(?int $indexPageId): array
-	{
-		if ($indexPageId === null || $indexPageId <= 0)
-		{
-			return ['=SYS' => 'N'];
-		}
-
-		return [
-			'LOGIC' => 'OR',
-			['=SYS' => 'N'],
-			['=ID' => $indexPageId],
-		];
-	}
-
-	/**
 	 * Filter of the two reads that enumerate the document pages of a base - the whole listing and the
 	 * paginated ids. One builder, because a page one read hands out and the other skips breaks the
 	 * conversion: the tree of the base is built from the listing, while the content step walks the
 	 * same pages by offset until a batch comes back short.
+	 *
+	 * A service page is told by the part it plays in the site, not by `SYS`: landing.demo sets that flag
+	 * on the inactive positions of a template and copying a page carries it over, so articles of a base
+	 * can be `SYS='Y'`. What is left out is an area of a layout - a page b_landing_template_ref points at,
+	 * the way landing itself filters them out - and the 404/503 page of the site. The home page stays in:
+	 * the caller tells it apart by LANDING_ID_INDEX.
 	 *
 	 * $excludePageIds drops pages that are converted as something other than a document of their
 	 * own: the index page of a section becomes the body of the section document, so a document of
@@ -61,13 +42,13 @@ class PageReader
 	 *
 	 * @param int[] $excludePageIds
 	 */
-	private static function documentPageFilter(int $siteId, ?int $indexPageId, array $excludePageIds = []): array
+	private static function documentPageFilter(int $siteId, array $excludePageIds = []): array
 	{
 		$filter = [
 			'=SITE_ID' => $siteId,
 			'=DELETED' => 'N',
 			'=FOLDER' => 'N',
-			self::systemPageFilter($indexPageId),
+			'==AREAS.ID' => null,
 			// Import is a trusted pipeline: read pages independently of the caller's
 			// landing rights, mirroring SiteReader::countPagesForSitesScoped. Without
 			// this, a knowledge-scope call from a context lacking landing permissions
@@ -75,13 +56,37 @@ class PageReader
 			'CHECK_PERMISSIONS' => 'N',
 		];
 
-		$excluded = self::positiveIds($excludePageIds);
+		$excluded = self::positiveIds(array_merge($excludePageIds, self::errorPageIds($siteId)));
 		if ($excluded !== [])
 		{
 			$filter['!@ID'] = $excluded;
 		}
 
 		return $filter;
+	}
+
+	/**
+	 * The 404 and 503 pages of the site (b_landing_site.LANDING_ID_404/503).
+	 *
+	 * @return int[]
+	 */
+	private static function errorPageIds(int $siteId): array
+	{
+		$row = SiteTable::getList([
+			'select' => ['LANDING_ID_404', 'LANDING_ID_503'],
+			'filter' => [
+				'=ID' => $siteId,
+				'CHECK_PERMISSIONS' => 'N',
+			],
+			'limit' => 1,
+		])->fetch();
+
+		if ($row === false)
+		{
+			return [];
+		}
+
+		return self::positiveIds([(int)($row['LANDING_ID_404'] ?? 0), (int)($row['LANDING_ID_503'] ?? 0)]);
 	}
 
 	/**
@@ -97,19 +102,18 @@ class PageReader
 	}
 
 	/**
-	 * Returns non-system document pages of a knowledge-base site, plus the SYS='Y' home
-	 * page when $indexPageId is supplied (see {@see documentPageFilter}).
+	 * Returns the document pages of a knowledge-base site, the home page among them - service pages
+	 * (areas of a layout, 404/503) are left out, see {@see documentPageFilter}.
 	 *
 	 * Landing serves knowledge bases from the *draft* copy (DRAFT_MODE='Y' in
 	 * intranet/.../knowledge/index.php), so ACTIVE/PUBLIC are intentionally NOT
 	 * filtered here - a KB page is visible to readers regardless of publication
-	 * state, gated only by rights. SYS='N' filters out 404/503 system pages,
-	 * FOLDER='N' returns leaf documents only (folders are exposed via
+	 * state, gated only by rights. FOLDER='N' returns leaf documents only (folders are exposed via
 	 * {@see listFoldersForSite}).
 	 *
 	 * @return array<int, array{ID:int, CODE:?string, TITLE:string, FOLDER_ID:?int, SORT:int}>
 	 */
-	public function listForSite(int $siteId, ?int $indexPageId = null): array
+	public function listForSite(int $siteId): array
 	{
 		if ($siteId <= 0 || !Loader::includeModule('landing'))
 		{
@@ -118,7 +122,7 @@ class PageReader
 
 		$rows = LandingScope::runInKnowledgeScope(static fn(): array => LandingTable::getList([
 			'select' => ['ID', 'CODE', 'TITLE', 'FOLDER_ID'],
-			'filter' => self::documentPageFilter($siteId, $indexPageId),
+			'filter' => self::documentPageFilter($siteId),
 			'order' => ['ID' => 'ASC'],
 		])->fetchAll());
 
@@ -263,7 +267,6 @@ class PageReader
 		int $siteId,
 		int $offset,
 		int $limit,
-		?int $indexPageId = null,
 		array $excludePageIds = [],
 	): array
 	{
@@ -276,7 +279,7 @@ class PageReader
 		$pageLimit = min($limit, self::MAX_PAGE_LIMIT);
 		$rows = LandingScope::runInKnowledgeScope(static fn(): array => LandingTable::getList([
 			'select' => ['ID'],
-			'filter' => self::documentPageFilter($siteId, $indexPageId, $excludePageIds),
+			'filter' => self::documentPageFilter($siteId, $excludePageIds),
 			'order' => ['ID' => 'ASC'],
 			'offset' => $pageOffset,
 			'limit' => $pageLimit,
@@ -332,10 +335,10 @@ class PageReader
 	 * of different folders. The lowest id wins, which keeps the answer the same on every request
 	 * (the ambiguity itself is accepted, BRIEF decision 12) instead of leaving it to row order.
 	 *
-	 * SYS pages are NOT excluded here, unlike in the reads that enumerate the import: the home
-	 * page of a base is always SYS='Y', and its old address has to keep working - the conversion
-	 * maps it onto the description of the base. Every other system page (404/503) simply has no
-	 * mapping, so it resolves to nothing anyway. DELETED='N' and no publication filter, as in
+	 * Service pages are NOT excluded here, unlike in the reads that enumerate the import: an area or
+	 * a 404/503 page has no mapping, so it resolves to nothing anyway, and the old address of the home
+	 * page has to keep working - the conversion maps it onto the description of the base. `SYS` is not
+	 * looked at either, as in {@see documentPageFilter}. DELETED='N' and no publication filter, as in
 	 * {@see listForSite}: landing serves a knowledge base from its draft copy.
 	 */
 	public function findPageIdByCode(int $siteId, string $code): ?int

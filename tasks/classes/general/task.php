@@ -302,6 +302,11 @@ class CTasks
 		$handler = new Task($userId);
 		$handler->setByPassParams($arParams);
 
+		if (($arParams['USE_CONSISTENCY'] ?? false) === true)
+		{
+			$handler->useConsistency();
+		}
+
 		if (isset($arFields['META::EVENT_GUID']))
 		{
 			$handler->setEventGuid($arFields['META::EVENT_GUID']);

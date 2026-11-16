@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Service\History;
 
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Entity\History\Event;
+use Bitrix\Note\Internal\Entity\History\Source;
 use Bitrix\Note\Internal\Integration\Pull\HistoryPullGateway;
 use Bitrix\Note\Internal\Repository\EventAuthorRepository;
 use Bitrix\Note\Internal\Repository\EventRepository;
@@ -37,9 +38,24 @@ class EventLogService
 	 *   actor, so the activity-line chip showed a single avatar until a reload while the sidebar
 	 *   feed (read later) already listed every co-author.
 	 */
-	public function record(string $scope, int $entityId, string $type, int $userId, ?int $versionId = null, array $authorIds = []): int
+	public function record(
+		string $scope,
+		int $entityId,
+		string $type,
+		int $userId,
+		?int $versionId = null,
+		array $authorIds = [],
+		?Source $source = null,
+	): int
 	{
-		$event = Event::create($scope, $entityId, $type, $userId, $versionId);
+		$event = Event::create(
+			$scope,
+			$entityId,
+			$type,
+			$userId,
+			$versionId,
+			$source ?? SourceContext::get(),
+		);
 		$eventId = $this->eventRepository->save($event);
 
 		if ($authorIds !== [])
@@ -47,7 +63,18 @@ class EventLogService
 			$this->eventAuthorRepository->saveAuthors($eventId, $authorIds);
 		}
 
-		$this->pullGateway->emit(new Event($eventId, $scope, $entityId, $type, $userId, $versionId, $event->getCreatedAt()));
+		$this->pullGateway->emit(
+			new Event(
+				$eventId,
+				$scope,
+				$entityId,
+				$type,
+				$userId,
+				$versionId,
+				$event->getCreatedAt(),
+				$event->getSource(),
+			),
+		);
 
 		return $eventId;
 	}
@@ -72,7 +99,13 @@ class EventLogService
 	 *
 	 * @param int[] $entityIds
 	 */
-	public function recordMany(string $scope, array $entityIds, string $type, int $userId): void
+	public function recordMany(
+		string $scope,
+		array $entityIds,
+		string $type,
+		int $userId,
+		?Source $source = null,
+	): void
 	{
 		if (!\Bitrix\Note\Internal\Configuration::isActivityEnabled())
 		{
@@ -90,9 +123,10 @@ class EventLogService
 
 		try
 		{
+			$source ??= SourceContext::get();
 			foreach ($normalized as $id)
 			{
-				$this->eventRepository->save(Event::create($scope, $id, $type, $userId, null));
+				$this->eventRepository->save(Event::create($scope, $id, $type, $userId, null, $source));
 			}
 		}
 		catch (\Throwable)

@@ -107,8 +107,8 @@ class RestoreDocumentFromRecycleBinCommand extends AbstractCommand
 		}
 
 		$data = $result->getData();
-		$wasArchivedBeforeTrash = (bool)($data['wasArchivedBeforeTrash'] ?? false);
-		if (!$wasArchivedBeforeTrash)
+		$restoredArchived = (bool)($data['restoredArchived'] ?? false);
+		if (!$restoredArchived)
 		{
 			$documentId = (int)($data['documentId'] ?? $record->getDocumentId());
 			$collectionId = (int)($data['collectionId'] ?? 0);

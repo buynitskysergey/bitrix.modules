@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Rest\V3\Documentation;
 
 use Bitrix\Note\Infrastructure\Rest\V3\Dto\SearchResultItemDto;
+use Bitrix\Note\Infrastructure\Rest\V3\Structure\SearchPaginationStructure;
 use Bitrix\Note\Public\Provider\Param\Search\SearchLimits;
 use Bitrix\Rest\V3\Documentation\MethodProvider;
 use Bitrix\Rest\V3\Schema\TypeAliasRegistry;
@@ -46,7 +47,15 @@ class DocumentSearchListMethodProvider extends MethodProvider
 					'properties' => [
 						'limit' => [
 							'type' => 'integer',
-							'description' => 'Results per page, capped at 200. Defaults to 50.',
+							'description' => 'Results per page, capped at '
+								. SearchPaginationStructure::MAX_LIMIT . '. Defaults to '
+								. SearchPaginationStructure::DEFAULT_LIMIT . '.',
+						],
+						'offset' => [
+							'type' => 'integer',
+							'description' => 'How many of the best matches to skip before the page starts. '
+								. 'Defaults to 0; the next page is this offset plus the limit. Refused past '
+								. SearchPaginationStructure::MAX_OFFSET . ' rather than silently cut.',
 						],
 					],
 				],
@@ -72,9 +81,8 @@ class DocumentSearchListMethodProvider extends MethodProvider
 						'items' => ['type' => 'array', 'items' => ['$ref' => $itemRef]],
 						'hasMore' => [
 							'type' => 'boolean',
-							'description' => 'True when the answer was cut by the limit. A bigger limit reaches '
-								. 'further, but only as far as 200: search has neither a cursor nor an offset, so past '
-								. 'that the remainder is reachable only by asking a narrower question.',
+							'description' => 'True when the answer was cut by the limit: there are matches past '
+								. 'this page. Ask for the next one - the same limit, the offset moved on by it.',
 						],
 					],
 				]],
@@ -101,9 +109,17 @@ class DocumentSearchListMethodProvider extends MethodProvider
 	protected function getDescription(): ?string
 	{
 		$minToken = SearchLimits::MIN_TOKEN_LENGTH;
+		$maxLimit = SearchPaginationStructure::MAX_LIMIT;
+		$maxOffset = SearchPaginationStructure::MAX_OFFSET;
 
 		return <<<TEXT
 			Searches the content and titles of the documents the caller may read.
+
+			The page is chosen by an offset into the ranking: `pagination.limit` says how long the page
+			is (at most {$maxLimit}), `pagination.offset` says how many of the better matches to skip.
+			So the whole answer is walkable - a match past the first {$maxLimit} is asked for by offset
+			rather than being out of reach - up to an offset of {$maxOffset}, past which the request is
+			refused: that deep the question is the thing to narrow, not the page.
 
 			What is invisible in the listings is not found here either: search and lists are built on
 			one and the same visibility rule, so a document of a foreign collection exists, is indexed,

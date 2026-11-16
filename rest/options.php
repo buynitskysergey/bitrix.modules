@@ -6,6 +6,8 @@ use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Rest\Internal\Integration\Main\Web\NationalTrustStore;
+use Bitrix\Rest\V3\Limiter\Config\QueryTimeLimiterConfig;
+use Bitrix\Rest\V3\Limiter\QueryTimeLimiter;
 use Bitrix\Rest\Public\Command;
 use Bitrix\Rest\Public\Provider;
 use Bitrix\Rest\Tools\Diagnostics\LoggerManager;
@@ -72,6 +74,29 @@ $allOptions = [
 		]
 	],
 ];
+if (QueryTimeLimiter::isSupported(Application::getConnection()))
+{
+	$allOptions[] = [
+		'CODE' => 'header',
+		'NAME' => Loc::getMessage('REST_OPT_QUERY_TIME_LIMIT_HEADER'),
+	];
+	$allOptions[] = [
+		'CODE' => QueryTimeLimiterConfig::OPTION_ACTIVE,
+		'NAME' => Loc::getMessage('REST_OPT_QUERY_TIME_LIMIT_ACTIVE') . ':',
+		'PARAMS' => [
+			'TYPE' => 'checkbox'
+		]
+	];
+	$allOptions[] = [
+		'CODE' => QueryTimeLimiterConfig::OPTION_SECONDS,
+		'NAME' => Loc::getMessage('REST_OPT_QUERY_TIME_LIMIT_SECONDS') . ':',
+		'DEFAULT' => (string)QueryTimeLimiterConfig::DEFAULT_SECONDS,
+		'PARAMS' => [
+			'TYPE' => 'text',
+			'SIZE' => 6
+		]
+	];
+}
 $filterOptions = [
 	[
 		'CODE' => 'client_id',
@@ -164,28 +189,24 @@ $accessPolicyOptions = [
 	[
 		'CODE' => 'rest_incoming_webhook_create_own_rights',
 		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_INCOMING_WEBHOOK_CREATE_OWN'),
-		'VALUE' => $incomingWebhookAccessPolicyProvider->getAccessCodesAllowedToCreateOwn(),
 		'COMMAND' => Command\IncomingWebhook\AccessPolicy\SetOwnIncomingWebhookCreationAccessCommand::class,
 		'CONTAINER_ID' => 'rest_access_policy_incoming_webhook_create_own',
 	],
 	[
 		'CODE' => 'rest_incoming_webhook_create_rights',
 		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_INCOMING_WEBHOOK_CREATE'),
-		'VALUE' => $incomingWebhookAccessPolicyProvider->getAccessCodesAllowedToCreate(),
 		'COMMAND' => Command\IncomingWebhook\AccessPolicy\SetIncomingWebhookCreationAccessCommand::class,
 		'CONTAINER_ID' => 'rest_access_policy_incoming_webhook_create',
 	],
 	[
 		'CODE' => 'rest_local_app_create_rights',
 		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_LOCAL_APP'),
-		'VALUE' => $applicationAccessPolicyProvider->getAccessCodesAllowedToCreateLocalApp(),
 		'COMMAND' => Command\Application\AccessPolicy\SetLocalApplicationCreationAccessCommand::class,
 		'CONTAINER_ID' => 'rest_access_policy_local_app_create',
 	],
 	[
 		'CODE' => 'rest_personal_app_create_rights',
 		'NAME' => Loc::getMessage('REST_OPT_ACCESS_POLICY_PERSONAL_APP'),
-		'VALUE' => $applicationAccessPolicyProvider->getAccessCodesAllowedToCreatePersonalApp(),
 		'COMMAND' => Command\Application\AccessPolicy\SetPersonalApplicationCreationAccessCommand::class,
 		'CONTAINER_ID' => 'rest_access_policy_personal_app_create',
 	],
@@ -194,6 +215,41 @@ $accessPolicyOptions = [
 \CJSCore::Init(['access']);
 
 $restoreDefaults = (string)$request->get('RestoreDefaults');
+$isRestAdmin = \Bitrix\Main\Engine\CurrentUser::get()->getId() > 0 && \CRestUtil::isAdmin();
+$ownEmbeddingAccessPolicyError = null;
+if ($request->isPost() && $restoreDefaults === '' && \check_bitrix_sessid() && $isRestAdmin
+	&& $request->getPost('rest_own_embedding_rights_present') === 'Y')
+{
+	$ownEmbeddingAccessCodes = $request->getPost('rest_own_embedding_rights');
+	if ($ownEmbeddingAccessCodes === null)
+	{
+		$ownEmbeddingAccessCodes = [];
+	}
+	if (!is_array($ownEmbeddingAccessCodes))
+	{
+		$ownEmbeddingAccessPolicyError = Loc::getMessage('REST_OPT_OWN_EMBEDDINGS_INVALID_CODES');
+	}
+	else
+	{
+		$ownEmbeddingAccessPolicyResult = (
+			new Command\Embedding\AccessPolicy\SetOwnEmbeddingAccessCommand($ownEmbeddingAccessCodes)
+		)->run();
+		if (!$ownEmbeddingAccessPolicyResult->isSuccess())
+		{
+			$ownEmbeddingAccessPolicyMessages = [
+				'ACCESS_DENIED' => 'REST_OPT_OWN_EMBEDDINGS_ACCESS_DENIED',
+				'INVALID_ACCESS_CODES' => 'REST_OPT_OWN_EMBEDDINGS_INVALID_CODES',
+				'POLICY_SAVE_FAILED' => 'REST_OPT_OWN_EMBEDDINGS_SAVE_FAILED',
+				'POLICY_AUDIT_FAILED' => 'REST_OPT_OWN_EMBEDDINGS_AUDIT_FAILED',
+			];
+			$ownEmbeddingAccessPolicyErrorCode = $ownEmbeddingAccessPolicyResult->getErrors()[0]->getCode();
+			$ownEmbeddingAccessPolicyError = Loc::getMessage(
+				$ownEmbeddingAccessPolicyMessages[$ownEmbeddingAccessPolicyErrorCode]
+					?? 'REST_OPT_OWN_EMBEDDINGS_SAVE_FAILED',
+			);
+		}
+	}
+}
 
 // post save
 if (($request->isPost() || $restoreDefaults !== '') && \check_bitrix_sessid())
@@ -215,7 +271,7 @@ if (($request->isPost() || $restoreDefaults !== '') && \check_bitrix_sessid())
 	{
 		foreach ($allOptions as $option)
 		{
-			if (($option[0] ?? '') == 'header')
+			if (($option['CODE'] ?? '') === 'header')
 			{
 				continue;
 			}
@@ -291,18 +347,39 @@ if (($request->isPost() || $restoreDefaults !== '') && \check_bitrix_sessid())
 		LoggerManager::getInstance()->setFilterOptions($filters);
 	}
 
-	\LocalRedirect(
-		$APPLICATION->GetCurPage() .
-		'?mid=' . urlencode($mid) .
-		'&lang=' . urlencode(LANGUAGE_ID) .
-		'&back_url_settings=' . urlencode($backUrl) .
-		'&' . $tabControl->ActiveTabParam());
+	if ($ownEmbeddingAccessPolicyError === null)
+	{
+		\LocalRedirect(
+			$APPLICATION->GetCurPage() .
+			'?mid=' . urlencode($mid) .
+			'&lang=' . urlencode(LANGUAGE_ID) .
+			'&back_url_settings=' . urlencode($backUrl) .
+			'&' . $tabControl->ActiveTabParam());
+	}
 }
+
+if ($ownEmbeddingAccessPolicyError !== null)
+{
+	\CAdminMessage::ShowMessage($ownEmbeddingAccessPolicyError);
+}
+
+$accessPolicyOptions[0]['VALUE'] = $incomingWebhookAccessPolicyProvider->getAccessCodesAllowedToCreateOwn();
+$accessPolicyOptions[1]['VALUE'] = $incomingWebhookAccessPolicyProvider->getAccessCodesAllowedToCreate();
+$accessPolicyOptions[2]['VALUE'] = $applicationAccessPolicyProvider->getAccessCodesAllowedToCreateLocalApp();
+$accessPolicyOptions[3]['VALUE'] = $applicationAccessPolicyProvider->getAccessCodesAllowedToCreatePersonalApp();
+
+$ownEmbeddingAccessCodes = $isRestAdmin
+	? (new Provider\Embedding\AccessPolicyProvider())->getAccessCodesAllowedToManageOwnEmbeddings()
+	: []
+;
 
 $tabControl->Begin();
 ?>
 <form method="post" name="intr_opt_form" action="<? echo $APPLICATION->GetCurPage() ?>?mid=<?=urlencode($mid)?>&amp;lang=<? echo LANGUAGE_ID ?>">
 	<? echo bitrix_sessid_post(); ?>
+	<? if ($isRestAdmin): ?>
+		<input type="hidden" name="rest_own_embedding_rights_present" value="Y">
+	<? endif; ?>
 	<?
 	$tabControl->BeginNextTab();
 	?>
@@ -385,6 +462,20 @@ $tabControl->Begin();
 					</td>
 				</tr>
 			<?endforeach;?>
+			<? if ($isRestAdmin): ?>
+				<tr>
+					<td valign="top" width="40%">
+						<?=Loc::getMessage('REST_OPT_ACCESS_POLICY_OWN_EMBEDDINGS')?>:
+					</td>
+					<td valign="middle" width="60%">
+						<?=$getAccessPolicyOptionHtml(
+							$ownEmbeddingAccessCodes,
+							'rest_access_policy_own_embeddings',
+							'rest_own_embedding_rights[]',
+						)?>
+					</td>
+				</tr>
+			<? endif; ?>
 		<?
 		$tabControl->BeginNextTab();
 		$ACTIVE = \COption::GetOptionInt('rest', 'log_end_time', 0) >= time();

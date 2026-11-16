@@ -67,6 +67,11 @@ if (is_dir(__DIR__ . '/tests/e2e'))
 	Main\Loader::registerNamespace('Bitrix\\Crm\\Controller\\Dev\\E2e', __DIR__ . '/tests/e2e');
 }
 
+if (is_dir(__DIR__ . '/dev/e2e'))
+{
+	Main\Loader::registerNamespace('Bitrix\\Crm\\Controller\\Dev\\E2e', __DIR__ . '/dev/e2e');
+}
+
 if (is_dir(__DIR__ . '/dev/lib'))
 {
 	Main\Loader::registerNamespace('Bitrix\\Crm\\Dev', __DIR__ . '/dev/lib');

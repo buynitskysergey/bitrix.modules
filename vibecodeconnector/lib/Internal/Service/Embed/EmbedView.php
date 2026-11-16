@@ -9,4 +9,5 @@ enum EmbedView: string
 	case CreateHub = 'create';
 	case ApplicationCreate = 'applications-create';
 	case AgentCreate = 'agents-create';
+	case CoworkAdmin = 'cowork-admin';
 }

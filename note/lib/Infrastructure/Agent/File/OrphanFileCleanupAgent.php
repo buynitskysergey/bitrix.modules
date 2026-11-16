@@ -25,10 +25,11 @@ use Bitrix\Note\Internal\Service\File\FileReachabilityService;
  * Race safety: the only window where a linked-but-"unreachable" file is actually in use is a fresh
  * upload whose token lives in the live YJS patch log but is not yet flushed to Document.MARKDOWN or
  * any version. Such a document has undrained patches, so we skip any document with a non-empty
- * patch log (DocumentUpdateRepository::hasAnyByDocumentId) — the same guard
- * OverwriteDocumentContentCommand uses. With an empty patch log, Document.MARKDOWN is authoritative
- * (CompactDocumentCommand flushes it on every compact), so reachability is accurate. A skipped
- * document is simply left to the recurring version-TTL sweep — an accepted no-false-deletion leak.
+ * patch log (DocumentUpdateRepository::filterDocumentIdsWithPatches, one query per page) — the same
+ * guard OverwriteDocumentContentCommand and the recurring version-TTL sweep use. With an empty patch
+ * log, Document.MARKDOWN is authoritative (CompactDocumentCommand flushes it on every compact), so
+ * reachability is accurate. A skipped document is simply left to the recurring version-TTL sweep —
+ * an accepted no-false-deletion leak.
  */
 final class OrphanFileCleanupAgent
 {
@@ -69,14 +70,31 @@ final class OrphanFileCleanupAgent
 				return '';
 			}
 
+			try
+			{
+				$pendingMap = array_fill_keys($updateRepository->filterDocumentIdsWithPatches($documentIds), true);
+			}
+			catch (\Throwable $e)
+			{
+				// The guard is what makes the pass safe: without it, stop this tick rather than sweep
+				// documents whose live text could not be ruled out. The cursor stays where it is.
+				self::logError('OrphanFileCleanupAgent (patch log lookup): ' . $e->getMessage());
+
+				return self::RESCHEDULE_EXPRESSION;
+			}
+
 			foreach ($documentIds as $documentId)
 			{
-				$totalDeleted += self::sweepDocument(
-					$documentId,
-					$updateRepository,
-					$reachabilityService,
-					$fileCleanupService,
-				);
+				// Skip actively-edited documents: undrained patches mean Document.MARKDOWN may lag the
+				// live content, so a freshly uploaded token could look unreachable while still in use.
+				if (!isset($pendingMap[$documentId]))
+				{
+					$totalDeleted += self::sweepDocument(
+						$documentId,
+						$reachabilityService,
+						$fileCleanupService,
+					);
+				}
 
 				// Advance and persist per document so a mid-page watchdog break resumes exactly
 				// after the last fully-processed document — never re-scanning or skipping one.
@@ -96,20 +114,12 @@ final class OrphanFileCleanupAgent
 	 */
 	private static function sweepDocument(
 		int $documentId,
-		DocumentUpdateRepository $updateRepository,
 		FileReachabilityService $reachabilityService,
 		DocumentFileCleanupService $fileCleanupService,
 	): int
 	{
 		try
 		{
-			// Skip actively-edited documents: undrained patches mean Document.MARKDOWN may lag the
-			// live content, so a freshly uploaded token could look unreachable while still in use.
-			if ($updateRepository->hasAnyByDocumentId($documentId))
-			{
-				return 0;
-			}
-
 			$unreachableFileIds = $reachabilityService->getUnreachableFileIds($documentId);
 			if (empty($unreachableFileIds))
 			{

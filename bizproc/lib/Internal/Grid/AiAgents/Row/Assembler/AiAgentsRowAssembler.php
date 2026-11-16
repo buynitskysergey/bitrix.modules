@@ -66,6 +66,12 @@ class AiAgentsRowAssembler extends RowAssembler
 		{
 			$startedBuUser = false;
 			$isSystemTemplate = !empty($row['data']['SYSTEM_CODE']);
+			if ($isSystemTemplate)
+			{
+				$rowsList[$key]['attrs']['data-testid'] = 'bizproc-ai-agents-grid-system-row-'
+					. $row['data']['SYSTEM_CODE']
+				;
+			}
 			$activatedBy = $this->getUserIdFromString($row['data']['ACTIVATED_BY'] ?? null);
 
 			if (!is_null($activatedBy))

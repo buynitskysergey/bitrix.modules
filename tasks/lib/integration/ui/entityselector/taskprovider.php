@@ -344,6 +344,24 @@ class TaskProvider extends BaseProvider
 		return $excludeIds;
 	}
 
+	protected function getGroupId(Dialog $dialog): int
+	{
+		$groupId = 0;
+		$entity = $dialog->getEntity(static::$entityId);
+
+		if ($entity !== null)
+		{
+			$taskOptions = $entity->getOptions();
+
+			if (isset($taskOptions['groupId']) && is_numeric($taskOptions['groupId']))
+			{
+				$groupId = (int)$taskOptions['groupId'];
+			}
+		}
+
+		return $groupId;
+	}
+
 	protected function isEditableOnly(Dialog $dialog): bool
 	{
 		$editableOnly = false;

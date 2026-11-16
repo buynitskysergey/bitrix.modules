@@ -217,6 +217,7 @@ class EditorUploaderController extends UploaderController
 			return null;
 		}
 
+		// No allowance on purpose: an upload is a write, and an archived base does not accept one.
 		$this->accessSnapshot = DocumentAccessService::getCurrentUserSnapshot(
 			(int)$context['documentId'],
 			(int)$context['collectionId'],

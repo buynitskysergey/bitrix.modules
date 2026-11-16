@@ -26,6 +26,8 @@ use Bitrix\Main\Type\DateTime;
  * <li> EVENT_TYPE string(32) mandatory
  * <li> USER_ID int mandatory
  * <li> VERSION_ID int optional
+ * <li> SOURCE_TYPE string(32) optional
+ * <li> SOURCE_ID int optional
  * <li> CREATED_AT datetime mandatory
  * </ul>
  *
@@ -91,6 +93,11 @@ class EventTable extends DataManager
 				],
 			),
 			(new IntegerField('VERSION_ID'))->configureNullable(),
+			(new StringField('SOURCE_TYPE'))
+				->configureNullable()
+				->configureSize(32)
+			,
+			(new IntegerField('SOURCE_ID'))->configureNullable(),
 			new DatetimeField(
 				'CREATED_AT',
 				[

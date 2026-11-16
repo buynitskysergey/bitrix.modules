@@ -18,4 +18,6 @@ interface ProcessLauncherInterface
 	 * answered by the result, so the caller distinguishes outcomes by it alone.
 	 */
 	public function launchForNewEmployee(int $userId): Result;
+
+	public function launchForPositionChanges(StructurePositionChange ...$changes): Result;
 }

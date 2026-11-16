@@ -594,6 +594,19 @@ class TaskService
 			return $response;
 		}
 
+		if (!isset($task['PARAMETERS']['DOCUMENT_ID']))
+		{
+			$documentId = \CBPStateService::getStateDocumentId($request->workflowId);
+			if ($documentId === false)
+			{
+				$response->setContent($renderer);
+
+				return $response;
+			}
+
+			$task['PARAMETERS']['DOCUMENT_ID'] = $documentId;
+		}
+
 		$task['saveVariables'] = $task['PARAMETERS']['SaveVariables'] ?? false;
 		$task['commentRequired'] = $task['PARAMETERS']['CommentRequired'] ?? 'N';
 		$controls = \CBPDocument::getTaskControls($task, $request->userId);

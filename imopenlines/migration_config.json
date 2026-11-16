@@ -1,0 +1,13 @@
+{
+	"defaultTableName": "b_imopenlines_config",
+	"installDirectoriesMapping": {
+		"install/activities": "activities",
+		"install/components": "components",
+		"install/js": "js",
+		"install/templates": "templates",
+		"install/tools": "tools"
+	},
+	"publicDirectoriesMapping": {
+		"install/public": ""
+	}
+}

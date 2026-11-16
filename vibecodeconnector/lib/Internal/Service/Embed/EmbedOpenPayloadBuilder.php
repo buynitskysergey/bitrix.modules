@@ -56,6 +56,7 @@ final class EmbedOpenPayloadBuilder
 			EmbedView::CreateHub => 'VIBECODECONNECTOR_EMBED_FRAME_TITLE_CREATE',
 			EmbedView::ApplicationCreate => 'VIBECODECONNECTOR_EMBED_FRAME_TITLE_APPLICATION',
 			EmbedView::AgentCreate => 'VIBECODECONNECTOR_EMBED_FRAME_TITLE_AGENT',
+			EmbedView::CoworkAdmin => 'VIBECODECONNECTOR_EMBED_FRAME_TITLE_COWORK_ADMIN',
 		};
 
 		return (string)Loc::getMessage($code);

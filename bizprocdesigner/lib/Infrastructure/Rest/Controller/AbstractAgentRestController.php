@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\BizprocDesigner\Infrastructure\Rest\Controller;
 
+use Bitrix\Bizproc\Workflow\Template\AgentOwnedMetadata;
 use Bitrix\BizprocDesigner\Infrastructure\Rest\Controller\ActionFilter\AgentTokenFilter;
 use Bitrix\BizprocDesigner\Infrastructure\Rest\Controller\ActionFilter\AiAvailabilityFilter;
 use Bitrix\BizprocDesigner\Infrastructure\Rest\Service\UnconvertibleGraphReader;
@@ -19,7 +20,9 @@ use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\FramePostLay
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\OperationAuthorizationGuard;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\UserAdminResolver;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\ValidationContextFactory;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\AgentTemplateMetadataValidator;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\GraphLimitsValidator;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\ValidationProfile;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\SaveWorkflowValidator;
 use Bitrix\BizprocDesigner\Internal\Service\Container;
 use Bitrix\Main\Engine\CurrentUser;
@@ -260,8 +263,8 @@ abstract class AbstractAgentRestController extends RestController
 	}
 
 	/**
-	 * The header plus the graph the identifier points at, so a read template and an added draft answer with
-	 * one shape. Null when the graph is gone.
+	 * The header plus the metadata and the graph the identifier points at, so a read template and an added
+	 * draft answer with one shape. Null when the graph is gone.
 	 *
 	 * @return array{
 	 *     id: int,
@@ -269,6 +272,7 @@ abstract class AbstractAgentRestController extends RestController
 	 *     documentType: DocumentDescription,
 	 *     modified: ?string,
 	 *     hasDraft: bool,
+	 *     description: string,
 	 *     draftId: ?int,
 	 *     blocks: AgentBlockCollection,
 	 *     connections: AgentConnectionCollection,
@@ -276,14 +280,20 @@ abstract class AbstractAgentRestController extends RestController
 	 */
 	protected function templateResource(WorkflowTemplateIdentifier $identifier): ?array
 	{
-		$agentTemplate = Container::getAgentWorkflowResolverService()->getAgentTemplate($identifier);
+		$resolver = Container::getAgentWorkflowResolverService();
+
+		$agentTemplate = $resolver->getAgentTemplate($identifier);
 		if ($agentTemplate === null)
 		{
 			return null;
 		}
 
+		$metadata = $resolver->getEffectiveMetadata($identifier);
+
 		return [
 			...$this->resourceHeader($identifier),
+			'name' => $metadata[AgentOwnedMetadata::FIELD_NAME],
+			'description' => $metadata[AgentOwnedMetadata::FIELD_DESCRIPTION],
 			'draftId' => $identifier->draftId,
 			'blocks' => $agentTemplate->blocks,
 			'connections' => $agentTemplate->connections,
@@ -347,7 +357,9 @@ abstract class AbstractAgentRestController extends RestController
 		return (new GraphLimitsValidator())->validate(
 			blocks: $rawGraph['blocks'],
 			connections: $rawGraph['connections'],
-			source: RequestSource::Rest,
+			// The entry is where the profile is chosen (TPL-02): every action of this controller is the external
+			// contour, and the validators past this point never ask the source again.
+			profile: ValidationProfile::ExternalContour,
 		);
 	}
 
@@ -383,6 +395,32 @@ abstract class AbstractAgentRestController extends RestController
 		);
 
 		return $postLayoutResult->isSuccess() ? $validateResult : $postLayoutResult;
+	}
+
+	/** @param array{blocks: mixed, connections: mixed} $graph */
+	protected function validateSubmission(
+		FieldsStructure $fields,
+		array $graph,
+		WorkflowTemplateIdentifier $identifier,
+	): Result
+	{
+		$currentMetadata = Container::getAgentWorkflowResolverService()->getEffectiveMetadata($identifier);
+
+		$metadataResult = (new AgentTemplateMetadataValidator())->validate(
+			$fields->getItems(),
+			$currentMetadata[AgentOwnedMetadata::FIELD_DESCRIPTION],
+		);
+		if (!$metadataResult->isSuccess())
+		{
+			return $metadataResult;
+		}
+
+		$graphResult = $this->validateGraph($graph, $identifier);
+
+		return $graphResult instanceof AgentWorkflowValidationResult
+			? $graphResult->withTemplateMetadata($metadataResult->metadata)
+			: $graphResult
+		;
 	}
 
 	/**

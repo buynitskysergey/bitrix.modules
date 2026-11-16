@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Rest\V3\Write;
 
+use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Rest\V3\Exception\EntityNotFoundException;
 
 /**
  * Translates the sort weight a REST caller asks for into the sibling slot the move commands speak in.
@@ -41,6 +43,8 @@ final class PositionSlotResolver
 			return null;
 		}
 
+		$this->requireLiveCollection($collectionId);
+
 		$weights = [];
 		foreach ($this->documents->getBranchPositions($collectionId, $parentId) as $sibling)
 		{
@@ -62,6 +66,8 @@ final class PositionSlotResolver
 			return null;
 		}
 
+		$this->requireLiveCollection($movedCollectionId);
+
 		$weights = [];
 		foreach ($this->collections->getActivePositions() as $row)
 		{
@@ -74,6 +80,20 @@ final class PositionSlotResolver
 		}
 
 		return $this->slotOf($weights, $weight);
+	}
+
+	/**
+	 * The tree of a knowledge base in the recycle bin is not a place anything is inserted into: the
+	 * neighbours read here are trashed themselves, so the slot they would yield is meaningless. The
+	 * actions that call this refuse such a base before they get here; the guard stands because the
+	 * order of those checks is the only thing keeping a deleted tree out of a write path.
+	 */
+	private function requireLiveCollection(int $collectionId): void
+	{
+		if (!DocumentAccessService::isCollectionAlive($collectionId))
+		{
+			throw new EntityNotFoundException($collectionId);
+		}
 	}
 
 	/**

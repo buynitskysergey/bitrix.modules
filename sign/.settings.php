@@ -6,6 +6,7 @@ use Bitrix\Sign\Access\Service\SelectorSourceAccessService;
 use Bitrix\Sign\Serializer\ItemPropertyJsonSerializer;
 use Bitrix\Sign\Service;
 use Bitrix\Sign\Config;
+use Bitrix\Sign\Contract;
 use Bitrix\Sign\Connector;
 use Bitrix\Sign\Repository;
 use Bitrix\Sign\Callback;
@@ -669,6 +670,15 @@ return [
 			'sign.service.sign.document.directorSigningGuard' => [
 				'className' => Service\Sign\Document\DirectorSigningGuardService::class,
 			],
+			'sign.service.sign.document.companyInitiatedPartyPlan' => [
+				'className' => Service\Sign\Document\CompanyInitiatedPartyPlanService::class,
+				'constructorParams' => static fn() => [
+					'manualFillingDecisionProvider' => Service\Container::instance()->getManualFillingDecisionProvider(),
+				],
+			],
+			Contract\Document\ManualFillingDecisionProvider::class => [
+				'className' => Service\Sign\Document\UnavailableManualFillingDecisionProvider::class,
+			],
 			'sign.callback.handler' => [
 				'className' => Callback\Handler::class,
 				'constructorParams' => static fn() => [
@@ -780,13 +790,6 @@ return [
 			'sign.service.integration.crm.processType' => [
 				'className' => Service\Integration\Crm\ProcessTypeService::class,
 			],
-			'sign.service.integration.crm.processActivity' => [
-				'className' => \Bitrix\Sign\Integration\CRM\Activity\ProcessActivityHandler::class,
-				'constructorParams' => static fn() => [
-					'launchRepository' => Service\Container::instance()->getProcessLaunchRepository(),
-					'processTypeService' => Service\Container::instance()->getCrmProcessTypeService(),
-				],
-			],
 			'sign.service.integration.bizproc.processCatalog' => [
 				'className' => Service\Integration\Bizproc\ProcessCatalogService::class,
 			],
@@ -855,6 +858,15 @@ return [
 			'sign.service.placeholder.aliasRoleResolver' => [
 				'className' => Service\Placeholder\FieldAlias\AliasRoleResolver::class,
 			],
+			'sign.service.placeholder.restriction' => [
+				'className' => Service\Placeholder\Restriction\PlaceholderRestrictionService::class,
+			],
+			'sign.service.placeholder.scenarioContextFactory' => [
+				'className' => Service\Placeholder\Restriction\ScenarioContextFactory::class,
+			],
+			'sign.service.placeholder.brokenAliasResolver' => [
+				'className' => Service\Placeholder\Restriction\BrokenAliasResolver::class,
+			],
 			'sign.service.placeholder.block' => [
 				'className' => Service\Sign\PlaceholderBlockService::class,
 				'constructorParams' => static fn() => [
@@ -902,6 +914,9 @@ return [
 			],
 			'sign.service.document.template.templateFolderRelation' => [
 				'className' => Service\Sign\Document\Template\TemplateFolderRelationService::class,
+			],
+			'sign.service.document.template.blankDownload' => [
+				'className' => Service\Sign\Document\Template\BlankDownloadService::class,
 			],
 			'sign.service.sign.document.signUntil' => [
 				'className' => Service\Sign\Document\SignUntilService::class,

@@ -223,7 +223,7 @@ final class OpenAppLayoutService
 		if (!$this->itemRepository->isAccessibleToUser(
 			$catalogItemId,
 			$userId,
-			$this->accessCodes->getUserCodes($userId),
+			$this->accessCodes->getUserCodesForItems($userId, [$catalogItemId]),
 		))
 		{
 			return self::ERROR_ACCESS_DENIED;
@@ -336,11 +336,21 @@ final class OpenAppLayoutService
 	 */
 	private function errorParams(string $code): array
 	{
+		$accessDenied = in_array($code, [self::ERROR_ACCESS_DENIED, self::ERROR_NOT_FOUND], true);
+
 		return [
 			$code,
-			(string)Loc::getMessage('VIBECODECONNECTOR_OPEN_APP_ERROR_TITLE'),
+			(string)Loc::getMessage(
+				$accessDenied
+					? 'VIBECODECONNECTOR_OPEN_APP_ERROR_ACCESS_DENIED_TITLE'
+					: 'VIBECODECONNECTOR_OPEN_APP_ERROR_TITLE'
+			),
 			(string)(
-				Loc::getMessage('VIBECODECONNECTOR_OPEN_APP_ERROR_' . $code)
+				Loc::getMessage(
+					$accessDenied
+						? 'VIBECODECONNECTOR_OPEN_APP_ERROR_ACCESS_DENIED_HINT'
+						: 'VIBECODECONNECTOR_OPEN_APP_ERROR_' . $code
+				)
 				?: Loc::getMessage('VIBECODECONNECTOR_OPEN_APP_ERROR_DEFAULT')
 			),
 		];

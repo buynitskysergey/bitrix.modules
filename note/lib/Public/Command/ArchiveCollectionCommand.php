@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Public\Command;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
 use Bitrix\Note\Internal\Service\DomainEventPublisher;
+use Bitrix\Note\Internal\Service\ExternalAccess\ExternalAccessLifecycleService;
+use Bitrix\Note\Internal\Service\ExternalAccess\RevokePullService;
 use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
@@ -26,6 +29,8 @@ class ArchiveCollectionCommand extends AbstractCommand
 	private readonly PushNotificationService $pushService;
 	private readonly DomainEventPublisher $eventPublisher;
 	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
+	private readonly ExternalAccessLifecycleService $externalAccess;
+	private readonly RevokePullService $revokePullService;
 	private readonly string $analyticsType;
 	// Failure is signalled via data['success']=false, so track the real archive outcome here.
 	private bool $succeeded = false;
@@ -40,6 +45,8 @@ class ArchiveCollectionCommand extends AbstractCommand
 		?DomainEventPublisher $eventPublisher = null,
 		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 		?BacklinkLifecycleNotifier $backlinkNotifier = null,
+		?ExternalAccessLifecycleService $externalAccess = null,
+		?RevokePullService $revokePullService = null,
 	)
 	{
 		$this->analyticsType = $analyticsType;
@@ -51,6 +58,8 @@ class ArchiveCollectionCommand extends AbstractCommand
 		$this->pushService = $pushService ?? new PushNotificationService();
 		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
 		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
+		$this->externalAccess = $externalAccess ?? new ExternalAccessLifecycleService();
+		$this->revokePullService = $revokePullService ?? new RevokePullService();
 	}
 
 	protected function execute(): Result
@@ -65,6 +74,8 @@ class ArchiveCollectionCommand extends AbstractCommand
 		{
 			return $this->createResult(['success' => false, 'archivedIds' => []]);
 		}
+
+		$linkRecordId = $this->externalAccess->findLinkId($this->collectionId);
 
 		$documentIds = $this->documentRepository->getLiveCollectionDocumentIds($this->collectionId);
 		if (!empty($documentIds))
@@ -92,6 +103,15 @@ class ArchiveCollectionCommand extends AbstractCommand
 			);
 			// [D1] archiving the collection changes its documents' visibility; refresh their targets.
 			$this->backlinkNotifier->sourcesChanged($documentIds);
+
+			// An archived knowledge base is not readable, so its public link goes out with it. The
+			// scope row stays: the knowledge base itself is alive and can be restored, and enabling
+			// the link back is a manual act of a moderator that issues a new address.
+			if ($linkRecordId !== null)
+			{
+				$this->externalAccess->disableLink($linkRecordId);
+				$this->publishRevoke($linkRecordId);
+			}
 		}
 
 		$this->succeeded = $collectionArchived;
@@ -105,6 +125,19 @@ class ArchiveCollectionCommand extends AbstractCommand
 	protected function afterRun(): void
 	{
 		AnalyticsService::collectionArchived($this->succeeded, $this->analyticsType);
+	}
+
+	/**
+	 * The revoke command is irreversible, and this command carries no transaction of its own: a
+	 * caller may have wrapped it in one. A background job runs at the very end of the request, when
+	 * any such transaction is already closed.
+	 */
+	private function publishRevoke(int $linkRecordId): void
+	{
+		$service = $this->revokePullService;
+		Application::getInstance()->addBackgroundJob(static function () use ($service, $linkRecordId): void {
+			$service->publishRevoke($linkRecordId);
+		});
 	}
 
 	private function emitCollectionArchive(int $collectionId, array $archivedDocumentIds): void

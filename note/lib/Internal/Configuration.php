@@ -37,106 +37,9 @@ final class Configuration
 		return Option::get('note', self::ACCESS_CASCADE_BROADCAST_OPTION, 'Y') === 'Y';
 	}
 
-	// Feature flags: whole-feature opt-ins. Default OFF, and unlike the UI-only ones below they take
-	// the work behind the interface with them — a surface hidden here does nothing while it is hidden.
+	// Feature flags that gate a backend path as well as the UI offering it.
 
-	public const NOTIFICATIONS_ENABLED_OPTION = 'notifications_enabled';
-
-	/**
-	 * Opt-in for subscription notifications: the bell of an article's activity line, the bell and the
-	 * "only notified" filter of the favorites block — and the delivery behind them, since
-	 * NotificationDrainAgent skips its tick while this is off. Default off, so a portal that never
-	 * set it sees no bell and mails nothing.
-	 *
-	 * The journal itself is not gated: events, versions and co-authors keep being written
-	 * (isActivityEnabled() governs those), which is what lets the feature be switched on without a
-	 * backfill. Subscription rows are never touched either — the drainer stops before it moves a
-	 * cursor, and turning the flag back on resumes from the events of the last day alone (its
-	 * freshness floor), not from the whole backlog.
-	 */
-	public static function isNotificationsEnabled(): bool
-	{
-		return Option::get('note', self::NOTIFICATIONS_ENABLED_OPTION, 'N') === 'Y';
-	}
-
-	// Feature flags: UI-only opt-ins. Default OFF, and they gate display only — the backend behind
-	// each of them keeps working, so none of these may be called from commands, providers or agents.
-
-	public const HISTORY_ENABLED_OPTION = 'history_enabled';
-	public const HOTKEYS_ENABLED_OPTION = 'hotkeys_enabled';
-	public const BACKLINKS_ENABLED_OPTION = 'backlinks_enabled';
-	public const MARKDOWN_IO_ENABLED_OPTION = 'markdown_io_enabled';
-	public const AI_CHAT_ENABLED_OPTION = 'ai_chat_enabled';
-
-	/**
-	 * UI-only opt-in for the history timeline surfaces (activity-line chip click + version
-	 * timeline sidebar + version restore entry point). Default off. This does NOT gate the
-	 * backend activity/history write path — that stays governed by isActivityEnabled(). Never
-	 * call this from backend commands/providers/drainer; it is meant for the component layer only.
-	 */
-	public static function isHistoryUiEnabled(): bool
-	{
-		return Option::get('note', self::HISTORY_ENABLED_OPTION, 'N') === 'Y';
-	}
-
-	/**
-	 * UI-only opt-in for the keyboard-shortcuts help surfaces (floating button, the `?`/`Cmd+/`
-	 * listener and the help panel itself). Default off. The editor keymap is not gated: shortcuts
-	 * keep working, only the way to look them up is hidden. Never call this from backend
-	 * commands/providers/drainer.
-	 */
-	public static function isHotkeysUiEnabled(): bool
-	{
-		return Option::get('note', self::HOTKEYS_ENABLED_OPTION, 'N') === 'Y';
-	}
-
-	/**
-	 * UI-only opt-in for the backlinks surfaces (the bootstrap `backlinks` slice, the widget and
-	 * both controller actions behind it). Default off. It does NOT gate the link index: extraction,
-	 * rebuild, repair and cleanup keep running so the index is already warm when the flag goes on.
-	 * Never call this from commands or from the indexing services.
-	 */
-	public static function isBacklinksUiEnabled(): bool
-	{
-		return Option::get('note', self::BACKLINKS_ENABLED_OPTION, 'N') === 'Y';
-	}
-
-	/**
-	 * UI-only opt-in for markdown import/export entry points (download .md, upload .md).
-	 * Default off. Gates display only — the import/export backend keeps working regardless.
-	 */
-	public static function isMarkdownIoEnabled(): bool
-	{
-		return Option::get('note', self::MARKDOWN_IO_ENABLED_OPTION, 'N') === 'Y';
-	}
-
-	/**
-	 * Opt-in for the BitrixGPT side chat in the knowledge base. Default off. Read it ONLY through
-	 * AiChatAvailability — the flag is the first of several conditions (modules, service, bot), and
-	 * a call site that checks the option alone would surface the panel where it cannot work.
-	 */
-	public static function isAiChatEnabled(): bool
-	{
-		return Option::get('note', self::AI_CHAT_ENABLED_OPTION, 'N') === 'Y';
-	}
-
-	// Feature flags that gate a backend path as well as the UI offering it — hence their own section:
-	// switching one of these off is NOT display-only, unlike the block above.
-
-	public const SUBTREE_INHERITANCE_OPTION = 'subtree_inheritance_enabled';
 	public const DISK_ATTACHMENTS_ENABLED_OPTION = 'disk_attachments_enabled';
-
-	/**
-	 * Gates the CREATION of new subtree grants (a marker where the subject had none) and the UI that
-	 * offers them — the scope checkbox in the permissions popup and the "Shared with me" section.
-	 * Default off. Keeping, re-levelling and revoking an EXISTING marker stays always-on, and the read
-	 * path is never gated: rows already materialised keep granting access, so switching the flag off
-	 * is a safe rollback of the entry points, not of the data.
-	 */
-	public static function isSubtreeInheritanceEnabled(): bool
-	{
-		return Option::get('note', self::SUBTREE_INHERITANCE_OPTION, 'N') === 'Y';
-	}
 
 	/**
 	 * Opt-in for attaching existing Disk files to a document. Default off, and it takes BOTH this
@@ -156,6 +59,7 @@ final class Configuration
 
 		return (new DiskGateway())->isUniversalFilePickerEnabled();
 	}
+
 
 	// Numeric settings: retention windows, agent tuning and one hard cap. Each getter clamps a
 	// misconfigured value where a zero or negative one would break the path that reads it.

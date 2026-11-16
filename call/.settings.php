@@ -15,6 +15,12 @@ return [
 			'defaultNamespace' => '\\Bitrix\\Call\\Controller',
 		],
 	],
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Call\\Public\\Features',
+		],
+		'readonly' => true,
+	],
 	'services' => [
 		'value' => [
 			\Bitrix\Call\Service\FollowUpReader::class => [

@@ -9,7 +9,9 @@ namespace Bitrix\Note\Infrastructure\Rest\V3\Read;
  *
  * The cursor is honest - it is filled only when a row beyond the page was actually fetched, so a
  * client that follows it always gets something. That is why the reads ask for one row more than the
- * page holds: without it "is there more" can only be guessed.
+ * page holds: without it "is there more" can only be guessed. The exception names itself
+ * ({@see DocumentListReader}): a walk stopped by the budget of the call carries the place it
+ * stopped at, because a null cursor there would read as the end of the list.
  */
 final class ReadResult
 {

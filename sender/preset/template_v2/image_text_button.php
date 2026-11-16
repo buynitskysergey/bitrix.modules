@@ -8,7 +8,12 @@
 					<tr>
 						<td valign="top" class="bxBlockContentImage" style="text-align: center">
 							<a href="/">
-								<img align="center" data-bx-editor-def-image="0" src="%IMAGE_PATH%" class="bxImage">
+								<img
+									align="center"
+									data-bx-editor-def-image="0"
+									src="%IMAGE_PATH%"
+									class="bxImage"
+								>
 							</a>
 						</td>
 					</tr>

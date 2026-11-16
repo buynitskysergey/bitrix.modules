@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Intranet\Internal\Integration\Bitrix24;
 
+use Bitrix\Bitrix24\License;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 
@@ -14,6 +15,11 @@ class PortalInfoService
 	public function __construct()
 	{
 		$this->isModuleIncluded = Loader::includeModule('bitrix24');
+	}
+
+	public function isCis(): ?bool
+	{
+		return $this->isModuleIncluded ? License::getCurrent()->isCIS() : null;
 	}
 
 	public function getPortalZone(): string

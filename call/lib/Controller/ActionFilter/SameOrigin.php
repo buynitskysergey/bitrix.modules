@@ -19,9 +19,9 @@ use Bitrix\Main\Web\Uri;
  * cookie is not SameSite-bound.
  *
  * Origin is what separates the two: a browser always sends it on a cross-site POST and a page cannot forge
- * or drop it, while native clients send no Origin at all - which is why an absent header passes. This is a
- * defence against a browser, not against a client holding a stolen cookie; nothing but taking the action
- * away from guests would help there.
+ * or drop it. Native clients either send no Origin, which is why an absent header passes, or a bare host
+ * with no scheme (iOS), which no browser ever writes. This is a defence against a browser, not against a
+ * client holding a stolen cookie; nothing but taking the action away from guests would help there.
  */
 class SameOrigin extends Base
 {
@@ -64,8 +64,11 @@ class SameOrigin extends Base
 	 * portal behind a TLS-terminating proxy cannot always tell which of the two the browser used - so a port
 	 * that is the default of either is dropped from it.
 	 *
-	 * An Origin that is not a bare http(s) authority matches nothing: the header comes from the outside and
-	 * is no promise of a well-formed URL.
+	 * An Origin without a scheme is a bare host[:port], as the iOS client writes it. A browser never sends that
+	 * form, so it is compared the way Host is, with 80 and 443 dropped on both sides.
+	 *
+	 * An Origin that is neither an http(s) nor a bare authority matches nothing: the header comes from the
+	 * outside and is no promise of a well-formed URL.
 	 */
 	private function isOwnOrigin(string $origin, string $httpHost): bool
 	{
@@ -74,8 +77,11 @@ class SameOrigin extends Base
 			return false;
 		}
 
-		$originAuthority = $this->originAuthority($origin);
-		$ownAuthority = $this->ownAuthority($httpHost);
+		$originAuthority = str_contains($origin, '://')
+			? $this->originAuthority($origin)
+			: $this->hostAuthority($origin)
+		;
+		$ownAuthority = $this->hostAuthority($httpHost);
 
 		return $originAuthority !== '' && $originAuthority === $ownAuthority;
 	}
@@ -98,7 +104,7 @@ class SameOrigin extends Base
 		return $port === self::DEFAULT_PORTS[$scheme] ? $host : $host . ':' . $port;
 	}
 
-	private function ownAuthority(string $httpHost): string
+	private function hostAuthority(string $httpHost): string
 	{
 		$parts = $this->bareAuthority('https://' . $httpHost);
 		if ($parts === null)

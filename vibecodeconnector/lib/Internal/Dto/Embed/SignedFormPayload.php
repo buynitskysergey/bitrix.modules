@@ -16,4 +16,17 @@ final class SignedFormPayload
 		public readonly bool $clipboardWrite = false,
 	) {
 	}
+
+	public function origin(): string
+	{
+		$parts = parse_url($this->actionUrl);
+		if (!is_array($parts) || ($parts['scheme'] ?? '') === '' || ($parts['host'] ?? '') === '')
+		{
+			return '';
+		}
+
+		$origin = $parts['scheme'] . '://' . $parts['host'];
+
+		return isset($parts['port']) ? $origin . ':' . $parts['port'] : $origin;
+	}
 }

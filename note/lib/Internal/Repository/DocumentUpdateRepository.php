@@ -8,9 +8,11 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\Result;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\DocumentUpdateTable;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
+use Bitrix\Note\Internal\Util\IdNormalizer;
 
 class DocumentUpdateRepository
 {
@@ -39,6 +41,39 @@ class DocumentUpdateRepository
 			'filter' => ['=DOCUMENT_ID' => $documentId],
 			'order' => ['ID' => 'ASC'],
 		])->fetchAll();
+	}
+
+	/**
+	 * Read-only journal of one document without the identity of whoever wrote it, plus the time each
+	 * patch was written.
+	 *
+	 * A separate method and not a flag on getByDocumentId(): this one feeds the public circuit, where
+	 * the reader is anonymous and has no business knowing which employees are editing right now, so
+	 * USER_ID must be impossible to hand out by accident. CREATED_AT rides along in the same query -
+	 * the caller needs the time of the last change and a second query for it would buy nothing.
+	 *
+	 * @return array<int, array{patch: string, createdAt: ?DateTime}>
+	 */
+	public function listPatchesWithoutAuthor(int $documentId): array
+	{
+		if ($documentId <= 0)
+		{
+			return [];
+		}
+
+		$rows = DocumentUpdateTable::getList([
+			'select' => ['PATCH', 'CREATED_AT'],
+			'filter' => ['=DOCUMENT_ID' => $documentId],
+			'order' => ['ID' => 'ASC'],
+		])->fetchAll();
+
+		return array_map(
+			static fn(array $row): array => [
+				'patch' => (string)$row['PATCH'],
+				'createdAt' => $row['CREATED_AT'] instanceof DateTime ? $row['CREATED_AT'] : null,
+			],
+			$rows,
+		);
 	}
 
 	/**
@@ -154,6 +189,37 @@ class DocumentUpdateRepository
 		$result->setData(['authorIds' => $authorIds]);
 
 		return $result;
+	}
+
+	/**
+	 * Of the given documents, those that still hold undrained patches. One index-only query over
+	 * IX_NOTE_DOC_UPD_DOCID for the whole batch instead of a hasAnyByDocumentId() per document; the
+	 * PATCH body (MEDIUMTEXT) is never selected. GROUP BY on the selected column keeps it
+	 * MySQL 5.6 / PostgreSQL compatible.
+	 *
+	 * Callers use it to leave an actively edited document alone: while patches are pending,
+	 * Document.MARKDOWN is behind the live text, so anything derived from MARKDOWN alone
+	 * (file reachability above all) answers about a document that no longer exists.
+	 *
+	 * @param int[] $documentIds
+	 *
+	 * @return int[]
+	 */
+	public function filterDocumentIdsWithPatches(array $documentIds): array
+	{
+		$normalized = IdNormalizer::normalize($documentIds);
+		if (empty($normalized))
+		{
+			return [];
+		}
+
+		$rows = DocumentUpdateTable::getList([
+			'select' => ['DOCUMENT_ID'],
+			'filter' => ['=DOCUMENT_ID' => $normalized],
+			'group' => ['DOCUMENT_ID'],
+		])->fetchAll();
+
+		return array_map(static fn(array $row): int => (int)$row['DOCUMENT_ID'], $rows);
 	}
 
 	public function hasAnyByDocumentId(int $documentId): bool

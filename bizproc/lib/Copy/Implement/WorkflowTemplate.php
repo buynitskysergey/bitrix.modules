@@ -62,7 +62,8 @@ class WorkflowTemplate
 
 		if ($fields)
 		{
-			$result = \CBPWorkflowTemplateLoader::add($fields, true);
+			// a copy inherits neither the date of the first publication of the original nor one of its own
+			$result = \CBPWorkflowTemplateLoader::add($fields, true, markFirstPublication: false);
 		}
 
 		if (!$result)

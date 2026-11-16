@@ -8,6 +8,7 @@ use Bitrix\Bizproc\Api\Request\WorkflowTemplateLockService\GetLockRequest;
 use Bitrix\Bizproc\Api\Service\WorkflowTemplateLockService;
 use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
 use Bitrix\BizprocDesigner\Internal\Config\Feature;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentTemplateMetadata;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\Draft;
 use Bitrix\BizprocDesigner\Internal\Integration\Pull\BizprocDesignerPullManager;
 use Bitrix\BizprocDesigner\Internal\Integration\Pull\Enum\BizprocDesignerPullEvent;
@@ -36,8 +37,14 @@ final readonly class AiAssistantDraftCreatorService
 	/**
 	 * @param int|null $draftRevision revision the write of the graph left behind; a caller that wrote nothing
 	 * passes none and the revision is read from the draft
+	 * @param AgentTemplateMetadata $templateMetadata metadata this very write stored, and only it (AGT-EVENT-01):
+	 * a caller that wrote none passes none, and the tab then leaves the values it shows alone
 	 */
-	public function pushDraft(Draft $draft, ?int $draftRevision = null): bool
+	public function pushDraft(
+		Draft $draft,
+		?int $draftRevision = null,
+		AgentTemplateMetadata $templateMetadata = new AgentTemplateMetadata(),
+	): bool
 	{
 		if (!$draft->userId)
 		{
@@ -53,7 +60,7 @@ final readonly class AiAssistantDraftCreatorService
 		return $this->pullManager->sendEventToUsers(
 			$recipientIds,
 			BizprocDesignerPullEvent::AiDraftUpdated,
-			$this->toFrontendPayload($draft, $draftRevision),
+			$this->toFrontendPayload($draft, $draftRevision, $templateMetadata),
 		);
 	}
 
@@ -119,8 +126,15 @@ final readonly class AiAssistantDraftCreatorService
 	 * The revision comes from the write that produced the graph whenever there was one: a second read of the
 	 * draft may already answer with the next revision, and the graph would then travel with a revision that
 	 * describes a content the recipient never saw.
+	 *
+	 * The name and the description are optional and carry the same rule (AGT-EVENT-01): the sender that did not
+	 * write them - the Marta tool - puts neither key in, and the tab tells an absent value from an empty one.
 	 */
-	private function toFrontendPayload(Draft $draft, ?int $draftRevision = null): array
+	private function toFrontendPayload(
+		Draft $draft,
+		?int $draftRevision = null,
+		AgentTemplateMetadata $templateMetadata = new AgentTemplateMetadata(),
+	): array
 	{
 		$payload = $draft->toArray();
 		$payload['blocks'] = array_map(
@@ -135,6 +149,15 @@ final readonly class AiAssistantDraftCreatorService
 			? $draftRevision ?? WorkflowTemplateDraftTable::getRevisionIfLatest($draft->templateId, $draft->draftId)
 			: 0
 		;
+
+		if ($templateMetadata->name !== null)
+		{
+			$payload['name'] = $templateMetadata->name;
+		}
+		if ($templateMetadata->description !== null)
+		{
+			$payload['description'] = $templateMetadata->description;
+		}
 
 		return $payload;
 	}

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service;
 
 use Bitrix\Bizproc\Internal\Service\Container as BizprocContainer;
-use Bitrix\Bizproc\Public\Service\Storage\StorageReferenceGuard;
 use Bitrix\BizprocDesigner\Internal\Entity\DocumentDescription;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentBlock;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentComplexConstruction;
@@ -13,7 +12,7 @@ use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentSettingC
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentTemplate;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\WorkflowTemplateIdentifier;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Enum\RequestSource;
-use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\AgentStartTriggerMatcher;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\BaselineProjection;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\SetupTemplateNodeMatcher;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\ValidationContext;
 use Bitrix\BizprocDesigner\Internal\Service\Container;
@@ -25,23 +24,19 @@ use Bitrix\BizprocDesigner\Internal\Service\Container;
  * circular - and is run through the same forward converter (RequestSource::Rest) the agent's template.get uses, so
  * an unchanged round-trip node fingerprints identically (ALG-01):
  *   - IMMUTABLE_TYPES (create/setuptemplate) -> baselineImmutableFingerprints, unconditionally (setuptemplate
- *     carries no StorageCode, so its immutability must not depend on one);
+ *     carries no StorageCode, so its immutability must not depend on one). Answered by the projection below
+ *     rather than collected here (ALG-02), as are the published start-trigger instances;
  *   - CONSUMER_TYPES (read/write/delete) with a static code, with a code the barrier cannot read whole, or
- *     addressed by StorageId -> baselineStaticNodeFingerprints, so the guard can let an unchanged id-addressed
- *     node through its anti-IDOR rule (ALG-02 rule 1 -> rule 4);
+ *     addressed by StorageId -> baselineStaticNodeFingerprints and baselineStaticNodeReferences, so the guard can
+ *     let an unchanged id-addressed node through its anti-IDOR rule (ALG-02 rule 1 -> rule 4). Answered by the
+ *     projection below rather than collected here (ALG-02);
  *   - storage codes the published template declares -> baselineStorageCodes, which is what authorises a token
- *     code (ALG-02 rule 3). Codes come from the immutable create nodes AND from the token codes the published
- *     consumers themselves use: a storage may have been created by the setup wizard rather than by a graph
- *     node, and without that relaxation a legitimate template would stop round-tripping.
- *   - codes of the create nodes alone -> baselineCreatorStorageCodes, the narrower set the admission policy of
- *     a create node outside the baseline inherits from (ALG-10). It stays separate from baselineStorageCodes
- *     because a consumer token code proves no ownership: merging the two would let an agent create storage
- *     under a code the published template only ever read. A create node addressing storage by StorageId
- *     contributes nothing to it: the runtime prefers the id over the code, so such a node reconfigures storage
- *     its StorageCode does not name and owns nothing under that code.
+ *     code (ALG-02 rule 3), and the codes of its create nodes alone -> baselineCreatorStorageCodes, the narrower
+ *     set the admission policy inherits from (ALG-10). Both answered by the projection below as well;
  *   - restricted passthrough settings of any node type, and of the sub-steps a complex node carries in its rules
  *     -> baselineRestrictedSettingFingerprints, which is what lets an executable condition be carried through but
- *     never authored (ALG-04). Both levels are collected because both are judged.
+ *     never authored (ALG-04). Both levels are collected because both are judged. The graph the agent was handed
+ *     feeds the same rule through a set of its own, see below.
  *   - every (block type, preset, document type, setting name, value) tuple the baseline carries, top-level and
  *     nested alike -> baselineOptionValues ({@see ValidationContext::hasCarriedOptionValue()}). Every part of the
  *     key is a part the option list is built from: without the preset a value published in the deal variant of a
@@ -53,7 +48,7 @@ use Bitrix\BizprocDesigner\Internal\Service\Container;
  *     and asking the catalog to describe each baseline block would cost a lookup per node for nothing.
  *   - the types the baseline is built of -> baselineBlockTypes, against which the reverse path lifts the EXCLUDED
  *     barrier of a reverse-visible CLASS: a switched-off block the template already published reads back, while
- *     one the agent invents does not.
+ *     one the agent invents does not. Answered by the projection below rather than collected here (ALG-02).
  *   - constants the published template declares -> baselineConstants, whose keys are the wider ownership set a
  *     code is judged taken against, and the codes the setup-wizard nodes of that same published version declare
  *     -> baselineWizardCodes, the narrow set a constant counts as inherited by (ALG-01). The two are kept apart
@@ -67,24 +62,39 @@ use Bitrix\BizprocDesigner\Internal\Service\Container;
  *     come from the published version. It authorises nothing and is measured against the declaration ceiling alone:
  *     a reverse write merges declarations into the draft and never removes one, so a ceiling that saw the published
  *     version only would watch the draft grow without a bound.
+ *   - the published graph itself, under the one matching rule of ALG-02 -> baseline
+ *     ({@see BaselineProjection}). The sets above answer "is this payload published anywhere in the template",
+ *     each for its own class of payload; the projection answers "which published block is this block", which is
+ *     what all of them are being carried over onto. Assembled from $publishedTemplate and never from the handed
+ *     graph below, which is kept a projection of its own. What stays collected HERE rather than in the projection is
+ *     what has to ask the portal something - the restricted names of an activity, the document type a complex
+ *     node fixes, the parse of a wizard form - because this is where the contour keeps its collaborators.
+ *   - every activity name the RAW published template carries, at any depth -> baselinePublishedNames
+ *     ({@see ValidationContext::$baselinePublishedNames}). The agent projection has no name for the child of a
+ *     sub-action at all, while the runtime resolves a reference to one by name, so this reading cannot come from
+ *     the converted graph the other baselines are built of.
  *
- * One reading does NOT come from the published version: the option values of the graph the agent was handed - the
- * bound draft when the template has one -> draftOptionValues ({@see ValidationContext::$draftOptionValues}). It
- * relaxes the option check alone and no barrier: the agent must be able to return unchanged the graph it was given,
- * and a value the user saved into the draft may since have dropped out of the portal's list. The restricted-setting
- * barrier, the storage baselines and the block-type baseline stay on the published version, or a graph would
- * authorise itself through the draft it wrote. Narrowed to what the published version does not already carry, which
- * is what that reading means and all the check can use of it: the two maps are joined by
- * {@see ValidationContext::hasCarriedOptionValue()}, so a tuple both graphs hold is answered by the baseline, and
- * the draft is exactly the graph whose width the agent writes itself.
+ * Three readings do NOT come from the published version, and all of them mean the same thing: the agent has to be
+ * able to hand back the graph it was given. The option values of that graph -> draftOptionValues
+ * ({@see ValidationContext::$draftOptionValues}); the graph itself under the matching rule -> handed
+ * ({@see ValidationContext::$handed}); and its restricted passthrough settings, top-level and nested alike ->
+ * handedRestrictedSettingFingerprints and handedRestrictedSettingReferences
+ * ({@see ValidationContext::$handedRestrictedSettingFingerprints}). Each is narrowed to what the published version
+ * does not already carry, so one key is accounted for once, and each is named after the graph it comes from: the
+ * storage baselines, the block-type baseline and the admission of an undescribed node stay on the published version,
+ * or a graph would authorise itself through the draft it wrote.
+ *
+ * The restricted settings are the one of the three a barrier rests on, and they rest on it because the barrier has
+ * to accept back what `template.get` handed over: a condition a person wrote in the editor lives in the draft alone,
+ * and the agent has neither the right to author it nor a value to replace it with. The circle that would make this
+ * unsound does not close - the barrier stands on the write path of the contour too, so the agent cannot put an
+ * authored payload into the draft and collect its authorisation on the next call (ALG-04).
  *
  * The baseline is assembled on the Marta entry as well, although storage nodes are hidden from it: one graph must
  * get one verdict on every entry, so the extra published-template conversion is an accepted cost.
  */
 final class ValidationContextFactory
 {
-	private const TEMPLATE_ID_TOKEN = '{=Workflow:TemplateId}';
-
 	private readonly AgentWorkflowResolverService $resolverService;
 
 	public function __construct(?AgentWorkflowResolverService $resolverService = null)
@@ -107,17 +117,25 @@ final class ValidationContextFactory
 			? $this->resolverService->getPublishedTemplateConstants($identifier->templateId)
 			: [];
 
+		// The names of the RAW published tree, which the agent projection above cannot answer: a complex node's
+		// sub-action carries children the runtime resolves by name and the projection never names
+		// ({@see ValidationContext::$baselinePublishedNames}).
+		$publishedNames = $identifier->templateId !== null
+			? $this->resolverService->getPublishedTemplateActivityNames($identifier->templateId)
+			: [];
+
 		// The draft is read for its SIZE alone (see ValidationContext::$draftWizardCodes): the baselines an edit is
 		// judged against stay the published version's, or a graph would vouch for itself through the draft it wrote.
 		$draftWizardCodes = $identifier->draftId !== null
 			? self::wizardAuthoredCodes($this->resolverService->getDraftConstants($identifier->draftId))
 			: [];
 
-		// The graph the agent was HANDED, which is the draft whenever the template has one. It feeds the option-list
-		// passthrough and nothing else (see ValidationContext::$draftOptionValues): the agent has to be able to
-		// return unchanged what it was given, and a value the user saved into the draft may have dropped out of the
-		// portal's list since. Read only when a draft exists - without one this is the published version already
-		// converted above, and a second conversion of it would buy nothing.
+		// The graph the agent was HANDED, which is the draft whenever the template has one. It feeds what the agent
+		// must be able to send back unchanged: the option-list passthrough (see ValidationContext::$draftOptionValues),
+		// the matching rule of its own (see ValidationContext::$handed) and the restricted passthrough settings it
+		// carries (see ValidationContext::$handedRestrictedSettingFingerprints). Read only when a draft exists -
+		// without one this is the published version already converted above, and a second conversion of it would buy
+		// nothing.
 		$handedTemplate = $identifier->draftId !== null
 			? $this->resolverService->getAgentTemplate($identifier)
 			: null;
@@ -132,6 +150,7 @@ final class ValidationContextFactory
 			publishedConstants: $publishedConstants,
 			draftWizardCodes: $draftWizardCodes,
 			handedTemplate: $handedTemplate,
+			publishedNames: $publishedNames,
 		);
 	}
 
@@ -143,8 +162,16 @@ final class ValidationContextFactory
 	 * @param list<string> $draftWizardCodes wizard-authored codes the bound draft already carries, for the
 	 *        declaration ceiling alone ({@see ValidationContext::$draftWizardCodes})
 	 * @param AgentTemplate|null $handedTemplate the graph template.get answered the agent with - the bound draft when
-	 *        the template has one. Read for its option values alone ({@see ValidationContext::$draftOptionValues}),
-	 *        and only for those the published version does not carry; no barrier of this context is assembled from it
+	 *        the template has one. Read for what the agent must be able to send back unchanged - its option values
+	 *        ({@see ValidationContext::$draftOptionValues}), its own matching rule ({@see ValidationContext::$handed})
+	 *        and its restricted passthrough settings
+	 *        ({@see ValidationContext::$handedRestrictedSettingFingerprints}) - and for nothing else. Every set it
+	 *        feeds is named after it and stays apart from the baseline one: the storage baselines, the block-type
+	 *        baseline and the admission of an undescribed node are assembled from the published version alone, or a
+	 *        graph would anchor itself in the draft it wrote
+	 * @param array<string, true> $publishedNames every activity name the published template carries at any depth
+	 *        ({@see ValidationContext::$baselinePublishedNames}), read from the raw template rather than from its
+	 *        agent projection, which has no name for the child of a sub-action at all
 	 */
 	public static function fromBaselineTemplate(
 		?AgentTemplate $publishedTemplate,
@@ -157,19 +184,13 @@ final class ValidationContextFactory
 		array $publishedConstants = [],
 		array $draftWizardCodes = [],
 		?AgentTemplate $handedTemplate = null,
+		array $publishedNames = [],
 	): ValidationContext
 	{
 		$restrictedSettings ??= new RestrictedSettingRegistry();
-		$baselineImmutableFingerprints = [];
-		$baselineStaticNodeFingerprints = [];
-		$baselineStorageCodes = [];
-		$baselineCreatorStorageCodes = [];
 		$baselineRestrictedSettingFingerprints = [];
-		$baselineVerbatimStartTriggerReferences = [];
-		$baselineStaticNodeReferences = [];
 		$baselineRestrictedSettingReferences = [];
 		$baselineWizardCodes = [];
-		$baselineBlockTypes = [];
 		$baselineOptionValues = [];
 
 		if ($publishedTemplate !== null)
@@ -177,14 +198,6 @@ final class ValidationContextFactory
 			foreach ($publishedTemplate->blocks as $block)
 			{
 				/** @var AgentBlock $block */
-				$baselineBlockTypes[mb_strtolower($block->type)] = true;
-				if (AgentStartTriggerMatcher::matches($block->type))
-				{
-					$baselineVerbatimStartTriggerReferences[
-						AgentStartTriggerMatcher::referenceFingerprint($block)
-					] = true;
-				}
-
 				$baselineRestrictedSettingFingerprints += self::collectRestrictedSettings(
 					$block,
 					$documentType,
@@ -211,70 +224,17 @@ final class ValidationContextFactory
 						$baselineWizardCodes = [...$baselineWizardCodes, ...$wizardCodes];
 					}
 				}
-
-				if (StorageNodeClassifier::isImmutable($block->type))
-				{
-					$baselineImmutableFingerprints[StorageNodeFingerprint::of($block->type, $block->settings)] = true;
-
-					$declaredCode = StorageNodeClassifier::extractStorageCode($block->settings);
-					if ($declaredCode !== null && $declaredCode !== '')
-					{
-						$baselineStorageCodes[] = $declaredCode;
-
-						// The id-addressing predicate answers here exactly as it answers for a consumer (below):
-						// a create node carrying a StorageId reconfigures the storage that id points at, not the
-						// one its StorageCode names, so the code proves no ownership and must not open rule 3a to
-						// consumers. The declared set keeps the code regardless - it only makes a per-template
-						// token code editable, and dropping it would cost an unchanged template its round-trip.
-						if (
-							StorageNodeClassifier::isStorageCreator($block->type)
-							&& !self::addressesStorageById($block->settings)
-						)
-						{
-							$baselineCreatorStorageCodes[] = $declaredCode;
-						}
-					}
-
-					continue;
-				}
-
-				if (StorageNodeClassifier::isConsumer($block->type))
-				{
-					$storageCode = StorageNodeClassifier::extractStorageCode($block->settings);
-					// An opaque code is anchored by the fingerprint as well. It would otherwise fall to
-					// baselineStorageCodes, where {@see StorageAuthorizationContext::indexCodes()} drops it for
-					// being unreadable - anchoring the published node nowhere and costing an unchanged template
-					// its round-trip. "The barrier does not read this code" therefore always means "anchor it by
-					// fingerprint", never "drop it from both sets".
-					$hasStaticCode = $storageCode !== null
-						&& (
-							self::isStaticCode($storageCode)
-							|| !StorageReferenceGuard::isFullyInterpretableCode($storageCode)
-						);
-
-					if ($hasStaticCode || self::addressesStorageById($block->settings))
-					{
-						$fingerprint = StorageNodeFingerprint::of($block->type, $block->settings);
-						$baselineStaticNodeFingerprints[$fingerprint] = true;
-						$baselineStaticNodeReferences[StorageNodeFingerprint::referenceOf(
-							$block->id,
-							$block->type,
-							$block->settings,
-						)] = true;
-					}
-					elseif ($storageCode !== null && $storageCode !== '')
-					{
-						// A pure token code of a published consumer: its storage may predate the graph.
-						$baselineStorageCodes[] = $storageCode;
-					}
-				}
 			}
 		}
 
 		// Only what the published version does NOT already carry: the check reads the two maps as one
 		// ({@see ValidationContext::hasCarriedOptionValue()}), so a tuple in both would answer twice and be held
-		// twice - and the handed graph is the draft, whose width the agent writes itself.
+		// twice - and the handed graph is the draft, whose width the agent writes itself. Its restricted passthrough
+		// settings are collected the same way and by the same code as the published ones, because the barrier they
+		// feed must judge a draft value by exactly the rule it judges a published one by (ALG-04).
 		$draftOptionValues = [];
+		$handedRestrictedSettingFingerprints = [];
+		$handedRestrictedSettingReferences = [];
 		if ($handedTemplate !== null)
 		{
 			foreach ($handedTemplate->blocks as $block)
@@ -283,6 +243,14 @@ final class ValidationContextFactory
 				$draftOptionValues += array_diff_key(
 					self::collectOptionValues($block, $documentType),
 					$baselineOptionValues,
+				);
+				$handedRestrictedSettingFingerprints += array_diff_key(
+					self::collectRestrictedSettings($block, $documentType, $restrictedSettings),
+					$baselineRestrictedSettingFingerprints,
+				);
+				$handedRestrictedSettingReferences += array_diff_key(
+					self::collectRestrictedSettingReferences($block, $documentType, $restrictedSettings),
+					$baselineRestrictedSettingReferences,
 				);
 			}
 		}
@@ -293,11 +261,7 @@ final class ValidationContextFactory
 			source: $source,
 			userId: $userId,
 			isUserAdmin: $isUserAdmin,
-			baselineImmutableFingerprints: $baselineImmutableFingerprints,
-			baselineStaticNodeFingerprints: $baselineStaticNodeFingerprints,
-			baselineStorageCodes: array_values(array_unique($baselineStorageCodes)),
 			baselineRestrictedSettingFingerprints: $baselineRestrictedSettingFingerprints,
-			baselineCreatorStorageCodes: array_values(array_unique($baselineCreatorStorageCodes)),
 			baselineConstants: $publishedConstants,
 			baselineWizardCodes: $baselineWizardCodes === null
 				? null
@@ -306,12 +270,19 @@ final class ValidationContextFactory
 			// The baseline graph itself answers whether anything is published, so a published template that declares
 			// no constant yet is told apart from a template with no published version at all.
 			hasPublishedBaseline: $publishedTemplate !== null,
-			baselineBlockTypes: $baselineBlockTypes,
-			baselineVerbatimStartTriggerReferences: $baselineVerbatimStartTriggerReferences,
-			baselineStaticNodeReferences: $baselineStaticNodeReferences,
 			baselineRestrictedSettingReferences: $baselineRestrictedSettingReferences,
 			baselineOptionValues: $baselineOptionValues,
 			draftOptionValues: $draftOptionValues,
+			// The published graph itself, projected under the one matching rule of ALG-02. Built from
+			// $publishedTemplate and from nothing else: the handed graph below is the draft, and a baseline
+			// carrying it would let a graph excuse itself by what it wrote.
+			baseline: new BaselineProjection($publishedTemplate?->blocks ?? []),
+			baselinePublishedNames: $publishedNames,
+			// The handed graph under the same matching rule, kept apart from the baseline at every point of use
+			// ({@see ValidationContext::$handed}).
+			handed: new BaselineProjection($handedTemplate?->blocks ?? []),
+			handedRestrictedSettingFingerprints: $handedRestrictedSettingFingerprints,
+			handedRestrictedSettingReferences: $handedRestrictedSettingReferences,
 		);
 	}
 
@@ -459,6 +430,14 @@ final class ValidationContextFactory
 	 * by its string form, and an element that has none is refused there whatever the baseline holds, so a
 	 * fingerprint of one is never asked for.
 	 *
+	 * An element that is an object is the map shape, and its members are judged by their own schema as well
+	 * ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\AgentSettingValueValidator::validateChildValue()}).
+	 * They are collected under the CHILD key of ALG-02 - the setting name and the key inside it - because that is
+	 * how the check looks them up, and never under the position in the list: an agent that reorders the columns of
+	 * a storage node has changed nothing about the value of any of them. Without this a published column whose type
+	 * the portal has since stopped offering would be refused on re-send, which is the round-trip of an untouched
+	 * template.
+	 *
 	 * @return array<string, true>
 	 */
 	private static function optionValueFingerprints(
@@ -481,6 +460,75 @@ final class ValidationContextFactory
 					(string)$item,
 					$documentType,
 				)] = true;
+
+				continue;
+			}
+
+			if (is_array($item))
+			{
+				// One element of a map that is also multiple: a list of objects.
+				$fingerprints += self::childOptionValueFingerprints(
+					$blockType,
+					$presetId,
+					$name,
+					$item,
+					$documentType,
+				);
+			}
+		}
+
+		if (is_array($value) && !array_is_list($value))
+		{
+			// A map that is not multiple: the value IS the object, and its members are the children.
+			$fingerprints += self::childOptionValueFingerprints(
+				$blockType,
+				$presetId,
+				$name,
+				$value,
+				$documentType,
+			);
+		}
+
+		return $fingerprints;
+	}
+
+	/**
+	 * The members of one object of a map setting, keyed by {@see ValidationContext::childSettingName()}. Only one
+	 * level down: the schema of a map declares children and no grandchildren, so nothing below is ever judged
+	 * against an option list.
+	 *
+	 * @param array<array-key, mixed> $object
+	 *
+	 * @return array<string, true>
+	 */
+	private static function childOptionValueFingerprints(
+		string $blockType,
+		?string $presetId,
+		string $name,
+		array $object,
+		?array $documentType,
+	): array
+	{
+		$fingerprints = [];
+		foreach ($object as $key => $childValue)
+		{
+			if (!is_string($key) || $key === '')
+			{
+				continue;
+			}
+
+			foreach (is_array($childValue) ? $childValue : [$childValue] as $item)
+			{
+				if (is_scalar($item))
+				{
+					$fingerprints[ValidationContext::optionValueFingerprint(
+						$blockType,
+						$presetId,
+						ValidationContext::childSettingName($name, $key),
+						(string)$item,
+						$documentType,
+					)] = true;
+				}
 			}
 		}
 
@@ -540,9 +588,11 @@ final class ValidationContextFactory
 	}
 
 	/**
-	 * Restricted passthrough settings of one baseline block (ALG-04) - its own and those of the sub-steps a complex
-	 * node carries in its rules. Anchored per (name, value) rather than per node, so an unrelated edit on the same
-	 * block - a new title, a moved connection - does not cost the template a condition it already published.
+	 * Restricted passthrough settings of one block of a graph the server wrote (ALG-04) - its own and those of the
+	 * sub-steps a complex node carries in its rules. Anchored per (name, value) rather than per node, so an unrelated
+	 * edit on the same block - a new title, a moved connection - does not cost the template a condition it already
+	 * carries. Run over the published version and over the handed graph alike, each into a set of its own, so one
+	 * account of the key serves both.
 	 *
 	 * @return array<string, true>
 	 */
@@ -749,32 +799,4 @@ final class ValidationContextFactory
 		return $fingerprints;
 	}
 
-	/**
-	 * Static means "not isolated to the bound template by the token alone" - every non-empty consumer code except a
-	 * pure token one. A token nested in a computable expression expands to a foreign code at runtime, so the guard
-	 * denies it the token branch (ALG-02 rule 3) and it must be anchored by its baseline fingerprint.
-	 */
-	private static function isStaticCode(string $code): bool
-	{
-		if ($code === '')
-		{
-			return false;
-		}
-
-		// Byte-wise on purpose: anything this check does not recognise as the canonical token is treated as
-		// static, i.e. anchored by the node fingerprint instead of becoming an editable token code. The guard
-		// judges what a code EXPANDS to ({@see StorageReferenceGuard::isFullyInterpretableCode()}); erring
-		// towards "static" here can only narrow what the agent may edit, never widen it.
-		return !str_contains($code, self::TEMPLATE_ID_TOKEN)
-			|| str_contains(str_replace(self::TEMPLATE_ID_TOKEN, '', $code), '{=');
-	}
-
-	/**
-	 * The very predicate the guard applies in ALG-02 rule 1, so the baseline collection and the refusal cannot
-	 * drift apart: what the guard refuses as an id-addressed node is exactly what is anchored here.
-	 */
-	private static function addressesStorageById(AgentSettingCollection $settings): bool
-	{
-		return StorageReferenceGuard::addressesStorageById(StorageNodeClassifier::extractStorageId($settings));
-	}
 }

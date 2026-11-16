@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Public\Provider;
 
 use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Model\FavoriteTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\FavoriteRepository;
@@ -13,30 +14,41 @@ use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
 use Bitrix\Note\Internal\Exceptions\CollectionTreeTooLargeException;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
+use Bitrix\Note\Internal\Service\Document\TreeNestingBuilder;
+use Bitrix\Note\Internal\Service\Document\TreeSizeLimit;
 use Bitrix\Note\Public\Service\AccessService;
 
 class TreeProvider
 {
-	public const TREE_MAX_NODES = 5000;
+	// Published for the clients of the provider; the value itself belongs to the domain, where the
+	// public circuit reads it too.
+	public const TREE_MAX_NODES = TreeSizeLimit::MAX_NODES;
 
 	private DocumentRepository $repository;
 	private CollectionRepository $collectionRepository;
 	private DocumentCardMetaResolver $cardMetaResolver;
+	private TreeNestingBuilder $nestingBuilder;
 
 	public function __construct(
 		?DocumentRepository $repository = null,
 		?CollectionRepository $collectionRepository = null,
 		?DocumentCardMetaResolver $cardMetaResolver = null,
+		?TreeNestingBuilder $nestingBuilder = null,
 	)
 	{
 		$this->repository = $repository ?? new DocumentRepository();
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
 		$this->cardMetaResolver = $cardMetaResolver ?? new DocumentCardMetaResolver();
+		$this->nestingBuilder = $nestingBuilder ?? new TreeNestingBuilder();
 	}
 
 	public function getTree(int $collectionId): array
 	{
-		$documents = $this->repository->getCollectionDocuments($collectionId);
+		// Same rule as everywhere: a deleted base is read whole, a live one hides what lies in the
+		// bin. Without it this method answers with an empty tree for a base whose documents all went
+		// to the bin with it.
+		$insideDeleted = !DocumentAccessService::isCollectionAlive($collectionId);
+		$documents = $this->repository->getCollectionDocuments($collectionId, $insideDeleted);
 		$nodes = [];
 		$tree = [];
 
@@ -72,42 +84,65 @@ class TreeProvider
 
 	public function getAccessibleTree(int $collectionId): array
 	{
-		$this->assertCollectionReadable($collectionId);
+		$insideDeleted = $this->assertCollectionReadable($collectionId);
 
-		[$nodes, $rootIds] = $this->readTreeNodes($collectionId);
+		[$nodes, $rootIds] = $this->readTreeNodes($collectionId, $insideDeleted);
 
 		$truncated = false;
 		if (count($nodes) > self::TREE_MAX_NODES)
 		{
-			[$nodes, $rootIds, $truncated] = $this->truncateTreeByRoots($nodes, $rootIds);
+			[$nodes, $rootIds, $truncated] = $this->nestingBuilder->truncateByRoots(
+				$nodes,
+				$rootIds,
+				self::TREE_MAX_NODES,
+			);
 		}
 
 		return [
-			'items' => $this->nestNodes($nodes, $rootIds),
+			'items' => $this->nestingBuilder->nestNodes($nodes, $rootIds),
 			'truncated' => $truncated,
 		];
 	}
 
-	private function assertCollectionReadable(int $collectionId): void
+	/**
+	 * Says whether the tree is being read from inside a deleted base, which is read whole. The right
+	 * that governs such a base is not the right to read it: a reader without it is answered as for a
+	 * base that is not there, so the deletion does not leak through a 403.
+	 */
+	private function assertCollectionReadable(int $collectionId): bool
 	{
-		if ($this->collectionRepository->getById($collectionId) === null)
+		$collection = $this->collectionRepository->getById($collectionId);
+		if ($collection === null)
 		{
 			throw new CollectionNotFoundException();
+		}
+
+		if ($collection->getTrashedAt() !== null)
+		{
+			$userId = (int)CurrentUser::get()->getId();
+			if (!DocumentAccessService::canManageCollectionInRecycleBin($userId, $collectionId))
+			{
+				throw new CollectionNotFoundException();
+			}
+
+			return true;
 		}
 
 		if (!AccessService::canViewCollection($collectionId))
 		{
 			throw new AccessDeniedException();
 		}
+
+		return false;
 	}
 
 	/**
 	 * @return array{0: array<int, array>, 1: int[]} flat nodes keyed by id, and the ids of the roots
 	 */
-	private function readTreeNodes(int $collectionId): array
+	private function readTreeNodes(int $collectionId, bool $insideDeleted = false): array
 	{
 		$nodes = [];
-		foreach ($this->repository->getCollectionDocuments($collectionId) as $document)
+		foreach ($this->repository->getCollectionDocuments($collectionId, $insideDeleted) as $document)
 		{
 			$nodes[(int)$document->getId()] = [
 				'id' => (int)$document->getId(),
@@ -133,54 +168,6 @@ class TreeProvider
 	}
 
 	/**
-	 * @param array<int, array> $nodes
-	 * @return array<int, int[]> child ids keyed by parent id
-	 */
-	private function buildChildrenMap(array $nodes): array
-	{
-		$childrenByParent = [];
-		foreach ($nodes as $id => $node)
-		{
-			$parentId = $node['parentId'];
-			if ($parentId !== null && isset($nodes[$parentId]))
-			{
-				$childrenByParent[$parentId][] = $id;
-			}
-		}
-
-		return $childrenByParent;
-	}
-
-	/**
-	 * @param array<int, array> $nodes
-	 * @param int[] $rootIds
-	 * @return array[] roots with their children nested inside
-	 */
-	private function nestNodes(array $nodes, array $rootIds): array
-	{
-		foreach ($nodes as $id => &$node)
-		{
-			$parentId = $node['parentId'];
-			if ($parentId !== null && isset($nodes[$parentId]))
-			{
-				$nodes[$parentId]['children'][] = &$node;
-			}
-		}
-		unset($node);
-
-		$items = [];
-		foreach ($rootIds as $rootId)
-		{
-			if (isset($nodes[$rootId]))
-			{
-				$items[] = $nodes[$rootId];
-			}
-		}
-
-		return $items;
-	}
-
-	/**
 	 * The tree of a collection whole, or a refusal - never a piece of it.
 	 *
 	 * The web path answers with a `truncated` flag and shows what it managed to read; a program cannot
@@ -198,6 +185,13 @@ class TreeProvider
 	public function getWholeAccessibleTree(int $collectionId): array
 	{
 		$this->assertCollectionReadable($collectionId);
+		// The REST path, and there the recycle bin does not exist: a deleted collection answers as a
+		// missing one everywhere in REST, and an empty tree would say something different. The web path
+		// above keeps its own answer, because the bin is a screen it has and REST has not.
+		if (!DocumentAccessService::isCollectionAlive($collectionId))
+		{
+			throw new CollectionNotFoundException();
+		}
 
 		[$nodes, $rootIds] = $this->readTreeNodes($collectionId);
 		if (count($nodes) > self::TREE_MAX_NODES)
@@ -205,12 +199,12 @@ class TreeProvider
 			throw new CollectionTreeTooLargeException(self::TREE_MAX_NODES);
 		}
 
-		return $this->nestNodes($nodes, $rootIds);
+		return $this->nestingBuilder->nestNodes($nodes, $rootIds);
 	}
 
 	/**
-	 * Returns paged children enriched with card meta (excerpt + author).
-	 * Used by both the in-document children block (compact view) and any cards grid.
+	 * Returns paged children enriched with card meta (excerpt, author, date of the last change).
+	 * Used by both the in-document children block and any cards grid.
 	 */
 	public function getListByParent(
 		int $collectionId,
@@ -220,6 +214,9 @@ class TreeProvider
 		?int $afterId = null,
 	): array
 	{
+		// The branch of a deleted base is read whole, like its tree: the caller has already been
+		// checked against the bin, here only the shape of the read follows from it.
+		$insideDeleted = !DocumentAccessService::isCollectionAlive($collectionId);
 		$normalizedLimit = $limit > 0 ? min($limit, 200) : 50;
 		$rawDocuments = $this->repository->getDocumentMetaByParent(
 			$collectionId,
@@ -227,6 +224,7 @@ class TreeProvider
 			$normalizedLimit + 1,
 			$afterPosition,
 			$afterId,
+			$insideDeleted,
 		);
 
 		$hasNextPage = count($rawDocuments) > $normalizedLimit;
@@ -239,7 +237,11 @@ class TreeProvider
 			static fn(\Bitrix\Note\Internal\Model\Document $document): int => (int)$document->getId(),
 			$documents,
 		);
-		$childrenCountMap = $this->repository->getChildrenCountMapByParentIds($collectionId, $documentIds);
+		$childrenCountMap = $this->repository->getChildrenCountMapByParentIds(
+			$collectionId,
+			$documentIds,
+			$insideDeleted,
+		);
 		// Star flag of the branch: one batch read per page. The branch is always read for the
 		// current user, so the favorites owner comes from the ambient user, as elsewhere in the tree.
 		$favoriteIds = array_flip((new FavoriteRepository())->findFavoriteEntityIds(
@@ -265,6 +267,7 @@ class TreeProvider
 			$lastId = $id;
 
 			$meta = $cardMeta[$id] ?? ['excerpt' => '', 'author' => null];
+			$updatedAt = $document->getUpdatedAt();
 
 			$result[] = [
 				'id' => $id,
@@ -273,6 +276,12 @@ class TreeProvider
 				'title' => $document->getTitle(),
 				'position' => $lastPosition,
 				'hasChildren' => (int)($childrenCountMap[$id] ?? 0) > 0,
+				// How many lie inside, for the card that draws this node: the sole of a card says the
+				// number, and a bare "there are some" leaves it blank.
+				'childCount' => (int)($childrenCountMap[$id] ?? 0),
+				// Same shape the content list answers with (see NodeDto): a card of a live level and a
+				// card of the archive print the date the same way, so they must be given it the same way.
+				'changedAt' => $updatedAt !== null ? $updatedAt->format('c') : '',
 				'excerpt' => $meta['excerpt'],
 				'author' => $meta['author'],
 				'isFavorite' => isset($favoriteIds[$id]),
@@ -283,71 +292,5 @@ class TreeProvider
 			'documents' => $result,
 			'nextCursor' => $hasNextPage ? ['position' => $lastPosition, 'id' => $lastId] : null,
 		];
-	}
-
-	private function truncateTreeByRoots(array $nodes, array $rootIds): array
-	{
-		$childrenByParent = $this->buildChildrenMap($nodes);
-
-		$keptNodes = [];
-		$keptRoots = [];
-		foreach ($rootIds as $rootId)
-		{
-			$remaining = self::TREE_MAX_NODES - count($keptNodes);
-			if ($remaining <= 0)
-			{
-				break;
-			}
-
-			$subtree = $this->collectSubtreeBfs($rootId, $childrenByParent, $nodes, $remaining);
-
-			if (count($subtree) > $remaining)
-			{
-				if (empty($keptRoots))
-				{
-					$subtree = array_slice($subtree, 0, $remaining, true);
-				}
-				else
-				{
-					break;
-				}
-			}
-
-			$keptRoots[] = $rootId;
-			foreach ($subtree as $id => $node)
-			{
-				$keptNodes[$id] = $node;
-			}
-		}
-
-		return [$keptNodes, $keptRoots, true];
-	}
-
-	private function collectSubtreeBfs(int $rootId, array $childrenByParent, array $nodes, int $softLimit): array
-	{
-		$subtree = [];
-		$queue = [$rootId];
-		// The queue is walked with a moving head instead of array_shift, which reindexes the whole
-		// queue on every step. On a branch that is wide rather than deep - one root with tens of
-		// thousands of children, the shape an import leaves behind - that reindexing is what the walk
-		// spends its time on, and it grows with the square of the branch.
-		for ($head = 0; $head < count($queue); $head++)
-		{
-			$current = $queue[$head];
-			$subtree[$current] = $nodes[$current];
-			if (count($subtree) > $softLimit)
-			{
-				return $subtree;
-			}
-			if (isset($childrenByParent[$current]))
-			{
-				foreach ($childrenByParent[$current] as $childId)
-				{
-					$queue[] = $childId;
-				}
-			}
-		}
-
-		return $subtree;
 	}
 }

@@ -9,6 +9,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Configuration;
+use Bitrix\Note\Internal\Exceptions\CollectionNotWritableException;
 use Bitrix\Note\Internal\Access\Model\CollectionAccessChange;
 use Bitrix\Note\Internal\Access\Permission\PermissionDictionary;
 use Bitrix\Note\Internal\Access\PortalAdmin;
@@ -47,6 +48,10 @@ final class CollectionAccessService
 	 */
 	private static array $userAccessCodes = [];
 
+	/**
+	 * The level written in the ACL, and nothing else. The state of the knowledge base is a layer
+	 * above this one - ask {@see hasCollectionLevel()} or {@see userHasLevel()} for the decision.
+	 */
 	public static function getUserLevel(int $collectionId, int $userId, array $accessCodes): int
 	{
 		return self::getUserAccessSnapshot($collectionId, $userId, $accessCodes)['effective'];
@@ -136,7 +141,10 @@ final class CollectionAccessService
 		return self::getUserAccessSnapshot($collectionId, $userId, $accessCodes);
 	}
 
-	public static function currentUserHasLevel(int $collectionId, int $requiredLevel): bool
+	public static function currentUserHasLevel(
+		int $collectionId,
+		int $requiredLevel,
+	): bool
 	{
 		if ($requiredLevel <= self::LEVEL_NONE)
 		{
@@ -160,7 +168,123 @@ final class CollectionAccessService
 		return self::hasCollectionLevel($collectionId, $userId, $accessCodes, $requiredLevel);
 	}
 
-	public static function hasCollectionLevel(int $collectionId, int $userId, array $accessCodes, int $requiredLevel): bool
+	/**
+	 * The same question about somebody who is not the current user - the recycle bin and the content
+	 * list ask it on behalf of the reader they are drawing for.
+	 */
+	public static function userHasLevel(
+		int $collectionId,
+		int $userId,
+		int $requiredLevel,
+	): bool
+	{
+		if ($requiredLevel <= self::LEVEL_NONE)
+		{
+			return true;
+		}
+
+		if ($userId <= 0 || $collectionId <= 0)
+		{
+			return false;
+		}
+
+		if (PortalAdmin::isAdmin($userId))
+		{
+			return true;
+		}
+
+		return self::hasCollectionLevel(
+			$collectionId,
+			$userId,
+			self::buildUserAccessCodes($userId),
+			$requiredLevel,
+		);
+	}
+
+	/**
+	 * The same decision as {@see userHasLevel()}, asked about many knowledge bases at once. A page of
+	 * sections asks it about every base it draws, and one base at a time cost a query for its ACL
+	 * rows each. Here they go as one query for the whole page.
+	 *
+	 * @param int[] $collectionIds
+	 * @return array<int, bool> keyed by base, in the order asked
+	 */
+	public static function batchHasLevel(
+		array $collectionIds,
+		int $userId,
+		int $requiredLevel,
+	): array
+	{
+		$ids = array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $collectionIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		if ($requiredLevel <= self::LEVEL_NONE)
+		{
+			return array_fill_keys($ids, true);
+		}
+
+		if ($userId <= 0)
+		{
+			return array_fill_keys($ids, false);
+		}
+
+		$allowed = array_fill_keys($ids, true);
+		$open = $ids;
+
+		if (PortalAdmin::isAdmin($userId))
+		{
+			return $allowed;
+		}
+
+		// '*' is the policy row of a base and is not among a user's own codes, while the single-base
+		// path adds it itself - without it a base open to everyone would read as closed here.
+		$codes = array_values(array_unique([...self::buildUserAccessCodes($userId), 'U' . $userId, '*']));
+		$levels = self::batchGetUserLevels($open, $codes);
+		foreach ($open as $id)
+		{
+			$allowed[$id] = (int)($levels[$id] ?? self::LEVEL_NONE) >= $requiredLevel;
+		}
+
+		return $allowed;
+	}
+
+	/**
+	 * Whether the knowledge base accepts writes at all. This is a question about the base and
+	 * not about the person: an archived base is read-only for everybody, its administrator included.
+	 *
+	 * The check is separate from the level on purpose - the level answers "may this user", the state
+	 * answers "may anyone", and creation, moving into the base and import all need the second one.
+	 * Hiding the button is not enough: a new document is created live, so a creation that slipped
+	 * through would leave an archived base archived by flag only.
+	 */
+	public static function collectionAcceptsWrites(int $collectionId): bool
+	{
+		return DocumentAccessService::collectionStateAllowed($collectionId, []);
+	}
+
+	/**
+	 * @throws CollectionNotWritableException
+	 */
+	public static function assertCollectionAcceptsWrites(int $collectionId): void
+	{
+		if (!self::collectionAcceptsWrites($collectionId))
+		{
+			throw new CollectionNotWritableException($collectionId);
+		}
+	}
+
+	public static function hasCollectionLevel(
+		int $collectionId,
+		int $userId,
+		array $accessCodes,
+		int $requiredLevel,
+	): bool
 	{
 		if ($requiredLevel <= self::LEVEL_NONE)
 		{
@@ -782,6 +906,11 @@ final class CollectionAccessService
 		return $result;
 	}
 
+	/**
+	 * Levels of every knowledge base the user touches. The archived state stays in the map -
+	 * archiving materialises itself on every document of the base, and the archive surfaces read
+	 * this very map.
+	 */
 	public static function getAllUserLevels(array $accessCodes): array
 	{
 		if (empty($accessCodes))
@@ -850,6 +979,7 @@ final class CollectionAccessService
 			$row = CollectionTable::query()
 				->setSelect(['ID'])
 				->where('IS_ARCHIVED', 'N')
+				->whereNull('TRASHED_AT')
 				->setLimit(1)
 				->exec()
 				->fetch()
@@ -864,16 +994,33 @@ final class CollectionAccessService
 			return false;
 		}
 
+		$manageableIds = [];
 		$levels = self::getAllUserLevels($accessCodes);
-		foreach ($levels['effective'] ?? [] as $level)
+		foreach ($levels['effective'] ?? [] as $collectionId => $level)
 		{
 			if ((int)$level >= self::LEVEL_MANAGE)
 			{
-				return true;
+				$manageableIds[] = (int)$collectionId;
 			}
 		}
 
-		return false;
+		if (empty($manageableIds))
+		{
+			return false;
+		}
+
+		// The level survives deletion, the base does not: a user whose only base is in the bin has
+		// nothing to manage.
+		$row = CollectionTable::query()
+			->setSelect(['ID'])
+			->whereIn('ID', $manageableIds)
+			->whereNull('TRASHED_AT')
+			->setLimit(1)
+			->exec()
+			->fetch()
+		;
+
+		return !empty($row);
 	}
 
 	private static function getCurrentUserAccessCodes(int $userId): array

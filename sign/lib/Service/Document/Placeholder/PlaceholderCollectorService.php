@@ -2,7 +2,6 @@
 
 namespace Bitrix\Sign\Service\Document\Placeholder;
 
-use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 use Bitrix\Sign\Config;
 use Bitrix\Sign\Helper\Field\NameHelper;
@@ -29,6 +28,9 @@ use Bitrix\Sign\Service\Integration\HumanResources\HcmLinkService;
 use Bitrix\Sign\Service\Placeholder\FieldAlias\AliasRoleResolver;
 use Bitrix\Sign\Service\Placeholder\FieldAlias\FieldAliasService;
 use Bitrix\Sign\Service\Placeholder\FieldAlias\AliasContext;
+use Bitrix\Sign\Service\Placeholder\Restriction\PlaceholderRestrictionService;
+use Bitrix\Sign\Service\Placeholder\Restriction\RestrictionPolicy;
+use Bitrix\Sign\Service\Placeholder\Restriction\ScenarioContext;
 use Bitrix\Sign\Service\Providers\InfoProvider;
 use Bitrix\Sign\Service\Providers\LegalInfoProvider;
 use Bitrix\Sign\Service\Providers\MemberDynamicFieldInfoProvider;
@@ -41,6 +43,12 @@ use Psr\Log\LoggerInterface;
 class PlaceholderCollectorService
 {
 	private const PRESET_ID = 1;
+
+	/**
+	 * The list only offers codes, so a scenario axis it cannot resolve yet restricts nothing here;
+	 * the warning before sending is the one that reads the same axes strictly.
+	 */
+	private const LIST_RESTRICTION_POLICY = RestrictionPolicy::PERMISSIVE;
 
 	private readonly LoggerInterface $logger;
 	private readonly Config\Storage $config;
@@ -60,6 +68,7 @@ class PlaceholderCollectorService
 		private readonly PlaceholderCacheService $placeholderCacheService,
 		private readonly SectionBuilder $sectionBuilder,
 		private readonly FieldAliasService $fieldAliasService,
+		private readonly PlaceholderRestrictionService $restrictionService,
 		?LoggerInterface $logger = null,
 		?Config\Storage $config = null,
 		?FieldAccessService $fieldAccessService = null,
@@ -80,6 +89,8 @@ class PlaceholderCollectorService
 	}
 
 	/**
+	 * @param bool $clearCache Skips reading the cache, so the list is rebuilt for this request only.
+	 * @param ScenarioContext|null $scenario Restricts the list to the scenario of the document; null keeps the full list.
 	 * @param bool $withDeletableMarks marks of the deletable fields (NORMATIVE ALG-B02) belong to the
 	 *                                 answer of the list; they cost the field maps of the permitted
 	 *                                 categories, so a caller that reads the codes of the fields only
@@ -88,24 +99,30 @@ class PlaceholderCollectorService
 	public function loadPlaceholdersByUserId(
 		int $userId,
 		bool $clearCache = false,
+		?ScenarioContext $scenario = null,
 		bool $withDeletableMarks = true,
 	): Result
 	{
 		$loadPlaceholdersResult = new Result();
 
-		if ($clearCache)
-		{
-			$this->placeholderCacheService->invalidateDocumentPlaceholderListCache();
-		}
+		$restrictionScenario = $this->resolveRestrictionScenario($scenario);
+		$cacheSignature = $restrictionScenario === null
+			? PlaceholderCacheService::NO_SCENARIO_SIGNATURE
+			: $this->restrictionService->getFilteredListSignature($restrictionScenario, self::LIST_RESTRICTION_POLICY)
+		;
 
-		$placeholdersFromCache = $this->placeholderCacheService->getPlaceholderList();
-		if (is_array($placeholdersFromCache))
+		if (!$clearCache)
 		{
-			return $loadPlaceholdersResult->setData(
-				$withDeletableMarks
-					? $this->markDeletableFields($placeholdersFromCache, $userId)
-					: $placeholdersFromCache,
-			);
+			$placeholdersFromCache = $this->placeholderCacheService->getPlaceholderList($cacheSignature);
+			// the entry goes on to markDeletableFields(array), so a non-array rebuilds the list
+			if (is_array($placeholdersFromCache))
+			{
+				return $loadPlaceholdersResult->setData(
+					$withDeletableMarks
+						? $this->markDeletableFields($placeholdersFromCache, $userId)
+						: $placeholdersFromCache,
+				);
+			}
 		}
 
 		$this->verifiedAliasFilterDisabled = $this->config->isPlaceholderVerifiedAliasFilterDisabled();
@@ -118,25 +135,46 @@ class PlaceholderCollectorService
 
 		$fieldsData = $fieldsDataResult->getData();
 		$placeholders = $this->createPlaceholdersFromFields($fieldsData);
-		$placeholders['externalB2eDocument'] = Application::getInstance()->getLicense()->getRegion() === 'ru'
+		$placeholders['externalB2eDocument'] = $this->areRegionalFieldsAvailable()
 			? $this->getExternalB2eDocumentPlaceholders()
 			: new PlaceholderCollection()
 		;
-		
+
+		if ($restrictionScenario !== null)
+		{
+			$placeholders = $this->restrictionService->filterSupported(
+				$placeholders,
+				$restrictionScenario,
+				self::LIST_RESTRICTION_POLICY,
+				$this->collectRawFieldTypes($fieldsData),
+			);
+		}
+
 		$placeholders = $this->convertAllPlaceholdersToAliases($placeholders);
 
 		$sections = $this->sectionBuilder->buildSections($placeholders);
-		$this->placeholderCacheService->setPlaceholderList($sections);
+		$this->placeholderCacheService->setPlaceholderList($cacheSignature, $sections);
 
 		return $loadPlaceholdersResult->setData(
 			$withDeletableMarks ? $this->markDeletableFields($sections, $userId) : $sections,
 		);
 	}
 
-	public function loadPlaceholdersByHcmLinkCompanyId(int $hcmLinkCompanyId): Result
+	public function loadPlaceholdersByHcmLinkCompanyId(
+		int $hcmLinkCompanyId,
+		?ScenarioContext $scenario = null,
+	): Result
 	{
 		$loadPlaceholdersResult = new Result();
-		$placeholdersFromCache = $this->placeholderCacheService->getPlaceholderListByHcmLinkCompanyId($hcmLinkCompanyId);
+		$restrictionScenario = $this->resolveRestrictionScenario($scenario);
+		$cacheSignature = $restrictionScenario === null
+			? PlaceholderCacheService::NO_SCENARIO_SIGNATURE
+			: $this->restrictionService->getFilteredListSignature($restrictionScenario, self::LIST_RESTRICTION_POLICY)
+		;
+		$placeholdersFromCache = $restrictionScenario === null
+			? $this->placeholderCacheService->getPlaceholderListByHcmLinkCompanyId($hcmLinkCompanyId)
+			: $this->placeholderCacheService->getPlaceholderListByHcmLinkCompanyId($hcmLinkCompanyId, $cacheSignature)
+		;
 		if ($placeholdersFromCache !== null)
 		{
 			return $loadPlaceholdersResult->setData($placeholdersFromCache);
@@ -156,6 +194,11 @@ class PlaceholderCollectorService
 		$rawFieldNames = $this->collectHcmLinkRawFieldNames($hcmLinkPlaceholders);
 		$this->fieldAliasService->preloadForFieldNames($rawFieldNames, $baseContext);
 
+		if ($restrictionScenario !== null)
+		{
+			$hcmLinkPlaceholders = $this->filterHcmLinkPlaceholders($hcmLinkPlaceholders, $restrictionScenario);
+		}
+
 		$hcmLinkPlaceholders = $this->convertHcmLinkPlaceholdersToAliases($hcmLinkPlaceholders, $baseContext);
 
 		$sections = $this->sectionBuilder->buildHcmLinkSections($hcmLinkPlaceholders);
@@ -163,10 +206,80 @@ class PlaceholderCollectorService
 
 		if (!$this->hcmLinkCollectionFullyHidden)
 		{
-			$this->placeholderCacheService->setPlaceholderListByHcmLinkCompanyId($hcmLinkCompanyId, $sections);
+			if ($restrictionScenario === null)
+			{
+				$this->placeholderCacheService->setPlaceholderListByHcmLinkCompanyId($hcmLinkCompanyId, $sections);
+			}
+			else
+			{
+				$this->placeholderCacheService->setPlaceholderListByHcmLinkCompanyId(
+					$hcmLinkCompanyId,
+					$sections,
+					$cacheSignature,
+				);
+			}
 		}
 
 		return $loadPlaceholdersResult;
+	}
+
+	private function filterHcmLinkPlaceholders(
+		HcmLinkPlaceholders $placeholders,
+		ScenarioContext $scenario,
+	): HcmLinkPlaceholders
+	{
+		return new HcmLinkPlaceholders(
+			employee: $this->filterHcmLinkCompanyCollection($placeholders->employee, $scenario),
+			representative: $this->filterHcmLinkCompanyCollection($placeholders->representative, $scenario),
+		);
+	}
+
+	private function filterHcmLinkCompanyCollection(
+		HcmLinkCompanyCollection $companies,
+		ScenarioContext $scenario,
+	): HcmLinkCompanyCollection
+	{
+		$result = new HcmLinkCompanyCollection();
+		foreach ($companies as $company)
+		{
+			$filtered = $this->restrictionService->filterSupported(
+				['items' => $company->items],
+				$scenario,
+				self::LIST_RESTRICTION_POLICY,
+			);
+			$result->add(new HcmLinkCompany(
+				$company->hcmLinkTitle,
+				$company->myCompanyTitle,
+				$filtered['items'],
+			));
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Whether the regional external fields are offered at all.
+	 *
+	 * The decision belongs to the restriction config and depends on the portal region alone, so it
+	 * holds for a scenario-less list as well; it is not the scenario filter, which cuts the built map.
+	 */
+	private function areRegionalFieldsAvailable(): bool
+	{
+		return $this->restrictionService->isRegionalFieldAvailable(ScenarioContext::fromAxes());
+	}
+
+	/**
+	 * Single decision point for scenario filtering: it keeps the applied filter and the cache
+	 * signature of the stored list from ever drifting apart.
+	 */
+	private function resolveRestrictionScenario(?ScenarioContext $scenario): ?ScenarioContext
+	{
+		if ($scenario === null || !$this->config->isPlaceholderRestrictionEnabled())
+		{
+			return null;
+		}
+
+		return $scenario;
 	}
 
 	/**
@@ -212,6 +325,26 @@ class PlaceholderCollectorService
 			'hideSmartB2eDocument' => true,
 			'presetId' => self::PRESET_ID,
 		];
+	}
+
+	/**
+	 * Raw types of the collected fields, by the code their placeholder names carry.
+	 *
+	 * Every source names its codes in its own namespace, so the map of each strategy that owns one
+	 * merges into a single map. The CRM fields need no entry: they are offered on the party of the
+	 * company representative, and no rule judges the raw type of that party.
+	 *
+	 * @return array<string, string>
+	 */
+	private function collectRawFieldTypes(array $fieldsData): array
+	{
+		$fields = $fieldsData['fields'] ?? [];
+
+		return UserFieldsPlaceholderCollectorStrategy::collectRawFieldTypes(
+			$fields[FrontFieldCategory::PROFILE->value]['FIELDS'] ?? [],
+		) + EmployeeDynamicPlaceholderCollectorStrategy::collectRawFieldTypes(
+			$fields[FrontFieldCategory::DYNAMIC_MEMBER->value]['FIELDS'] ?? [],
+		);
 	}
 
 	/**

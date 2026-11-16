@@ -22,14 +22,15 @@ class PaidTariff
 	{
 		if (Loader::includeModule('bitrix24'))
 		{
-			return \CBitrix24::isLicensePaid()
-				|| \CBitrix24::IsNfrLicense()
-				|| \CBitrix24::IsDemoLicense()
-				|| $this->isVibeDemoActive()
-			;
+			return $this->isCloudLicensePaid() || $this->isVibeDemoActive();
 		}
 
 		return !$this->license->isDemoKey();
+	}
+
+	public function isCloudLicensePaid(): bool
+	{
+		return \CBitrix24::isLicensePaid() || \CBitrix24::IsNfrLicense() || \CBitrix24::IsDemoLicense();
 	}
 
 	private function isVibeDemoActive(): bool

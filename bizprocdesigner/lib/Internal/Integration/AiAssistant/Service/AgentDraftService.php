@@ -15,6 +15,7 @@ use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\BizprocDesigner\Internal\Config\Feature;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentBlockCollection;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentConnectionCollection;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentTemplateMetadata;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\Draft;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\WorkflowTemplateIdentifier;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Enum\RequestSource;
@@ -118,6 +119,7 @@ final class AgentDraftService
 	 *        graph declare, as the validator read them (TPL-03). Empty by default, and an empty set leaves this
 	 *        method behaving exactly as it did before the parameter existed - an entry that carries no wizard node
 	 *        outside the published baseline writes the constants it always wrote.
+	 * @param AgentTemplateMetadata $templateMetadata validated fields submitted with the graph
 	 */
 	public function saveAndPush(
 		AuthorizedTemplateSubject $subject,
@@ -125,6 +127,7 @@ final class AgentDraftService
 		AgentConnectionCollection $connections,
 		RequestSource $source,
 		array $setupConstantDeclarations = [],
+		AgentTemplateMetadata $templateMetadata = new AgentTemplateMetadata(),
 	): Result
 	{
 		$identifier = $subject->toIdentifier();
@@ -138,9 +141,17 @@ final class AgentDraftService
 			connections: $connections,
 			documentType: $identifier->documentDescription->toBizprocComplexType(),
 			source: $source,
+			boundBlocks: $this->resolverService->getBoundBlocks($identifier),
 		);
 
-		$persistResult = $this->persist($identifier, $userId, $draft, $source, $setupConstantDeclarations);
+		$persistResult = $this->persist(
+			$identifier,
+			$userId,
+			$draft,
+			$source,
+			$setupConstantDeclarations,
+			$templateMetadata,
+		);
 		if (!$persistResult->isSuccess())
 		{
 			return $persistResult;
@@ -162,7 +173,7 @@ final class AgentDraftService
 			);
 		}
 
-		$this->draftCreatorService->pushDraft($draft, $persistResult->getDraftRevision());
+		$this->draftCreatorService->pushDraft($draft, $persistResult->getDraftRevision(), $templateMetadata);
 
 		return $persistResult;
 	}
@@ -176,6 +187,7 @@ final class AgentDraftService
 		Draft $draft,
 		RequestSource $source,
 		array $setupConstantDeclarations,
+		AgentTemplateMetadata $templateMetadata,
 	): SaveTemplateDraftResponse
 	{
 		$connections = array_map(
@@ -185,7 +197,13 @@ final class AgentDraftService
 
 		$converter = new NodesToTemplate($draft->blocks->toArray(), $connections);
 
-		$fields = $this->prepareFields($identifier, $userId, $source, $setupConstantDeclarations);
+		$fields = $this->prepareFields(
+			$identifier,
+			$userId,
+			$source,
+			$setupConstantDeclarations,
+			$templateMetadata,
+		);
 		$fields['DOCUMENT_TYPE'] = $identifier->documentDescription->toBizprocComplexType();
 		$fields['TEMPLATE'] = $converter->convert();
 
@@ -202,6 +220,7 @@ final class AgentDraftService
 				self::toChangeRequestSource($source),
 			),
 			useEditConflictGuard: Feature::instance()->isTemplateEditLockAvailable(),
+			fieldsToClaim: $templateMetadata->claimedFields(),
 		);
 
 		return (new WorkflowTemplateService())->saveTemplateDraft($request);
@@ -228,6 +247,7 @@ final class AgentDraftService
 		int $userId,
 		RequestSource $source,
 		array $setupConstantDeclarations,
+		AgentTemplateMetadata $templateMetadata,
 	): array
 	{
 		$fields = [
@@ -242,10 +262,21 @@ final class AgentDraftService
 
 		$published = $this->getPublishedTemplateFields((int)($identifier->templateId ?? 0));
 		$draftData = $this->resolverService->getDraftTemplateData((int)($identifier->draftId ?? 0));
+		$submitted = $templateMetadata->toTemplateFields();
+
+		$inheritedMetadata = $this->resolverService->getEffectiveMetadata($identifier);
 
 		foreach (self::META_FIELDS as $field)
 		{
-			if (isset($draftData[$field]))
+			if (isset($submitted[$field]))
+			{
+				$fields[$field] = $submitted[$field];
+			}
+			elseif (array_key_exists($field, $inheritedMetadata))
+			{
+				$fields[$field] = $inheritedMetadata[$field];
+			}
+			elseif (isset($draftData[$field]))
 			{
 				$fields[$field] = $draftData[$field];
 			}

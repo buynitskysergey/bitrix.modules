@@ -77,7 +77,7 @@ abstract class BaseCheckListService
 		int $entityId,
 		array $entityItemsFields,
 		?Entity\CheckList $existingCheckList = null,
-		bool $useBatch = false,
+		bool $useBatch = true,
 	): CheckListStatusResult
 	{
 		$ids = $this->normalizeIds($ids);
@@ -155,7 +155,7 @@ abstract class BaseCheckListService
 		?Entity\CheckList $existingCheckList,
 		bool $stopOnError,
 		?int $expectedEntityId = null,
-		bool $useBatch = false,
+		bool $useBatch = true,
 	): CheckListStatusResult
 	{
 		$entityId = $this->resolveEntityId($itemsFieldsById);

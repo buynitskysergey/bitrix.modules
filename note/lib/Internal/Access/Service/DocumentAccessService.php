@@ -19,6 +19,7 @@ use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\DocumentAccessTable;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\EventTable;
+use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 use Bitrix\Note\Infrastructure\Agent\Access\SubtreeAclReconcileScheduler;
 use Bitrix\Note\Internal\Service\Access\SubtreeAclReconciler;
@@ -42,6 +43,12 @@ final class DocumentAccessService
 	public const SCOPE_DOCUMENT = 'document';
 	public const SCOPE_SUBTREE = 'subtree';
 
+	// States of a knowledge base a caller may let through. The live state needs no name: it
+	// is always allowed. The values match the ContentState of the read contracts, which the access
+	// layer may not reference - the domain does not depend on the public surface.
+	public const STATE_ARCHIVED = 'archived';
+	public const STATE_TRASHED = 'trashed';
+
 	private const ALLOWED_LEVELS = [self::LEVEL_NONE, self::LEVEL_VIEW, self::LEVEL_EDIT];
 
 	// Single pull command for both cascade delivery paths (collection + personal channel).
@@ -57,12 +64,18 @@ final class DocumentAccessService
 	private const MAX_CODE_EXPANSION_ROWS = 20000;
 
 	private const ERROR_INVALID_SCOPE_LEVEL = 'NOTE_ACCESS_INVALID_SCOPE_LEVEL';
-	private const ERROR_SUBTREE_DISABLED = 'NOTE_ACCESS_SUBTREE_DISABLED';
 
 	private static ?array $userHasAnyGrantCache = null;
 
 	/** @var array<int, bool> request-scoped IS_MAIN cache, keyed by documentId */
 	private static array $isMainDocumentCache = [];
+
+	/**
+	 * @var array<int, array{archived: bool}|null> request-scoped state cache, keyed by
+	 *      collectionId; a null entry is a base with no row at all, remembered so a listing of old
+	 *      orphans does not re-ask for every card
+	 */
+	private static array $collectionStateCache = [];
 
 	public static function normalizeLevel(string|int|null $level): int
 	{
@@ -216,6 +229,8 @@ final class DocumentAccessService
 	 *  - sharedAccess — true when the viewer has no collection VIEW; the document is
 	 *    reachable only via a document-level grant.
 	 *
+	 * @param string[] $allowStates self::STATE_* of the knowledge base the caller lets
+	 *        through on top of the live state; the default is closed
 	 * @return array{
 	 *   canViewCollection: bool,
 	 *   canEditCollection: bool,
@@ -225,8 +240,28 @@ final class DocumentAccessService
 	 *   sharedAccess: bool,
 	 * }
 	 */
-	public static function getCurrentUserSnapshot(int $documentId, int $collectionId, bool $isArchived = false): array
+	public static function getCurrentUserSnapshot(
+		int $documentId,
+		int $collectionId,
+		bool $isArchived = false,
+		array $allowStates = [],
+	): array
 	{
+		// The state is checked before the administrator bypass: the bypass is a bypass of the
+		// access level, and the state closes access in a layer of its own. Otherwise "closed by
+		// default" would hold for everyone but the administrator.
+		if (!self::collectionStateAllowed($collectionId, $allowStates))
+		{
+			return [
+				'canViewCollection' => false,
+				'canEditCollection' => false,
+				'canManagePermissions' => false,
+				'canView' => false,
+				'canEdit' => false,
+				'sharedAccess' => true,
+			];
+		}
+
 		if (PortalAdmin::isCurrentUserAdmin())
 		{
 			return [
@@ -297,6 +332,15 @@ final class DocumentAccessService
 			return false;
 		}
 
+		// The state of the base closes writing for everybody, the administrator included, and it is
+		// checked before the bypass for the same reason as in getCurrentUserSnapshot: the bypass is a
+		// bypass of the level, and the state is a layer of its own. An archived base takes no writes,
+		// whatever level the writer holds on it.
+		if ($requiredLevel >= self::LEVEL_EDIT && !self::collectionStateAllowed($collectionId, []))
+		{
+			return false;
+		}
+
 		if (PortalAdmin::isAdmin($userId))
 		{
 			return true;
@@ -311,6 +355,29 @@ final class DocumentAccessService
 		}
 
 		return max($levels['collection'], $levels['document']) >= $requiredLevel;
+	}
+
+	/**
+	 * Read access to the content of a document with the state of its base taken into account.
+	 *
+	 * A base in the recycle bin is governed as a whole by one right, and it is not the right to read:
+	 * deleting a base no longer takes its ACL rows away, so a VIEW left there must open nothing.
+	 * Every surface that serves the content of a document - versions, attachments, collaborative
+	 * editing - asks this instead of a bare level.
+	 */
+	public static function canViewDocumentContent(int $documentId, int $collectionId, int $userId): bool
+	{
+		if (!self::isCollectionAlive($collectionId))
+		{
+			return self::canManageCollectionInRecycleBin($userId, $collectionId);
+		}
+
+		return self::userHasLevel($documentId, $collectionId, $userId, self::LEVEL_VIEW);
+	}
+
+	public static function currentUserCanViewDocumentContent(int $documentId, int $collectionId): bool
+	{
+		return self::canViewDocumentContent($documentId, $collectionId, (int)CurrentUser::get()->getId());
 	}
 
 	/**
@@ -431,24 +498,6 @@ final class DocumentAccessService
 
 		$oldExplicit = self::fetchGrantsBySource($documentId, self::SOURCE_NONE);
 		$oldMarkers = self::fetchGrantsBySource($documentId, $documentId);
-
-		// Creating a NEW subtree grant (a marker where the subject had none) is gated by the flag.
-		// Keeping, re-levelling or revoking an existing marker stays always-on.
-		if (!empty($subtreeGrants) && !Configuration::isSubtreeInheritanceEnabled())
-		{
-			foreach ($subtreeGrants as $subjectCode => $level)
-			{
-				if (!isset($oldMarkers[$subjectCode]))
-				{
-					$result->addError(new \Bitrix\Main\Error(
-						'Subtree inheritance is not available',
-						self::ERROR_SUBTREE_DISABLED,
-					));
-
-					return $result;
-				}
-			}
-		}
 
 		ksort($documentGrants);
 		ksort($subtreeGrants);
@@ -1330,6 +1379,18 @@ final class DocumentAccessService
 	public static function clearRequestCache(): void
 	{
 		self::$userHasAnyGrantCache = null;
+		self::$collectionStateCache = [];
+		self::$isMainDocumentCache = [];
+	}
+
+	/**
+	 * The state of one knowledge base is resolved once per request. A request that changes it has to
+	 * say so, or everything asked afterwards answers by the state the base had at the start: a REST
+	 * batch that deletes a base and then writes into it is a single request.
+	 */
+	public static function forgetCollectionState(int $collectionId): void
+	{
+		unset(self::$collectionStateCache[$collectionId]);
 	}
 
 	/**
@@ -1462,6 +1523,45 @@ final class DocumentAccessService
 	}
 
 	/**
+	 * Which of these documents the viewer holds a grant of their own on.
+	 *
+	 * Asked by the surfaces that draw something ABOUT a document the viewer reached without holding
+	 * its knowledge base - the path above a search hit, first of all. A grant is inherited downwards,
+	 * so the answer over a chain of ancestors is its lower part, and the part above it is what the
+	 * viewer is not allowed to learn the names of.
+	 *
+	 * @param int[] $documentIds
+	 * @param string[] $codesPersonal access codes without '*'
+	 * @return array<int, true> the granted ids, as a lookup
+	 */
+	public static function filterGrantedDocumentIds(array $documentIds, array $codesPersonal): array
+	{
+		$documentIds = array_values(array_unique(array_filter(
+			array_map('intval', $documentIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+		if (empty($documentIds) || empty($codesPersonal))
+		{
+			return [];
+		}
+
+		$rows = DocumentTable::query()
+			->setSelect(['ID'])
+			->whereIn('ID', $documentIds)
+			->where(self::buildDocumentGrantFilter('ID', $codesPersonal))
+			->fetchAll()
+		;
+
+		$granted = [];
+		foreach ($rows as $row)
+		{
+			$granted[(int)$row['ID']] = true;
+		}
+
+		return $granted;
+	}
+
+	/**
 	 * Full visibility predicate of a LISTING: the document-grant core above OR the
 	 * collection-VIEW branch. This is what list queries put in their WHERE instead of fetching a
 	 * window and dropping rows in PHP afterwards; the caller supplies the two field names of its
@@ -1477,7 +1577,7 @@ final class DocumentAccessService
 	 * given an empty array, so calling the core with no personal codes would silently drop the
 	 * SUBJECT_CODE restriction inside its sub-queries and turn the predicate into "anything anyone
 	 * was ever granted". Both branches are therefore added only when they have input, and a
-	 * predicate with no branches at all must be false rather than empty — an empty ConditionTree
+	 * predicate with no branches at all must be false rather than empty - an empty ConditionTree
 	 * means "no conditions", i.e. everything. The PHP path this replaces behaves the same way
 	 * ({@see batchGetEffectiveLevels()} yields no levels without codes).
 	 *
@@ -1485,16 +1585,25 @@ final class DocumentAccessService
 	 * admin may see is a per-surface decision (backlinks and favorites show everything, /shared/
 	 * shows nothing).
 	 *
+	 * The state of the knowledge base gates the whole predicate and is not part of its OR:
+	 * a personal grant on a document is worthless once the base it lives in is gone. Deletion no
+	 * longer removes the base row, so it is the state gate below - not the missing row - that makes
+	 * the grant worthless while the base is in the recycle bin.
+	 * The allowance is the caller's decision and the default is closed - a surface whose job is to
+	 * show archived content asks for it by name.
+	 *
 	 * @param string $documentField document-id field of the OUTER query
 	 * @param string $collectionField collection-id field of the OUTER query
 	 * @param string[] $codesPersonal access codes without '*'
 	 * @param int[] $accessibleCollectionIds collections the user holds VIEW+ on
+	 * @param string[] $allowStates self::STATE_* the caller lets through on top of the live state
 	 */
 	public static function buildListVisibilityFilter(
 		string $documentField,
 		string $collectionField,
 		array $codesPersonal,
 		array $accessibleCollectionIds,
+		array $allowStates = [],
 	): ConditionTree
 	{
 		$filter = Query::filter()->logic('or');
@@ -1519,7 +1628,184 @@ final class DocumentAccessService
 			return Query::filter()->where($documentField, '<', 0);
 		}
 
-		return $filter;
+		$stateGate = self::buildCollectionStateFilter($collectionField, $allowStates);
+
+		return $stateGate === null
+			? $filter
+			: Query::filter()->where($filter)->where($stateGate)
+		;
+	}
+
+	/**
+	 * The state half of the predicate: knowledge bases the caller lets through, as a
+	 * sub-query rather than a list of ids - the set is bounded by the portal, not by the page, and
+	 * the columns it reads are indexed.
+	 *
+	 * Public because not every list is built through {@see buildListVisibilityFilter()}: the search
+	 * assembles its own ACL condition over the index table and needs the same gate on top of it.
+	 *
+	 * @param string[] $allowStates
+	 * @return ConditionTree|null null when every state is allowed and the gate is a no-op
+	 */
+	public static function buildCollectionStateFilter(string $collectionField, array $allowStates): ?ConditionTree
+	{
+		$allowArchived = in_array(self::STATE_ARCHIVED, $allowStates, true);
+		$allowTrashed = in_array(self::STATE_TRASHED, $allowStates, true);
+		if ($allowArchived && $allowTrashed)
+		{
+			return null;
+		}
+
+		$subQuery = CollectionTable::query()->setSelect(['ID']);
+		if (!$allowArchived)
+		{
+			$subQuery->where('IS_ARCHIVED', 'N');
+		}
+		if (!$allowTrashed)
+		{
+			$subQuery->whereNull('TRASHED_AT');
+		}
+
+		return Query::filter()->whereIn($collectionField, $subQuery);
+	}
+
+	/**
+	 * The same gate for a single knowledge base. A base that does not exist is not a state
+	 * and is left to the caller: "no row" and "deleted" stopped being the same thing.
+	 *
+	 * The recycle bin is closed by default just like the archive: a base lying there keeps its row
+	 * and its ACL, so without this branch every grant would keep working inside a deleted base.
+	 *
+	 * @param string[] $allowStates
+	 */
+	public static function collectionStateAllowed(int $collectionId, array $allowStates): bool
+	{
+		if ($collectionId <= 0)
+		{
+			return true;
+		}
+
+		$state = self::resolveCollectionState($collectionId);
+		if ($state === null)
+		{
+			return true;
+		}
+
+		if ($state['archived'] && !in_array(self::STATE_ARCHIVED, $allowStates, true))
+		{
+			return false;
+		}
+
+		return !$state['trashed'] || in_array(self::STATE_TRASHED, $allowStates, true);
+	}
+
+	/**
+	 * States of many knowledge bases in one read, for a caller that is about to ask the gate above
+	 * about each of them. The gate itself reads a base at a time - which is right for one document
+	 * and wrong for a page of sections, where it turned into a query per base.
+	 *
+	 * @param int[] $collectionIds
+	 */
+	public static function primeCollectionStates(array $collectionIds): void
+	{
+		$missing = [];
+		foreach ($collectionIds as $id)
+		{
+			$id = (int)$id;
+			if ($id > 0 && !array_key_exists($id, self::$collectionStateCache))
+			{
+				$missing[$id] = true;
+			}
+		}
+		if (empty($missing))
+		{
+			return;
+		}
+
+		$rows = CollectionTable::query()
+			->setSelect(['ID', 'IS_ARCHIVED', 'TRASHED_AT'])
+			->whereIn('ID', array_keys($missing))
+			->fetchAll()
+		;
+		foreach ($rows as $row)
+		{
+			$id = (int)$row['ID'];
+			unset($missing[$id]);
+			self::$collectionStateCache[$id] = self::stateRow($row);
+		}
+		// A base with no row is remembered as such: otherwise the gate would read it again, one
+		// query per base, which is what this method exists to avoid.
+		foreach (array_keys($missing) as $id)
+		{
+			self::$collectionStateCache[$id] = null;
+		}
+	}
+
+	/**
+	 * @return array{archived: bool, trashed: bool}|null null when there is no such knowledge base
+	 */
+	private static function resolveCollectionState(int $collectionId): ?array
+	{
+		if (array_key_exists($collectionId, self::$collectionStateCache))
+		{
+			return self::$collectionStateCache[$collectionId];
+		}
+
+		$row = CollectionTable::query()
+			->setSelect(['ID', 'IS_ARCHIVED', 'TRASHED_AT'])
+			->where('ID', $collectionId)
+			->setLimit(1)
+			->fetch()
+		;
+		if ($row === false)
+		{
+			return self::$collectionStateCache[$collectionId] = null;
+		}
+
+		return self::$collectionStateCache[$collectionId] = self::stateRow($row);
+	}
+
+	/**
+	 * @param array<string, mixed> $row
+	 * @return array{archived: bool, trashed: bool}
+	 */
+	private static function stateRow(array $row): array
+	{
+		return [
+			'archived' => ($row['IS_ARCHIVED'] ?? 'N') === 'Y',
+			'trashed' => ($row['TRASHED_AT'] ?? null) !== null,
+		];
+	}
+
+	/**
+	 * State of one knowledge base, read once per request. The gates above answer yes or no; this is
+	 * for a caller that has to tell live from archived and from trashed.
+	 *
+	 * @return array{archived: bool, trashed: bool}|null null when there is no such knowledge base
+	 */
+	public static function collectionState(int $collectionId): ?array
+	{
+		return $collectionId > 0 ? self::resolveCollectionState($collectionId) : null;
+	}
+
+	/**
+	 * Whether the knowledge base is there to be worked with at all: the row is present and the base
+	 * is not in the recycle bin. Replaces the presence check everywhere presence used to mean
+	 * exactly this - deletion no longer takes the row away.
+	 *
+	 * A caller that has to tell a base that never existed from a deleted one asks
+	 * {@see collectionState()} instead: that difference is what an orphan is.
+	 */
+	public static function isCollectionAlive(int $collectionId): bool
+	{
+		if ($collectionId <= 0)
+		{
+			return false;
+		}
+
+		$state = self::resolveCollectionState($collectionId);
+
+		return $state !== null && !$state['trashed'];
 	}
 
 	/**
@@ -1538,12 +1824,36 @@ final class DocumentAccessService
 	}
 
 	/**
+	 * Codes the stream of personal grants of the document list runs on, resolved in one place
+	 * because two callers deciding it apart is how one surface starts answering what another hides.
+	 *
+	 * Empty for a portal administrator: every base is theirs already, so the stream would name the
+	 * same documents the stream of bases has just named - the same reason /shared/ is empty for
+	 * them ({@see listSharedWithMeIds()}).
+	 *
+	 * @return string[]
+	 */
+	public static function personalGrantStreamCodes(int $userId): array
+	{
+		if ($userId <= 0 || self::isPortalAdmin($userId))
+		{
+			return [];
+		}
+
+		return self::personalCodes(CollectionAccessService::buildUserAccessCodes($userId));
+	}
+
+	/**
 	 * Collections of the given level map the user may read. Feeds the $accessibleCollectionIds
 	 * argument above.
 	 *
 	 * Lives next to the predicate rather than in each caller: the VIEW threshold is what decides
 	 * whether a whole knowledge base shows up in a list, and two copies of it would eventually be
 	 * raised in one place only.
+	 *
+	 * A base in the recycle bin drops out here and not in the level map: the map has to keep saying
+	 * that the user still moderates it, because that is what the card of the base in the bin is
+	 * granted by. The recycle-bin paths therefore take the map directly and skip this method.
 	 *
 	 * @param array<int|string, int|string> $collectionLevels collectionId => effective level, as
 	 *        {@see CollectionAccessService::getAllUserLevels()} returns under 'effective'
@@ -1560,7 +1870,14 @@ final class DocumentAccessService
 			}
 		}
 
-		return $ids;
+		if (empty($ids))
+		{
+			return [];
+		}
+
+		$trashed = array_flip((new CollectionRepository())->filterTrashedIds($ids));
+
+		return array_values(array_filter($ids, static fn(int $id): bool => !isset($trashed[$id])));
 	}
 
 	/**
@@ -1587,13 +1904,7 @@ final class DocumentAccessService
 		if (!$isAdmin)
 		{
 			$collectionLevels = CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [];
-			foreach ($collectionLevels as $cid => $level)
-			{
-				if ((int)$level >= CollectionAccessService::LEVEL_VIEW)
-				{
-					$accessibleCollectionIds[] = (int)$cid;
-				}
-			}
+			$accessibleCollectionIds = self::accessibleCollectionIds($collectionLevels);
 
 			if (empty($codesPersonal) && empty($accessibleCollectionIds))
 			{
@@ -1606,6 +1917,9 @@ final class DocumentAccessService
 			->where('IS_ARCHIVED', 'Y')
 			->whereNotNull('ARCHIVED_AT')
 			->whereNull('RECYCLE_BIN.ID')
+			// The archive of a base in the bin went to the bin with it; the gate also closes the
+			// personal-grant branch below, which the id list alone would leave open.
+			->where(self::buildCollectionStateFilter('COLLECTION_ID', [self::STATE_ARCHIVED]))
 		;
 
 		if (!$isAdmin)
@@ -1691,12 +2005,15 @@ final class DocumentAccessService
 			return [];
 		}
 
+		$stateGate = self::buildCollectionStateFilter('COLLECTION_ID', [self::STATE_ARCHIVED]);
+
 		if (PortalAdmin::isAdmin($userId))
 		{
 			$rows = DocumentTable::query()
 				->setSelect(['ID'])
 				->where('IS_ARCHIVED', 'Y')
 				->whereNull('RECYCLE_BIN.ID')
+				->where($stateGate)
 				->fetchAll()
 			;
 
@@ -1725,6 +2042,7 @@ final class DocumentAccessService
 			->where('IS_ARCHIVED', 'Y')
 			->whereIn('COLLECTION_ID', $manageCollectionIds)
 			->whereNull('RECYCLE_BIN.ID')
+			->where($stateGate)
 			->fetchAll()
 		;
 
@@ -1758,6 +2076,8 @@ final class DocumentAccessService
 
 		$isAdmin = self::isPortalAdmin($userId);
 
+		// Raw on purpose: {@see accessibleCollectionIds()} drops bases that are in the bin, which is
+		// what every other listing needs and the one thing the bin itself must not do.
 		$accessibleCollectionIds = [];
 		if (!$isAdmin)
 		{
@@ -1795,9 +2115,14 @@ final class DocumentAccessService
 	 * Visibility gate for trashed documents (controller getAction, mapping).
 	 * Aligned with listVisible:
 	 *   - admin → true
-	 *   - source collection alive → user must have VIEW+ on it (authorship/trashedBy alone
+	 *   - the base of the document is live -> user must have VIEW+ on it (authorship/trashedBy alone
 	 *     is not enough; revoking VIEW must hide the trashed document)
-	 *   - source collection gone (orphan) → trashedBy or document.createdBy may see it.
+	 *   - the base itself is in the bin -> MODERATE+ on it, the single right that governs the base
+	 *     as a whole; a grant on one document inside it, and authorship of it, grant nothing
+	 *   - no base at all (orphan) -> trashedBy or document.createdBy may see it.
+	 *
+	 * "No row" is the only orphan there is: a base in the bin keeps its row, so a document either
+	 * has a base - live, archived or trashed - or has none at all.
 	 */
 	public static function canViewInRecycleBin(int $userId, RecycleBinRecord $record): bool
 	{
@@ -1818,17 +2143,21 @@ final class DocumentAccessService
 		}
 
 		$collectionId = $meta['collectionId'];
-		$collectionAlive = $collectionId > 0 && self::collectionExists($collectionId);
+		$state = self::collectionState($collectionId);
 
-		if (!$collectionAlive)
+		if ($state === null)
 		{
 			return $record->getTrashedBy() === $userId || $meta['createdBy'] === $userId;
 		}
 
 		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
 		$levels = CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [];
+		$threshold = $state['trashed']
+			? CollectionAccessService::LEVEL_MODERATE
+			: CollectionAccessService::LEVEL_VIEW
+		;
 
-		return ((int)($levels[$collectionId] ?? 0)) >= CollectionAccessService::LEVEL_VIEW;
+		return ((int)($levels[$collectionId] ?? 0)) >= $threshold;
 	}
 
 	public static function canRestoreFromRecycleBin(int $userId, RecycleBinRecord $record): bool
@@ -1850,11 +2179,20 @@ final class DocumentAccessService
 		}
 
 		$collectionId = $meta['collectionId'];
-		if ($collectionId <= 0 || !self::collectionExists($collectionId))
+		$state = self::collectionState($collectionId);
+		if ($state === null)
 		{
-			// orphan: only the user who trashed it or the document author may restore
+			// orphan - no base at all: only the user who trashed it or the document author may restore
 			// (target collection is picked separately and re-validated for MANAGE)
 			return $record->getTrashedBy() === $userId || $meta['createdBy'] === $userId;
+		}
+
+		// A document of a base in the bin does not come back on its own: the base is restored whole,
+		// and a document pulled out of it now would be missing from the restored base. The service
+		// refuses such a restore, so nothing offers it.
+		if ($state['trashed'])
+		{
+			return false;
 		}
 
 		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
@@ -1870,27 +2208,68 @@ final class DocumentAccessService
 			return false;
 		}
 
-		if (self::isPortalAdmin($userId))
-		{
-			return true;
-		}
+		$isAdmin = self::isPortalAdmin($userId);
 
 		$meta = self::resolveDocumentMeta($record->getDocumentId());
 		if ($meta === null)
 		{
-			return false;
+			return $isAdmin;
 		}
 
 		$collectionId = $meta['collectionId'];
-		if ($collectionId <= 0 || !self::collectionExists($collectionId))
+		$state = self::collectionState($collectionId);
+		if ($state === null)
 		{
-			return $record->getTrashedBy() === $userId;
+			return $isAdmin || $record->getTrashedBy() === $userId;
+		}
+
+		if ($state['trashed'])
+		{
+			// A base in the bin is taken away whole, by its own action: a document deleted for good
+			// out of it now would be missing from the base restored later (AC-005, AC-015).
+			return false;
+		}
+
+		if ($isAdmin)
+		{
+			return true;
 		}
 
 		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
 		$levels = CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [];
 
 		return ((int)($levels[$collectionId] ?? 0)) >= CollectionAccessService::LEVEL_MANAGE;
+	}
+
+	/**
+	 * The one right that governs a knowledge base lying in the recycle bin: seeing its card, opening
+	 * it, restoring it and deleting it for good are the same decision, taken on the base as a whole
+	 * (unlike a single trashed document, where viewing and restoring part ways). The level map is
+	 * read raw on purpose - the base is out of {@see accessibleCollectionIds()} exactly while this
+	 * question is worth asking.
+	 */
+	public static function canManageCollectionInRecycleBin(int $userId, int $collectionId): bool
+	{
+		if ($userId <= 0 || $collectionId <= 0)
+		{
+			return false;
+		}
+
+		$state = self::collectionState($collectionId);
+		if ($state === null || !$state['trashed'])
+		{
+			return false;
+		}
+
+		if (self::isPortalAdmin($userId))
+		{
+			return true;
+		}
+
+		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
+		$levels = CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [];
+
+		return ((int)($levels[$collectionId] ?? 0)) >= CollectionAccessService::LEVEL_MODERATE;
 	}
 
 	/**
@@ -1908,16 +2287,10 @@ final class DocumentAccessService
 			return [];
 		}
 
-		if (self::isPortalAdmin($userId))
-		{
-			$out = [];
-			foreach ($records as $record)
-			{
-				$out[(int)$record->getId()] = ['canView' => true, 'canRestore' => true, 'canHardDelete' => true];
-			}
-
-			return $out;
-		}
+		// The admin bypasses the levels, not the state of the base: a document inside a base lying in
+		// the bin answers by the same rules for everyone, or the interface would draw an action the
+		// service refuses.
+		$isAdmin = self::isPortalAdmin($userId);
 
 		$documentIds = [];
 		foreach ($records as $record)
@@ -1950,21 +2323,14 @@ final class DocumentAccessService
 			}
 		}
 
-		$aliveCollections = [];
-		if (!empty($collectionIds))
-		{
-			$rows = CollectionTable::query()
-				->setSelect(['ID'])
-				->whereIn('ID', array_keys($collectionIds))
-				->exec();
-			while ($row = $rows->fetch())
-			{
-				$aliveCollections[(int)$row['ID']] = true;
-			}
-		}
+		$collectionStates = (new CollectionRepository())->getStatesByIds(array_keys($collectionIds));
 
-		$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
-		$levels = CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [];
+		$levels = [];
+		if (!$isAdmin)
+		{
+			$accessCodes = CollectionAccessService::buildUserAccessCodes($userId);
+			$levels = CollectionAccessService::getAllUserLevels($accessCodes)['effective'] ?? [];
+		}
 
 		$out = [];
 		foreach ($records as $record)
@@ -1976,27 +2342,48 @@ final class DocumentAccessService
 
 			if ($meta === null)
 			{
-				$out[$recordId] = ['canView' => false, 'canRestore' => false, 'canHardDelete' => false];
+				$out[$recordId] = $isAdmin
+					? ['canView' => true, 'canRestore' => true, 'canHardDelete' => true]
+					: ['canView' => false, 'canRestore' => false, 'canHardDelete' => false]
+				;
 
 				continue;
 			}
 
 			$collectionId = $meta['collectionId'];
 			$createdBy = $meta['createdBy'];
-			$alive = $collectionId > 0 && isset($aliveCollections[$collectionId]);
-			$level = $alive ? (int)($levels[$collectionId] ?? 0) : 0;
+			// Presence of the base, not its archived state: an archived base still owns its
+			// documents; only a base gone from the table turns them into orphans.
+			$hasCollection = $collectionId > 0 && isset($collectionStates[$collectionId]);
+			$isTrashedCollection = $hasCollection && $collectionStates[$collectionId]['isTrashed'];
+			$level = $hasCollection ? (int)($levels[$collectionId] ?? 0) : 0;
 
-			$canView = $alive
+			if ($isTrashedCollection)
+			{
+				// Single-threshold branch, the same one the card of the base answers by. Neither
+				// restoring nor deleting for good is among them: the base goes back, and away, whole,
+				// so a document pulled out of it now would be missing from it afterwards. Both
+				// actions belong to the base itself (AC-005, AC-015).
+				$out[$recordId] = [
+					'canView' => $isAdmin || $level >= CollectionAccessService::LEVEL_MODERATE,
+					'canRestore' => false,
+					'canHardDelete' => false,
+				];
+
+				continue;
+			}
+
+			$canView = $isAdmin || ($hasCollection
 				? $level >= CollectionAccessService::LEVEL_VIEW
-				: ($trashedBy === $userId || $createdBy === $userId);
+				: ($trashedBy === $userId || $createdBy === $userId));
 
-			$canRestore = $alive
+			$canRestore = $isAdmin || ($hasCollection
 				? $level >= CollectionAccessService::LEVEL_MANAGE
-				: ($trashedBy === $userId || $createdBy === $userId);
+				: ($trashedBy === $userId || $createdBy === $userId));
 
-			$canHardDelete = $alive
+			$canHardDelete = $isAdmin || ($hasCollection
 				? $level >= CollectionAccessService::LEVEL_MANAGE
-				: $trashedBy === $userId;
+				: $trashedBy === $userId);
 
 			$out[$recordId] = [
 				'canView' => $canView,
@@ -2040,22 +2427,6 @@ final class DocumentAccessService
 			'collectionId' => (int)($row['COLLECTION_ID'] ?? 0),
 			'createdBy' => (int)($row['CREATED_BY'] ?? 0),
 		];
-	}
-
-	private static function collectionExists(int $collectionId): bool
-	{
-		if ($collectionId <= 0)
-		{
-			return false;
-		}
-
-		$row = \Bitrix\Note\Internal\Model\CollectionTable::query()
-			->setSelect(['ID'])
-			->where('ID', $collectionId)
-			->setLimit(1)
-			->fetch();
-
-		return $row !== false;
 	}
 
 }

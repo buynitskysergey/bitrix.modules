@@ -7,6 +7,7 @@ namespace Bitrix\Note\Public\Command;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
 use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
@@ -21,6 +22,7 @@ use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 use Bitrix\Note\Internal\Service\History\EventLogService;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
+use Bitrix\Note\Internal\Enum\WriteSource;
 use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 
 class MoveDocumentCommand extends AbstractCommand
@@ -36,8 +38,16 @@ class MoveDocumentCommand extends AbstractCommand
 	private readonly PushNotificationService $pushService;
 	private readonly DomainEventPublisher $eventPublisher;
 	private readonly EventLogService $eventLogService;
+	private readonly WriteSource $writeSource;
+	private readonly bool $checkRights;
 	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
 
+	/**
+	 * @param WriteSource $writeSource Reaches the lifecycle event and nothing else.
+	 * @param bool $checkRights Reaches the position service and nothing else; false lifts both
+	 *                          barriers of the write path (CMD-02). The flags are independent:
+	 *                          a workflow write with rights checked is a valid combination.
+	 */
 	public function __construct(
 		int $id,
 		int $collectionId,
@@ -50,6 +60,8 @@ class MoveDocumentCommand extends AbstractCommand
 		?PushNotificationService $pushService = null,
 		?DomainEventPublisher $eventPublisher = null,
 		?EventLogService $eventLogService = null,
+		WriteSource $writeSource = WriteSource::User,
+		bool $checkRights = true,
 		?BacklinkLifecycleNotifier $backlinkNotifier = null,
 	)
 	{
@@ -64,6 +76,8 @@ class MoveDocumentCommand extends AbstractCommand
 		$this->pushService = $pushService ?? new PushNotificationService();
 		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
 		$this->eventLogService = $eventLogService ?? new EventLogService();
+		$this->writeSource = $writeSource;
+		$this->checkRights = $checkRights;
 		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
 	}
 
@@ -87,11 +101,22 @@ class MoveDocumentCommand extends AbstractCommand
 			throw new DocumentArchivedException();
 		}
 
+		// The state of the receiving knowledge base, not only the archivedness of the document
+		// and of the new parent: a move is a write into the base it lands in.
+		CollectionAccessService::assertCollectionAcceptsWrites($this->collectionId);
+
 		// Uncached pre-move snapshot of the source location so the domain event's "from" is reliable
 		// (the cached getById above may be stale, which could otherwise drop the move event).
 		$sourceLocation = $this->repository->getLocationById($this->id);
 		$sourceCollectionId = $sourceLocation['collectionId'] ?? null;
 		$sourceParentId = $sourceLocation['parentId'] ?? null;
+
+		// A move is a write into the base it leaves as well: an archived source base is read-only
+		// too, so taking a document out of it is blocked the same as moving one in.
+		if ($sourceCollectionId !== null && (int)$sourceCollectionId !== $this->collectionId)
+		{
+			CollectionAccessService::assertCollectionAcceptsWrites((int)$sourceCollectionId);
+		}
 
 		if ($this->parentId !== null)
 		{
@@ -120,6 +145,7 @@ class MoveDocumentCommand extends AbstractCommand
 			$this->parentId,
 			$this->position,
 			$this->userId,
+			$this->checkRights,
 		);
 		if (!$result->isSuccess())
 		{
@@ -318,6 +344,8 @@ class MoveDocumentCommand extends AbstractCommand
 			$subtreeIds,
 			['collectionId' => $sourceCollectionId, 'parentId' => $sourceParentId],
 			['collectionId' => $targetCollectionId, 'parentId' => $targetParentId],
+			initiatorId: $this->userId,
+			writeSource: $this->writeSource,
 		);
 	}
 

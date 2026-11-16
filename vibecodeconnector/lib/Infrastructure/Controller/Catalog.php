@@ -605,7 +605,7 @@ final class Catalog extends Controller
 		if (!$this->itemRepository->isAccessibleToUser(
 			$catalogItemId,
 			$userId,
-			$this->accessCodes->getUserCodes($userId),
+			$this->accessCodes->getUserCodesForItems($userId, [$catalogItemId]),
 		))
 		{
 			throw new AccessDeniedException('User has no access to this catalog item');
@@ -658,7 +658,7 @@ final class Catalog extends Controller
 		if (!$this->itemRepository->isAccessibleToUser(
 			$catalogItemId,
 			$userId,
-			$this->accessCodes->getUserCodes($userId),
+			$this->accessCodes->getUserCodesForItems($userId, [$catalogItemId]),
 		))
 		{
 			throw new AccessDeniedException('User has no access to this catalog item');
@@ -681,7 +681,7 @@ final class Catalog extends Controller
 		if (!$this->itemRepository->isAccessibleToUser(
 			$catalogItemId,
 			$userId,
-			$this->accessCodes->getUserCodes($userId),
+			$this->accessCodes->getUserCodesForItems($userId, [$catalogItemId]),
 		))
 		{
 			throw new AccessDeniedException('User has no access to this catalog item');
@@ -748,7 +748,7 @@ final class Catalog extends Controller
 	): AjaxJson
 	{
 		$userId = (int)$currentUser->getId();
-		$userCodes = $this->accessCodes->getUserCodes($userId);
+		$userCodes = $this->accessCodes->getUserCodesForItems($userId, [$catalogItemId]);
 
 		if (!$this->itemRepository->isAccessibleToUser(
 			$catalogItemId,

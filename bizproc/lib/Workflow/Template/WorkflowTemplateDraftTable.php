@@ -106,11 +106,19 @@ class WorkflowTemplateDraftTable extends DataManager
 	 * The freshest draft of the template together with its configuration. Only for callers that really read
 	 * the configuration: it is stored as one blob and is the heaviest column of the table.
 	 *
-	 * @return array<string, mixed>|null null when the template has no draft
+	 * @param int|null $userId narrows the search to the drafts of one user, the way a caller working on behalf
+	 *        of one person needs it: with the editing lock off a template holds a draft per user, and its
+	 *        freshest draft belongs to whoever wrote last, not to the person asking
+	 *
+	 * @return array<string, mixed>|null null when the template has no such draft
 	 */
-	public static function getLatestDraftWithDataByTemplateId(int $templateId): ?array
+	public static function getLatestDraftWithDataByTemplateId(int $templateId, ?int $userId = null): ?array
 	{
-		return static::selectLatestDraft($templateId, ['ID', 'STATUS', 'REVISION', 'TEMPLATE_DATA', 'CREATED']);
+		return static::selectLatestDraft(
+			$templateId,
+			['ID', 'STATUS', 'REVISION', 'TEMPLATE_DATA', 'CREATED'],
+			$userId,
+		);
 	}
 
 	/**
@@ -159,11 +167,19 @@ class WorkflowTemplateDraftTable extends DataManager
 		;
 	}
 
-	private static function selectLatestDraft(int $templateId, array $select): ?array
+	private static function selectLatestDraft(int $templateId, array $select, ?int $userId = null): ?array
 	{
-		$row = static::query()
+		$query = static::query()
 			->setSelect($select)
 			->where('TEMPLATE_ID', $templateId)
+		;
+
+		if ($userId !== null)
+		{
+			$query->where('USER_ID', $userId);
+		}
+
+		$row = $query
 			->setOrder(['CREATED' => 'DESC', 'ID' => 'DESC'])
 			->setLimit(1)
 			->fetch()

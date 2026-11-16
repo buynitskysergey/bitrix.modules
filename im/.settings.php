@@ -1,6 +1,12 @@
 <?php
 
 return [
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Im\\Public\\Features',
+		],
+		'readonly' => true,
+	],
 	'controllers' => [
 		'value' => [
 			'namespaces' => [
@@ -33,6 +39,12 @@ return [
 			],
 			'Im.AccessService' => [
 				'className' => \Bitrix\Im\V2\Service\AccessService::class,
+			],
+			\Bitrix\Im\V2\Public\Provider\Copilot\AnswerProvider::class => [
+				'className' => \Bitrix\Im\V2\Public\Provider\Copilot\AnswerProvider::class,
+				'constructorParams' => static function (): array {
+					return [\Bitrix\Im\V2\Integration\AI\AIHelper::getExistingCopilotBotId()];
+				},
 			],
 			'Im.GuestInviteSmsTransport' => [
 				'className' => \Bitrix\Im\V2\SharingLink\Transport\DefaultGuestInviteSmsTransport::class,

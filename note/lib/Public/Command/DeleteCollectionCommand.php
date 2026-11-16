@@ -9,18 +9,16 @@ use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
 use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
 use Bitrix\Note\Internal\Service\DomainEventPublisher;
+use Bitrix\Note\Internal\Service\ExternalAccess\ExternalAccessLifecycleService;
+use Bitrix\Note\Internal\Service\ExternalAccess\RevokePullService;
 use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
-use Bitrix\Note\Internal\Repository\DocumentRepository;
-use Bitrix\Note\Internal\Repository\FavoriteRepository;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Import\CollectionImportLockService;
-use Bitrix\Note\Internal\Service\RecycleBin\HardDeleteService;
 use Bitrix\Note\Internal\Service\RecycleBin\MoveToRecycleBinService;
-use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 
 class DeleteCollectionCommand extends AbstractCommand
 {
@@ -28,15 +26,13 @@ class DeleteCollectionCommand extends AbstractCommand
 	private readonly int $userId;
 	private readonly CollectionRepository $collectionRepository;
 	private readonly MoveToRecycleBinService $moveService;
-	private readonly SearchIndexService $searchIndexService;
 	private readonly CollectionImportLockService $importLockService;
 	private readonly PushNotificationService $pushService;
 	private readonly RecycleBinRepository $recycleBinRepository;
 	private readonly DomainEventPublisher $eventPublisher;
-	private readonly DocumentRepository $documentRepository;
-	private readonly HardDeleteService $hardDeleteService;
-	private readonly FavoriteRepository $favoriteRepository;
 	private readonly BacklinkLifecycleNotifier $backlinkNotifier;
+	private readonly ExternalAccessLifecycleService $externalAccess;
+	private readonly RevokePullService $revokePullService;
 	private readonly string $analyticsType;
 	// Failure is signalled via data['success']=false, so $result->isSuccess() is unreliable here.
 	private bool $succeeded = false;
@@ -46,16 +42,14 @@ class DeleteCollectionCommand extends AbstractCommand
 		int $userId = 0,
 		?CollectionRepository $collectionRepository = null,
 		?MoveToRecycleBinService $moveService = null,
-		?SearchIndexService $searchIndexService = null,
 		?CollectionImportLockService $importLockService = null,
 		?PushNotificationService $pushService = null,
 		?RecycleBinRepository $recycleBinRepository = null,
 		?DomainEventPublisher $eventPublisher = null,
-		?DocumentRepository $documentRepository = null,
-		?HardDeleteService $hardDeleteService = null,
-		?FavoriteRepository $favoriteRepository = null,
 		string $analyticsType = AnalyticsDictionary::TYPE_BK,
 		?BacklinkLifecycleNotifier $backlinkNotifier = null,
+		?ExternalAccessLifecycleService $externalAccess = null,
+		?RevokePullService $revokePullService = null,
 	)
 	{
 		$this->analyticsType = $analyticsType;
@@ -63,15 +57,13 @@ class DeleteCollectionCommand extends AbstractCommand
 		$this->userId = $userId;
 		$this->collectionRepository = $collectionRepository ?? new CollectionRepository();
 		$this->moveService = $moveService ?? new MoveToRecycleBinService();
-		$this->searchIndexService = $searchIndexService ?? new SearchIndexService();
 		$this->importLockService = $importLockService ?? new CollectionImportLockService();
 		$this->pushService = $pushService ?? new PushNotificationService();
 		$this->recycleBinRepository = $recycleBinRepository ?? new RecycleBinRepository();
 		$this->eventPublisher = $eventPublisher ?? new DomainEventPublisher();
-		$this->documentRepository = $documentRepository ?? new DocumentRepository();
-		$this->hardDeleteService = $hardDeleteService ?? new HardDeleteService();
-		$this->favoriteRepository = $favoriteRepository ?? new FavoriteRepository();
 		$this->backlinkNotifier = $backlinkNotifier ?? new BacklinkLifecycleNotifier();
+		$this->externalAccess = $externalAccess ?? new ExternalAccessLifecycleService();
+		$this->revokePullService = $revokePullService ?? new RevokePullService();
 	}
 
 	protected function execute(): Result
@@ -80,6 +72,15 @@ class DeleteCollectionCommand extends AbstractCommand
 		if ($collection === null)
 		{
 			return $this->createResult(['success' => false]);
+		}
+
+		// Already in the bin: answered before the move rather than after it, so a repeat does not walk
+		// the tree again and does not re-announce a deletion that has already happened.
+		if ($collection->getTrashedAt() !== null)
+		{
+			$this->succeeded = true;
+
+			return $this->createResult(['success' => true, 'trashedIds' => []]);
 		}
 
 		$activeSessionId = $this->importLockService->findActiveSessionForCollection($this->id);
@@ -92,36 +93,28 @@ class DeleteCollectionCommand extends AbstractCommand
 			]);
 		}
 
-		// The main document carries the collection description: it lives outside the tree, so a
-		// trashed one could be restored but never shown again. It dies with the collection instead.
-		$mainDocumentId = $this->documentRepository->findMainDocumentIdByCollectionId($this->id);
-		$mainDocumentLinkChange = $mainDocumentId !== null
-			? $this->hardDeleteService->prepareDelete([$mainDocumentId])
-			: null
-		;
+		// The revoke command is addressed by the link record id, and the scope row that ties the
+		// record to this knowledge base dies below: read the id while it is still readable.
+		$linkRecordId = $this->externalAccess->findLinkId($this->id);
 
 		$connection = Application::getConnection();
 		$connection->startTransaction();
-		$mainDocumentCleanup = null;
 		try
 		{
-			$trashedIds = $this->moveService->moveCollection($this->id, $this->userId);
-			if ($mainDocumentId !== null)
+			if ($linkRecordId !== null)
 			{
-				$mainDocumentCleanup = $this->hardDeleteService->deleteByDocumentIds(
-					[$mainDocumentId],
-					$mainDocumentLinkChange,
-				);
+				$this->externalAccess->disableLink($linkRecordId);
+				$this->externalAccess->deleteScopeRows($this->id);
 			}
-			// Favorite rows on the knowledge base itself; the subscription on it is already
-			// cleared inside hardDeleteById(). The rows on its documents deliberately stay: those
-			// documents are not deleted here, they go to the recycle bin, where RecycleBinRepository
-			// ::listVisible() keeps showing them to their owner as orphans and they can be restored
-			// into another knowledge base. The row and its position have to survive that, exactly as
-			// for any other trashed document; the rows go with the documents themselves, when the bin
-			// is emptied or the TTL agent purges it (HardDeleteService::deleteByDocumentIds()).
-			$this->favoriteRepository->deleteByCollectionId($this->id);
-			$this->collectionRepository->hardDeleteById($this->id);
+
+			// The main document rides along with the rest: nothing is destroyed here any more, so
+			// the collection description has somewhere to come back to.
+			$trashedIds = $this->moveService->moveCollection($this->id, $this->userId);
+
+			// Favorite rows and collection-scope subscriptions stay. While the base is restorable,
+			// so is the surroundings a person built around it; both are cleared for good by
+			// HardDeleteCollectionService, when the bin is emptied or the TTL agent purges it.
+			$trashed = $this->collectionRepository->trashById($this->id, $this->userId);
 			$connection->commitTransaction();
 		}
 		catch (\Throwable $e)
@@ -130,23 +123,23 @@ class DeleteCollectionCommand extends AbstractCommand
 			throw $e;
 		}
 
-		// Files and the search index are non-transactional: only touch them once the commit stands.
-		if ($mainDocumentCleanup !== null)
+		// Deleting a base that is already in the recycle bin is an ordinary race between two tabs,
+		// not a failure: the state the caller asked for is the state it gets.
+		if (!$trashed)
 		{
-			$this->hardDeleteService->runPostCommitCleanup(
-				$mainDocumentCleanup['fileIds'],
-				$mainDocumentCleanup['documentIds'],
-			);
+			$this->succeeded = true;
+
+			return $this->createResult([
+				'success' => true,
+				'trashedIds' => $trashedIds,
+			]);
 		}
 
-		try
-		{
-			$this->searchIndexService->deindexDocuments($trashedIds);
-		}
-		catch (\Throwable)
-		{
-		}
-
+		// The search index is left alone: nothing about the documents changed, only the state of the
+		// base, and every ranked read already gates its query by that state (see
+		// \Bitrix\Note\Internal\Access\Service\DocumentAccessService::buildCollectionStateFilter()).
+		// That is what keeps the restore a state flip instead of a reindex of the whole base; the
+		// rows go with the documents when the base is purged for good.
 		$this->emitCollectionDelete($this->id, $trashedIds);
 		$this->eventPublisher->emitLifecycle(
 			OnDocumentLifecycleEvent::COLLECTION_DELETED,
@@ -155,6 +148,11 @@ class DeleteCollectionCommand extends AbstractCommand
 		);
 		// [D1] trashing the collection changes its documents' visibility; refresh their targets.
 		$this->backlinkNotifier->sourcesChanged($trashedIds);
+
+		if ($linkRecordId !== null)
+		{
+			$this->publishRevoke($linkRecordId);
+		}
 
 		$this->succeeded = true;
 
@@ -171,9 +169,12 @@ class DeleteCollectionCommand extends AbstractCommand
 
 	private function emitCollectionDelete(int $collectionId, array $trashedDocumentIds): void
 	{
+		// restorable says the base went to the bin instead of dying, so an open editor tells the
+		// difference without asking the server (AC-016). Every recipient of the cascade gets it.
+		$extra = ['restorable' => true];
+
 		// Skip the map when the cascade falls back to requestRefetch — editors will
 		// pick up recycleBinId/trashedAt via the getMyAccess refetch path instead.
-		$extra = [];
 		if (count($trashedDocumentIds) <= PushNotificationService::REALTIME_BATCH_THRESHOLD)
 		{
 			$map = $this->recycleBinRepository->getIdsByDocumentIds($trashedDocumentIds);
@@ -189,8 +190,22 @@ class DeleteCollectionCommand extends AbstractCommand
 			collectionCommand: 'collectionDelete',
 			collectionPayloadExtra: $extra,
 			globalCommand: 'collectionDelete',
-			globalPayload: ['collectionId' => $collectionId],
+			globalPayload: ['collectionId' => $collectionId, 'restorable' => true],
+			granteePayloadExtra: ['restorable' => true],
 		);
+	}
+
+	/**
+	 * The revoke command is irreversible: sent from an unfinished transaction it would declare the
+	 * access closed while a rollback keeps the link working. A background job runs at the very end
+	 * of the request, when the transaction of a caller wrapping this command is closed too.
+	 */
+	private function publishRevoke(int $linkRecordId): void
+	{
+		$service = $this->revokePullService;
+		Application::getInstance()->addBackgroundJob(static function () use ($service, $linkRecordId): void {
+			$service->publishRevoke($linkRecordId);
+		});
 	}
 
 	private function createResult(array $data = []): Result

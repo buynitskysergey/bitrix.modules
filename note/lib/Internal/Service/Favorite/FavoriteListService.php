@@ -28,7 +28,7 @@ use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
  * branches: documents are judged through the joined document, knowledge bases against the id list
  * the collection layer resolves. Rights used to be applied row by row after the fetch, which forced
  * a refill loop; on a sparse ACL the budget ran out before the first visible row and the page came
- * back empty. Now a row that reaches PHP is visible by construction.
+ * back empty. Now a row that reaches PHP is visible by construction and one window answers the page.
  *
  * The list is personal and must reflect current rights on every request, so nothing here outlives
  * the request. What is left per row is answered by batch calls: coverage by CoverageResolver (the
@@ -38,32 +38,15 @@ use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
 final class FavoriteListService
 {
 	public const DEFAULT_LIMIT = 50;
-	// The refill budget below bounds only the SECOND window onwards, so without a cap here a single
-	// request could ask for the user's whole list. Same upper bound the batch state read uses.
+	// Same upper bound the batch state read uses.
 	public const MAX_LIMIT = 200;
 	public const EXPAND_VIA_TREE = 'tree';
 	public const EXPAND_VIA_ACCESSIBLE_TREE = 'accessibleTree';
 
-	// Refill budget in candidate ROWS read from the database per request, not in cursor
-	// windows: a window cap would cost ten times more at limit=50 than at limit=5. On the cap the
-	// page comes back short with a live cursor on the last examined candidate.
-	//
-	// Since the visibility predicate moved into the query, this budget bounds the onlyNotified
-	// branch alone — that filter reads the coverage state per window and drops rows after the
-	// fetch. A plain page is answered by the first window and never reaches it.
-	private const FAVORITE_SCAN_MAX_CANDIDATES = 500;
-
-	// Second bound of the same budget, in windows: the row budget alone would let a page of
-	// limit=1 spend its 500 rows over 250 windows, each paying for metadata, rights and coverage.
-	// Windows are read at DEFAULT_LIMIT at least, so this cap and the row budget run out together.
-	private const FAVORITE_SCAN_MAX_WINDOWS = 10;
-
 	public function __construct(
 		private readonly FavoriteRepository $favoriteRepository = new FavoriteRepository(),
 		private readonly DocumentRepository $documentRepository = new DocumentRepository(),
-		// Read-only within one request, so the resolver may keep the user-level half of the ancestor
-		// walk across the keyset windows of a refill.
-		private readonly CoverageResolver $coverageResolver = new CoverageResolver(cacheUserAnchors: true),
+		private readonly CoverageResolver $coverageResolver = new CoverageResolver(),
 		// Owner of the branch a shared row expands into, and therefore of the answer about its chevron.
 		private readonly AccessibleTreeService $accessibleTreeService = new AccessibleTreeService(),
 	) {}
@@ -84,13 +67,7 @@ final class FavoriteListService
 	 *   nextCursor: array{position: int, id: int}|null
 	 * }
 	 */
-	public function listPage(
-		int $userId,
-		array $accessCodes,
-		int $limit,
-		?array $afterCursor = null,
-		bool $onlyNotified = false,
-	): array
+	public function listPage(int $userId, array $accessCodes, int $limit, ?array $afterCursor = null): array
 	{
 		$empty = ['items' => [], 'nextCursor' => null];
 		if ($userId <= 0)
@@ -101,101 +78,46 @@ final class FavoriteListService
 		$limit = min(self::MAX_LIMIT, max(1, $limit));
 		$isAdmin = PortalAdmin::isAdmin($userId);
 		$collectionLevels = $isAdmin ? [] : $this->resolveCollectionLevels($accessCodes);
-		$visibility = $this->buildVisibilityFilter($isAdmin, $accessCodes, $collectionLevels);
 
 		[$afterPosition, $afterId] = $this->parseCursor($afterCursor);
 
-		$kept = [];
-		$nextCursor = null;
-		$scanned = 0;
-		$windows = 0;
-
-		// Candidates are read in windows of at least DEFAULT_LIMIT regardless of the requested page
-		// size: the per-window cost (metadata, coverage) is constant, so a small page must not buy
-		// itself more windows. The page returned still holds exactly $limit rows.
-		$candidateLimit = max($limit, self::DEFAULT_LIMIT);
-
-		// Rights live in the WHERE now, so a plain page is answered by the first window and the
-		// budget below never engages. What it still bounds is the onlyNotified branch: the coverage
-		// state is read per window and drops rows after the fetch, not in the WHERE. A user with
-		// many favorites and few subscriptions can therefore still receive a short page with a live
-		// cursor — intended, see ADR section 3.
-		while (
-			count($kept) < $limit
-			&& $scanned < self::FAVORITE_SCAN_MAX_CANDIDATES
-			&& $windows < self::FAVORITE_SCAN_MAX_WINDOWS
-		)
+		// +1 lookahead answers "is there another page" without a COUNT query.
+		$window = $this->favoriteRepository->pageAfter(
+			$userId,
+			$afterPosition,
+			$afterId,
+			$limit + 1,
+			$this->buildVisibilityFilter($isAdmin, $accessCodes, $collectionLevels),
+		);
+		if (empty($window))
 		{
-			// +1 lookahead answers "is there another page" without a COUNT query.
-			$window = $this->favoriteRepository->pageAfter(
-				$userId,
-				$afterPosition,
-				$afterId,
-				$candidateLimit + 1,
-				$visibility,
-			);
-			if (empty($window))
-			{
-				$nextCursor = null;
-
-				break;
-			}
-
-			++$windows;
-			$scanned += count($window);
-			$candidates = array_slice($window, 0, $candidateLimit);
-
-			// The cursor advances by the last CANDIDATE. Every candidate is visible by construction
-			// now, so this only serves the notification filter: a row it drops is walked past rather
-			// than re-offered on the next page.
-			$nextCursor = count($window) > $candidateLimit
-				? ['position' => (int)$candidates[count($candidates) - 1]['position'], 'id' => (int)$candidates[count($candidates) - 1]['id']]
-				: null
-			;
-
-			$visible = $this->hydrate($candidates);
-			if ($onlyNotified)
-			{
-				// Coverage decides whether the row survives, so with the filter on it has to be read
-				// per window. With the filter off it changes nothing here and runs once for the page.
-				$visible = $this->attachNotifyState($userId, $visible, true);
-			}
-
-			foreach ($visible as $row)
-			{
-				$kept[] = $row;
-			}
-
-			if ($nextCursor === null)
-			{
-				break;
-			}
-
-			$afterPosition = $nextCursor['position'];
-			$afterId = $nextCursor['id'];
+			return $empty;
 		}
 
-		if (count($kept) > $limit)
-		{
-			// Refilling can overshoot: the tail beyond the page must stay reachable, so the cursor
-			// falls back to the last row actually returned.
-			$kept = array_slice($kept, 0, $limit);
-			$last = $kept[count($kept) - 1];
-			$nextCursor = ['position' => (int)$last['position'], 'id' => (int)$last['id']];
-		}
+		$candidates = array_slice($window, 0, $limit);
 
-		if (empty($kept))
+		// The cursor advances by the last CANDIDATE, not by the last row returned: hydrate() may drop
+		// one whose object vanished between the two queries, and that row must be walked past rather
+		// than re-offered on the next page.
+		$nextCursor = count($window) > $limit
+			? ['position' => (int)$candidates[count($candidates) - 1]['position'], 'id' => (int)$candidates[count($candidates) - 1]['id']]
+			: null
+		;
+
+		$visible = $this->hydrate($candidates);
+		if (empty($visible))
 		{
 			return ['items' => [], 'nextCursor' => $nextCursor];
 		}
 
-		if (!$onlyNotified)
-		{
-			$kept = $this->attachNotifyState($userId, $kept, false);
-		}
-
 		return [
-			'items' => $this->buildItems($kept, $isAdmin, $collectionLevels, $accessCodes, $userId),
+			'items' => $this->buildItems(
+				$this->attachNotifyState($userId, $visible),
+				$isAdmin,
+				$collectionLevels,
+				$accessCodes,
+				$userId,
+			),
 			'nextCursor' => $nextCursor,
 		];
 	}
@@ -248,7 +170,7 @@ final class FavoriteListService
 		}
 
 		$items = $this->buildItems(
-			$this->attachNotifyState($userId, $visible, false),
+			$this->attachNotifyState($userId, $visible),
 			$isAdmin,
 			$collectionLevels,
 			$accessCodes,
@@ -325,6 +247,10 @@ final class FavoriteListService
 				'DOCUMENT.COLLECTION_ID',
 				$codesPersonal,
 				$accessibleCollectionIds,
+				// An archived base is readable, and favorites have never hidden its documents:
+				// the allowance keeps that. A deleted base is another matter - its content has no place
+				// on a live surface.
+				[DocumentAccessService::STATE_ARCHIVED],
 			))
 		;
 
@@ -391,7 +317,8 @@ final class FavoriteListService
 	/**
 	 * Metadata of alive, non-trashed documents. The recycle bin and the main document are excluded
 	 * by the same filters every listing uses — kept here so a row whose document was trashed
-	 * between the page query and this one still disappears.
+	 * between the page query and this one still disappears. Deleting a knowledge base puts its whole
+	 * tree in the bin, so the same exclusion answers for the documents of a deleted base.
 	 *
 	 * @param int[] $documentIds
 	 * @return array<int, array{title: string, collectionId: int, parentId: int|null}>
@@ -422,6 +349,9 @@ final class FavoriteListService
 	}
 
 	/**
+	 * A base in the recycle bin drops out of the page here, not by its favorite row being deleted:
+	 * restoring the base brings the row back on its old position by itself.
+	 *
 	 * @param int[] $collectionIds
 	 * @return array<int, array{title: string, collectionId: int, parentId: null, collectionArchived: bool}>
 	 */
@@ -430,6 +360,7 @@ final class FavoriteListService
 		$rows = CollectionTable::query()
 			->setSelect(['ID', 'NAME', 'IS_ARCHIVED'])
 			->whereIn('ID', $collectionIds)
+			->whereNull('TRASHED_AT')
 			->exec()
 		;
 
@@ -450,15 +381,13 @@ final class FavoriteListService
 	}
 
 	/**
-	 * Coverage of one window: one CoverageResolver call per entity type, never per row. With the
-	 * filter on, a row nothing is delivered to is dropped here - that is part of the filtering, so
-	 * it happens before the next-page verdict. `notified` is the resolver's own verdict, so a muted
-	 * row never passes and neither does one covered only from above.
+	 * Coverage of one page: one CoverageResolver call per entity type, never per row. Describes the
+	 * row, never decides whether it belongs: the page is the user's whole list, subscribed or not.
 	 *
 	 * @param array<int, array<string, mixed>> $rows
 	 * @return array<int, array<string, mixed>> rows with the `notify` state attached
 	 */
-	private function attachNotifyState(int $userId, array $rows, bool $onlyNotified): array
+	private function attachNotifyState(int $userId, array $rows): array
 	{
 		if (empty($rows))
 		{
@@ -498,11 +427,6 @@ final class FavoriteListService
 				'inheritedSource' => null,
 				'notified' => false,
 			];
-
-			if ($onlyNotified && !$state['notified'])
-			{
-				continue;
-			}
 
 			$row['notify'] = $state;
 			$withState[] = $row;

@@ -21,6 +21,7 @@ final class Event implements EntityInterface
 		private readonly int $userId,
 		private readonly ?int $versionId,
 		private readonly DateTime $createdAt,
+		private readonly ?Source $source = null,
 	) {}
 
 	public static function create(
@@ -29,9 +30,10 @@ final class Event implements EntityInterface
 		string $eventType,
 		int $userId,
 		?int $versionId = null,
+		?Source $source = null,
 	): self
 	{
-		return new self(null, $scope, $entityId, $eventType, $userId, $versionId, new DateTime());
+		return new self(null, $scope, $entityId, $eventType, $userId, $versionId, new DateTime(), $source);
 	}
 
 	/**
@@ -45,9 +47,10 @@ final class Event implements EntityInterface
 		int $userId,
 		?int $versionId,
 		DateTime $createdAt,
+		?Source $source = null,
 	): self
 	{
-		return new self(null, $scope, $entityId, $eventType, $userId, $versionId, $createdAt);
+		return new self(null, $scope, $entityId, $eventType, $userId, $versionId, $createdAt, $source);
 	}
 
 	public function getId(): ?int
@@ -83,5 +86,10 @@ final class Event implements EntityInterface
 	public function getCreatedAt(): DateTime
 	{
 		return $this->createdAt;
+	}
+
+	public function getSource(): ?Source
+	{
+		return $this->source;
 	}
 }

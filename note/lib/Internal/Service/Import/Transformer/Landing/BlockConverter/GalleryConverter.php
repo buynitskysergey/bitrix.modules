@@ -12,9 +12,11 @@ use Bitrix\Note\Internal\Service\Import\Transformer\Landing\HtmlToMarkdown;
  * Block codes matching /^\d+\.\d+\.(gallery|slider)/ - image and embed collections.
  *
  * Each image is rendered as a standalone enriched-asset line so the editor
- * tokenizer treats it as block-level. Files are resolved via b_landing_file
- * (block <-> files) - first DOM image binds to the first FILE_ID and so on; an image with no file
- * behind it goes out wrapped for download ({@see LandingSource::externalAttachmentUrl()}).
+ * tokenizer treats it as block-level. The file of an image is the one its <img> names itself
+ * ({@see BlockHtmlExtractor::imageFileId()}) - the rows of b_landing_file follow the order of uploads,
+ * not of the carousel, and keep replaced pictures until publication. An <img> without the attribute
+ * takes the file row of its position; an image with no file behind it goes out wrapped for download
+ * ({@see LandingSource::externalAttachmentUrl()}).
  * Carousel embeds (iframes / anchors inside .landing-block-node-embed) follow
  * the images: whitelisted hosts emit a bare URL the editor turns into a video
  * embed, everything else goes out by the one link rule ({@see HtmlToMarkdown::linkOrText()})
@@ -55,7 +57,7 @@ final class GalleryConverter implements Converter
 		$lines = [];
 		foreach ($descriptors as $i => $img)
 		{
-			$landingFileId = $landingFileIds[$i] ?? null;
+			$landingFileId = $img['fileId'] ?? ($landingFileIds[$i] ?? null);
 			$suffix = BlockHtmlExtractor::positionQuerySuffix($img['width'], $img['align']);
 			// No b_landing_file behind this <img>: fetch it as an external image when it is an
 			// http(s) URL, otherwise keep the raw src untouched - same as ImageConverter. Without the

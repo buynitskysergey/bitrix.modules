@@ -1,5 +1,5 @@
 <html xmlns="http://www.w3.org/1999/xhtml"><head>
-	<meta name="viewport" content="width=device-width">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<meta http-equiv="X-UA-Compatible" content="IE=edge">
 	<meta http-equiv="Content-Type" content="text/html; charset=Windows-1251">
 	<title>#SUBJECT#</title>
@@ -12,7 +12,8 @@
 			table[lang=x-outer],
 			table.mail-grid-cell,
 			table[class=bxPhone320]{
-				width: 300px !important;
+				width: 100% !important;
+				max-width: 100% !important;
 				float:none;
 			}
 		}
@@ -23,7 +24,8 @@
 			table[lang=x-outer],
 			table.mail-grid-cell,
 			table[class=bxPhone320]{
-				width: 300px !important;
+				width: 100% !important;
+				max-width: 100% !important;
 				float:none;
 			}
 		}
@@ -140,6 +142,12 @@
 			body{
 				width:100% !important;
 				min-width:100% !important;
+			}
+		}
+		@media only screen and (max-width:480px){
+			img{
+				max-width:100% !important;
+				height:auto !important;
 			}
 		}
 

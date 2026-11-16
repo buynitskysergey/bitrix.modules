@@ -79,7 +79,7 @@ class VibePlusPolicy
 
 	protected function hasPaidTariffAccess(): bool
 	{
-		return \CBitrix24::isLicensePaid() || \CBitrix24::IsNfrLicense() || \CBitrix24::IsDemoLicense();
+		return (new PaidTariff())->isCloudLicensePaid();
 	}
 
 	private function resolveRuntimeStateProvider(): ?RuntimeStateProvider

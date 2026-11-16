@@ -1,4 +1,7 @@
 <?php
+$isCloudRegionMayTrackMails = \Bitrix\Main\Loader::includeModule('sender')
+	&& \Bitrix\Sender\Integration\Bitrix24\Service::isCloudRegionMayTrackMails();
+
 $sender_default_option = [
 	'interval'=>'20',
 	'auto_method'=>'agent',
@@ -11,7 +14,11 @@ $sender_default_option = [
 	'unsub_link'=>'',
 	'sub_link'=>'',
 	'auto_agent_interval'=>'0',
-	'track_mails'=>  \Bitrix\Sender\Integration\Bitrix24\Service::isCloudRegionMayTrackMails() ? 'N' : 'Y',
-	"mail_consent" => \Bitrix\Sender\Integration\Bitrix24\Service::isCloudRegionMayTrackMails() ? 'Y' : 'N',
+	'track_mails'=> $isCloudRegionMayTrackMails ? 'N' : 'Y',
+	"mail_consent" => $isCloudRegionMayTrackMails ? 'Y' : 'N',
 	"~mail_max_consent_requests" => "1",
+	\Bitrix\Sender\Integration\Sender\Mail\FeedbackId::OPTION_SOURCE_ID => '',
+	\Bitrix\Sender\Integration\Sender\Mail\FeedbackId::OPTION_SENDER_ID => '',
+	\Bitrix\Sender\Integration\Sender\Mail\FeedbackId::OPTION_ENABLED => 'N',
+	\Bitrix\Sender\Integration\Sender\Mail\FeedbackId::OPTION_PORTAL_ID => '',
 ];

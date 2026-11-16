@@ -63,6 +63,15 @@ abstract class CBPActivity
 	protected array $arProperties = [];
 	protected array $arPropertiesTypes = [];
 
+	/**
+	 * Constants that came with the scheme of the instance ({@see \CBPActivity::setConstantsTypes()}); null
+	 * for an instance reading the constants of the published template, empty for a scheme having none.
+	 */
+	protected ?array $arConstantsTypes = null;
+
+	/** Meaningful on the root activity alone {@see self::getTestRunContext()}. */
+	private ?Bizproc\Internal\Entity\Workflow\TestRunContext $testRunContext = null;
+
 	protected string $name = '';
 	protected int $outputPortId = 0;
 	protected bool $activated = true;
@@ -135,7 +144,7 @@ abstract class CBPActivity
 	 * - a false condition, a deactivated node - is closed without ever being executed and must skip the chain
 	 * of its children together with its logic.
 	 */
-	private ?int $childFlowInputPort = null;
+	protected ?int $childFlowInputPort = null;
 
 	/**
 	 * Service properties of the activities served by the unified settings panel, by lower-cased activity
@@ -413,6 +422,9 @@ abstract class CBPActivity
 	 * The auto-describer merges them into `skippedSettings`, so reverse validation accepts them by name
 	 * while their values bypass type coercion. Activities override this to declare such names.
 	 *
+	 * A name declared here and nowhere else stands for the free map category
+	 * ({@see \Bitrix\Bizproc\Internal\Entity\Activity\SettingCategory::EditableFreeMap}).
+	 *
 	 * @param array $documentType ['module', 'entityType', 'documentType'].
 	 * @return array<int, string>
 	 */
@@ -427,6 +439,10 @@ abstract class CBPActivity
 	 * has no way to hold. Reverse validation compares such a value against the published baseline and refuses
 	 * anything else - the passthrough contract alone would accept an arbitrary payload as is.
 	 *
+	 * These names are the carried category
+	 * ({@see \Bitrix\Bizproc\Internal\Entity\Activity\SettingCategory::Carried}) and are published as the
+	 * block's `carriedSettings`.
+	 *
 	 * @param array $documentType ['module', 'entityType', 'documentType'].
 	 * @return array<int, string>
 	 */
@@ -440,6 +456,10 @@ abstract class CBPActivity
 	 * dialog writes them on every save and the agent never opens that dialog. Declared as name => value pairs
 	 * so the caller applies them without knowing what the field means. Activities override this to declare
 	 * such pairs.
+	 *
+	 * Every key here is of the enforced category
+	 * ({@see \Bitrix\Bizproc\Internal\Entity\Activity\SettingCategory::Enforced}): the server writes the
+	 * value whatever the agent sent, so the name is never published as an editable setting.
 	 *
 	 * @param array $documentType ['module', 'entityType', 'documentType'].
 	 * @return array<string, string>
@@ -639,9 +659,19 @@ abstract class CBPActivity
 		return is_array($variablesTypes) ? $variablesTypes : [];
 	}
 
+	public function setConstantsTypes(array $constantsTypes): void
+	{
+		$this->getRootActivity()->arConstantsTypes = $constantsTypes;
+	}
+
 	private function getConstantTypes()
 	{
 		$rootActivity = $this->GetRootActivity();
+		if ($rootActivity->arConstantsTypes !== null)
+		{
+			return $rootActivity->arConstantsTypes;
+		}
+
 		if (method_exists($rootActivity, 'GetWorkflowTemplateId'))
 		{
 			$templateId = $rootActivity->GetWorkflowTemplateId();
@@ -706,6 +736,26 @@ abstract class CBPActivity
 		}
 
 		return $p;
+	}
+
+	/** {@see Bizproc\Internal\Entity\Workflow\TestRunContext} */
+	public function getTestRunContext(): ?Bizproc\Internal\Entity\Workflow\TestRunContext
+	{
+		return $this->getRootActivity()->testRunContext;
+	}
+
+	public function setTestRunContext(?Bizproc\Internal\Entity\Workflow\TestRunContext $context): void
+	{
+		$this->getRootActivity()->testRunContext = $context;
+	}
+
+	/**
+	 * Of a root activity read from the saved state before its workflow is restored: the workflow it keeps
+	 * is an empty shell until then, so the root is not looked up through it.
+	 */
+	public function getOwnTestRunContext(): ?Bizproc\Internal\Entity\Workflow\TestRunContext
+	{
+		return $this->testRunContext;
 	}
 
 	public function setWorkflow(CBPWorkflow $workflow)
@@ -1667,10 +1717,12 @@ abstract class CBPActivity
 	 * ({@see CBPWorkflow::runExecuteActivityOperation()}), so it skips the children together with the logic
 	 * of the node.
 	 *
-	 * A node overriding this method runs no children: it is a node of type `operators`
+	 * A node overriding this method either runs no children - a node of type `operators`
 	 * ({@see CBPStateNode}, {@see CBPMergeFlowNode}, {@see CBPForEachActivity}), and the unified panel
 	 * serves none of those
-	 * ({@see \Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider}).
+	 * ({@see \Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider}) - or starts the
+	 * chain itself through {@see self::startChildFlowOnce()}, which is what a trigger of a test run does
+	 * ({@see \Bitrix\Bizproc\Activity\BaseTrigger::executeWithPayload()}).
 	 */
 	public function executeWithPayload(ExecutionPayload $payload)
 	{
@@ -1711,7 +1763,7 @@ abstract class CBPActivity
 	 *
 	 * @return bool Whether the node now waits for children instead of closing.
 	 */
-	private function startChildFlowOnce(): bool
+	protected function startChildFlowOnce(): bool
 	{
 		return $this->childFlowAfterNativeLogic
 			&& $this->childFlowInputPort !== null

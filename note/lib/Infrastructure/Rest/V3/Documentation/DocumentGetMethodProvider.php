@@ -65,6 +65,7 @@ class DocumentGetMethodProvider extends MethodProvider
 				'createdAt' => '2026-08-11T10:15:00+03:00',
 				'updatedAt' => '2026-08-11T10:15:00+03:00',
 				'contentUpdatedAt' => '2026-08-11T11:02:00+03:00',
+				'state' => 'live',
 				'isArchived' => false,
 				'isTrashed' => false,
 				'isOrphan' => false,
@@ -83,10 +84,10 @@ class DocumentGetMethodProvider extends MethodProvider
 			Reads a single document: its record, its markdown, and what state it is in.
 
 			Archived and trashed documents answer here as well - they are readable, only writes into
-			them are refused. Which one the caller is holding is said by three markers: `isArchived`
-			(the document is in the archive), `isTrashed` (it is in the recycle bin) and `isOrphan`
-			(meaningful only together with `isTrashed`: the collection that owned it is gone, so
-			restoring it needs a new collection to restore into).
+			them are refused. Which one the caller is holding is said by `state`: `live`, `archived`
+			or `trashed`. The markers `isArchived`, `isTrashed` and `isOrphan` say the same thing the
+			harder way and are deprecated - `isOrphan` means a `trashed` document whose collection is
+			gone, so restoring it needs a new collection to restore into.
 
 			`updatedAt` moves on a structural change of the record - a rename, a move, an archive, an
 			overwrite through REST. An edit in the collaborative editor deliberately moves

@@ -6,6 +6,7 @@ namespace Bitrix\Vibecodeconnector\Internal\Service\Catalog\Access;
 
 use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
+use Bitrix\Vibecodeconnector\Internal\Integration\HumanResources\DepartmentCodesCache;
 use Bitrix\Vibecodeconnector\Internal\Integration\Main\AudienceCodeSet;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\AccessRepository;
 use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\CatalogItemRepository;
@@ -15,6 +16,7 @@ final class AccessWriter
 	public function __construct(
 		private readonly AccessRepository $accessRepository = new AccessRepository(),
 		private readonly CatalogItemRepository $itemRepository = new CatalogItemRepository(),
+		private readonly DepartmentCodesCache $departmentCodesCache = new DepartmentCodesCache(),
 	) {}
 
 	/**
@@ -108,8 +110,6 @@ final class AccessWriter
 				$this->itemRepository->bumpAppChatSyncRevision($catalogItemId);
 			}
 			$connection->commitTransaction();
-
-			return $result;
 		}
 		catch (\Throwable $exception)
 		{
@@ -117,5 +117,12 @@ final class AccessWriter
 
 			throw $exception;
 		}
+
+		if ($result->changed)
+		{
+			$this->departmentCodesCache->forget();
+		}
+
+		return $result;
 	}
 }

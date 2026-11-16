@@ -1,0 +1,10 @@
+{
+	"defaultTableName": "b_blog",
+	"installDirectoriesMapping": {
+		"install/admin": "admin",
+		"install/components": "components",
+		"install/images": "images/blog",
+		"install/public/templates": "templates",
+		"install/themes": "themes"
+	}
+}

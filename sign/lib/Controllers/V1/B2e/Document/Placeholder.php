@@ -9,9 +9,11 @@ use Bitrix\Sign\Attribute\ActionAccess;
 use Bitrix\Sign\Config\Feature;
 use Bitrix\Sign\Config\Storage;
 use Bitrix\Sign\Engine\Controller;
+use Bitrix\Sign\Item;
 use Bitrix\Sign\Repository\Grid\PlaceholderRepository;
 use Bitrix\Sign\Service\Document\FieldAccessService;
 use Bitrix\Sign\Service\Document\Placeholder\PlaceholderCollectorService;
+use Bitrix\Sign\Service\Placeholder\Restriction\ScenarioContext;
 use Bitrix\Sign\Service\Providers\LegalInfoProvider;
 use Bitrix\Sign\Attribute;
 use Bitrix\Sign\Type\Field\FrontFieldCategory;
@@ -60,6 +62,7 @@ class Placeholder extends Controller
 	public function listAction(
 		PlaceholderCollectorService $placeholderService,
 		bool $clearCache = false,
+		?string $uid = null,
 	): array
 	{
 		$currentUserId = (int)CurrentUser::get()->getId();
@@ -70,7 +73,11 @@ class Placeholder extends Controller
 			return [];
 		}
 
-		$result = $placeholderService->loadPlaceholdersByUserId($currentUserId, $clearCache);
+		$result = $placeholderService->loadPlaceholdersByUserId(
+			$currentUserId,
+			$clearCache,
+			$this->resolveScenarioContext($uid),
+		);
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -88,9 +95,14 @@ class Placeholder extends Controller
 	public function listByHcmLinkIdAction(
 		int $hcmLinkCompanyId,
 		PlaceholderCollectorService $placeholderService,
+		?string $uid = null,
 	): array
 	{
-		$result = $placeholderService->loadPlaceholdersByHcmLinkCompanyId($hcmLinkCompanyId);
+		$scenarioContext = $this->resolveScenarioContext($uid)?->withHcmLinkCompanyId($hcmLinkCompanyId);
+		$result = $placeholderService->loadPlaceholdersByHcmLinkCompanyId(
+			$hcmLinkCompanyId,
+			$scenarioContext,
+		);
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -465,5 +477,42 @@ class Placeholder extends Controller
 		}
 
 		return $fieldCodes;
+	}
+
+	/**
+	 * The scenario of the document only narrows the list, so an unknown or inaccessible uid keeps
+	 * the full list instead of failing the action.
+	 */
+	private function resolveScenarioContext(?string $uid): ?ScenarioContext
+	{
+		if (
+			!Storage::instance()->isPlaceholderRestrictionEnabled()
+			|| $uid === null
+			|| $uid === ''
+		)
+		{
+			return null;
+		}
+
+		$document = $this->container->getDocumentRepository()->getByUid($uid);
+		if ($document === null || !$this->canEditDocumentOrItsTemplate($document))
+		{
+			return null;
+		}
+
+		return $this->container->getScenarioContextFactory()->fromDocument($document);
+	}
+
+	/**
+	 * Item-aware counterpart of the permission-level LogicOr of the action: the uid comes from the
+	 * client, so the permission must be checked against the loaded document.
+	 */
+	private function canEditDocumentOrItsTemplate(Item\Document $document): bool
+	{
+		$accessController = $this->getAccessController();
+
+		return $accessController->checkByItem(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT, $document)
+			|| $accessController->checkByItem(ActionDictionary::ACTION_B2E_TEMPLATE_EDIT, $document)
+		;
 	}
 }

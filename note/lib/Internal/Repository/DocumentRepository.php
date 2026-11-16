@@ -8,21 +8,31 @@ use Bitrix\Main\Application;
 use Bitrix\Main\ORM\Data\Result as OrmResult;
 use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\Result;
 use Bitrix\Main\Type\Date;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Main\ORM\Query\Join;
 use Bitrix\Main\ORM\Query\Query;
+use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\DocumentViewTable;
 use Bitrix\Note\Internal\Service\Document\MainDocumentFilter;
 use Bitrix\Note\Internal\Service\RecycleBin\RecycleBinFilter;
+use Bitrix\Note\Internal\Util\CursorDate;
+use Bitrix\Note\Internal\Util\IdNormalizer;
 
 class DocumentRepository
 {
 	private const ORM_CACHE_TTL = 15;
+
+	// States a page may ask for. The values are those of the read contract; the domain does not
+	// reference the contract itself, the same way {@see DocumentAccessService::STATE_ARCHIVED} does not.
+	public const STATE_LIVE = 'live';
+	public const STATE_ARCHIVED = DocumentAccessService::STATE_ARCHIVED;
+	public const STATE_TRASHED = DocumentAccessService::STATE_TRASHED;
 
 	private ?RecycleBinFilter $recycleBinFilter = null;
 
@@ -38,6 +48,13 @@ class DocumentRepository
 		return $this->mainDocumentFilter ??= new MainDocumentFilter();
 	}
 
+	/**
+	 * Everything a move needs to know about a node and nothing else: which node it is and where it is
+	 * now. Public, unlike its neighbours, because the readers are the bulk commands of the Public
+	 * layer, and a whole set read by LIST_SELECT instead would carry the memory nobody capped.
+	 */
+	public const MOVE_META_SELECT = ['ID', 'COLLECTION_ID', 'PARENT_ID'];
+
 	private const LIST_SELECT = [
 		'ID', 'COLLECTION_ID', 'PARENT_ID', 'TITLE',
 		'POSITION', 'IS_ARCHIVED', 'CREATED_BY', 'UPDATED_BY',
@@ -49,6 +66,29 @@ class DocumentRepository
 	];
 
 	private const ANCESTOR_SELECT = ['ID', 'PARENT_ID'];
+
+	/**
+	 * Fields the node of the public tree is built from: the title, the
+	 * place in the tree and the date of the last change, and no author of it.
+	 */
+	private const PUBLIC_TREE_SELECT = [
+		'ID', 'COLLECTION_ID', 'PARENT_ID', 'TITLE', 'POSITION', 'IS_ARCHIVED', 'UPDATED_AT',
+	];
+
+	/**
+	 * Fields the public answer by a document is built from - the white list and nothing
+	 * else: no author of the last change, no counters, no rights.
+	 *
+	 * Neither mediumText column is here. YJS_STATE was never read from the object at all -
+	 * PublicResponseMapper re-reads the snapshot by itself, after the journal and never before it -
+	 * and MARKDOWN is only ever the fallback of a document whose snapshot is empty, so the mapper
+	 * reads it by getRawMarkdown() at the one branch that needs it. A document body is the largest
+	 * thing this table stores, and the public circuit is anonymous: reading it to answer anything
+	 * other than "here is the text" is a price not proportional to the answer.
+	 */
+	private const PUBLIC_DOCUMENT_SELECT = [
+		'ID', 'COLLECTION_ID', 'PARENT_ID', 'TITLE', 'CONTENT_FORMAT', 'UPDATED_AT',
+	];
 
 	/**
 	 * Content fields the collaboration bootstrap rebuilds the editor from, see getCollaborationSnapshot().
@@ -346,6 +386,36 @@ class DocumentRepository
 		}
 
 		return (int)$row['MATERIALIZED_UPTO_ID'];
+	}
+
+	/**
+	 * Those of the given documents whose projection has never been written under the materialization
+	 * contract: a collaborative document (yjs, or the legacy json tree) with no cursor at all. Its
+	 * MARKDOWN was written by some client before the cursor existed, and nothing records which one -
+	 * the editor of 26.0.0 wrote attachments into it as nothing at all - so the text is no statement
+	 * about the files the document carries. A markdown document is not among them: its text is written
+	 * by the server from what the caller sent and is complete by construction.
+	 *
+	 * @param int[] $ids
+	 * @return int[]
+	 */
+	public function filterIdsWithoutMaterializedProjection(array $ids): array
+	{
+		$normalized = IdNormalizer::normalize($ids);
+		if (empty($normalized))
+		{
+			return [];
+		}
+
+		$rows = DocumentTable::query()
+			->setSelect(['ID'])
+			->whereIn('ID', $normalized)
+			->whereNull('MATERIALIZED_UPTO_ID')
+			->where('CONTENT_FORMAT', '!=', DocumentTable::CONTENT_FORMAT_MD)
+			->fetchAll()
+		;
+
+		return array_map(static fn(array $row): int => (int)$row['ID'], $rows);
 	}
 
 	/**
@@ -700,7 +770,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-01] Documents each of the given users created within the period, counted for the whole
+	 * Documents each of the given users created within the period, counted for the whole
 	 * batch in one grouped query - the annual summary walks users in batches, and a per-user query
 	 * would multiply the index range scans by the size of the batch.
 	 *
@@ -734,7 +804,7 @@ class DocumentRepository
 	}
 
 	/**
-	 * [ALG-01] Reads other employees left within the period on documents these users authored.
+	 * Reads other employees left within the period on documents these users authored.
 	 * One read = one employee on one document: b_note_document_view keeps a single row per
 	 * (document, reader) with the time of the *last* view, so re-opening a document does not add
 	 * a row and the number of openings does not exist in the data at all.
@@ -988,10 +1058,229 @@ class DocumentRepository
 	}
 
 	/**
+	 * One live document inside one knowledge base, read for the public circuit.
+	 *
+	 * The scope is a condition of the query, not a comparison after the read: there is nowhere to
+	 * forget it. Liveness is the same predicate the tree read uses - not archived, not in the
+	 * recycle bin, not the hidden main document - and archivedness is spelled out explicitly
+	 * because it has no predicate object of its own.
+	 *
+	 * getById() and getMetaById() are deliberately not reused: they filter none of the three and
+	 * read through the ORM cache, while a revoked access has to take effect at once.
+	 */
+	public function getLiveInCollection(int $collectionId, int $documentId): ?Document
+	{
+		if ($collectionId <= 0 || $documentId <= 0)
+		{
+			return null;
+		}
+
+		return $this->liveInCollectionQuery($collectionId)
+			->setSelect(self::PUBLIC_DOCUMENT_SELECT)
+			->where('ID', $documentId)
+			->fetchObject()
+		;
+	}
+
+	/**
+	 * Whether the scope of a link holds this document, and nothing beyond that.
+	 *
+	 * The same question getLiveInCollection() answers, asked where the answer is used as yes or no:
+	 * the parent of an opened document, the target of a mention or of a backlink, the document
+	 * behind a served picture. All of them used to read the document whole - its body included -
+	 * to produce a boolean, and the picture path paid it once per image on the page.
+	 *
+	 * The predicate is not repeated here: it is the one builder both methods share, so the two
+	 * answers cannot drift apart.
+	 */
+	public function existsLiveInCollection(int $collectionId, int $documentId): bool
+	{
+		if ($collectionId <= 0 || $documentId <= 0)
+		{
+			return false;
+		}
+
+		return $this->liveInCollectionQuery($collectionId)
+			->setSelect(['ID'])
+			->where('ID', $documentId)
+			->fetch() !== false
+		;
+	}
+
+	/**
+	 * The whole liveness predicate of the public circuit in one place: inside the knowledge base,
+	 * not archived, not in the recycle bin, not the hidden main document.
+	 *
+	 * Every public read is built from here rather than repeating the three conditions, because a
+	 * predicate spelled out in several places is a predicate that will one day be relaxed in one of
+	 * them: the narrow reads answer the same question as the wide ones and must answer it the same.
+	 */
+	private function liveInCollectionQuery(int $collectionId): Query
+	{
+		$query = DocumentTable::query()
+			->where('COLLECTION_ID', $collectionId)
+			->where('IS_ARCHIVED', 'N')
+		;
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		return $query;
+	}
+
+	/**
+	 * Titles of the live documents of one knowledge base among the given ids, read for the public
+	 * circuit: id => title, and an id that is missing from the answer is an id the visitor may not
+	 * be told anything about.
+	 *
+	 * The liveness predicate is the one of getLiveInCollection(): a mention of an archived, a
+	 * recycled or the hidden main document is as unavailable as a mention of someone else's.
+	 *
+	 * @param int[] $documentIds
+	 * @return array<int, string>
+	 */
+	public function getLiveTitlesInCollection(int $collectionId, array $documentIds): array
+	{
+		$ids = array_values(array_unique(array_filter(
+			array_map('intval', $documentIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+		if ($collectionId <= 0 || $ids === [])
+		{
+			return [];
+		}
+
+		$query = $this->liveInCollectionQuery($collectionId)
+			->setSelect(['ID', 'TITLE'])
+			->whereIn('ID', $ids)
+		;
+
+		$titles = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$titles[(int)$row['ID']] = (string)($row['TITLE'] ?? '');
+		}
+
+		return $titles;
+	}
+
+	/**
+	 * The hidden main document of one knowledge base - the carrier of its description - read for the
+	 * public circuit.
+	 *
+	 * The mirror image of getLiveInCollection(): the same scope, the same freshness and the same
+	 * liveness, with the one predicate inverted. It is a separate method and not a flag because the
+	 * hidden main document is the one thing the scoped reader must never return, and the two callers
+	 * are asking different questions.
+	 */
+	public function getLiveMainInCollection(int $collectionId): ?Document
+	{
+		if ($collectionId <= 0)
+		{
+			return null;
+		}
+
+		return $this->liveMainInCollectionQuery($collectionId)
+			->setSelect(self::PUBLIC_DOCUMENT_SELECT)
+			->fetchObject()
+		;
+	}
+
+	/**
+	 * The id of the same hidden main document, for the two callers that only need to recognise it:
+	 * the file path, which lets the pictures of the description out, and the batch that describes
+	 * those pictures. Neither shows the text, and the text is the heaviest thing in the row.
+	 */
+	public function getLiveMainIdInCollection(int $collectionId): ?int
+	{
+		if ($collectionId <= 0)
+		{
+			return null;
+		}
+
+		$row = $this->liveMainInCollectionQuery($collectionId)
+			->setSelect(['ID'])
+			->fetch()
+		;
+
+		return $row === false ? null : (int)$row['ID'];
+	}
+
+	private function liveMainInCollectionQuery(int $collectionId): Query
+	{
+		$query = DocumentTable::query()
+			->where('COLLECTION_ID', $collectionId)
+			->where('IS_MAIN', DocumentTable::IS_MAIN_YES)
+			->where('IS_ARCHIVED', 'N')
+			->setLimit(1)
+		;
+		$this->recycleBinFilter()->applyExclusion($query);
+
+		return $query;
+	}
+
+	/**
+	 * The tree of one knowledge base read for the public circuit.
+	 *
+	 * The listing repeats getCollectionDocuments() predicate for predicate - no archived, no
+	 * recycled, no hidden main one, the same order - and differs only in the columns: the white list
+	 * of the public node plus UPDATED_AT, which the node of the answer carries. TREE_SELECT is left alone on
+	 * purpose: it serves the ordinary tree, and a column added there would be paid for by every
+	 * caller of it, while here the answer is capped by TreeSizeLimit::MAX_NODES.
+	 *
+	 * Rows and not entities: the caller builds six scalars per node and never touches a Document, so
+	 * hydrating one object per row was work whose result was thrown away.
+	 *
+	 * The listing is whole or it is not made at all: a LIMIT here would cut the rows in the order they
+	 * happen to be sorted in, and that order groups children under their parent, so the cut takes the
+	 * children of the last parents rather than the tail of the tree. The caller therefore counts
+	 * first (countLiveInCollection) and only reads a knowledge base it has already found small enough.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	public function getLiveTreeInCollection(int $collectionId): array
+	{
+		if ($collectionId <= 0)
+		{
+			return [];
+		}
+
+		return $this->liveInCollectionQuery($collectionId)
+			->setSelect(self::PUBLIC_TREE_SELECT)
+			->addOrder('PARENT_ID', 'ASC')
+			->addOrder('POSITION', 'DESC')
+			->addOrder('ID', 'DESC')
+			->fetchAll()
+		;
+	}
+
+	/**
+	 * How many live documents one knowledge base holds, by the same predicate the listings use.
+	 *
+	 * The cheap question asked before the expensive one: the count needs neither the columns nor the
+	 * ordering, so above the budget of an answer nothing is sorted, hydrated or carried into PHP at
+	 * all.
+	 */
+	public function countLiveInCollection(int $collectionId): int
+	{
+		if ($collectionId <= 0)
+		{
+			return 0;
+		}
+
+		$row = $this->liveInCollectionQuery($collectionId)
+			->registerRuntimeField(new ExpressionField('CNT', 'COUNT(*)'))
+			->setSelect(['CNT'])
+			->fetch()
+		;
+
+		return $row === false ? 0 : (int)$row['CNT'];
+	}
+
+	/**
 	 * @return Document[]
 	 */
 
-	public function getCollectionDocuments(int $collectionId): array
+	public function getCollectionDocuments(int $collectionId, bool $insideDeletedCollection = false): array
 	{
 		$query = DocumentTable::query()
 			->setSelect(self::TREE_SELECT)
@@ -1001,7 +1290,7 @@ class DocumentRepository
 			->addOrder('POSITION', 'DESC')
 			->addOrder('ID', 'DESC')
 		;
-		$this->recycleBinFilter()->applyExclusion($query);
+		$this->applyBinVisibility($query, $insideDeletedCollection);
 		$this->mainDocumentFilter()->applyExclusion($query);
 
 		return $query->fetchCollection()->getAll();
@@ -1037,6 +1326,7 @@ class DocumentRepository
 		?int $afterPosition = null,
 		?int $afterId = null,
 		bool $rootsOnly = false,
+		bool $insideDeletedCollection = false,
 	): array
 	{
 		// ORDER BY (POSITION DESC, ID DESC) matches user-controlled drag-n-drop order in the desktop tree
@@ -1077,7 +1367,7 @@ class DocumentRepository
 			$query->setLimit($limit);
 		}
 
-		$this->recycleBinFilter()->applyExclusion($query);
+		$this->applyBinVisibility($query, $insideDeletedCollection);
 		$this->mainDocumentFilter()->applyExclusion($query);
 
 		return $query->fetchCollection()->getAll();
@@ -1089,9 +1379,10 @@ class DocumentRepository
 		?int $limit = null,
 		?int $afterPosition = null,
 		?int $afterId = null,
+		bool $insideDeletedCollection = false,
 	): array
 	{
-		$query = $this->buildParentQuery($collectionId, $parentId, true)
+		$query = $this->buildParentQuery($collectionId, $parentId, true, $insideDeletedCollection)
 			->setSelect(self::LIST_SELECT)
 		;
 		if ($afterPosition !== null && $afterId !== null)
@@ -1363,17 +1654,52 @@ class DocumentRepository
 			return [];
 		}
 
-		$childrenCountMap = $this->getChildrenCountMapByParentIds($collectionId, $normalizedIds);
+		// A probe, not a count: the answer is a yes or a no, and counting to it read every child of
+		// every parent asked about. Grouped by PARENT_ID with nothing to aggregate, the branch index
+		// (COLLECTION_ID, PARENT_ID) is walked group by group - one entry per parent that has any -
+		// instead of row by row. How many lie inside is a different question, asked by the card of a
+		// document through {@see getChildrenCountMapByParentIds()}.
+		$query = DocumentTable::query()
+			->setSelect(['PARENT_ID'])
+			->where('COLLECTION_ID', $collectionId)
+			->where('IS_ARCHIVED', 'N')
+			->whereIn('PARENT_ID', $normalizedIds)
+			->setGroup(['PARENT_ID'])
+			->setCacheTtl(self::ORM_CACHE_TTL)
+		;
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		$withChildren = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$withChildren[(int)($row['PARENT_ID'] ?? 0)] = true;
+		}
+
 		$result = [];
 		foreach ($normalizedIds as $id)
 		{
-			$result[$id] = (int)($childrenCountMap[$id] ?? 0) > 0;
+			$result[$id] = isset($withChildren[$id]);
 		}
 
 		return $result;
 	}
 
-	public function getChildrenCountMapByParentIds(int $collectionId, array $parentIds): array
+	/**
+	 * Live direct children of each of the given documents, within one knowledge base.
+	 *
+	 * A real COUNT: the number reaches the card of a document as "how many lie inside", and a probe
+	 * answering 1 to any branch made every card say one. The count is no dearer than the probe was -
+	 * both read the branch index by (COLLECTION_ID, PARENT_ID), a grouping instead of a DISTINCT.
+	 *
+	 * @param int[] $parentIds
+	 * @return array<int, int> parentId => live children
+	 */
+	public function getChildrenCountMapByParentIds(
+		int $collectionId,
+		array $parentIds,
+		bool $insideDeletedCollection = false,
+	): array
 	{
 		$normalizedParentIds = array_values(array_unique(array_map(
 			static fn($id): int => (int)$id,
@@ -1386,14 +1712,17 @@ class DocumentRepository
 		}
 
 		$query = DocumentTable::query()
-			->setSelect(['PARENT_ID'])
+			->registerRuntimeField(
+				'CHILD_COUNT',
+				new ExpressionField('CHILD_COUNT', 'COUNT(%s)', 'ID'),
+			)
+			->setSelect(['PARENT_ID', 'CHILD_COUNT'])
 			->where('COLLECTION_ID', $collectionId)
 			->where('IS_ARCHIVED', 'N')
 			->whereIn('PARENT_ID', $normalizedParentIds)
-			->setDistinct()
 			->setCacheTtl(self::ORM_CACHE_TTL)
 		;
-		$this->recycleBinFilter()->applyExclusion($query);
+		$this->applyBinVisibility($query, $insideDeletedCollection);
 		$this->mainDocumentFilter()->applyExclusion($query);
 		$query = $query->exec();
 
@@ -1403,7 +1732,7 @@ class DocumentRepository
 			$parentId = (int)($row['PARENT_ID'] ?? 0);
 			if ($parentId > 0)
 			{
-				$result[$parentId] = 1;
+				$result[$parentId] = (int)($row['CHILD_COUNT'] ?? 0);
 			}
 		}
 
@@ -1467,7 +1796,20 @@ class DocumentRepository
 		)));
 	}
 
-	public function getChildrenCountMap(int $collectionId): array
+	/**
+	 * A deleted knowledge base is read whole: its page shows everything it holds, in the bin or not.
+	 * Only a live base hides what lies in the bin, because there the bin is a place of its own the
+	 * reader can go to.
+	 */
+	private function applyBinVisibility(Query $query, bool $insideDeletedCollection): void
+	{
+		if (!$insideDeletedCollection)
+		{
+			$this->recycleBinFilter()->applyExclusion($query);
+		}
+	}
+
+	public function getChildrenCountMap(int $collectionId, bool $insideDeletedCollection = false): array
 	{
 		$query = DocumentTable::query()
 			->setSelect(['PARENT_ID'])
@@ -1476,7 +1818,7 @@ class DocumentRepository
 			->whereNotNull('PARENT_ID')
 			->setDistinct()
 		;
-		$this->recycleBinFilter()->applyExclusion($query);
+		$this->applyBinVisibility($query, $insideDeletedCollection);
 		$this->mainDocumentFilter()->applyExclusion($query);
 		$query = $query->exec();
 
@@ -1512,6 +1854,7 @@ class DocumentRepository
 		bool $includeRecycleBin = false,
 		bool $excludeArchived = false,
 		?int $limit = null,
+		bool $onlyArchived = false,
 	): array
 	{
 		if ($rootId <= 0 || $collectionId <= 0 || ($limit !== null && $limit <= 0))
@@ -1537,11 +1880,19 @@ class DocumentRepository
 			{
 				$query->where('IS_ARCHIVED', 'N');
 			}
+			if ($onlyArchived)
+			{
+				$query->where('IS_ARCHIVED', 'Y');
+			}
 			if (!$includeRecycleBin)
 			{
 				$this->recycleBinFilter()->applyExclusion($query);
-				$this->mainDocumentFilter()->applyExclusion($query);
 			}
+			// Outside the branch above on purpose: the description of a knowledge base lives outside
+			// the tree and is never part of anybody's subtree. It used to be dropped only when the bin
+			// was excluded, so a walk of a trashed branch - which is exactly what a branch operation
+			// walks - swept it in.
+			$this->mainDocumentFilter()->applyExclusion($query);
 			if ($limit !== null)
 			{
 				// A single level can be arbitrarily wide, so the bound belongs on the query too.
@@ -1618,6 +1969,8 @@ class DocumentRepository
 			{
 				$this->recycleBinFilter()->applyExclusion($query);
 			}
+			// Same reason as in the single-root walk: the knowledge base description is not a node.
+			$this->mainDocumentFilter()->applyExclusion($query);
 			$rows = $query->exec();
 
 			$nextParentIds = [];
@@ -1793,6 +2146,46 @@ class DocumentRepository
 		DocumentTable::updateMulti($idsToLift, ['PARENT_ID' => null], true);
 	}
 
+	/**
+	 * Every document of a knowledge base, the archive and the recycle bin included — the set that
+	 * travels when the base itself moves. Only the main document is left out: it carries the
+	 * collection's description and has no place in the tree.
+	 *
+	 * @return int[]
+	 */
+	public function getCollectionDocumentIds(int $collectionId): array
+	{
+		if ($collectionId <= 0)
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->setSelect(['ID'])
+			->where('COLLECTION_ID', $collectionId)
+		;
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		return array_map(static fn(array $row): int => (int)$row['ID'], $query->fetchAll());
+	}
+
+	/**
+	 * Hands a whole set of documents over to another knowledge base in one statement. Nothing else
+	 * moves with them: PARENT_ID, positions and the ACL reconciliation are the caller's business,
+	 * and the caller runs this inside the transaction they all share.
+	 *
+	 * @param int[] $ids
+	 */
+	public function moveByIdsToCollection(array $ids, int $targetCollectionId): void
+	{
+		if ($targetCollectionId <= 0)
+		{
+			return;
+		}
+
+		$this->updateMulti($ids, ['COLLECTION_ID' => $targetCollectionId]);
+	}
+
 	public function getLiveCollectionDocumentIds(int $collectionId): array
 	{
 		if ($collectionId <= 0)
@@ -1810,6 +2203,187 @@ class DocumentRepository
 		$rows = $query->fetchAll();
 
 		return array_map(static fn(array $row): int => (int)$row['ID'], $rows);
+	}
+
+	/**
+	 * @param int[]|null $candidateIds null means no narrowing by id
+	 * @return int[]
+	 */
+	public function findLiveIdsByFilter(array $filter, ?array $candidateIds, int $limit): array
+	{
+		if ($candidateIds === [] || $limit <= 0)
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->setSelect(['ID'])
+			->setOrder(['ID' => 'DESC'])
+			->setLimit($limit)
+			->where('IS_ARCHIVED', 'N')
+		;
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		if ($candidateIds !== null)
+		{
+			$ids = $this->normalizeIdList($candidateIds);
+			if ($ids === [])
+			{
+				return [];
+			}
+
+			$query->whereIn('ID', $ids);
+		}
+
+		if ($filter !== [])
+		{
+			$query->addFilter(null, $filter);
+		}
+
+		return array_map('intval', array_column($query->fetchAll(), 'ID'));
+	}
+
+	/**
+	 * The live documents of a knowledge base authored by one user — the set the "My articles" bulk
+	 * operations run on. Resolved on the server and never taken from the client: the exclusions of
+	 * {@see getLiveCollectionDocumentIds()} plus the author.
+	 *
+	 * @return int[]
+	 */
+	public function getLiveOwnedCollectionDocumentIds(int $collectionId, int $userId): array
+	{
+		if ($collectionId <= 0 || $userId <= 0)
+		{
+			return [];
+		}
+
+		$rows = $this->liveOwnedInCollectionQuery($collectionId, $userId)
+			->setSelect(['ID'])
+			->fetchAll()
+		;
+
+		return array_map(static fn(array $row): int => (int)$row['ID'], $rows);
+	}
+
+	/**
+	 * How many documents {@see getLiveOwnedCollectionDocumentIds()} would return, by the same
+	 * predicate and without carrying any of them into PHP.
+	 */
+	public function countLiveOwnedCollectionDocuments(int $collectionId, int $userId): int
+	{
+		if ($collectionId <= 0 || $userId <= 0)
+		{
+			return 0;
+		}
+
+		$row = $this->liveOwnedInCollectionQuery($collectionId, $userId)
+			->registerRuntimeField(new ExpressionField('CNT', 'COUNT(*)'))
+			->setSelect(['CNT'])
+			->fetch()
+		;
+
+		return $row === false ? 0 : (int)$row['CNT'];
+	}
+
+	private function liveOwnedInCollectionQuery(int $collectionId, int $userId): Query
+	{
+		return $this->liveInCollectionQuery($collectionId)->where('CREATED_BY', $userId);
+	}
+
+	/**
+	 * PARENT_ID of the asked nodes and of nothing else. Enough for the boundary re-hang, where the
+	 * walk only ever climbs through nodes of the set itself; a walk that passes through nodes outside
+	 * it needs {@see getAncestorIdsMap()} instead.
+	 *
+	 * @param int[] $documentIds
+	 * @return array<int, ?int> documentId => parentId, null for a root of the knowledge base;
+	 *                          an id of another collection or of no document at all is absent
+	 */
+	public function getParentMap(int $collectionId, array $documentIds): array
+	{
+		$normalizedIds = $this->normalizeIdList($documentIds);
+		if ($collectionId <= 0 || empty($normalizedIds))
+		{
+			return [];
+		}
+
+		$rows = DocumentTable::query()
+			->setSelect(['ID', 'PARENT_ID'])
+			->where('COLLECTION_ID', $collectionId)
+			->whereIn('ID', $normalizedIds)
+			->fetchAll()
+		;
+
+		$map = [];
+		foreach ($rows as $row)
+		{
+			$parentId = $row['PARENT_ID'] === null ? null : (int)$row['PARENT_ID'];
+			$map[(int)$row['ID']] = $parentId;
+		}
+
+		return $map;
+	}
+
+	/**
+	 * The boundary of a set: for each of $nodeIds, the children that are NOT in the set. One query —
+	 * PARENT_ID IN (...) AND ID NOT IN (...) — and only the parents that have such children appear in
+	 * the answer.
+	 *
+	 * $liveOnly says what happens to a child that is archived or lies in the recycle bin. Archiving and
+	 * deleting leave the node in its own knowledge base and have no business touching its archive, so
+	 * they ask for the live boundary; a move takes the node out of the base, and a non-selected archived
+	 * or trashed descendant has to stay behind with the live ones, so it asks for the full one.
+	 *
+	 * @param int[] $nodeIds
+	 * @return array<int, int[]> parentId => ids of its children outside the set
+	 */
+	public function getChildrenOutsideSet(int $collectionId, array $nodeIds, bool $liveOnly = true): array
+	{
+		$normalizedIds = $this->normalizeIdList($nodeIds);
+		if ($collectionId <= 0 || empty($normalizedIds))
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->setSelect(['ID', 'PARENT_ID'])
+			->where('COLLECTION_ID', $collectionId)
+			->whereIn('PARENT_ID', $normalizedIds)
+			->whereNotIn('ID', $normalizedIds)
+		;
+		if ($liveOnly)
+		{
+			$query->where('IS_ARCHIVED', 'N');
+			$this->recycleBinFilter()->applyExclusion($query);
+		}
+		// Unconditional: the main document is never anybody's child, and the two modes differ only in
+		// what they say about the archive and the bin.
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		$childrenByParent = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$parentId = (int)($row['PARENT_ID'] ?? 0);
+			if ($parentId > 0)
+			{
+				$childrenByParent[$parentId][] = (int)$row['ID'];
+			}
+		}
+
+		return $childrenByParent;
+	}
+
+	/**
+	 * @param int[] $ids
+	 * @return int[]
+	 */
+	private function normalizeIdList(array $ids): array
+	{
+		return array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $ids),
+			static fn(int $id): bool => $id > 0,
+		)));
 	}
 
 	/**
@@ -1855,7 +2429,17 @@ class DocumentRepository
 	 *
 	 * @return array<int, array{ID: int, IS_ARCHIVED: bool, PARENT_ID: ?int, POSITION: int, TITLE: string}>
 	 */
-	public function listByCollectionForCascadeDelete(int $collectionId, int $afterId, int $limit): array
+	/**
+	 * @param bool $includeMain the main document is excluded everywhere else - it lives outside the
+	 *                          tree - but the cascade into the recycle bin has to take it along, or a
+	 *                          restored knowledge base comes back without its description.
+	 */
+	public function listByCollectionForCascadeDelete(
+		int $collectionId,
+		int $afterId,
+		int $limit,
+		bool $includeMain = false,
+	): array
 	{
 		if ($collectionId <= 0 || $limit <= 0)
 		{
@@ -1869,7 +2453,10 @@ class DocumentRepository
 			->addOrder('ID', 'ASC')
 			->setLimit($limit)
 		;
-		$this->mainDocumentFilter()->applyExclusion($query);
+		if (!$includeMain)
+		{
+			$this->mainDocumentFilter()->applyExclusion($query);
+		}
 		$rows = $query->fetchAll();
 
 		return array_map(
@@ -1931,7 +2518,663 @@ class DocumentRepository
 		return $result;
 	}
 
-	private function buildParentQuery(int $collectionId, ?int $parentId, bool $activeOnly): Query
+	/**
+	 * Archive roots: an archived document whose parent is not archived, or has no parent.
+	 * The same rule as in the bin, read from the state each side keeps - the archive keeps it on the
+	 * document, the bin in the presence of its row. No stored root flag exists on either side, and
+	 * one would have to be recomputed for everything archived before this release.
+	 *
+	 * Trashed documents stay out: they belong to the bin's locus, exactly as in the flat listing.
+	 * So does everything lying in a knowledge base that is itself archived or deleted: such a base is
+	 * a section of another surface, whole, and its content has no second place to stand in.
+	 */
+	private function queryArchivedRoots(int $collectionId): Query
+	{
+		return $this->queryArchivedRootsIn([$collectionId]);
+	}
+
+	/**
+	 * @param int[]|null $collectionIds null asks over every knowledge base
+	 */
+	private function queryArchivedRootsIn(?array $collectionIds): Query
+	{
+		$query = DocumentTable::query()
+			->where('IS_ARCHIVED', 'Y')
+			->whereNotNull('ARCHIVED_AT')
+			->where(Query::filter()->logic('or')
+				->whereNull('PARENT_ID')
+				->where('PARENT.IS_ARCHIVED', 'N')
+			)
+		;
+		if ($collectionIds !== null)
+		{
+			$query->whereIn('COLLECTION_ID', $collectionIds);
+		}
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		return $query;
+	}
+
+	/**
+	 * Archive roots of a reader who does not hold the knowledge base and got in by a grant of their
+	 * own. The same surface, a different starting point: what they may see begins at the documents
+	 * granted to them, not at the top of the archived subtree, so a granted document is a root here
+	 * even when its own parent is archived beside it.
+	 *
+	 * A grant is inherited downwards, so a granted document standing under another granted one is not
+	 * a root - it is already inside the section, and naming it twice would show the same card at two
+	 * levels. Knowledge bases the reader does hold are excluded: their archive is read the ordinary
+	 * way, and counting a base twice would put two sections with one name on the screen.
+	 *
+	 * @param string[] $codesPersonal access codes without '*'
+	 * @param int[] $heldCollectionIds bases the reader holds VIEW+ on, read by the ordinary pass
+	 * @param int[]|null $onlyCollectionIds narrows the answer to these bases
+	 */
+	private function queryGrantedArchivedRootsIn(
+		array $codesPersonal,
+		array $heldCollectionIds,
+		?array $onlyCollectionIds = null,
+	): ?Query
+	{
+		if (empty($codesPersonal))
+		{
+			return null;
+		}
+
+		$query = DocumentTable::query()
+			->where('IS_ARCHIVED', 'Y')
+			->whereNotNull('ARCHIVED_AT')
+			->where(DocumentAccessService::buildDocumentGrantFilter('ID', $codesPersonal))
+			->where(Query::filter()->logic('or')
+				->whereNull('PARENT_ID')
+				->where('PARENT.IS_ARCHIVED', 'N')
+				->where(DocumentAccessService::buildDocumentGrantFilter('PARENT_ID', $codesPersonal)->negative())
+			)
+		;
+
+		$held = $this->normalizePositiveIds($heldCollectionIds);
+		if (!empty($held))
+		{
+			$query->whereNotIn('COLLECTION_ID', $held);
+		}
+
+		if ($onlyCollectionIds !== null)
+		{
+			$only = $this->normalizePositiveIds($onlyCollectionIds);
+			if (empty($only))
+			{
+				return null;
+			}
+
+			$query->whereIn('COLLECTION_ID', $only);
+		}
+
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		return $query;
+	}
+
+	/**
+	 * Everything the reader may see in the archive, both reaches in one query: the bases they hold
+	 * and the corners of other bases they were let into. One query and not two, because the sections
+	 * are ordered by the name of the base and paged by that order - two lists merged in PHP would
+	 * have to agree with the database on how names compare, and they do not have to.
+	 *
+	 * @param int[]|null $heldCollectionIds bases the reader holds VIEW+ on; null is the whole portal
+	 * @param string[] $codesPersonal access codes without '*'; empty for an administrator
+	 */
+	private function queryArchivedRootsFor(?array $heldCollectionIds, array $codesPersonal): ?Query
+	{
+		$query = DocumentTable::query()
+			->where('IS_ARCHIVED', 'Y')
+			->whereNotNull('ARCHIVED_AT')
+		;
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		// Top of an archived subtree: the ordinary root of the archive.
+		$ownRoot = static fn(): ConditionTree => Query::filter()->logic('or')
+			->whereNull('PARENT_ID')
+			->where('PARENT.IS_ARCHIVED', 'N')
+		;
+
+		if ($heldCollectionIds === null)
+		{
+			return $query->where($ownRoot());
+		}
+
+		$held = $this->normalizePositiveIds($heldCollectionIds);
+		$reach = Query::filter()->logic('or');
+		$hasBranch = false;
+
+		if (!empty($held))
+		{
+			$reach->where(Query::filter()->whereIn('COLLECTION_ID', $held)->where($ownRoot()));
+			$hasBranch = true;
+		}
+
+		if (!empty($codesPersonal))
+		{
+			// The other reach starts lower: at the granted document itself, whatever stands above it.
+			$granted = Query::filter()
+				->where(DocumentAccessService::buildDocumentGrantFilter('ID', $codesPersonal))
+				->where(Query::filter()->logic('or')
+					->whereNull('PARENT_ID')
+					->where('PARENT.IS_ARCHIVED', 'N')
+					->where(DocumentAccessService::buildDocumentGrantFilter('PARENT_ID', $codesPersonal)->negative())
+				)
+			;
+			if (!empty($held))
+			{
+				$granted->whereNotIn('COLLECTION_ID', $held);
+			}
+
+			$reach->where($granted);
+			$hasBranch = true;
+		}
+
+		if (!$hasBranch)
+		{
+			return null;
+		}
+
+		return $query->where($reach);
+	}
+
+	/**
+	 * @param string[] $codesPersonal
+	 * @param array{changedAt: string, id: int}|null $cursor
+	 * @return array<int, array{id: int, documentId: int, changedAt: string}>
+	 */
+	public function listGrantedArchivedRootPage(
+		int $collectionId,
+		array $codesPersonal,
+		?array $cursor,
+		int $limit,
+	): array
+	{
+		if ($collectionId <= 0)
+		{
+			return [];
+		}
+
+		$query = $this->queryGrantedArchivedRootsIn($codesPersonal, [], [$collectionId]);
+		if ($query === null)
+		{
+			return [];
+		}
+
+		$this->applyArchiveCursor($query, $cursor);
+
+		return $this->fetchArchivePage($query, $limit);
+	}
+
+	/**
+	 * Keyset over (ARCHIVED_AT DESC, ID DESC), inclusive of the given key - see the twin in
+	 * {@see RecycleBinRepository} for why inclusive.
+	 *
+	 * @param array{changedAt: string, id: int}|null $cursor
+	 */
+	private function applyArchiveCursor(Query $query, ?array $cursor): void
+	{
+		$at = CursorDate::parse($cursor['changedAt'] ?? null);
+		$id = isset($cursor['id']) ? (int)$cursor['id'] : 0;
+		if ($at === null || $id <= 0)
+		{
+			return;
+		}
+
+		$query->where(Query::filter()->logic('or')
+			->where('ARCHIVED_AT', '<', $at)
+			->where(Query::filter()
+				->where('ARCHIVED_AT', $at)
+				->where('ID', '<=', $id)
+			)
+		);
+	}
+
+	/**
+	 * The keyset of the archive runs on the document row itself, so 'id' and 'documentId' are the
+	 * same number here; both are present so a page reads the same on either surface.
+	 *
+	 * @return array<int, array{id: int, documentId: int, changedAt: string}>
+	 */
+	private function fetchArchivePage(Query $query, int $limit): array
+	{
+		$rows = $query
+			->setSelect(['ID', 'ARCHIVED_AT'])
+			->addOrder('ARCHIVED_AT', 'DESC')
+			->addOrder('ID', 'DESC')
+			->setLimit(max(1, $limit))
+			->fetchAll()
+		;
+
+		$out = [];
+		foreach ($rows as $row)
+		{
+			$archivedAt = $row['ARCHIVED_AT'] ?? null;
+			$out[] = [
+				'id' => (int)$row['ID'],
+				'documentId' => (int)$row['ID'],
+				'changedAt' => $archivedAt instanceof DateTime
+					? $archivedAt->format('Y-m-d H:i:s')
+					: (string)($archivedAt ?? ''),
+			];
+		}
+
+		return $out;
+	}
+
+	/**
+	 * One page of the top level of a knowledge base's section in the archive.
+	 *
+	 * @param array{changedAt: string, id: int}|null $cursor
+	 * @return array<int, array{id: int, documentId: int, changedAt: string}>
+	 */
+	public function listArchivedRootPage(int $collectionId, ?array $cursor, int $limit): array
+	{
+		if ($collectionId <= 0)
+		{
+			return [];
+		}
+
+		$query = $this->queryArchivedRoots($collectionId);
+		$this->applyArchiveCursor($query, $cursor);
+
+		return $this->fetchArchivePage($query, $limit);
+	}
+
+	/**
+	 * Children of an archived node: one level, archived like the node itself.
+	 *
+	 * The knowledge base is named even though the node alone already says which one it is: the base
+	 * is the head of IX_NOTE_DOCUMENT_STATE_BRANCH (COLLECTION_ID, IS_MAIN, IS_ARCHIVED, ARCHIVED_AT, ID,
+	 * PARENT_ID), the index this very order was created for. Without it the only index the page can
+	 * run on is the portal-wide one on the archive, so reading one level of five documents walks the
+	 * archived rows of every base on the portal until five of them turn out to have this parent.
+	 *
+	 * @param array{changedAt: string, id: int}|null $cursor
+	 * @return array<int, array{id: int, documentId: int, changedAt: string}>
+	 */
+	public function listArchivedChildPage(int $parentId, int $collectionId, ?array $cursor, int $limit): array
+	{
+		if ($parentId <= 0)
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->where('PARENT_ID', $parentId)
+			->where('IS_ARCHIVED', 'Y')
+			->whereNotNull('ARCHIVED_AT')
+		;
+		if ($collectionId > 0)
+		{
+			$query->where('COLLECTION_ID', $collectionId);
+		}
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+		$this->applyArchiveCursor($query, $cursor);
+
+		return $this->fetchArchivePage($query, $limit);
+	}
+
+	/**
+	 * The same level for a reader who reaches the archived node by a grant alone. A grant on a
+	 * document is not a grant on what lies under it: only a subtree grant reaches the children, and
+	 * it reaches them as rows of their own, so the level is read through the same grant filter as
+	 * everything else this reader is shown.
+	 *
+	 * @param string[] $codesPersonal access codes without '*'; an empty list sees nothing
+	 * @param array{changedAt: string, id: int}|null $cursor
+	 * @return array<int, array{id: int, documentId: int, changedAt: string}>
+	 */
+	public function listGrantedArchivedChildPage(
+		int $parentId,
+		int $collectionId,
+		array $codesPersonal,
+		?array $cursor,
+		int $limit,
+	): array
+	{
+		if ($parentId <= 0 || empty($codesPersonal))
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->where('PARENT_ID', $parentId)
+			->where('IS_ARCHIVED', 'Y')
+			->whereNotNull('ARCHIVED_AT')
+			->where(DocumentAccessService::buildDocumentGrantFilter('ID', $codesPersonal))
+		;
+		if ($collectionId > 0)
+		{
+			$query->where('COLLECTION_ID', $collectionId);
+		}
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+		$this->applyArchiveCursor($query, $cursor);
+
+		return $this->fetchArchivePage($query, $limit);
+	}
+
+	/**
+	 * One page of the stream of documents of the knowledge bases the reader holds, every state the
+	 * caller asks for in a single order.
+	 *
+	 * The order (COLLECTION_ID DESC, ID DESC) is the one IX_NOTE_DOC_MAIN gives away: the two
+	 * columns of its head are the equalities of the query, and the primary key rides in the suffix
+	 * of every secondary index, so the ID order inside a base costs nothing and needs no sort. A
+	 * page therefore costs its own length and not the number of bases behind the IN.
+	 *
+	 * State is an ordinary predicate over that order and not a segment of it: archived lives on the
+	 * document row, trashed is the existence of a bin row on the reference over UNIQUE(DOCUMENT_ID).
+	 * A page asked for the trashed state alone is read from the bin instead - see the twin in
+	 * {@see RecycleBinRepository::listByCollectionsPage()}, which has an index of its own for it.
+	 *
+	 * @param int[]|null $collectionIds bases the reader holds VIEW+ on; null puts no restriction,
+	 *                                   the empty list answers nothing
+	 * @param string[] $states self::STATE_*; the empty list answers nothing
+	 * @param array{collectionId: int, id: int}|null $cursor last row of the previous page, exclusive
+	 * @return array<int, array{id: int, collectionId: int}>
+	 */
+	public function listByCollectionsPage(?array $collectionIds, array $states, ?array $cursor, int $limit): array
+	{
+		$ids = $collectionIds === null ? null : $this->normalizePositiveIds($collectionIds);
+		if ($ids === [] || empty($states) || $limit <= 0)
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->setSelect(['ID', 'COLLECTION_ID'])
+			->addOrder('COLLECTION_ID', 'DESC')
+			->addOrder('ID', 'DESC')
+			->setLimit($limit)
+		;
+		if ($ids === null)
+		{
+			// Unrestricted, yet still not the whole table: a document whose base row is gone belongs
+			// to the stream of orphans alone, and naming it here too would hand it out twice.
+			$query->whereNotNull('COLLECTION.ID');
+		}
+		else
+		{
+			$query->whereIn('COLLECTION_ID', $ids);
+		}
+		$this->mainDocumentFilter()->applyExclusion($query);
+		$this->applyStatePredicate($query, $states);
+		$this->applyStreamCursor($query, $cursor);
+
+		$out = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$out[] = [
+				'id' => (int)$row['ID'],
+				'collectionId' => (int)$row['COLLECTION_ID'],
+			];
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param string[] $states
+	 */
+	private function applyStatePredicate(Query $query, array $states): void
+	{
+		$live = in_array(self::STATE_LIVE, $states, true);
+		$archived = in_array(self::STATE_ARCHIVED, $states, true);
+		$trashed = in_array(self::STATE_TRASHED, $states, true);
+
+		if ($live && $archived && $trashed)
+		{
+			return;
+		}
+
+		$predicate = Query::filter()->logic('or');
+		if ($trashed)
+		{
+			$predicate->whereNotNull('RECYCLE_BIN.ID');
+		}
+
+		if ($live || $archived)
+		{
+			// A document in the bin is trashed whatever its archive flag says, so the two states
+			// that live on the row are asked for outside the bin.
+			$outsideBin = Query::filter()->whereNull('RECYCLE_BIN.ID');
+			if (!$live)
+			{
+				$outsideBin->where('IS_ARCHIVED', 'Y');
+			}
+			if (!$archived)
+			{
+				$outsideBin->where('IS_ARCHIVED', 'N');
+			}
+
+			$predicate->where($outsideBin);
+		}
+
+		$query->where($predicate);
+	}
+
+	/**
+	 * Keyset over (COLLECTION_ID DESC, ID DESC), exclusive of the given key: the cursor names the
+	 * last row handed out, and the stream continues strictly after it.
+	 *
+	 * @param array{collectionId: int, id: int}|null $cursor
+	 */
+	private function applyStreamCursor(Query $query, ?array $cursor): void
+	{
+		$collectionId = isset($cursor['collectionId']) ? (int)$cursor['collectionId'] : 0;
+		$id = isset($cursor['id']) ? (int)$cursor['id'] : 0;
+		if ($collectionId <= 0 || $id <= 0)
+		{
+			return;
+		}
+
+		$query->where(Query::filter()->logic('or')
+			->where('COLLECTION_ID', '<', $collectionId)
+			->where(Query::filter()
+				->where('COLLECTION_ID', $collectionId)
+				->where('ID', '<', $id)
+			)
+		);
+	}
+
+	/**
+	 * A page of the archive's section list: how much every base holds, in the order the sections are
+	 * read in - by name. The name lives on the other table, so it is selected and grouped by along
+	 * with the id; ordering by it in SQL is what lets the list be paged at all. Ordered by the id
+	 * instead, the page said "the fifty oldest bases" while the screen showed them alphabetically -
+	 * two different orders, and no way to ask for what came after the page.
+	 *
+	 * @param array{title: string, collectionId: int}|null $afterCursor
+	 * @return array<int, array{count: int, title: string}> in the order of the page
+	 */
+	private function tallyByCollectionName(Query $query, int $limit, ?array $afterCursor): array
+	{
+		$query
+			->registerRuntimeField(
+				'ARCHIVED_ROOT_COUNT',
+				new ExpressionField('ARCHIVED_ROOT_COUNT', 'COUNT(%s)', 'ID'),
+			)
+			->setSelect(['COLLECTION_ID', 'COLLECTION_NAME' => 'COLLECTION.NAME', 'ARCHIVED_ROOT_COUNT'])
+			->addOrder('COLLECTION_NAME', 'ASC')
+			->addOrder('COLLECTION_ID', 'ASC')
+			->setLimit(max(1, $limit))
+		;
+
+		// Exclusive keyset: a page of sections names the base it stops at, and repeating it on the
+		// next page would draw the same section twice.
+		$title = isset($afterCursor['title']) ? (string)$afterCursor['title'] : '';
+		$cursorId = isset($afterCursor['collectionId']) ? (int)$afterCursor['collectionId'] : 0;
+		if ($cursorId > 0)
+		{
+			$query->where(Query::filter()->logic('or')
+				->where('COLLECTION_NAME', '>', $title)
+				->where(Query::filter()
+					->where('COLLECTION_NAME', $title)
+					->where('COLLECTION_ID', '>', $cursorId)
+				)
+			);
+		}
+
+		$out = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$collectionId = (int)($row['COLLECTION_ID'] ?? 0);
+			if ($collectionId > 0)
+			{
+				$out[$collectionId] = [
+					'count' => (int)($row['ARCHIVED_ROOT_COUNT'] ?? 0),
+					'title' => (string)($row['COLLECTION_NAME'] ?? ''),
+				];
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Archived roots of every knowledge base at once - see the twin in
+	 * {@see RecycleBinRepository::tallyRootsByFreshness()} for why one pass replaces a query per
+	 * base.
+	 *
+	 * The bound applies to the bases that hold archived content, and not to a prefix of the portal's
+	 * bases: cutting first and counting afterwards showed an empty archive on a portal whose archived
+	 * documents happen to live in bases created later.
+	 *
+	 * @param int[]|null $collectionIds bases the viewer may see; null puts no restriction, the empty
+	 *                                  list answers nothing
+	 * @param int $limit how many bases the page holds
+	 * @return array<int, array{count: int, title: string}> collectionId => archived roots and the
+	 *         name the page is ordered by, in the order of the page
+	 */
+	public function tallyArchivedRootsByCollection(
+		?array $collectionIds,
+		int $limit,
+		?array $afterCursor = null,
+		array $codesPersonal = [],
+	): array
+	{
+		if ($limit <= 0)
+		{
+			return [];
+		}
+
+		$query = $this->queryArchivedRootsFor($collectionIds, $codesPersonal);
+		if ($query === null)
+		{
+			return [];
+		}
+
+		return $this->tallyByCollectionName($query, $limit, $afterCursor);
+	}
+
+	/**
+	 * Direct archived children of each of the given documents, counted over the documents
+	 * themselves rather than over the rows of the bin.
+	 *
+	 * @param int[] $collectionIds bases the parents live in; the empty list counts nothing
+	 * @param int[] $parentIds
+	 * @param ConditionTree|null $visibility predicate over ID / COLLECTION_ID; null counts everything
+	 * @return array<int, int> parentId => archived children
+	 */
+	public function getArchivedChildCountMap(
+		array $collectionIds,
+		array $parentIds,
+		?ConditionTree $visibility = null,
+	): array
+	{
+		return $this->getChildCountMapByState($collectionIds, $parentIds, 'Y', $visibility);
+	}
+
+	/**
+	 * Live direct children of each of the given documents, counted for real.
+	 *
+	 * @param int[] $collectionIds bases the parents live in; the empty list counts nothing
+	 * @param int[] $parentIds
+	 * @param ConditionTree|null $visibility predicate over ID / COLLECTION_ID; null counts everything
+	 * @return array<int, int> parentId => live children
+	 */
+	public function getLiveChildCountMap(
+		array $collectionIds,
+		array $parentIds,
+		?ConditionTree $visibility = null,
+	): array
+	{
+		return $this->getChildCountMapByState($collectionIds, $parentIds, 'N', $visibility);
+	}
+
+	/**
+	 * The knowledge base is named even though a parent id already says which one it is: every branch
+	 * index of the table starts with COLLECTION_ID, and no index starts with PARENT_ID. Asked by
+	 * parent alone the count ran on the portal-wide index of the state - IS_ARCHIVED and nothing
+	 * else - so counting the children of one document read every document of the portal in that
+	 * state and probed the bin for each of them. Named, the count runs on the branch index.
+	 *
+	 * A parent id belongs to exactly one base, so a batch spanning several of them stays correct
+	 * with both sides given as lists: the extra bases only widen the range, they cannot add rows to
+	 * another parent's count.
+	 *
+	 * @param int[] $collectionIds
+	 * @param int[] $parentIds
+	 * @return array<int, int>
+	 */
+	private function getChildCountMapByState(
+		array $collectionIds,
+		array $parentIds,
+		string $isArchived,
+		?ConditionTree $visibility = null,
+	): array
+	{
+		$ids = $this->normalizePositiveIds($parentIds);
+		$collections = $this->normalizePositiveIds($collectionIds);
+		if (empty($ids) || empty($collections))
+		{
+			return [];
+		}
+
+		$query = DocumentTable::query()
+			->registerRuntimeField(
+				'CHILD_COUNT',
+				new ExpressionField('CHILD_COUNT', 'COUNT(%s)', 'ID'),
+			)
+			->setSelect(['PARENT_ID', 'CHILD_COUNT'])
+			->whereIn('COLLECTION_ID', $collections)
+			->whereIn('PARENT_ID', $ids)
+			->where('IS_ARCHIVED', $isArchived)
+		;
+		if ($visibility !== null)
+		{
+			$query->where($visibility);
+		}
+		$this->recycleBinFilter()->applyExclusion($query);
+		$this->mainDocumentFilter()->applyExclusion($query);
+
+		$out = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$parentId = (int)($row['PARENT_ID'] ?? 0);
+			if ($parentId > 0)
+			{
+				$out[$parentId] = (int)($row['CHILD_COUNT'] ?? 0);
+			}
+		}
+
+		return $out;
+	}
+
+	private function buildParentQuery(
+		int $collectionId,
+		?int $parentId,
+		bool $activeOnly,
+		bool $insideDeletedCollection = false,
+	): Query
 	{
 		$query = DocumentTable::query()
 			->where('COLLECTION_ID', $collectionId)
@@ -1953,7 +3196,7 @@ class DocumentRepository
 			$query->where('PARENT_ID', $parentId);
 		}
 
-		$this->recycleBinFilter()->applyExclusion($query);
+		$this->applyBinVisibility($query, $insideDeletedCollection);
 		$this->mainDocumentFilter()->applyExclusion($query);
 
 		return $query;

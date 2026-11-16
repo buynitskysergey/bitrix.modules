@@ -167,7 +167,9 @@ final class HtmlToMarkdown
 	private function loadDom(string $html): ?\DOMDocument
 	{
 		$dom = new \DOMDocument('1.0', 'UTF-8');
-		$wrapped = '<?xml encoding="UTF-8"?><html><body>' . $html . '</body></html>';
+		$wrapped = '<?xml encoding="UTF-8"?><html><body>'
+			. BlockHtmlExtractor::unwrapHeadingParagraphs($html)
+			. '</body></html>';
 
 		$previous = libxml_use_internal_errors(true);
 		try
@@ -355,13 +357,21 @@ final class HtmlToMarkdown
 	/**
 	 * Inline content of a heading, folded onto a single line. A markdown heading ends at the line
 	 * break, so a break inside it would leave the tail of the title behind as a paragraph - and
-	 * landing templates wrap a long title across lines and put a `<br>` in it by hand.
+	 * landing templates wrap a long title across lines and put a `<br>` in it by hand. A paragraph
+	 * unwrapped out of the heading leaves a space next to one of the text's own (`&nbsp;` included),
+	 * folded here too.
 	 */
 	private function headingText(\DOMElement $node, ?BlockMediaContext $media): string
 	{
 		$inner = $this->renderInline($node, $media);
 
-		return trim(preg_replace('/\s*\R\s*/u', ' ', $inner) ?? $inner);
+		return $this->trimHeading(preg_replace('/\s*\R\s*|\h{2,}/u', ' ', $inner) ?? $inner);
+	}
+
+	/** Trims a title, `&nbsp;` (U+00A0) included - it would stand as a second space after the marker. */
+	private function trimHeading(string $text): string
+	{
+		return preg_replace('/^[\pZ\s]+|[\pZ\s]+$/u', '', $text) ?? trim($text);
 	}
 
 	/**
@@ -392,7 +402,7 @@ final class HtmlToMarkdown
 			return null;
 		}
 
-		$inner = trim($this->renderInline($node, $media));
+		$inner = $this->trimHeading($this->renderInline($node, $media));
 		if ($this->isBlank($inner))
 		{
 			return '';
@@ -886,18 +896,14 @@ final class HtmlToMarkdown
 			BlockHtmlExtractor::extractAlign($node),
 		);
 
-		// The <img>'s own file id is authoritative. Prefer the retina `data-fileid2x` when present -
-		// it is the highest-resolution managed copy, so avatars/photos import at the sharpest size
-		// ("максимального размера") rather than the down-scaled @1x. Landing lists a block's @2x files
-		// alongside the @1x ones, so a block with N images can expose 2N file ids; resolving straight
-		// from the attribute (and never advancing the positional cursor - both ids are excluded from
-		// the pool, see BlockMediaContext::forContent) keeps every card on its own picture.
-		$dataFileId = (int)$node->getAttribute('data-fileid2x');
-		if ($dataFileId <= 0)
-		{
-			$dataFileId = (int)$node->getAttribute('data-fileid');
-		}
-		if ($dataFileId > 0)
+		// The <img>'s own file id is authoritative ({@see BlockHtmlExtractor::imageFileId()}), the
+		// retina copy first, so avatars/photos import at the sharpest size rather than the down-scaled
+		// @1x. Landing lists a block's @2x files alongside the @1x ones, so a block with N images can
+		// expose 2N file ids; resolving straight from the attribute (and never advancing the positional
+		// cursor - both ids are excluded from the pool, see BlockMediaContext::forContent) keeps every
+		// card on its own picture.
+		$dataFileId = BlockHtmlExtractor::imageFileId($node);
+		if ($dataFileId !== null)
 		{
 			return '![' . $alt . '](' . LandingSource::ATTACHMENT_SCHEME . $dataFileId . $suffix . ')';
 		}

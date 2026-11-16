@@ -10,15 +10,20 @@ use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Access\PortalAdmin;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
+use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Model\FavoriteTable;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\FavoriteRepository;
+use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 use Bitrix\Note\Internal\Repository\SubscriptionRepository;
 use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
+use Bitrix\Note\Internal\Service\RecycleBin\RetentionDeadline;
+use Bitrix\Note\Internal\Service\User\AuthorResolver;
 use Bitrix\Note\Internal\Service\User\SystemUser;
+use Bitrix\Note\Public\Provider\Dto\DocumentReadDto;
 
 final class DocumentProvider
 {
@@ -27,6 +32,8 @@ final class DocumentProvider
 		private readonly DocumentCardMetaResolver $cardMetaResolver = new DocumentCardMetaResolver(),
 		private readonly CollectionRepository $collectionRepository = new CollectionRepository(),
 		private readonly SubscriptionRepository $subscriptionRepository = new SubscriptionRepository(),
+		private readonly RecycleBinRepository $recycleBinRepository = new RecycleBinRepository(),
+		private readonly AuthorResolver $authorResolver = new AuthorResolver(),
 	) {}
 
 	public function getById(int $id): ?Document
@@ -76,6 +83,50 @@ final class DocumentProvider
 			'createdBy' => (int)$document->getCreatedBy(),
 			'createdAt' => $document->getCreatedAt(),
 		];
+	}
+
+	/**
+	 * Document content for a reader outside the portal (RAG source sync): narrow meta, then
+	 * only the MARKDOWN column, so the heavy CRDT snapshot of the row is never read.
+	 *
+	 * Refuses anything a reader must not see: missing, archived, trashed (the recycle bin keeps
+	 * the row and its ACL untouched, so the trash is checked explicitly) and documents whose
+	 * collection is closed for reading — the ACL snapshot covers the collection state as well.
+	 *
+	 * @throws DocumentNotFoundException when the document is not readable
+	 */
+	public function getForRead(int $id): DocumentReadDto
+	{
+		$document = $this->documentRepository->getMetaById($id);
+		if ($document === null || $document->getIsArchived() || $this->recycleBinRepository->getByDocumentId($id) !== null)
+		{
+			throw new DocumentNotFoundException();
+		}
+
+		$documentId = (int)$document->getId();
+		$collectionId = (int)$document->getCollectionId();
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $collectionId);
+		if (!$snapshot['canView'])
+		{
+			throw new DocumentNotFoundException();
+		}
+
+		$markdown = $this->documentRepository->getRawMarkdown($id) ?? '';
+
+		return new DocumentReadDto(
+			id: $documentId,
+			collectionId: $snapshot['sharedAccess'] ? null : $collectionId,
+			parentId: $document->getParentId() !== null ? (int)$document->getParentId() : null,
+			title: (string)$document->getTitle(),
+			markdown: $markdown,
+			position: (int)$document->getPosition(),
+			createdBy: (int)$document->getCreatedBy(),
+			updatedBy: (int)$document->getUpdatedBy(),
+			createdAt: $document->getCreatedAt(),
+			updatedAt: $document->getUpdatedAt(),
+			// Content build time, separate from updatedAt; null until the projection materializes.
+			contentUpdatedAt: $document->getContentUpdatedAt(),
+		);
 	}
 
 	/**
@@ -141,7 +192,8 @@ final class DocumentProvider
 	 *     updatedAt: string,
 	 *     excerpt: string,
 	 *     author: ?array{id: int, name: string},
-	 *     hasChildren: bool
+	 *     hasChildren: bool,
+	 *     childCount: int
 	 *   }>,
 	 *   nextCursor: ?array{position: int, id: int}
 	 * }
@@ -161,8 +213,18 @@ final class DocumentProvider
 			throw new CollectionNotFoundException();
 		}
 
+		// A base lying in the bin still has a page, and the page shows it whole, read-only, with the
+		// notice on top. One right governs it, and it is not the right to read: a reader who cannot
+		// manage the bin must not learn that the base is even there, so for them it is missing
+		// rather than forbidden.
+		$isTrashed = $collection->getTrashedAt() !== null;
+		if ($isTrashed && !DocumentAccessService::canManageCollectionInRecycleBin($userId, $collectionId))
+		{
+			throw new CollectionNotFoundException();
+		}
+
 		$accessSnapshot = CollectionAccessService::getCurrentUserAccessSnapshot($collectionId);
-		if ($accessSnapshot['effective'] < CollectionAccessService::LEVEL_VIEW)
+		if (!$isTrashed && $accessSnapshot['effective'] < CollectionAccessService::LEVEL_VIEW)
 		{
 			throw new AccessDeniedException();
 		}
@@ -187,6 +249,7 @@ final class DocumentProvider
 			$afterPosition,
 			$afterId,
 			$rootsOnly,
+			$isTrashed,
 		);
 
 		$hasNextPage = count($rawDocuments) > $limit;
@@ -203,9 +266,16 @@ final class DocumentProvider
 			$documentIds[] = (int)$document->getId();
 		}
 		$cardMeta = $this->cardMetaResolver->resolve($authorIdByDocumentId);
-		// Ship the "has live children" flag with the list so the bulk-confirm dialog can decide
-		// locally whether to offer the "with nested" toggle — no separate dry-run round-trip.
-		$hasChildrenMap = $this->documentRepository->getHasChildrenMap($collectionId, $documentIds);
+		// How many live children each document has. The card prints the number on its sole and the
+		// bulk-confirm dialog reads the same answer as a yes or no - whether to offer the "with
+		// nested" toggle - so neither needs a round-trip of its own. One count instead of a count
+		// and a probe: both read the branch index by (COLLECTION_ID, PARENT_ID) under the same
+		// exclusions, so "there are some" is exactly "the count is above zero".
+		$childCountMap = $this->documentRepository->getChildrenCountMapByParentIds(
+			$collectionId,
+			$documentIds,
+			$isTrashed,
+		);
 
 		$items = [];
 		$lastPosition = null;
@@ -218,6 +288,7 @@ final class DocumentProvider
 			$lastId = $id;
 
 			$meta = $cardMeta[$id] ?? ['excerpt' => '', 'author' => null];
+			$childCount = (int)($childCountMap[$id] ?? 0);
 			$items[] = [
 				'id' => $id,
 				'parentId' => $document->getParentId() !== null ? (int)$document->getParentId() : null,
@@ -226,7 +297,8 @@ final class DocumentProvider
 				'updatedAt' => $this->observedUpdatedAt($document)->format('c'),
 				'excerpt' => $meta['excerpt'],
 				'author' => $meta['author'],
-				'hasChildren' => $hasChildrenMap[$id] ?? false,
+				'hasChildren' => $childCount > 0,
+				'childCount' => $childCount,
 			];
 		}
 
@@ -252,6 +324,19 @@ final class DocumentProvider
 				FavoriteTable::ENTITY_TYPE_COLLECTION,
 				$collectionId,
 			) !== null;
+			// The page draws its own notice out of this, and hides everything that writes: the server
+			// refuses those anyway, and a button that is always refused is worse than no button.
+			$collectionMeta['state'] = $isTrashed ? 'trashed' : 'live';
+			$collectionMeta['trashedAt'] = $isTrashed ? $collection->getTrashedAt()->format('c') : null;
+			// Same deadline the cleanup agent goes by, so the notice on the page cannot name a date
+			// the agent disagrees with.
+			$collectionMeta['trashExpiresAt'] = $isTrashed
+				? RetentionDeadline::forTrashedAt($collection->getTrashedAt())
+				: null;
+			$trasherId = (int)$collection->getTrashedBy();
+			$collectionMeta['trashedBy'] = $isTrashed
+				? ($this->authorResolver->resolve([$trasherId])[$trasherId] ?? null)
+				: null;
 		}
 
 		return [

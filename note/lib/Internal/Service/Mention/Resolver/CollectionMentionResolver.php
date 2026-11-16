@@ -34,11 +34,13 @@ final class CollectionMentionResolver implements MentionEntityResolver
 
 		$levelMap = $isAdmin ? [] : CollectionAccessService::batchGetUserLevels($normalizedIds, $accessCodes);
 
-		// Load names; archived or missing collections are treated as deleted.
+		// Load names; archived, trashed or missing collections are treated as deleted - the token must
+		// not name a base whose card the reader may have no right to even see in the bin.
 		$rows = CollectionTable::query()
 			->setSelect(['ID', 'NAME'])
 			->whereIn('ID', $normalizedIds)
 			->where('IS_ARCHIVED', 'N')
+			->whereNull('TRASHED_AT')
 			->exec()
 		;
 		$nameMap = [];

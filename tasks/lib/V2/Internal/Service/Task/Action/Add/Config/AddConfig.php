@@ -6,6 +6,7 @@ namespace Bitrix\Tasks\V2\Internal\Service\Task\Action\Add\Config;
 
 use Bitrix\Tasks\Processor;
 use Bitrix\Tasks\V2\Internal\Entity\Analytics\AnalyticsData;
+use Bitrix\Tasks\V2\Internal\Service\Interaction\InteractionOrigin;
 
 class AddConfig
 {
@@ -25,6 +26,7 @@ class AddConfig
 	private ?Processor\Task\Result $shiftResult = null;
 	private ?AnalyticsData $analyticsData;
 	private ?bool $manualDeadline;
+	private InteractionOrigin $origin;
 
 	public function __construct(
 		int $userId,
@@ -45,6 +47,7 @@ class AddConfig
 		// null means the caller did not report it (mobile app, legacy CTaskItem,
 		// REST), in which case RunAddEvent falls back to the DEADLINE heuristic.
 		?bool $manualDeadline = null,
+		InteractionOrigin $origin = InteractionOrigin::System,
 	) {
 		$this->userId = $userId;
 		$this->fromAgent = $fromAgent;
@@ -61,6 +64,7 @@ class AddConfig
 		$this->runtime = $runtime;
 		$this->analyticsData = $analyticsData;
 		$this->manualDeadline = $manualDeadline;
+		$this->origin = $origin;
 	}
 
 	// Getter methods
@@ -163,6 +167,11 @@ class AddConfig
 		return $this->checkUserFields;
 	}
 
+	public function getOrigin(): InteractionOrigin
+	{
+		return $this->origin;
+	}
+
 	// Fluent setters
 	public function setUserId(int $userId): static
 	{
@@ -244,6 +253,13 @@ class AddConfig
 	public function setFullTaskData(array $fullTaskData): static
 	{
 		$this->fullTaskData = $fullTaskData;
+
+		return $this;
+	}
+
+	public function setOrigin(InteractionOrigin $origin): static
+	{
+		$this->origin = $origin;
 
 		return $this;
 	}

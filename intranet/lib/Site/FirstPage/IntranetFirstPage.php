@@ -3,6 +3,7 @@
 namespace Bitrix\Intranet\Site\FirstPage;
 
 use Bitrix\Intranet\Internal\Service\Portal\PortalFirstPageUrlNormalizer;
+use Bitrix\Intranet\Internal\Service\Portal\FirstPageUrlPolicy;
 use Bitrix\Intranet\UI\LeftMenu\Preset\Manager;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
@@ -71,7 +72,8 @@ class IntranetFirstPage implements FirstPage
 		if (
 			empty($firstPagePath)
 			|| preg_match('~^(/(\\?.*)?|/index.php(\\?.*)?)$~i', $firstPagePath)
-			|| preg_match('~^(http|//|/company/personal/mail/)~i', $firstPagePath)
+			|| preg_match('~^/company/personal/mail/~i', $firstPagePath)
+			|| !FirstPageUrlPolicy::isAllowedAsFirstPage($firstPagePath)
 		)
 		{
 			if (

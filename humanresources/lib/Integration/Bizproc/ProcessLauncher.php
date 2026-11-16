@@ -25,6 +25,7 @@ class ProcessLauncher implements ProcessLauncherInterface
 	 * node that is either invisible or never started, without an error.
 	 */
 	private const TRIGGER_CODE = 'NewEmployeeTrigger';
+	private const POSITION_TRIGGER_CODE = 'StructurePositionChangedTrigger';
 
 	/**
 	 * A passed delay, whatever its value, is what moves the start out of the current request: the engine
@@ -52,12 +53,44 @@ class ProcessLauncher implements ProcessLauncherInterface
 			);
 		}
 
-		return Starter::getByScenario(Scenario::onEvent)
+		$starter = Starter::getByScenario(Scenario::onEvent)
 			->setContext(new ContextDto(self::CONTEXT_MODULE_ID))
 			->setDelay(self::START_DELAY)
 			->addEvent(self::TRIGGER_CODE, [], $this->buildEventFields($userId))
-			->start()
 		;
+
+		return $this->start($starter);
+	}
+
+	public function launchForPositionChanges(StructurePositionChange ...$changes): Result
+	{
+		if (!$changes)
+		{
+			return new Result();
+		}
+
+		if (!$this->includeProcessEngine())
+		{
+			return (new Result())->addError(
+				new Error('The process engine is not available.', 'HUMANRESOURCES_BIZPROC_LAUNCH_ENGINE_UNAVAILABLE'),
+			);
+		}
+
+		$starter = Starter::getByScenario(Scenario::onEvent)
+			->setContext(new ContextDto(self::CONTEXT_MODULE_ID))
+			->setDelay(self::START_DELAY)
+		;
+		foreach ($changes as $change)
+		{
+			$starter->addEvent(self::POSITION_TRIGGER_CODE, [], $change->toEventFields());
+		}
+
+		return $this->start($starter);
+	}
+
+	protected function start(Starter $starter): Result
+	{
+		return $starter->start();
 	}
 
 	protected function includeProcessEngine(): bool

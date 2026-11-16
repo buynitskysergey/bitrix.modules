@@ -21,6 +21,7 @@
 	\Bitrix\Sign\Controllers\V1\B2e\Member\Link::class => 'lib/Controllers/V1/B2e/Member/Link.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Member\Reminder::class => 'lib/Controllers/V1/B2e/Member/Reminder.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Document\Template::class => 'lib/Controllers/V1/B2e/Document/Template.php',
+	\Bitrix\Sign\Controllers\V1\B2e\Document\Template\Blank::class => 'lib/Controllers/V1/B2e/Document/Template/Blank.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Document\Member::class => 'lib/Controllers/V1/B2e/Document/Member.php',
 	\Bitrix\Sign\Controllers\V1\Integration\Im\GroupChat::class => 'lib/Controllers/V1/Integration/Im/GroupChat.php',
 	\Bitrix\Sign\Controllers\V1\B2e\Document\Group::class => 'lib/Controllers/V1/B2e/Document/Group.php',

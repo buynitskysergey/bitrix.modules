@@ -10,6 +10,7 @@ use Bitrix\Intranet\Exception\DeleteFailedException;
 use Bitrix\Intranet\Exception\UpdateFailedException;
 use Bitrix\Intranet\Exception\WrongIdException;
 use Bitrix\Intranet\Internal\Repository\Mapper\UserMapper;
+use Bitrix\Intranet\Internals\ApplicationExceptionCode;
 use Bitrix\Intranet\Internals\Trait\UserUpdateError;
 use Bitrix\Intranet\UserTable;
 use Bitrix\Intranet\Contract\Repository\UserRepository as UserRepositoryContract;
@@ -541,10 +542,18 @@ class UserRepository implements UserRepositoryContract
 		];
 
 		$userApi = new \CUser();
+		$exceptionStackOffset = ApplicationExceptionCode::getStackOffset();
 		$id = $userApi->Add($userFields);
 		if ($id === false)
 		{
-			throw new CreationFailedException(new ErrorCollection([new Error($userApi->LAST_ERROR)]));
+			$lastError = (string)$userApi->LAST_ERROR;
+			$errorCode = ApplicationExceptionCode::findByErrorMessage(
+				$lastError,
+				$exceptionStackOffset,
+				ApplicationExceptionCode::INVITATION_PUBLIC_CODES,
+			) ?? 0;
+
+			throw new CreationFailedException(new ErrorCollection([new Error($lastError, $errorCode)]));
 		}
 		$user->setId((int)$id);
 

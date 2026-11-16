@@ -17,6 +17,8 @@ use Bitrix\Sign\Repository\BlockRepository;
 use Bitrix\Sign\Service\Container;
 use Bitrix\Sign\Service\Document;
 use Bitrix\Sign\Service\Integration\HumanResources\HcmLinkFieldService;
+use Bitrix\Sign\Service\Placeholder\Restriction\PlaceholderRestrictionService;
+use Bitrix\Sign\Service\Placeholder\Restriction\ScenarioContext;
 use Bitrix\Sign\Service\Providers\LegalInfoProvider;
 use Bitrix\Sign\Service\Providers\MemberDynamicFieldInfoProvider;
 use Bitrix\Sign\Service\Result\Sign\Block\B2eRequiredFieldsResult;
@@ -43,11 +45,6 @@ final class Field
 	private const NOT_REQUIRED_FIELD_TYPES = [
 		FieldType::PATRONYMIC,
 		FieldType::POSITION,
-	];
-
-	private const EMPLOYEE_INITIATED_UNSUPPORTED_USER_FIELD_TYPES = [
-		FieldType::ADDRESS,
-		FieldType::URL,
 	];
 
 	private const ADDRESS_SUBFIELD_CODES = [
@@ -79,12 +76,14 @@ final class Field
 	private readonly HcmLinkFieldService $hcmLinkFieldService;
 	private readonly \Bitrix\Sign\Blanks\Block\Factory $blockFactory;
 	private readonly Document\FieldService $fieldService;
+	private readonly PlaceholderRestrictionService $placeholderRestrictionService;
 
 	public function __construct(
 		?BlockRepository $blockRepository = null,
 		?HcmLinkFieldService $hcmLinkFieldService = null,
 		?\Bitrix\Sign\Blanks\Block\Factory $blockFactory = null,
 		?Document\FieldService $fieldService = null,
+		?PlaceholderRestrictionService $placeholderRestrictionService = null,
 	)
 	{
 		$this->memberConnectorFactory = new MemberConnectorFactory();
@@ -93,6 +92,9 @@ final class Field
 		$this->hcmLinkFieldService = $hcmLinkFieldService ?? Container::instance()->getHcmLinkFieldService();
 		$this->blockFactory = $blockFactory ?? new \Bitrix\Sign\Blanks\Block\Factory();
 		$this->fieldService = $fieldService ?? Container::instance()->getDocumentFieldService();
+		$this->placeholderRestrictionService = $placeholderRestrictionService
+			?? Container::instance()->getPlaceholderRestrictionService()
+		;
 	}
 
 	/**
@@ -979,18 +981,22 @@ final class Field
 		return in_array($fieldType, self::NOT_REQUIRED_FIELD_TYPES, true) ? false : null;
 	}
 
+	/**
+	 * The restriction config owns the set of types the signer of an employee-initiated document cannot be
+	 * given. It is asked with the raw user field type, before convertUserFieldType() turns a url into a
+	 * plain string and the restriction stops seeing it.
+	 */
 	private function shouldSkipUnsupportedEmployeeInitiatedFieldType(
 		Item\Document $document,
 		Item\Member $member,
 		string $sourceFieldType,
 	): bool
 	{
-		if ($member->role !== Type\Member\Role::SIGNER || !$document->isInitiatedByEmployee())
-		{
-			return false;
-		}
-
-		return in_array(strtolower($sourceFieldType), self::EMPLOYEE_INITIATED_UNSUPPORTED_USER_FIELD_TYPES, true);
+		return $this->placeholderRestrictionService->isFieldTypeUnsupported(
+			$sourceFieldType,
+			$member->role,
+			ScenarioContext::fromAxes(initiatedByType: $document->initiatedByType),
+		);
 	}
 
 	private function createB2eRegionalFields(

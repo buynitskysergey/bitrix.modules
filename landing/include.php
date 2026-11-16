@@ -95,6 +95,15 @@ $jsConfig = [
 		],
 	],
 
+	// Framework-independent responder for the sandboxed custom code frame (frame side of the bridge).
+	// No 'rel' on purpose: it must not pull main.core (runs in an opaque-origin srcdoc document).
+	// The frame gets it by direct URL, so the registration is what keeps the path a declared asset.
+	'landing_customcode_responder' => [
+		'js' => [
+			$pathJS . '/customcode/helper/responder.js',
+		],
+	],
+
 	'landing_event_tracker' => [
 		'js' => [
 			$pathJS . '/event-tracker/event-tracker.js',

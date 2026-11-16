@@ -455,4 +455,27 @@ class Storage
 	{
 		return Main\Config\Option::get('sign', '~disable_placeholder_verified_alias_filter', 'N') === 'Y';
 	}
+
+	public function isPlaceholderRestrictionEnabled(): bool
+	{
+		return Main\Config\Option::get('sign', '~placeholder_restriction_enabled', 'N') === 'Y';
+	}
+
+	public function getPlaceholderListCacheEpoch(): int
+	{
+		return (int)Main\Config\Option::get('sign', '~placeholder_list_cache_epoch', '0');
+	}
+
+	/**
+	 * Makes every cached placeholder list variant unreachable at once, whatever scenario it was
+	 * built for; the orphaned cache entries expire by their own TTL.
+	 */
+	public function bumpPlaceholderListCacheEpoch(): void
+	{
+		Main\Config\Option::set(
+			'sign',
+			'~placeholder_list_cache_epoch',
+			(string)($this->getPlaceholderListCacheEpoch() + 1),
+		);
+	}
 }

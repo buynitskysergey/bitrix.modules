@@ -109,8 +109,11 @@ final class PermissionDictionary extends MainPermissionDictionary
 		}
 
 		self::$collectionPermissions = [];
+		// Archived bases stay on the screen - rights over them still work; a base in the recycle bin
+		// is not there to be granted anything.
 		$collections = CollectionTable::getList([
 			'select' => ['ID', 'NAME'],
+			'filter' => ['=TRASHED_AT' => null],
 		])->fetchCollection();
 
 		foreach ($collections as $item)

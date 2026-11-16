@@ -11,9 +11,12 @@ use Bitrix\Note\Internal\Service\Import\Transformer\Landing\HtmlToMarkdown;
 /**
  * Block: 32.2.img_one_big and any block whose .landing-block-node-img produces an <img>.
  *
- * Emits markdown image syntax `![alt](landing-file://<landingFileId>)` when a
- * b_landing_file row exists for the block; otherwise falls back to the source URL.
- * Download step resolves `landing-file://N` IDs through ImportFileService::copyFromLanding.
+ * Emits markdown image syntax `![alt](landing-file://<fileId>)`. The file is the one the <img> names
+ * itself ({@see BlockHtmlExtractor::imageFileId()}): the landing editor keeps the rows of a replaced
+ * picture in b_landing_file until publication, so the order of those rows says nothing about which
+ * picture is shown. An <img> without the attribute takes the file row of its position, and one with
+ * no file at all falls back to the source URL. Download step resolves `landing-file://N` IDs through
+ * ImportFileService::copyFromLanding.
  */
 final class ImageConverter implements Converter
 {
@@ -38,7 +41,7 @@ final class ImageConverter implements Converter
 		$lines = [];
 		foreach ($descriptors as $i => $img)
 		{
-			$landingFileId = $landingFileIds[$i] ?? null;
+			$landingFileId = $img['fileId'] ?? ($landingFileIds[$i] ?? null);
 			$suffix = BlockHtmlExtractor::positionQuerySuffix($img['width'], $img['align']);
 			if ($landingFileId !== null)
 			{

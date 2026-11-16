@@ -250,4 +250,7 @@ if (is_dir($documentRoot . '/bitrix/modules/im/dev/'))
 {
 	// developer mode
 	\Bitrix\Main\Loader::registerNamespace('Bitrix\Im\Dev', \Bitrix\Main\Loader::getDocumentRoot() . '/bitrix/modules/im/dev/lib/');
+	// Controller\Dev, not Dev: the action resolver only routes to classes under the controller
+	// namespaces of the module declared in .settings.php.
+	\Bitrix\Main\Loader::registerNamespace('Bitrix\Im\Controller\Dev', __DIR__ . '/dev');
 }

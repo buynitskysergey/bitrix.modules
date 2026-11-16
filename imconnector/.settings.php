@@ -2,6 +2,12 @@
 use Bitrix\ImConnector\Tools;
 
 return [
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\ImConnector\\Public\\Features',
+		],
+		'readonly' => true,
+	],
 	'services' => [
 		'value' => [
 			//@deprecated

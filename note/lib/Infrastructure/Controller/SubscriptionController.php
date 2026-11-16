@@ -5,27 +5,29 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Controller;
 
 use Bitrix\Main\Command\Exception\CommandException;
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Context;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
+use Bitrix\Note\Internal\Config\Feature\DocumentNotifications;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
-use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Notification\NotificationShippingPolicy;
 use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
+use Bitrix\Note\Internal\Service\Subscription\SubscriptionListService;
 use Bitrix\Note\Public\Command\RemoveSubscriptionCommand;
 use Bitrix\Note\Public\Command\SetSubscriptionCommand;
 use Bitrix\Note\Public\Provider\SubscriptionProvider;
 
 /**
  * Bell control: subscribe/change scope, unsubscribe, and
- * read state. No auto-subscription anywhere in the module — every row here is
- * created by an explicit user action.
+ * read state, plus the sidebar's list of subscribed articles. No auto-subscription anywhere in the
+ * module: every row here is created by an explicit user action.
  */
 class SubscriptionController extends Controller
 {
@@ -49,15 +51,39 @@ class SubscriptionController extends Controller
 	}
 
 	/**
+	 * One page of the caller's own subscribed articles, ordered (ID DESC). The end of the list is
+	 * `nextCursor === null`, never the number of returned rows, which the visibility predicate and
+	 * a document lost between two queries may leave short.
+	 *
+	 * The cursor is a bare `{id}`: this list carries no manual order, so unlike the favorites one it
+	 * needs no position in the key. No filters either: scope and mode are what the list IS.
+	 *
+	 * With the portal feature off the block offering this list is hidden, so an empty page is the
+	 * honest answer: there is nothing to show and nothing went wrong.
+	 *
+	 * @param array{id: int}|null $afterCursor
+	 */
+	public function listAction(int $limit = SubscriptionListService::DEFAULT_LIMIT, ?array $afterCursor = null): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0 || !Feature::isEnabled(DocumentNotifications::class))
+		{
+			return ['items' => [], 'nextCursor' => null];
+		}
+
+		return (new SubscriptionProvider())->getPage($userId, $limit, $afterCursor);
+	}
+
+	/**
 	 * Subscribe / change scope. Idempotent upsert; requires LEVEL_VIEW on
 	 * the target (you can only subscribe to something you can see).
 	 */
 	public function setAction(string $scope, int $entityId, string $mode): ?array
 	{
-		// The bell offering this is hidden while the option is off, so a call arriving here is not one
+		// The bell offering this is hidden while the feature is off, so a call arriving here is not one
 		// the interface can make. Refused rather than stored: a row written now would start delivering
 		// the moment the option goes on, without the user ever having asked for it.
-		if (!Configuration::isNotificationsEnabled())
+		if (!Feature::isEnabled(DocumentNotifications::class))
 		{
 			$this->addError(new Error(Loc::getMessage('NOTE_SUBSCRIPTION_SET_ERROR')));
 
@@ -80,24 +106,11 @@ class SubscriptionController extends Controller
 		$userId = (int)$this->getCurrentUser()->getId();
 		try
 		{
-			$result = (new SetSubscriptionCommand($userId, $scope, $entityId, $mode))->run();
+			(new SetSubscriptionCommand($userId, $scope, $entityId, $mode))->run();
 		}
 		catch (CommandException)
 		{
 			$this->addError(new Error(Loc::getMessage('NOTE_SUBSCRIPTION_SET_ERROR')));
-
-			return null;
-		}
-
-		// The invariant refuses through Result data, not an exception: AbstractCommand::run()
-		// wraps every exception of execute() into CommandException, so a typed catch cannot tell the
-		// reasons apart.
-		if (($result->getData()['errorCode'] ?? null) === SetSubscriptionCommand::ERROR_FAVORITE_REQUIRED)
-		{
-			$this->addError(new Error(
-				Loc::getMessage('NOTE_SUBSCRIPTION_FAVORITE_REQUIRED'),
-				SetSubscriptionCommand::ERROR_FAVORITE_REQUIRED,
-			));
 
 			return null;
 		}
@@ -182,6 +195,13 @@ class SubscriptionController extends Controller
 
 		$userId = (int)$this->getCurrentUser()->getId();
 		if ($userId <= 0 || $collectionId <= 0)
+		{
+			return $empty;
+		}
+
+		// A deleted base draws no bells: its documents are read from the recycle bin, and the states
+		// of the subscriptions that survive there are nothing the interface offers to change.
+		if (!DocumentAccessService::isCollectionAlive($collectionId))
 		{
 			return $empty;
 		}

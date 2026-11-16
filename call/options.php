@@ -12,6 +12,7 @@ use Bitrix\Main\HttpApplication;
 use Bitrix\Call\JwtCall;
 use Bitrix\Call\Signaling;
 use Bitrix\Call\Library;
+use Bitrix\Call\Settings;
 use Bitrix\Call\NotifyService;
 use Bitrix\Call\Integration\AI\CallAISettings;
 
@@ -63,6 +64,8 @@ $isApply = $request->isPost() && !empty($request['Apply']);
 $isRestoreDefaults = $request->isPost() && !empty($request['RestoreDefaults']);
 
 $publicUrl = '';
+$turnFormInput = null;
+$turnError = '';
 
 if (
 	($isUpdate || $isApply || $isRestoreDefaults)
@@ -85,16 +88,38 @@ if (
 	else
 	{
 		$selfTurnServer = isset($request['TURN_SERVER_SELF']);
-		Option::set('call', 'turn_server_self', $selfTurnServer ? 'Y' : 'N');
 
 		if ($selfTurnServer)
 		{
-			Option::set('call', 'turn_server', $request['TURN_SERVER']);
-			Option::set('call', 'turn_server_login', $request['TURN_SERVER_LOGIN']);
-			Option::set('call', 'turn_server_password', $request['TURN_SERVER_PASSWORD']);
+			$turnServer = trim((string)$request['TURN_SERVER']);
+			$turnServerLogin = (string)$request['TURN_SERVER_LOGIN'];
+			$turnServerPassword = (string)$request['TURN_SERVER_PASSWORD'];
+
+			if (!Settings::isTurnServerConfigValid($turnServer, $turnServerLogin, $turnServerPassword))
+			{
+				$turnError = (string)Loc::getMessage(
+					Settings::isTurnServerAddressValid($turnServer)
+						? 'CALL_OPTIONS_TURN_SERVER_ERROR_CREDENTIALS'
+						: 'CALL_OPTIONS_TURN_SERVER_ERROR_ADDRESS'
+				);
+				// Keep the rejected input in the form instead of the saved values
+				$turnFormInput = [
+					'server' => $turnServer,
+					'login' => $turnServerLogin,
+					'password' => $turnServerPassword,
+				];
+			}
+			else
+			{
+				Option::set('call', 'turn_server_self', 'Y');
+				Option::set('call', 'turn_server', $turnServer);
+				Option::set('call', 'turn_server_login', $turnServerLogin);
+				Option::set('call', 'turn_server_password', $turnServerPassword);
+			}
 		}
 		else
 		{
+			Option::set('call', 'turn_server_self', 'N');
 			Option::delete('call', ['name' => 'turn_server']);
 			Option::delete('call', ['name' => 'turn_server_login']);
 			Option::delete('call', ['name' => 'turn_server_password']);
@@ -188,6 +213,13 @@ if (
 		}
 	}
 
+	// A later ThrowException replaces the previous one, so the TURN error is merged in last
+	if ($turnError !== '')
+	{
+		$exception = $APPLICATION->getException();
+		$APPLICATION->ThrowException($exception ? $turnError . '<br>' . $exception->getString() : $turnError);
+	}
+
 	// errors
 	if ($exception = $APPLICATION->getException())
 	{
@@ -228,7 +260,10 @@ if (
 <?php
 $tabControl->Begin();
 $tabControl->BeginNextTab();
-$selfTurnServer = (Option::get('call', 'turn_server_self') == 'Y');
+$selfTurnServer = ($turnFormInput !== null || Option::get('call', 'turn_server_self') == 'Y');
+$turnServerValue = $turnFormInput['server'] ?? COption::GetOptionString('call', 'turn_server');
+$turnServerLoginValue = $turnFormInput['login'] ?? COption::GetOptionString('call', 'turn_server_login');
+$turnServerPasswordValue = $turnFormInput['password'] ?? COption::GetOptionString('call', 'turn_server_password');
 $isJwtSchemeEnabled = (bool)Option::get('call', 'call_v2_enabled');
 $portalHasRegistered  = ((int)Option::get('call', 'call_portal_id', 0) > 0);
 
@@ -243,15 +278,15 @@ $portalHasRegistered  = ((int)Option::get('call', 'call_portal_id', 0) > 0);
 	</tr>
 	<tr id="video_group_2" <?php if (!$selfTurnServer):?>style="display: none"<?endif;?>>
 		<td class="adm-detail-content-cell-l"><?=Loc::getMessage("CALL_OPTIONS_TURN_SERVER")?>:</td>
-		<td class="adm-detail-content-cell-r"><input type="input" size="40" value="<?=htmlspecialcharsbx(COption::GetOptionString('call', 'turn_server'))?>" name="TURN_SERVER"></td>
+		<td class="adm-detail-content-cell-r"><input type="input" size="40" value="<?=htmlspecialcharsbx($turnServerValue)?>" name="TURN_SERVER"></td>
 	</tr>
 	<tr id="video_group_4" <?php if (!$selfTurnServer):?>style="display: none"<?endif;?>>
 		<td class="adm-detail-content-cell-l"><?=Loc::getMessage("CALL_OPTIONS_TURN_SERVER_LOGIN")?>:</td>
-		<td class="adm-detail-content-cell-r"><input type="input" size="20" value="<?=htmlspecialcharsbx(COption::GetOptionString('call', 'turn_server_login'))?>" name="TURN_SERVER_LOGIN"></td>
+		<td class="adm-detail-content-cell-r"><input type="input" size="20" value="<?=htmlspecialcharsbx($turnServerLoginValue)?>" name="TURN_SERVER_LOGIN"></td>
 	</tr>
 	<tr id="video_group_5" <?php if (!$selfTurnServer):?>style="display: none"<?endif;?>>
 		<td class="adm-detail-content-cell-l"><?=Loc::getMessage("CALL_OPTIONS_TURN_SERVER_PASSWORD")?>:<br><small>(<?=Loc::getMessage("CALL_OPTIONS_TURN_SERVER_PASSWORD_HINT")?>)</small></td>
-		<td class="adm-detail-content-cell-r"><input type="input" size="20" value="<?=htmlspecialcharsbx(COption::GetOptionString('call', 'turn_server_password'))?>" name="TURN_SERVER_PASSWORD"></td>
+		<td class="adm-detail-content-cell-r"><input type="input" size="20" value="<?=htmlspecialcharsbx($turnServerPasswordValue)?>" name="TURN_SERVER_PASSWORD"></td>
 	</tr>
 
 	<tr class="heading">

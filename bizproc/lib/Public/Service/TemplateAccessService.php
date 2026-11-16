@@ -47,6 +47,85 @@ class TemplateAccessService
 	}
 
 	/**
+	 * A storage holding a data view answers to the template owning the view; any other storage stays open.
+	 * The owner is not client input, so a since-deleted owner template does not lock its leftover view.
+	 */
+	public function canEditStorage(int $storageTypeId, ?int $userId = null): bool
+	{
+		if ($storageTypeId <= 0)
+		{
+			return true;
+		}
+
+		$view = Container::getDataViewRepository()?->getByStorageTypeId($storageTypeId);
+		$ownerTemplateId = $view?->getOwnerTemplateId();
+
+		return $ownerTemplateId === null
+			|| $ownerTemplateId <= 0
+			|| $this->canEdit($ownerTemplateId, $userId)
+			|| !Container::getWorkflowTemplateRepository()?->exists($ownerTemplateId);
+	}
+
+	/**
+	 * Storages of views whose owner template the user may not edit; one right check per distinct owner.
+	 *
+	 * @return int[]
+	 */
+	public function getClosedStorageTypeIds(?int $userId = null): array
+	{
+		if ($this->controller($userId)->isAdmin())
+		{
+			return [];
+		}
+
+		$ownerByStorageTypeId = Container::getDataViewRepository()?->getOwnerTemplateIds() ?? [];
+
+		$ownerIds = [];
+		foreach ($ownerByStorageTypeId as $ownerTemplateId)
+		{
+			$ownerTemplateId = (int)$ownerTemplateId;
+			if ($ownerTemplateId > 0)
+			{
+				$ownerIds[$ownerTemplateId] = $ownerTemplateId;
+			}
+		}
+
+		if ($ownerIds === [])
+		{
+			return [];
+		}
+
+		$this->warmupAuthorshipForPermission(
+			array_values($ownerIds),
+			PermissionDictionary::BIZPROC_TEMPLATE_EDIT,
+			$userId,
+		);
+
+		$lockingOwnerIds = [];
+		foreach ($ownerIds as $ownerTemplateId)
+		{
+			if (!$this->canEdit($ownerTemplateId, $userId))
+			{
+				$lockingOwnerIds[] = $ownerTemplateId;
+			}
+		}
+		$lockingOwnerIds = array_flip(
+			Container::getWorkflowTemplateRepository()?->filterExisting($lockingOwnerIds) ?? [],
+		);
+
+		$closedIds = [];
+		foreach ($ownerByStorageTypeId as $storageTypeId => $ownerTemplateId)
+		{
+			if (isset($lockingOwnerIds[(int)$ownerTemplateId]))
+			{
+				$closedIds[] = (int)$storageTypeId;
+			}
+		}
+
+		return $closedIds;
+	}
+
+	/**
 	 * The edit right of a whole set of users on one template - the question a caller holding the set already
 	 * asks: the page of candidates of the mention hint, the addressees of one note message. The single entry
 	 * point for such a caller, so that a set is answered by the very same canEdit() and never by a second

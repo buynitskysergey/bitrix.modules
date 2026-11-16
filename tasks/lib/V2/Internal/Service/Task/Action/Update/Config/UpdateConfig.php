@@ -6,6 +6,7 @@ namespace Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\Config;
 
 use Bitrix\Tasks\Internals\Task\UpdateEventSuppression;
 use Bitrix\Tasks\V2\Internal\Entity\Analytics\AnalyticsData;
+use Bitrix\Tasks\V2\Internal\Service\Interaction\InteractionOrigin;
 
 class UpdateConfig
 {
@@ -26,6 +27,7 @@ class UpdateConfig
 	private RuntimeData $runtime;
 	private ?AnalyticsData $analyticsData;
 	private bool $fromAi;
+	private InteractionOrigin $origin;
 	private bool $skipTaskUpdateEvent = false;
 
 	public function __construct(
@@ -46,6 +48,7 @@ class UpdateConfig
 		RuntimeData $runtime = new RuntimeData(),
 		?AnalyticsData $analyticsData = null,
 		bool $fromAi = false,
+		InteractionOrigin $origin = InteractionOrigin::System,
 	)
 	{
 		$this->userId = $userId;
@@ -65,6 +68,7 @@ class UpdateConfig
 		$this->runtime = $runtime;
 		$this->analyticsData = $analyticsData;
 		$this->fromAi = $fromAi;
+		$this->origin = $origin;
 	}
 
 	public static function createFromArray(
@@ -73,7 +77,7 @@ class UpdateConfig
 			'CORRECT_DATE_PLAN_DEPENDENT_TASKS' => true,
 			'CORRECT_DATE_PLAN' => true,
 			'THROTTLE_MESSAGES' => false
-		]
+		],
 	): static
 	{
 		$config = new static($userId);
@@ -217,6 +221,11 @@ class UpdateConfig
 		return $this->fromAi;
 	}
 
+	public function getOrigin(): InteractionOrigin
+	{
+		return $this->origin;
+	}
+
 	public function isSkipTaskUpdateEvent(): bool
 	{
 		return $this->skipTaskUpdateEvent;
@@ -331,6 +340,13 @@ class UpdateConfig
 	public function setAnalyticsData(AnalyticsData $analyticsData): static
 	{
 		$this->analyticsData = $analyticsData;
+
+		return $this;
+	}
+
+	public function setOrigin(InteractionOrigin $origin): static
+	{
+		$this->origin = $origin;
 
 		return $this;
 	}

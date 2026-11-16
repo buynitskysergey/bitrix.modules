@@ -17,9 +17,11 @@ use Bitrix\Main\Type\Contract\Arrayable;
  *     ({@see \Bitrix\Bizproc\Service\AiDescription::getActivityDescription}) and serialised on the way out.
  *     An empty collection is valid - an HTML-only sub-action or a schema that is unavailable in the environment.
  * @param list<string> $skippedSettings names of the sub-action's properties that exist but are absent from the
- *     settings schema, mirroring {@see \Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail::$skippedSettings}
- *     of an ordinary block: properties the description could not express by type plus the ones the activity
- *     declares as passthrough. Kept for reverse validation only and deliberately not published in the catalog -
+ *     settings schema: properties the description could not express by type plus the ones the activity declares
+ *     as carried from the published template. This is the union an ordinary block judges a name by
+ *     ({@see \Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail::$skippedSettings} and
+ *     {@see \Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail::$carriedSettings}), so a name gets the same
+ *     verdict at both levels. Kept for reverse validation only and deliberately not published in the catalog -
  *     the agent must not read them as a writable surface.
  * @param array|null $documentSchema machine-readable contract of the sub-action's `document` construction
  *     field: only the FORMAT of the value (a bizproc expression `{=<sourceBlockId>:<propertyId>}`), never the

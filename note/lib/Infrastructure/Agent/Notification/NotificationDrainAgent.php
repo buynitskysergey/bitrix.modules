@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Bitrix\Note\Infrastructure\Agent\Notification;
 
 use Bitrix\Main\Application;
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Configuration;
+use Bitrix\Note\Internal\Config\Feature\DocumentNotifications;
 use Bitrix\Note\Internal\Entity\History\Event;
 use Bitrix\Note\Internal\Integration\Im\ImNotificationGateway;
 use Bitrix\Note\Internal\Model\EventTable;
+use Bitrix\Note\Internal\Repository\CollectionRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\EventRepository;
 use Bitrix\Note\Internal\Service\Notification\CompactedEventGroup;
@@ -110,6 +113,7 @@ final class NotificationDrainAgent
 
 	private readonly EventRepository $eventRepository;
 	private readonly DocumentRepository $documentRepository;
+	private readonly CollectionRepository $collectionRepository;
 	private readonly EventAuthorResolver $authorResolver;
 	private readonly NotificationRecipientService $recipientService;
 	private readonly ImNotificationGateway $gateway;
@@ -133,6 +137,7 @@ final class NotificationDrainAgent
 	{
 		$this->eventRepository = new EventRepository();
 		$this->documentRepository = new DocumentRepository();
+		$this->collectionRepository = new CollectionRepository();
 		// One author set per event for the whole tick: who is kept out of the recipients and who
 		// faces the notification are the same answer, read once from the same resolver.
 		$this->authorResolver = new EventAuthorResolver();
@@ -161,10 +166,10 @@ final class NotificationDrainAgent
 			return self::RESCHEDULE_EXPRESSION;
 		}
 
-		// Skipped before the cursor moves, so switching the option back on resumes the drain where it
+		// Skipped before the cursor moves, so switching the feature back on resumes the drain where it
 		// stopped instead of replaying the gap: what accumulated meanwhile is dropped by the freshness
 		// floor of drainProfile(), and the cursor jumps past it on the first fresh event.
-		if (!Configuration::isNotificationsEnabled())
+		if (!Feature::isEnabled(DocumentNotifications::class))
 		{
 			return self::RESCHEDULE_EXPRESSION;
 		}
@@ -488,6 +493,13 @@ final class NotificationDrainAgent
 		// whole compacted set of this pass in one query, no N+1 across the plan.
 		$collectionIdMap = $this->documentRepository->getCollectionIds(array_keys($documentIds));
 
+		// A base that went to the recycle bin delivers nothing. Counted as delivered rather than as
+		// unsettled: it may sit in the bin for the whole retention period, and holding the cursor
+		// behind it would stop the delivery of everything else.
+		$trashedCollectionIds = array_flip(
+			$this->collectionRepository->filterTrashedIds(array_values($collectionIdMap)),
+		);
+
 		// plan key "recipientId|kind|collectionId" -> bucket; collectionId in
 		// the key means two unrelated operations of the same kind in different
 		// collections never get glued together into one aggregate.
@@ -503,6 +515,11 @@ final class NotificationDrainAgent
 			}
 
 			$collectionId = $collectionIdMap[$group->getEntityId()] ?? 0;
+			if (isset($trashedCollectionIds[$collectionId]))
+			{
+				continue;
+			}
+
 			try
 			{
 				$recipients = $this->recipientService->resolve($group);

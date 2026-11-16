@@ -22,6 +22,8 @@ use Bitrix\Bizproc\Public\Service\WorkflowTemplate\Dto\PilotPublicationRequest;
 use Bitrix\Bizproc\Public\Service\WorkflowTemplate\PilotEditorStateService;
 use Bitrix\Bizproc\Public\Service\WorkflowTemplate\PilotPublicationService;
 use Bitrix\Bizproc\UI\UserView;
+use Bitrix\Bizproc\Workflow\Template\AgentOwnedMetadata;
+use Bitrix\Bizproc\Workflow\Template\AgentOwnedMetadataService;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
 use Bitrix\Bizproc\Workflow\Template\Converter\NodesToTemplate;
@@ -29,12 +31,14 @@ use Bitrix\Bizproc\Workflow\Template\Converter\TemplateToNodes;
 use Bitrix\Bizproc\Workflow\Template\Converter\SequentialToNodeWorkflow;
 use Bitrix\BizprocDesigner\Infrastructure\Enum\StartTrigger;
 use Bitrix\BizprocDesigner\Internal\Config\Feature;
+use Bitrix\BizprocDesigner\Internal\Config\TemplateMetadataLimits;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\AgentWebhookService;
 use Bitrix\BizprocDesigner\Internal\Integration\Pull\Enum\BizprocDesignerPullEvent;
 use Bitrix\BizprocDesigner\Internal\Service\TemplateEditAccess;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\OperationAuthorizationGuard;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\UserAdminResolver;
 use Bitrix\BizprocDesigner\Internal\Integration\Pull\TemplateNoteWatch;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\ReadableExpressionContextFactory;
 use Bitrix\BizprocDesigner\Internal\Service\Container;
 use Bitrix\BizprocDesigner\Internal\Service\NodeFilter\FoundItemsService;
 use Bitrix\Main\Access\AccessCode;
@@ -42,6 +46,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\ArgumentException;
 use Bitrix\Main\DB\Connection;
 use Bitrix\Main\Diag\ExceptionHandlerLog;
+use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\DB\TransactionException;
 use Bitrix\Main\DI\Exception\CircularDependencyException;
 use Bitrix\Main\Engine\CurrentUser;
@@ -56,15 +61,13 @@ use Bitrix\Main\Request;
 use Bitrix\Main\Result;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
+use Bitrix\UI\EntitySelector\Dialog as EntitySelectorDialog;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 class Diagram extends JsonController
 {
-	/**
-	 * Counted in characters, not bytes. The storage column holds about 65000 bytes, and the markup of
-	 * the description editor inflates the payload at the same visible text, so the limit keeps
-	 * a reserve against that capacity.
-	 */
-	public const DESCRIPTION_MAX_LENGTH = 16000;
+	public const DESCRIPTION_MAX_LENGTH = TemplateMetadataLimits::DESCRIPTION_MAX_LENGTH;
 
 	private const PUBLISH_MODE_MAIN = 'main';
 	private const PUBLISH_MODE_USER = 'user';
@@ -97,6 +100,13 @@ class Diagram extends JsonController
 	private const CONFIRMATION_PILOT_STOP = 'pilotStop';
 	private const CONFIRMATION_STOP_RUNNING_PROCESSES = 'stopRunningProcesses';
 
+	// The holder of the editing lease is read through the entity selector, the same way the client
+	// reads any other user of the editor.
+	private const USER_ENTITY_ID = 'user';
+
+	/** Where the reading of the lease holder reports a provider that answered nothing. */
+	private const LOGGER_ID = 'bizprocdesigner.templatelock.owner_view';
+
 	private const ERROR_CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
 	private const ERROR_PILOT_CONSTANTS_EMPTY = 'PILOT_CONSTANTS_EMPTY';
 
@@ -109,6 +119,8 @@ class Diagram extends JsonController
 	private ?TemplateAccessService $accessService = null;
 	private ?TemplateEditAccess $editAccess = null;
 	private ?Api\Service\WorkflowTemplateLockService $lockService = null;
+	private ?LoggerInterface $logger = null;
+	private ?ReadableExpressionContextFactory $readableExpressionContextFactory = null;
 	private TemplateNoteWatch $noteWatch;
 
 	public function __construct(?Request $request = null, ?TemplateNoteWatch $noteWatch = null)
@@ -149,6 +161,24 @@ class Diagram extends JsonController
 	protected function lockService(): Api\Service\WorkflowTemplateLockService
 	{
 		return $this->lockService ??= new Api\Service\WorkflowTemplateLockService();
+	}
+
+	/**
+	 * A logger id that is switched off leaves a NullLogger in its place: the records of this controller
+	 * are diagnostics of a degradation, and none of its paths may depend on them being written.
+	 */
+	private function logger(): LoggerInterface
+	{
+		return $this->logger ??= (new LoggerFactory())->createById(self::LOGGER_ID) ?? new NullLogger();
+	}
+
+	/**
+	 * One instance per request, shared by every scheme it converts: each names its own declarations and its
+	 * own steps, while the descriptors they have in common are described once.
+	 */
+	private function readableExpressionContextFactory(): ReadableExpressionContextFactory
+	{
+		return $this->readableExpressionContextFactory ??= new ReadableExpressionContextFactory();
 	}
 
 	public function getAction(
@@ -319,6 +349,11 @@ class Diagram extends JsonController
 		[$blocks, $connections] = (new TemplateToNodes(
 			$snapshot['TEMPLATE'] ?? [],
 			Feature::instance()->areComplexNodeConnectionsAvailable(),
+			// A version is named by its own snapshot: the live row may have moved on since it was published.
+			baseContentBlockContext: $this->readableExpressionContextFactory()->createForAuthorizedSchema(
+				$snapshot,
+				$tpl->getDocumentComplexType(),
+			),
 		))->convert();
 
 		// The name and the description belong to the version as much as its graph does, and a restore puts
@@ -1004,6 +1039,9 @@ class Diagram extends JsonController
 		// The editor only edits user-facing metadata. Service fields (TYPE, SYSTEM_CODE, DOCUMENT_TYPE) must
 		// never be writable here: a PUBLISH holder could otherwise move the row out of the Nodes ACL.
 		$data = array_intersect_key($data, array_flip(['NAME', 'DESCRIPTION']));
+
+		$fieldsToRelease = array_keys($data);
+
 		$currentValues = $tpl?->collectValues() ?? [];
 		foreach ($data as $field => $value)
 		{
@@ -1012,11 +1050,6 @@ class Diagram extends JsonController
 				unset($data[$field]);
 			}
 		}
-		if (!$data)
-		{
-			return [];
-		}
-
 		if ($templateId > 0 && $tpl === null)
 		{
 			// Only an admin reaches this far without a record, so the answer reveals nothing. The check stands
@@ -1025,6 +1058,11 @@ class Diagram extends JsonController
 			$this->addError(ErrorMessage::TEMPLATE_NOT_FOUND->getCodedError(['#ID#' => $templateId]));
 
 			return null;
+		}
+
+		if (!$data)
+		{
+			return $this->releaseAgentOwnedMetadata($templateId, $fieldsToRelease);
 		}
 
 		// After the early return above: a rename that changes nothing writes nothing and must neither read the
@@ -1050,7 +1088,11 @@ class Diagram extends JsonController
 		}
 		$data['MODIFIED'] = $modified;
 
-		$result = (new UpdateWorkflowTemplateCommand($templateId, $data))->run();
+		$result = (new UpdateWorkflowTemplateCommand(
+			$templateId,
+			$data,
+			$fieldsToRelease,
+		))->run();
 		if (!$result->isSuccess())
 		{
 			$this->addErrors($result->getErrors());
@@ -2035,15 +2077,35 @@ class Diagram extends JsonController
 		$tplData = $schemeOverlay['TEMPLATE'] ?? $tpl->getTemplate();
 		$trackOn = (int)\Bitrix\Main\Config\Option::get('bizproc', 'tpl_track_on_' . $id, 0);
 
+		// The declarations of the acting scheme, taken exactly as the meta of the answer below takes them: an
+		// overlay of a draft or of a pilot version declares its own, and the row answers for the rest.
+		$actingDeclarations = array_filter(
+			array_intersect_key($schemeOverlay, array_flip(self::SCHEME_OWNED_META_FIELDS)),
+			static fn($block): bool => $block !== null,
+		);
+		$templateRow = $tpl->collectValues();
+
 		$complexNodeConnectionsAvailable = Feature::instance()->areComplexNodeConnectionsAvailable();
-		[$blocks, $connections] = (new TemplateToNodes($tplData, $complexNodeConnectionsAvailable))->convert();
-		[$publishedBlocks, $publishedConnection] =
-			(new TemplateToNodes($tpl->getTemplate(), $complexNodeConnectionsAvailable))->convert()
-		;
+		[$blocks, $connections] = (new TemplateToNodes(
+			$tplData,
+			$complexNodeConnectionsAvailable,
+			baseContentBlockContext: $this->readableExpressionContextFactory()->createForAuthorizedSchema(
+				['TEMPLATE' => $tplData] + $actingDeclarations + $templateRow,
+				$documentType,
+			),
+		))->convert();
+		[$publishedBlocks, $publishedConnection] = (new TemplateToNodes(
+			$tpl->getTemplate(),
+			$complexNodeConnectionsAvailable,
+			// The layer of comparison is named by the published scheme, declarations included.
+			baseContentBlockContext: $this->readableExpressionContextFactory()
+				->createForAuthorizedSchema($templateRow, $documentType)
+			,
+		))->convert();
 
 		// The settings the scheme on the canvas declares follow that scheme: a pilot version may declare a
 		// parameter the live row does not know about, and republishing it from the editor would drop it.
-		$templateMeta = array_merge($tpl->collectValues(), ['TRACK_ON' => $trackOn]);
+		$templateMeta = array_merge($templateRow, ['TRACK_ON' => $trackOn]);
 		$schemeOwnedMetaFields = self::SCHEME_OWNED_META_FIELDS;
 		if ($draftRow && WorkflowTemplateDraftTable::hasRestoredMetadata($draftRow))
 		{
@@ -2052,6 +2114,11 @@ class Diagram extends JsonController
 			$schemeOwnedMetaFields[] = 'NAME';
 			$schemeOwnedMetaFields[] = 'DESCRIPTION';
 		}
+
+		$schemeOwnedMetaFields = array_values(array_unique(array_merge(
+			$schemeOwnedMetaFields,
+			AgentOwnedMetadata::readFrom($schemeOverlay),
+		)));
 
 		foreach ($schemeOwnedMetaFields as $field)
 		{
@@ -2074,7 +2141,7 @@ class Diagram extends JsonController
 			'canPublish' => $canPublish,
 			'draftId' => $draftId,
 			'draftRevision' => $draftRevision,
-			'lock' => $this->getLockOwner($templateId, (int)$user->getId()),
+			'lock' => $this->getLockOwner($templateId, (int)$user->getId(), withOwnerView: true),
 			'canUndoRestore' => WorkflowTemplateDraftTable::isRestoredDraft($draftRow),
 			'draftSavedAt' => $draftSavedAt,
 			'documentType' => $documentType,
@@ -2267,11 +2334,108 @@ class Diagram extends JsonController
 	 * the lease is taken by the first write. An unavailable lease storage leaves the client without an
 	 * owner instead of closing the load.
 	 *
-	 * @return array<string, int|bool>|null null when nobody edits the template
+	 * The name and the photo of the holder are asked for by the load of the schema alone: there they save
+	 * the client a request of its own and the screen a frame of a skeleton. Every later answer about the
+	 * same lease carries the id only - it is by the id that the client notices a change of the holder, and
+	 * the name of the new one it reads once, instead of being told the unchanged one every minute.
+	 *
+	 * @return array<string, int|bool|string|null>|null null when nobody edits the template
 	 */
-	private function getLockOwner(int $templateId, int $userId): ?array
+	private function getLockOwner(int $templateId, int $userId, bool $withOwnerView = false): ?array
 	{
-		return $this->readLeaseOwner($templateId, $userId)?->toArray();
+		$owner = $this->readLeaseOwner($templateId, $userId);
+		if ($owner === null)
+		{
+			return null;
+		}
+
+		// The caller holds the template themselves: the client never shows the name of its own lease, and
+		// the answer carries isMine for that. The read would be paid for by every session that writes -
+		// on the first write, on every renewal of the lease and twice over a takeover - and shown to
+		// nobody.
+		if (!$withOwnerView || $owner->userId === $userId)
+		{
+			return $owner->toArray();
+		}
+
+		return $owner->toArray() + $this->readLockOwnerView($owner->userId);
+	}
+
+	/**
+	 * How the holder of the lease is shown to the caller: the name and the photo, or nothing at all.
+	 *
+	 * The lease itself carries only the id - see LockOwnerDto, where that is a decision and not an
+	 * omission - and the client used to read the name by that id on its own, one request after the
+	 * schema. The name travels with the lease instead, so the person opening a busy template reads who
+	 * holds it at once; the request the client made is left as the way of every later change of the
+	 * holder, which arrives by id alone.
+	 *
+	 * The reading goes through the same entity selector provider the client asked, and for the same
+	 * reason: the visibility rules of the portal - a hidden employee, a colleague from the extranet -
+	 * are answered in one place and not repeated here. An answer that never came leaves the payload
+	 * without the name, and the client reads it by id the old way: this is decoration over a lease that
+	 * must open the editor regardless.
+	 *
+	 * @return array{name?: string, avatarUrl?: string|null}
+	 */
+	private function readLockOwnerView(int $ownerUserId): array
+	{
+		if ($ownerUserId <= 0 || !Loader::includeModule('ui'))
+		{
+			return [];
+		}
+
+		try
+		{
+			$dialog = new EntitySelectorDialog([
+				'entities' => [
+					[
+						'id' => self::USER_ENTITY_ID,
+						'dynamicLoad' => true,
+						// Only the holder is asked about: without these the provider also preloads the
+						// recent items and the first users of the portal.
+						'fillRecentItems' => false,
+						'options' => ['fillDialog' => false],
+					],
+				],
+				'preselectedItems' => [[self::USER_ENTITY_ID, $ownerUserId]],
+			]);
+			$dialog->load();
+
+			$item = $dialog->getItemCollection()->get(self::USER_ENTITY_ID, $ownerUserId);
+			// An employee the provider answered nothing about does not leave the collection empty: the
+			// dialog fills the gap with a placeholder whose title is a word about the absence. Passed on
+			// as a name it would show that word on the screen and link to a profile of a person the
+			// caller may not see at all.
+			if ($item === null || $item->isHidden())
+			{
+				return [];
+			}
+
+			return [
+				'name' => $item->getTitle(),
+				'avatarUrl' => $item->getAvatar(),
+			];
+		}
+		catch (\Throwable $failure)
+		{
+			// The lease opens the editor with or without the decoration, so the failure is not carried to
+			// the caller - but a provider refusing every call costs a dialog on the server and a request
+			// of the client each time, and nothing else on this path would name that. The record waits for
+			// the logger id to be switched on: a channel to open over the portal where the empty names are
+			// seen, and not a line in the log of every other one. The holder and the failure are named by
+			// the message itself, because the formatter of that channel renders the placeholders it finds
+			// there and drops the rest of the context.
+			$this->logger()->warning(
+				'Template lease: the holder {ownerUserId} could not be read. {exception}',
+				[
+					'ownerUserId' => $ownerUserId,
+					'exception' => $failure,
+				],
+			);
+
+			return [];
+		}
 	}
 
 	/**
@@ -2488,6 +2652,23 @@ class Diagram extends JsonController
 		);
 	}
 
+
+	/**
+	 * @param list<string> $fieldsToRelease
+	 * @return array|null
+	 */
+	private function releaseAgentOwnedMetadata(int $templateId, array $fieldsToRelease): ?array
+	{
+		$result = (new AgentOwnedMetadataService())->release($templateId, $fieldsToRelease);
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return null;
+		}
+
+		return $result->getData();
+	}
 
 	/**
 	 * The single description gate of the editor: every write surface that carries the field

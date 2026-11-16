@@ -36,13 +36,17 @@ class ValidateSingleRuleCommand extends AbstractCommand
 
 	/**
 	 * Construction types a relation-port card may carry, mirroring what the rules toolbar offers on a
-	 * relation port (`base-settings` and `filter` declare `applies: input port only`). Relation cards are
-	 * validated without a node capability catalog on purpose - the relation action is declared apart from
-	 * actionDictionary and is therefore absent from the node catalog, so catalog membership would reject
-	 * valid cards. This list is what replaces the block-availability check for those cards; the action
-	 * itself is validated against the node's declared relation action in the controller.
+	 * relation port. The general settings are the head block of a relation input: they stand for the very
+	 * action the node declares for its relations, so they arrive bound to it and become a child activity of
+	 * their own - never a merge into the properties of the host ({@see self::validateBaseSettings()}). A
+	 * `filter` stays out: it belongs to an input port of the node. Relation cards are validated without a
+	 * node capability catalog on purpose - the relation action is declared apart from actionDictionary and
+	 * is therefore absent from the node catalog, so catalog membership would reject valid cards. This list
+	 * is what replaces the block-availability check for those cards; the action itself is validated against
+	 * the node's declared relation action in the controller.
 	 */
 	public const RELATION_PORT_CONSTRUCTION_TYPES = [
+		ConstructionType::BASE_SETTINGS,
 		ConstructionType::IF_CONDITION,
 		ConstructionType::AND_CONDITION,
 		ConstructionType::OR_CONDITION,
@@ -90,6 +94,9 @@ class ValidateSingleRuleCommand extends AbstractCommand
 	 *   of its event from them ({@see \Bitrix\Bizproc\Internal\Service\Activity\ComplexActivityService::getPublishedDocumentTypeForNode()}),
 	 *   so the catalog this command validates against is built in the same document context the settings
 	 *   panel published - otherwise a card the panel offered would be rejected here.
+	 * @param bool $isRelationPort Whether the rule belongs to a relation port. The general settings of such a
+	 *   port stand for the relation action the node declares, so a construction bound to no action at all is
+	 *   refused: it would be host-merged, and a relation container merges nothing into its host.
 	 */
 	public function __construct(
 		public readonly PortRuleDto $portRuleDto,
@@ -98,6 +105,7 @@ class ValidateSingleRuleCommand extends AbstractCommand
 		public readonly ?array $documentType = null,
 		public readonly ?array $allowedConstructionTypes = null,
 		public readonly ?array $activityProperties = null,
+		public readonly bool $isRelationPort = false,
 	)
 	{
 		Loader::requireModule('bizproc');
@@ -239,11 +247,26 @@ class ValidateSingleRuleCommand extends AbstractCommand
 		$result = new Result();
 		$activityData = $expression->activityData ?? [];
 		$actualType = (string)($activityData['Type'] ?? '');
+		$isBoundToAction = $expression->actionId !== null && $expression->actionId !== '';
+
+		// The head block of a relation input speaks for the action of that input and for nothing else. A
+		// construction arriving there bound to no action would take the host-merge route and write the
+		// properties it carries into the node itself, so it is refused instead. Which action it is bound to
+		// is the controller's to answer: only there is the relation action the node declares known.
+		if ($this->isRelationPort && !$isBoundToAction)
+		{
+			$result->addError(new Error(
+				'Base settings of a relation port must be bound to the relation action of the node.',
+				'ERR-BASE-SETTINGS-NOT-BOUND-ON-RELATION-PORT',
+			));
+
+			return $result;
+		}
 
 		// Node-action-backed base-settings (actionId !== null): it describes an action of its own and is
 		// converted into a child activity, so its document answers to the rules an ACTION answers to, and
 		// its action answers to the catalog of the node - the declared-vs-actual payload guard included.
-		if ($expression->actionId !== null && $expression->actionId !== '')
+		if ($isBoundToAction)
 		{
 			// The editor puts the block on the node the moment the node is opened
 			// (initBaseSettingsIfNeeded), so a form nobody ever filled is the normal state of a node
@@ -272,7 +295,12 @@ class ValidateSingleRuleCommand extends AbstractCommand
 
 		// Bound to a node-action by its type alone: the converter builds it as a proxy child - or drops it
 		// on the portless container - and never host-merges it, so the guard below must not speak about it.
-		if ($this->isNodeActionBackingType($actualType))
+		// A payload carrying the class of the host is the node's own form and is host-merged whatever its
+		// class is able to serve as, so it goes to that guard - which checks that very equality.
+		if (
+			!$this->isHostOwnBaseSettings($expression, $actualType, (string)$this->activityType)
+			&& $this->isNodeActionBackingType($actualType)
+		)
 		{
 			return $result;
 		}

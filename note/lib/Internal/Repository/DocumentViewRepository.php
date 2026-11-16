@@ -9,6 +9,7 @@ use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Model\DocumentViewTable;
+use Bitrix\Note\Internal\Util\CursorDate;
 
 /**
  * b_note_document_view access: upsert on awareness join, keyset read
@@ -61,21 +62,8 @@ class DocumentViewRepository
 		;
 
 		$cursorUserId = isset($afterCursor['userId']) ? (int)$afterCursor['userId'] : 0;
-		$cursorViewedAtRaw = is_string($afterCursor['viewedAt'] ?? null) ? $afterCursor['viewedAt'] : '';
-		// A malformed client cursor must degrade to "first page", not throw a 500
-		// (mirrors FeedProvider::parseCursor); an unparseable date leaves the cursor unset.
-		$cursorViewedAt = null;
-		if ($cursorViewedAtRaw !== '')
-		{
-			try
-			{
-				$cursorViewedAt = DateTime::createFromPhp(new \DateTime($cursorViewedAtRaw));
-			}
-			catch (\Throwable)
-			{
-				$cursorViewedAt = null;
-			}
-		}
+		// A malformed client cursor degrades to "first page" instead of throwing - see CursorDate.
+		$cursorViewedAt = CursorDate::parse($afterCursor['viewedAt'] ?? null);
 		if ($cursorUserId > 0 && $cursorViewedAt !== null)
 		{
 			$query->where(

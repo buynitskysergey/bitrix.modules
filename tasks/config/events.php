@@ -24,6 +24,7 @@ return [
 			Im\EventHandler\OnAfterSendMessageEvent\AutoUnmuteAuditor::class,
 			Im\EventHandler\OnAfterSendMessageEvent\UpdateCounters::class,
 			Im\EventHandler\OnAfterSendMessageEvent\SendPushNotification::class,
+			Im\EventHandler\OnAfterSendMessageEvent\RecordInteraction::class,
 			Rest\EventHandler\OnAfterSendMessageEvent\ExecuteRestEvent::class,
 		],
 		\Bitrix\Im\V2\Chat\ExternalChat\Event\AfterMuteEvent::class => [

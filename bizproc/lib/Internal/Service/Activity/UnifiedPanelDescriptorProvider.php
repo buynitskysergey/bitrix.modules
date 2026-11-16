@@ -184,9 +184,9 @@ final class UnifiedPanelDescriptorProvider
 	 * children of such a node stays with them ({@see \CBPActivity::validateChild()}) - a template saved while
 	 * the feature was on has to keep publishing after it is switched off.
 	 *
-	 * @param bool $featureAvailable Verdict of the rollout option of the feature
-	 *     (`bizprocdesigner`/`complex_node_connections_available`), read and passed in by the editor: the
-	 *     option belongs to that module ({@see \Bitrix\BizprocDesigner\Internal\Config\Feature}).
+	 * @param bool $featureAvailable Verdict of the designer feature flag
+	 *     \Bitrix\BizprocDesigner\Public\Feature\Node\ComplexNodeConnectionsFlag, read and passed in by the
+	 *     editor through {@see \Bitrix\BizprocDesigner\Internal\Config\Feature}.
 	 */
 	public function isSurfaceAvailableForNode(
 		string $activityCode,

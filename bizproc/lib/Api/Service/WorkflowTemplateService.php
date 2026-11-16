@@ -16,6 +16,7 @@ use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\Config\TemplateHistory;
 use Bitrix\Bizproc\Internal\Entity\WorkflowTemplate\VersionChoice;
 use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\WorkflowTemplateRepository;
+use Bitrix\Bizproc\Workflow\Template\AgentOwnedMetadata;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
 use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
 use Bitrix\Bizproc\Internal\Access\Permission\PermissionDictionary;
@@ -714,7 +715,13 @@ class WorkflowTemplateService
 				// history stays empty until the user publishes for the first time.
 				// Authorship comes from the user this save was authorized for, not from the global one: it
 				// decides the "own templates" scope, so the two must be the same person by construction.
-				$templateId = (int)\CBPWorkflowTemplateLoader::add($fields, actorId: $request->user->getId());
+				// A creation without a common version is not a publication either: the first one for
+				// everyone dates the template later.
+				$templateId = (int)\CBPWorkflowTemplateLoader::add(
+					$fields,
+					actorId: $request->user->getId(),
+					markFirstPublication: !$withoutCommonVersion,
+				);
 				$publicationResponse = new RecordPublicationResponse();
 				if (
 					$withoutCommonVersion
@@ -1198,12 +1205,18 @@ class WorkflowTemplateService
 					$prevState = $this->getDraftBaseState($request->templateId);
 				}
 
+				$boundDraftData = is_array($draft->getTemplateData()) ? $draft->getTemplateData() : [];
+
 				$draftFields = [
 					'MODULE_ID' => $tpl->getModuleId(),
 					'ENTITY' => $tpl->getEntity(),
 					'DOCUMENT_TYPE' => $tpl->getDocumentType(),
 					'TEMPLATE_ID' => $templateId,
-					'TEMPLATE_DATA' => $tpl->collectValues(),
+					'TEMPLATE_DATA' => self::toDraftTemplateData(
+						$tpl->collectValues(),
+						$boundDraftData,
+						$request->fieldsToClaim,
+					),
 					'USER_ID' => $request->user->getId(),
 					'CREATED' => new \Bitrix\Main\Type\DateTime(),
 				];
@@ -1270,7 +1283,11 @@ class WorkflowTemplateService
 					'ENTITY' => $tpl->getEntity(),
 					'DOCUMENT_TYPE' => $tpl->getDocumentType(),
 					'TEMPLATE_ID' => $templateId,
-					'TEMPLATE_DATA' => $tpl->collectValues(),
+					'TEMPLATE_DATA' => self::toDraftTemplateData(
+						$tpl->collectValues(),
+						[],
+						$request->fieldsToClaim,
+					),
 					'USER_ID' => $request->user->getId(),
 					'CREATED' => new \Bitrix\Main\Type\DateTime(),
 				];
@@ -1321,7 +1338,10 @@ class WorkflowTemplateService
 		$draft = WorkflowTemplateDraftTable::getLatestDraftWithDataByTemplateId($templateId);
 		if ($draft !== null)
 		{
-			return is_array($draft['TEMPLATE_DATA']) ? $draft['TEMPLATE_DATA'] : [];
+			return is_array($draft['TEMPLATE_DATA'])
+				? AgentOwnedMetadata::stripFrom($draft['TEMPLATE_DATA'])
+				: []
+			;
 		}
 
 		$live = WorkflowTemplateTable::query()
@@ -1332,6 +1352,24 @@ class WorkflowTemplateService
 		;
 
 		return $live ?: [];
+	}
+
+	/**
+	 * @param array<string, mixed> $snapshot
+	 * @param array<string, mixed> $boundDraftData
+	 * @param list<string> $fieldsToClaim
+	 * @return array<string, mixed>
+	 */
+	private static function toDraftTemplateData(
+		array $snapshot,
+		array $boundDraftData,
+		array $fieldsToClaim,
+	): array
+	{
+		return AgentOwnedMetadata::applyTo(
+			$snapshot,
+			AgentOwnedMetadata::nextOwnedFields($boundDraftData, $snapshot, $fieldsToClaim),
+		);
 	}
 
 	/**

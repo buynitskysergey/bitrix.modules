@@ -13,6 +13,8 @@ use Bitrix\Tasks\V2\Internal\Entity\Task;
 use Bitrix\Tasks\V2\Internal\Repository\TaskRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Service\Consistency\ConsistencyResolverInterface;
 use Bitrix\Tasks\V2\Internal\Service\Esg\EgressController;
+use Bitrix\Tasks\V2\Internal\Service\Interaction\InteractionRecorder;
+use Bitrix\Tasks\V2\Internal\Service\Ranking\EventType;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\Config\UpdateConfig;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\RunBizProc;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\RunCrm;
@@ -30,6 +32,7 @@ class UpdateTaskService
 		private readonly ConsistencyResolverInterface $consistencyResolver,
 		private readonly TaskRepositoryInterface $taskRepository,
 		private readonly EgressController $egressController,
+		private readonly InteractionRecorder $interactionRecorder,
 		private readonly TaskMutationRegistry $mutationRegistry,
 	)
 	{
@@ -83,6 +86,16 @@ class UpdateTaskService
 				deferSearchIndex: true,
 			);
 		}
+
+		// Outside the consistency wrapper: a rolled back update must not add weight.
+		// Re-entrant updates count once - the recorder dedups within the request.
+		$this->interactionRecorder->record(
+			userId: $config->getUserId(),
+			taskId: (int)$task->id,
+			eventType: EventType::Update,
+			relationKind: null,
+			origin: $config->getOrigin(),
+		);
 
 		try
 		{

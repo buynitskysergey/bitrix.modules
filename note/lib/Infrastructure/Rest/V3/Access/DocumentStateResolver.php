@@ -78,9 +78,13 @@ class DocumentStateResolver
 				throw new EntityNotFoundException($documentId);
 			}
 
+			// A base in the recycle bin hides nothing by itself: whether the caller is let into the bin
+			// is the whole question, and canViewInRecycleBin() has just answered it - for a deleted
+			// base by the right to moderate it. Orphan keeps its own meaning: no base at all.
 			$state = $this->collections->exists($collectionId)
 				? DocumentState::Trashed
-				: DocumentState::Orphan;
+				: DocumentState::Orphan
+			;
 
 			return new ResolvedDocument(
 				meta: $meta,

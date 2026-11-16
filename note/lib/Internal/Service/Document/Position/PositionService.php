@@ -41,15 +41,29 @@ final class PositionService
 			?? new SubtreeAclReconciler($this->repository, new SubtreeAclReconcileScheduler());
 	}
 
+	/**
+	 * @param bool $checkRights False lifts both barriers of the write path at once: the system user
+	 *                          becomes an acceptable actor and the escalation check is not asked.
+	 *                          The two are tied to one flag on purpose — "rights are not checked" is
+	 *                          the only state in which a system actor makes sense.
+	 */
 	public function move(
 		int $documentId,
 		int $targetCollectionId,
 		?int $targetParentId,
 		?int $targetPosition,
-		int $userId
+		int $userId,
+		bool $checkRights = true
 	): Result
 	{
-		if ($documentId <= 0 || $targetCollectionId <= 0 || $userId <= 0)
+		if ($documentId <= 0 || $targetCollectionId <= 0)
+		{
+			return $this->createErrorResult('Invalid move parameters.');
+		}
+
+		// A caller that lost its user must be refused rather than silently moving the document:
+		// escalation is only asked on reparent, so a plain reorder would pass unnoticed.
+		if ($userId < 0 || ($userId === 0 && $checkRights))
 		{
 			return $this->createErrorResult('Invalid move parameters.');
 		}
@@ -80,7 +94,10 @@ final class PositionService
 
 			// Block a silent escalation: a reparent into a subtree-shared branch that would
 			// hand new positive access to a share audience needs moderator level, not just manage.
-			if ($this->movementEscalatesAccess($targetParentId, $targetCollectionId, $subtreeIds, $userId))
+			$escalates = $checkRights
+				&& $this->movementEscalatesAccess($targetParentId, $targetCollectionId, $subtreeIds, $userId)
+			;
+			if ($escalates)
 			{
 				return $this->createEscalationErrorResult();
 			}

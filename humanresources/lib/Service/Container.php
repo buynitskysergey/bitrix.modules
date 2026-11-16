@@ -228,6 +228,11 @@ class Container
 		return self::getService('humanresources.repository.hcmlink.job');
 	}
 
+	public static function getHcmLinkJobMonitoringRepository(): Repository\HcmLink\JobMonitoringRepository
+	{
+		return self::getService('humanresources.repository.hcmlink.job.monitoring');
+	}
+
 	public static function getHcmLinkJobService(): Contract\Service\HcmLink\JobService
 	{
 		return self::getService('humanresources.service.hcmlink.job');
@@ -241,6 +246,11 @@ class Container
 	public static function getHcmLinkUserRepository(): Contract\Repository\HcmLink\UserRepository
 	{
 		return self::getService('humanresources.repository.hcmlink.user');
+	}
+
+	public static function getHcmLinkExclusionRepository(): Repository\HcmLink\ExclusionRepository
+	{
+		return self::getService('humanresources.repository.hcmlink.exclusion');
 	}
 
 	public static function getHcmLinkFieldService(): Service\HcmLink\FieldService
@@ -261,6 +271,16 @@ class Container
 	public static function getHcmLinkCompanyCounterService(): Service\HcmLink\Counter\CompanyCounterService
 	{
 		return self::getService('humanresources.service.hcmlink.counter.company');
+	}
+
+	public static function getHcmLinkCompanyDisconnectService(): Service\HcmLink\CompanyDisconnectService
+	{
+		return self::getService('humanresources.service.hcmlink.company.disconnect');
+	}
+
+	public static function getHcmLinkExclusionService(): Service\HcmLink\ExclusionService
+	{
+		return self::getService('humanresources.service.hcmlink.exclusion');
 	}
 
 	public static function getHcmLinkAccessService(): Service\HcmLink\AccessService
@@ -326,6 +346,11 @@ class Container
 	public static function getBizprocProcessLauncher(): ProcessLauncherInterface
 	{
 		return self::getService('humanresources.integration.bizproc.processLauncher');
+	}
+
+	public static function getStructurePositionJournal(): PositionJournal
+	{
+		return self::getService('humanresources.integration.bizproc.structurePositionJournal');
 	}
 
 	public static function getStructureAuthProvider(): StructureAuthProvider

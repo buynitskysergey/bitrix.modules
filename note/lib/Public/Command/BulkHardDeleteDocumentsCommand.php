@@ -14,8 +14,10 @@ use Bitrix\Note\Internal\Service\RecycleBin\HardDeleteService;
  * Bulk hard-delete (empty from the recycle bin)
  * of a selection. Owner of the API-04 contract.
  *
- * The recycle section is flat, so no subtree expansion happens (withNested=false). Per-record
- * hard-delete rights are decided by BulkAccessAggregator via bulkComputeRecycleBinAcl
+ * With $withNested the server expands each selected node into its branch: after a
+ * deleted branch collapses into one card the client no longer holds its composition, so the
+ * single card in front of the user means the whole branch. Per-record hard-delete rights are
+ * decided by BulkAccessAggregator via bulkComputeRecycleBinAcl
  * (canHardDelete): a live-collection entry needs MANAGE, an orphan needs trashedBy / portal
  * admin. Records the user cannot hard-delete land in skippedByAccessCount, they are not an error.
  *
@@ -33,6 +35,7 @@ class BulkHardDeleteDocumentsCommand extends AbstractBulkCommand
 	public function __construct(
 		int $userId,
 		array $documentIds,
+		bool $withNested = false,
 		?HardDeleteService $hardDeleteService = null,
 		?SelectionResolver $selectionResolver = null,
 		?BulkAccessAggregator $accessAggregator = null,
@@ -42,7 +45,7 @@ class BulkHardDeleteDocumentsCommand extends AbstractBulkCommand
 			$userId,
 			$documentIds,
 			SelectionResolver::SECTION_RECYCLE,
-			false, // recycle entries are flat — hard-delete exactly the selected records
+			$withNested,
 			$selectionResolver ?? new SelectionResolver(),
 			$accessAggregator ?? new BulkAccessAggregator(),
 		);

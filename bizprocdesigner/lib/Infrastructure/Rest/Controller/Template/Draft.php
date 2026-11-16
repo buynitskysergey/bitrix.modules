@@ -56,21 +56,23 @@ final class Draft extends AbstractAgentRestController
 		}
 
 		$graph = $this->submittedGraph($request->fields);
-		$validateResult = $this->validateGraph($graph, $identifier);
+		$validateResult = $this->validateSubmission($request->fields, $graph, $identifier);
 		if (!$validateResult instanceof AgentWorkflowValidationResult)
 		{
 			throw new GraphValidationException($validateResult->getErrors());
 		}
 
-		// The declarations ride the same result the valid blocks ride, so the graph is written from the very
-		// reading of the wizard forms it was judged by. template.validate builds the same result and stops at the
-		// verdict, which is what keeps a dry run from touching the constants.
+		// The declarations and the metadata ride the same result the valid blocks ride, so the graph is written
+		// from the very reading of the wizard forms and of the body it was judged by. template.validate builds the
+		// same result and stops at the verdict, which is what keeps a dry run from touching the constants and from
+		// renaming the template.
 		$saveResult = Container::getAgentDraftService()->saveAndPush(
 			subject: $subject,
 			blocks: $validateResult->blocks,
 			connections: $validateResult->connections,
 			source: RequestSource::Rest,
 			setupConstantDeclarations: $validateResult->setupConstantDeclarations,
+			templateMetadata: $validateResult->templateMetadata,
 		);
 
 		$savedDraftId = $saveResult instanceof SaveTemplateDraftResponse ? $saveResult->getTemplateDraftId() : 0;

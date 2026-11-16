@@ -45,49 +45,67 @@ class AttachmentCopier
 			return $result->addError(new Error('"disk" module is required.'));
 		}
 
-		$folder = (new HiddenStorage())
-			->setUserId($this->userId)
-			->setSecurityContextOptions([
-				'entityTypeId' => $this->entityTypeId,
-				'entityId' => $this->entityId,
-			])
-			->getOrCreateFolder(HiddenStorage::FOLDER_CODE_ACTIVITY)
-		;
-
-		if (!$folder)
+		try
 		{
-			return $result->addError(new Error('Unable to resolve hidden storage folder for attachments.'));
+			$folder = (new HiddenStorage())
+				->setUserId($this->userId)
+				->setSecurityContextOptions([
+					'entityTypeId' => $this->entityTypeId,
+					'entityId' => $this->entityId,
+				])
+				->getOrCreateFolder(HiddenStorage::FOLDER_CODE_ACTIVITY)
+			;
+
+			if (!$folder)
+			{
+				return $result->addError(new Error('Unable to resolve hidden storage folder for attachments.'));
+			}
+
+			foreach ($attachedIds as $attachedId)
+			{
+				$attachedId = (int)$attachedId;
+
+				$attachedObject = AttachedObject::loadById($attachedId);
+				if (!$attachedObject)
+				{
+					$result->addError(new Error("Attached object {$attachedId} was not found.", $attachedId));
+
+					continue;
+				}
+
+				if (!$attachedObject->canRead($this->userId))
+				{
+					$result->addError(new Error("Access to attached object {$attachedId} is denied.", $attachedId));
+
+					continue;
+				}
+
+				$newFile = $this->copyAttachedObject($attachedObject, $folder);
+				if (!$newFile instanceof File)
+				{
+					$result->addError(new Error("Unable to copy attached object {$attachedId}.", $attachedId));
+
+					continue;
+				}
+
+				$createdFileIds[] = $newFile->getId();
+				$map[$attachedId] = FileUserType::NEW_FILE_PREFIX . $newFile->getId();
+			}
+
 		}
-
-		foreach ($attachedIds as $attachedId)
+		catch (\Throwable $exception)
 		{
-			$attachedId = (int)$attachedId;
-
-			$attachedObject = AttachedObject::loadById($attachedId);
-			if (!$attachedObject)
-			{
-				$result->addError(new Error("Attached object {$attachedId} was not found.", $attachedId));
-
-				continue;
-			}
-
-			if (!$attachedObject->canRead($this->userId))
-			{
-				$result->addError(new Error("Access to attached object {$attachedId} is denied.", $attachedId));
-
-				continue;
-			}
-
-			$newFile = $this->copyAttachedObject($attachedObject, $folder);
-			if (!$newFile instanceof File)
-			{
-				$result->addError(new Error("Unable to copy attached object {$attachedId}.", $attachedId));
-
-				continue;
-			}
-
-			$createdFileIds[] = $newFile->getId();
-			$map[$attachedId] = FileUserType::NEW_FILE_PREFIX . $newFile->getId();
+			Container::getInstance()->getLogger('Default')->error(
+				'{method}: unable to copy comment attachments',
+				[
+					'method' => __METHOD__,
+					'exceptionClass' => get_class($exception),
+					'exceptionCode' => $exception->getCode(),
+					'exceptionFile' => $exception->getFile(),
+					'exceptionLine' => $exception->getLine(),
+				],
+			);
+			$result->addError(new Error('Could not copy comment attachments'));
 		}
 
 		return $result->setData([

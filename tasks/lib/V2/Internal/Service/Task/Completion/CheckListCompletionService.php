@@ -21,7 +21,7 @@ class CheckListCompletionService
 	{
 	}
 
-	public function completeForTask(int $taskId, int $userId, bool $useBatch = false): Result
+	public function completeForTask(int $taskId, int $userId, bool $useBatch = true): Result
 	{
 		$result = new Result();
 

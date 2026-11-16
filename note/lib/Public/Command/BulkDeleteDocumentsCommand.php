@@ -119,7 +119,7 @@ class BulkDeleteDocumentsCommand extends AbstractBulkCommand
 		// History parity with DeleteDocumentCommand, which records the event on the operation's
 		// ROOT only, not per subtree descendant. With withNested=true $processedDocumentIds is the
 		// whole expanded subtree, so record only the processed selection roots. No live-push.
-		$rootsProcessed = array_values(array_intersect($processedDocumentIds, $this->rootIds));
+		$rootsProcessed = array_values(array_intersect($processedDocumentIds, $this->selectionRootIds()));
 		$this->eventLogService->recordMany(EventTable::SCOPE_DOCUMENT, $rootsProcessed, 'trashed', $this->userId);
 
 		$this->searchIndexService->deindexDocuments($processedDocumentIds);

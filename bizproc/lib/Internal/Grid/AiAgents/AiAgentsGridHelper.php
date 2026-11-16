@@ -13,6 +13,7 @@ use Bitrix\Bizproc\Internal\Integration\Rag\Service\KnowledgeBaseFileService;
 use Bitrix\Bizproc\Internal\Integration\Rag\Service\KnowledgeBaseService;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\FileTable;
+use Bitrix\Main\Engine\CurrentUser;
 use CBPHelper;
 
 use Bitrix\HumanResources\Enum\DepthLevel;
@@ -34,6 +35,7 @@ use Bitrix\Bizproc\Internal\Access\Permission\PermissionDictionary;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Filter\AiAgentsFilter;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Filter\AiAgentsFilterSettings;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Service\TemplateBotUsageService;
+use Bitrix\Bizproc\Internal\Grid\AiAgents\Service\TemplateProjectUsageService;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Settings\AiAgentsSettings;
 use Bitrix\Bizproc\Internal\Grid\AiAgents\Visibility\HiddenAiAgentsRegistry;
 use Bitrix\Bizproc\Internal\Repository\WorkflowTemplate\Query\LaunchedCopyQuery;
@@ -62,6 +64,7 @@ class AiAgentsGridHelper
 	private SetupTemplateService $setupTemplateService;
 	private AiAgentProvider $aiAgentProvider;
 	private TemplateAccessService $templateAccessService;
+	private TemplateProjectUsageService $templateProjectUsageService;
 
 	public function __construct(
 		?HiddenAiAgentsRegistry $hiddenAiAgents = null,
@@ -70,6 +73,7 @@ class AiAgentsGridHelper
 		?SetupTemplateService $setupTemplateService = null,
 		?AiAgentProvider $aiAgentProvider = null,
 		?TemplateAccessService $templateAccessService = null,
+		?TemplateProjectUsageService $templateProjectUsageService = null,
 	)
 	{
 		$this->navParamName = self::GRID_ID . '_nav';
@@ -81,6 +85,7 @@ class AiAgentsGridHelper
 		// The very instance the row actions ask for the transfer right, so the page warmup below reaches them.
 		$this->aiAgentProvider = $aiAgentProvider ?? ServiceLocator::getInstance()->get(AiAgentProvider::class);
 		$this->templateAccessService = $templateAccessService ?? new TemplateAccessService();
+		$this->templateProjectUsageService = $templateProjectUsageService ?? new TemplateProjectUsageService();
 
 		Loader::requireModule('humanresources');
 	}
@@ -345,6 +350,7 @@ class AiAgentsGridHelper
 		$idMapByTemplate = [];
 		$ragFileIds = [];
 		$templateIds = [];
+		$projectIdsByTemplate = [];
 
 		foreach ($templates as $template)
 		{
@@ -357,6 +363,10 @@ class AiAgentsGridHelper
 			}
 
 			$extractedIds = $this->extractIdsFromConstants($template);
+			if ($extractedIds['projectIds'] !== [])
+			{
+				$projectIdsByTemplate[$templateId] = $extractedIds['projectIds'];
+			}
 
 			$allUserIds = [...$allUserIds, ...$extractedIds['userIds']];
 			$allDepartmentIds = [...$allDepartmentIds, ...$extractedIds['departmentIds']];
@@ -371,6 +381,20 @@ class AiAgentsGridHelper
 				'recursiveDepartmentIds' => $extractedIds['recursiveDepartmentIdsFromConstant'],
 				'ragFilesStatuses' => $ragFilesStatuses,
 			];
+		}
+
+		$projectUserIdsByTemplate = $this->templateProjectUsageService->getUserIdsByTemplate(
+			$projectIdsByTemplate,
+			(int)CurrentUser::get()->getId(),
+			true,
+		);
+		foreach ($projectUserIdsByTemplate as $templateId => $userIds)
+		{
+			$idMapByTemplate[$templateId]['usedByUserIds'] = array_values(array_unique([
+				...$idMapByTemplate[$templateId]['usedByUserIds'],
+				...$userIds,
+			]));
+			$allUserIds = [...$allUserIds, ...$userIds];
 		}
 
 		$templateBotIdMap = $this->templateBotUsageService->getBotIdsByTemplate($templateIds, $templates);
@@ -477,25 +501,32 @@ class AiAgentsGridHelper
 	}
 
 	/**
-	 * Extracts user and department IDs from a template's constants.
+	 * Extracts user, department and project IDs from a template's constants.
 	 *
 	 * @param array $template A single template data array.
 	 * @return array{
 	 *     userIds: list<int>,
 	 *     departmentIds: list<int>,
-	 *     recursiveDepartmentIds: list<int>
+	 *     recursiveDepartmentIdsFromConstant: list<int>,
+	 *     projectIds: list<int>
 	 * }
 	 */
 	private function extractIdsFromConstants(array $template): array
 	{
 		if (!is_null($template['SYSTEM_CODE']) || empty($template['CONSTANTS']))
 		{
-			return ['userIds' => [], 'departmentIds' => [], 'recursiveDepartmentIdsFromConstant' => []];
+			return [
+				'userIds' => [],
+				'departmentIds' => [],
+				'recursiveDepartmentIdsFromConstant' => [],
+				'projectIds' => [],
+			];
 		}
 
 		$userIds = [];
 		$departmentIds = [];
 		$recursiveDepartmentIds = [];
+		$projectIds = [];
 
 		$documentType = $this->getTemplateDocumentType($template);
 
@@ -506,6 +537,27 @@ class AiAgentsGridHelper
 
 		foreach ($constants as $constantInfo)
 		{
+			if (
+				($constantInfo['Type'] ?? '') === 'project'
+				&& !empty($template['ACTIVATED_BY'])
+				&& !empty($template['ACTIVATED_AT'])
+			)
+			{
+				foreach ((array)($constantInfo['Default'] ?? []) as $value)
+				{
+					if (!is_int($value) && !is_string($value))
+					{
+						continue;
+					}
+
+					$projectId = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+					if ($projectId !== false)
+					{
+						$projectIds[] = $projectId;
+					}
+				}
+			}
+
 			if (($constantInfo['Type'] ?? '') !== FieldType::USER)
 			{
 				continue;
@@ -527,6 +579,7 @@ class AiAgentsGridHelper
 			'userIds' => array_unique($userIds),
 			'departmentIds' => array_unique($departmentIds),
 			'recursiveDepartmentIdsFromConstant' => array_unique($recursiveDepartmentIds),
+			'projectIds' => array_values(array_unique($projectIds)),
 		];
 	}
 

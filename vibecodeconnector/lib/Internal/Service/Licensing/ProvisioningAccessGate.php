@@ -23,7 +23,7 @@ final class ProvisioningAccessGate
 	{
 	}
 
-	public function ensureVibeCodeAvailable(int $userId = 0): ?bool
+	public function ensureRestProvisioningAvailable(EntryPoint $entryPoint, int $userId = 0): void
 	{
 		$availability = $this->vibePlusPolicy->getAvailability();
 		if ($availability === false)
@@ -34,13 +34,6 @@ final class ProvisioningAccessGate
 				$this->upsellProvider->getForUser($userId)?->toArray(),
 			);
 		}
-
-		return $availability;
-	}
-
-	public function ensureRestProvisioningAvailable(EntryPoint $entryPoint, int $userId = 0): void
-	{
-		$availability = $this->ensureVibeCodeAvailable($userId);
 
 		$restProvisioningPolicy = $this->restProvisioningPolicy ?? new ProvisioningAccessPolicy();
 		if ($entryPoint->isCowork())

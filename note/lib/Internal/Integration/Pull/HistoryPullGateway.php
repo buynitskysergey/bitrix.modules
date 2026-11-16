@@ -20,7 +20,7 @@ use Bitrix\Note\Public\Provider\FeedProvider;
  * subscribe a new tag on its own).
  *
  * Reuses FeedProvider::enrichOne() so the pushed `event` tile has exactly the same
- * actor/authors/versionAvailable shape as one listFeed page item — the sidebar can
+ * actor/authors/versionAvailable/source shape as one listFeed page item — the sidebar can
  * splice it into the feed without a re-fetch.
  */
 final class HistoryPullGateway

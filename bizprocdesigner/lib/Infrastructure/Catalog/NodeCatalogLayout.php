@@ -268,6 +268,7 @@ final class NodeCatalogLayout
 		],
 		'workflow' => [
 			['EmptyBlockActivity', 'FRAME'],
+			['PoolNode'],
 			['SetupTemplateActivity'],
 			['IfElseBranchActivity'],
 			['SwitchNode'],

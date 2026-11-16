@@ -7,6 +7,7 @@ namespace Bitrix\Note\Internal\Service\Document;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Infrastructure\Agent\Access\SubtreeAclReconcileScheduler;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
 use Bitrix\Note\Internal\Exceptions\ParentDocumentMismatchException;
 use Bitrix\Note\Internal\Model\Document;
@@ -54,6 +55,10 @@ class DocumentService
 	): Document
 	{
 		$this->assertCollectionExists($collectionId);
+		// The state of the knowledge base bans the write on the server, not only in the UI: a
+		// new document is created live, so one created inside an archived base would leave that base
+		// archived by flag only.
+		CollectionAccessService::assertCollectionAcceptsWrites($collectionId);
 		$this->assertParentBelongsToCollection($parentId, $collectionId);
 
 		$position = $this->positionCalculator->calculateNextPosition(

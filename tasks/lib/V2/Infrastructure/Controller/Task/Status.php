@@ -14,6 +14,7 @@ use Bitrix\Tasks\V2\Public\Command\Task\Status\TakeTaskCommand;
 use Bitrix\Tasks\V2\Infrastructure\Controller\BaseController;
 use Bitrix\Tasks\V2\Internal\Entity;
 use Bitrix\Tasks\V2\Internal\Access\Task\Status\Permission;
+use Bitrix\Tasks\V2\Internal\Service\Interaction\InteractionOrigin;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\Config\UpdateConfig;
 use Bitrix\Tasks\V2\Internal\Service\Task\Completion\TaskCompletionService;
 use Bitrix\Tasks\V2\Public\Provider\Params\TaskParams;
@@ -33,6 +34,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new StartTaskCommand(
@@ -62,6 +64,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new TakeTaskCommand(
@@ -91,6 +94,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new DisapproveTaskCommand(
@@ -120,6 +124,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new DeferTaskCommand(
@@ -149,6 +154,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new ApproveTaskCommand(
@@ -178,6 +184,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new PauseTaskCommand(
@@ -209,6 +216,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = $taskCompletionService->complete($task->getId(), $config, $completeWithChecklist);
@@ -235,6 +243,7 @@ class Status extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new RenewTaskCommand(

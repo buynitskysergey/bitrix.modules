@@ -21,7 +21,10 @@ use Bitrix\Note\Internal\Service\Document\DocumentCardMetaResolver;
 use Bitrix\Note\Internal\Service\Document\DocumentLastChangeResolver;
 use Bitrix\Note\Internal\Service\Document\DocumentSubscriptionStateResolver;
 use Bitrix\Note\Internal\Service\Document\DocumentViewsSnapshotResolver;
+use Bitrix\Note\Internal\Service\File\DocumentFilesMapService;
 use Bitrix\Note\Public\Provider\CollaborationProvider;
+use Bitrix\Note\Public\Provider\ContentList\CollectionStateResolver;
+use Bitrix\Note\Public\Provider\ContentList\NodeContextResolver;
 class DirectOpenContextService
 {
 	private const MAX_PARENT_CHAIN_DEPTH = 200;
@@ -35,6 +38,9 @@ class DirectOpenContextService
 	private DocumentSubscriptionStateResolver $subscriptionStateResolver;
 	private DocumentBacklinksSnapshotResolver $backlinksSnapshotResolver;
 	private FavoriteRepository $favoriteRepository;
+	private NodeContextResolver $nodeContextResolver;
+	private CollectionStateResolver $collectionStateResolver;
+	private DocumentFilesMapService $filesMapService;
 	public function __construct(
 		?DocumentRepository $documentRepository = null,
 		?CollectionRepository $collectionRepository = null,
@@ -45,6 +51,9 @@ class DirectOpenContextService
 		?DocumentSubscriptionStateResolver $subscriptionStateResolver = null,
 		?DocumentBacklinksSnapshotResolver $backlinksSnapshotResolver = null,
 		?FavoriteRepository $favoriteRepository = null,
+		?NodeContextResolver $nodeContextResolver = null,
+		?CollectionStateResolver $collectionStateResolver = null,
+		?DocumentFilesMapService $filesMapService = null,
 	)
 	{
 		$this->documentRepository = $documentRepository ?? new DocumentRepository();
@@ -65,9 +74,44 @@ class DirectOpenContextService
 		// very same activity line as getAction.
 		$this->backlinksSnapshotResolver = $backlinksSnapshotResolver ?? new DocumentBacklinksSnapshotResolver();
 		$this->favoriteRepository = $favoriteRepository ?? new FavoriteRepository();
+		// How much lies directly inside the document. The block of nested documents is drawn from it,
+		// so it has to travel with the server-rendered page as well: a direct link never asks
+		// getOpenContext, and without this the block was there only when the reader came from a list.
+		$this->nodeContextResolver = $nodeContextResolver ?? new NodeContextResolver();
+		// State of the base the document lies in: the path above the text names the base wherever
+		// the document is read, but opens it only while the base itself is live.
+		$this->collectionStateResolver = $collectionStateResolver ?? new CollectionStateResolver();
+		$this->filesMapService = $filesMapService ?? new DocumentFilesMapService();
 	}
 
 	public function resolve(int $documentId): ?array
+	{
+		$context = $this->buildContext($documentId);
+		if ($context === null)
+		{
+			return null;
+		}
+
+		// State-aware and counted in one place on the server: how much lies inside, and - for a
+		// deleted node - both dates of its deletion. Written onto the document payload, which is what
+		// the editor reads, and beside it, which is what the open-context action answers with.
+		$node = $this->nodeContextResolver->resolve($documentId, $this->getCurrentUserId());
+		if (is_array($context['document'] ?? null))
+		{
+			$context['document'] = $node + $context['document'];
+
+			// The same map DocumentController::getAction hands out: a direct link opens the editor from
+			// this payload and would otherwise resolve every file of the document in a second request.
+			if (!($context['document']['isTrashed'] ?? false))
+			{
+				$context['document']['files'] = (object)$this->filesMapService->build($documentId);
+			}
+		}
+
+		return $node + $context;
+	}
+
+	private function buildContext(int $documentId): ?array
 	{
 		if ($documentId <= 0)
 		{
@@ -109,7 +153,13 @@ class DirectOpenContextService
 		}
 
 		$isTargetArchived = (bool)$targetDocument->getIsArchived();
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $collectionId, $isTargetArchived);
+
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$collectionId,
+			$isTargetArchived,
+			[DocumentAccessService::STATE_ARCHIVED],
+		);
 		if (!$snapshot['canViewCollection'])
 		{
 			if (!$snapshot['canView'])
@@ -288,10 +338,15 @@ class DirectOpenContextService
 		);
 
 		$targetArchivedAt = $targetDocument->getArchivedAt();
+		$targetChildCount = (int)($this->documentRepository->getLiveChildCountMap(
+			[$collectionId],
+			[$targetDocumentId],
+		)[$targetDocumentId] ?? 0);
 		$targetDocumentPayload = [
 			'id' => $targetDocumentId,
 			'collectionId' => $collectionId,
 			'collectionTitle' => $normalizedCollectionName,
+			'collectionState' => $this->collectionStateResolver->resolve($collectionId)->value,
 			'canEdit' => $canEditDocument,
 			'canEditCollection' => $canEditCollection,
 			'canManagePermissions' => $canManagePermissions,
@@ -305,7 +360,11 @@ class DirectOpenContextService
 			'isArchived' => $isTargetArchived,
 			'archivedAt' => $targetArchivedAt?->format('c'),
 			'isTrashed' => false,
-			'hasChildren' =>(bool)($hasChildrenMap[$targetDocumentId] ?? false),
+			// The level of the open document is read on demand, so the page needs its size before it
+			// has its content: the counter next to "Documents inside" is drawn from this number, and
+			// the block itself is offered only when there is something in it.
+			'childCount' => $targetChildCount,
+			'hasChildren' => $targetChildCount > 0,
 			'ancestors' => BreadcrumbAncestor::listToArray($ancestorPairs),
 			'views' => $this->viewsSnapshotResolver->resolve($targetDocumentId),
 			'lastChange' => $this->lastChangeResolver->resolve($targetDocumentId),
@@ -478,7 +537,8 @@ class DirectOpenContextService
 	): array
 	{
 		$rawCollectionId = (int)$document->getCollectionId();
-		$collectionAlive = false;
+		// Presence of the base, not its state: an archived base keeps its row and its name.
+		$hasCollection = false;
 		$collectionTitle = '';
 		if ($rawCollectionId > 0)
 		{
@@ -489,19 +549,20 @@ class DirectOpenContextService
 			;
 			if ($row !== false)
 			{
-				$collectionAlive = true;
+				$hasCollection = true;
 				$collectionTitle = (string)($row['NAME'] ?? '');
 			}
 		}
 
-		$exposedCollectionId = $collectionAlive ? $rawCollectionId : 0;
-		$exposedCollectionTitle = $collectionAlive ? $collectionTitle : '';
+		$exposedCollectionId = $hasCollection ? $rawCollectionId : 0;
+		$exposedCollectionTitle = $hasCollection ? $collectionTitle : '';
 
 		$archivedAt = $document->getArchivedAt();
 		$targetDocumentPayload = [
 			'id' => $documentId,
 			'collectionId' => $exposedCollectionId,
 			'collectionTitle' => $exposedCollectionTitle,
+			'collectionState' => $this->collectionStateResolver->resolve($exposedCollectionId)->value,
 			'canEdit' => false,
 			'canEditCollection' => false,
 			'parentId' => $this->toNullableInt($document->getParentId()),
@@ -514,7 +575,7 @@ class DirectOpenContextService
 			'isTrashed' => true,
 			'recycleBinId' => (int)$record->getId(),
 			'trashedAt' => $record->getTrashedAt()->format('c'),
-			'isOrphan' => !$collectionAlive,
+			'isOrphan' => !$hasCollection,
 			'canRestore' => $canRestore,
 			'canHardDelete' => $canHardDelete,
 			'hasChildren' => false,

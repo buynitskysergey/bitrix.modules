@@ -11,8 +11,9 @@ use Bitrix\Rest\V3\Exception\SkipWriteToLogException;
  * The collection is too big to be answered as one tree.
  *
  * A refusal rather than a cut answer: a cut tree is indistinguishable from a whole one, so the caller
- * would draw it with branches silently missing. The phrase names the budget and stops there - REST V3
- * has no listing of documents to walk such a collection with.
+ * would draw it with branches silently missing. The phrase names the budget and sends the caller to
+ * note.document.list, which walks a collection of any size page by page - what it does not carry is
+ * the nesting.
  */
 class TreeTooLargeException extends RestException implements SkipWriteToLogException
 {

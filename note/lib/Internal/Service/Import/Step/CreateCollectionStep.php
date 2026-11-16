@@ -226,18 +226,18 @@ class CreateCollectionStep implements StepInterface
 	 * A collection that is gone answers the same way and for the same reason: the screen has nothing to
 	 * show for it either.
 	 *
-	 * The rule stands on the landing branch alone - Outline and the local wiki keep the base they had.
+	 * The archive rule stands on the landing branch alone - Outline and the local wiki keep the base
+	 * they had. The recycle bin rule holds for every source: a base lying there takes no writes at all.
 	 */
 	public static function countsAsEarlierConversion(string $sourceType, int $collectionId): bool
 	{
-		if ($sourceType !== self::LANDING_SOURCE_TYPE)
+		$collection = (new CollectionRepository())->getById($collectionId);
+		if ($collection === null || $collection->getTrashedAt() !== null)
 		{
-			return true;
+			return false;
 		}
 
-		$collection = (new CollectionRepository())->getById($collectionId);
-
-		return $collection !== null && !$collection->getIsArchived();
+		return $sourceType !== self::LANDING_SOURCE_TYPE || !$collection->getIsArchived();
 	}
 
 	/**

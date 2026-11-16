@@ -1,5 +1,11 @@
 <?php
 return [
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Landing\\Public\\Features'
+		],
+		'readonly' => true
+	],
 	'controllers' => [
 		'value' => [
 			'namespaces' => [

@@ -4,20 +4,28 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Public\Provider;
 
+use Bitrix\Main\Config\Feature;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
+use Bitrix\Note\Internal\Config\Feature\DocumentNotifications;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Subscription\CoverageResolver;
+use Bitrix\Note\Internal\Service\Subscription\SubscriptionListService;
 
 /**
- * Subscription state for the bell control. Right is plain
- * LEVEL_VIEW on the document (mirrors ViewProvider); the collection half of the
- * state is only reported when the viewer can also see the collection —
- * otherwise "this document and all nested" is not a meaningful choice for them
- * and reporting it would leak the collection's subscriber-state to a
- * document-only grantee.
+ * Subscription state for the bell control, and the read side of the subscriptions block: one page of
+ * the articles the caller subscribed to themselves.
+ *
+ * Right for the bell is plain LEVEL_VIEW on the document (mirrors ViewProvider); the collection half
+ * of the state is only reported when the viewer can also see the collection; otherwise "this
+ * document and all nested" is not a meaningful choice for them and reporting it would leak the
+ * collection's subscriber-state to a document-only grantee.
+ *
+ * The page is personal, so the provider resolves the access codes of that very user and hands them
+ * to the list service together with the pagination parameters; assembling the rows (titles, rights,
+ * coverage, chevron) is the service's job and stays batched there.
  */
 final class SubscriptionProvider
 {
@@ -26,7 +34,56 @@ final class SubscriptionProvider
 		private readonly CoverageResolver $coverageResolver = new CoverageResolver(),
 		private readonly DocumentRepository $documentRepository = new DocumentRepository(),
 		private readonly CollectionProvider $collectionProvider = new CollectionProvider(),
+		private readonly SubscriptionListService $listService = new SubscriptionListService(),
 	) {}
+
+	/**
+	 * @param array{id: int}|null $afterCursor
+	 * @return array{items: array<int, array<string, mixed>>, nextCursor: array{id: int}|null}
+	 */
+	public function getPage(
+		int $userId,
+		int $limit = SubscriptionListService::DEFAULT_LIMIT,
+		?array $afterCursor = null,
+	): array
+	{
+		if ($userId <= 0)
+		{
+			return ['items' => [], 'nextCursor' => null];
+		}
+
+		return $this->listService->listPage(
+			$userId,
+			CollectionAccessService::buildUserAccessCodes($userId),
+			min(
+				SubscriptionListService::MAX_LIMIT,
+				$limit > 0 ? $limit : SubscriptionListService::DEFAULT_LIMIT,
+			),
+			$afterCursor,
+		);
+	}
+
+	/**
+	 * Whether the caller has anything the subscriptions block would show. Asked once while the page
+	 * is rendered, so the sidebar can offer the notifications mode without a request of its own.
+	 * Without it the block hides itself whenever the favorites list is empty and the mode becomes
+	 * unreachable.
+	 *
+	 * With the portal feature off there is no such mode to offer, so the answer is `false` and the
+	 * database is not asked at all.
+	 */
+	public function hasSubscriptions(int $userId): bool
+	{
+		if ($userId <= 0 || !Feature::isEnabled(DocumentNotifications::class))
+		{
+			return false;
+		}
+
+		return $this->listService->hasAnySubscription(
+			$userId,
+			CollectionAccessService::buildUserAccessCodes($userId),
+		);
+	}
 
 	/**
 	 * `subscribed`/`mode` describe a DIRECT self/subtree subscription on this document.
@@ -51,7 +108,11 @@ final class SubscriptionProvider
 		}
 
 		$documentCollectionId = (int)$ownership['collectionId'];
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $documentCollectionId);
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$documentCollectionId,
+			allowStates: [DocumentAccessService::STATE_ARCHIVED],
+		);
 		if (!$snapshot['canView'])
 		{
 			throw new AccessDeniedException();

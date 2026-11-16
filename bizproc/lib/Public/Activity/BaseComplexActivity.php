@@ -35,6 +35,16 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 	protected const OUTPUT_ACTIVITY_NAMES = 'OutputNames';
 	protected const NOT_FILLED_MARK = 'NotFilled';
 
+	/**
+	 * Values the mark takes when the panel names the block it was left in, so the refusal of the
+	 * publication names it too ({@see self::getNotFilledMessage()}). Any other non-empty value is a mark
+	 * all the same - a node marked before the block was named carries a plain `Y`.
+	 */
+	public const NOT_FILLED_RULES = 'Rules';
+	public const NOT_FILLED_RELATIONS = 'Relations';
+
+	private const FILLED_MARK = 'N';
+
 	protected array $queuePortIds = [];
 
 	protected function __construct($name)
@@ -207,15 +217,32 @@ abstract class BaseComplexActivity extends FlowDirectedActivity implements
 			];
 		}
 
-		if (($arTestProperties[static::NOT_FILLED_MARK] ?? 'N') === 'Y')
+		$notFilledMark = (string)($arTestProperties[static::NOT_FILLED_MARK] ?? self::FILLED_MARK);
+		if ($notFilledMark !== self::FILLED_MARK && $notFilledMark !== '')
 		{
 			$arErrors[] = [
 				'code' => 'NotExist',
-				'message' => Loc::getMessage('BIZPROC_PUBLIC_ACTIVITY_BCA_NOT_FILLED'),
+				'message' => self::getNotFilledMessage($notFilledMark),
 			];
 		}
 
 		return array_merge($arErrors, parent::validateProperties($arTestProperties, $user));
+	}
+
+	/**
+	 * What the publication says of a node the panel marked unfinished. A mark naming the block it was left
+	 * in names that block to the person as well; the rules are what the message speaks of by default, so a
+	 * mark of the rules and one written before the block was named say the same thing.
+	 */
+	private static function getNotFilledMessage(string $notFilledMark): string
+	{
+		$messageId = match ($notFilledMark)
+		{
+			self::NOT_FILLED_RELATIONS => 'BIZPROC_PUBLIC_ACTIVITY_BCA_NOT_FILLED_RELATIONS',
+			default => 'BIZPROC_PUBLIC_ACTIVITY_BCA_NOT_FILLED',
+		};
+
+		return (string)Loc::getMessage($messageId);
 	}
 
 	protected static function getPropertiesMap(array $documentType, array $context = []): array

@@ -6,6 +6,7 @@ namespace Bitrix\BizprocDesigner\Internal\Service\Activity;
 
 use Bitrix\Bizproc\Activity\ContentBlockResolver;
 use Bitrix\Bizproc\Activity\Dto\ContentBlock;
+use Bitrix\Bizproc\Activity\Dto\ContentBlockContext;
 use Bitrix\Bizproc\Internal\Service\Container;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\PortRuleDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\Rule\ActionExpressionDto;
@@ -18,7 +19,8 @@ use Bitrix\BizprocDesigner\Internal\Trait\NodeActionResolver;
 /**
  * The single owner of the derived content block of the rules of a node: the one place that walks the rule
  * structure looking for action constructions, and the one place that decides whether such a construction
- * gets a block at all.
+ * gets a block at all. A construction of any other kind leaves the walk without one, whatever it arrived
+ * holding.
  *
  * The block is display-only and is never authoritative in a saved template: the read transport recalculates
  * it from the current configuration of the nested activity, and the write transport cuts the client copy out
@@ -48,6 +50,29 @@ final class RuleContentBlock
 	 * both recalculated shares one budget between them instead of getting one per container.
 	 */
 	private int $remainingConstructions = self::MAX_CONTENT_BLOCK_CONSTRUCTIONS;
+
+	/**
+	 * Context every construction of this instance is resolved against, one per instance exactly as the budget
+	 * above, so the labels of a node whose rules and relations are both recalculated are resolved once.
+	 */
+	private readonly ?ContentBlockContext $context;
+
+	/**
+	 * @param ?ContentBlockContext $context Built by
+	 *     {@see \Bitrix\BizprocDesigner\Internal\Service\Activity\ReadableExpressionContextFactory}; null
+	 *     leaves the preview saying what it said before the readable form existed.
+	 * @param ?array $nodeDocumentType Document type the node hosting these rules works in, when it is not the
+	 *     one of the template: its nested actions act on that document, so a reference to a document field in
+	 *     one of them names a field of it. Null leaves every construction named in the type the context was
+	 *     built in.
+	 */
+	public function __construct(?ContentBlockContext $context = null, ?array $nodeDocumentType = null)
+	{
+		$this->context = $nodeDocumentType === null || $nodeDocumentType === []
+			? $context
+			: $context?->forDocumentType($nodeDocumentType)
+		;
+	}
 
 	/**
 	 * Recalculates the block of every action construction of one rule dictionary of a node, admitting only
@@ -232,6 +257,26 @@ final class RuleContentBlock
 	}
 
 	/**
+	 * Constructions whose activity data may reach the client holding a block. An ACTION is the only one whose
+	 * block is recalculated here; a FILTER and a base-settings construction get theirs from the shared save
+	 * pipeline instead ({@see \Bitrix\BizprocDesigner\Public\Command\Activity\Settings\SaveCommandHandler}),
+	 * which answers for the activity it saved and not for the request that submitted it. Nothing draws those
+	 * two, so the key is cut rather than recalculated: the panel loses nothing and the block of a construction
+	 * nobody admitted does not travel.
+	 */
+	private function carriesBlock(ConstructionDto $construction): bool
+	{
+		return match ($construction->constructionType)
+		{
+			ConstructionType::ACTION, ConstructionType::FILTER
+				=> $construction->expression instanceof ActionExpressionDto,
+			ConstructionType::BASE_SETTINGS
+				=> $construction->expression instanceof BaseSettingsExpressionDto,
+			default => false,
+		};
+	}
+
+	/**
 	 * @param iterable<PortRuleDto> $portRuleDtoDictionary
 	 * @param callable(string): bool $isTypeAdmitted Whether the provider of that activity type may be called.
 	 */
@@ -253,11 +298,7 @@ final class RuleContentBlock
 
 				foreach ($ruleDto->constructions as $construction)
 				{
-					if (
-						!$construction instanceof ConstructionDto
-						|| $construction->constructionType !== ConstructionType::ACTION
-						|| !$construction->expression instanceof ActionExpressionDto
-					)
+					if (!$construction instanceof ConstructionDto || !$this->carriesBlock($construction))
 					{
 						continue;
 					}
@@ -272,10 +313,13 @@ final class RuleContentBlock
 					// has since cleared must not outlive the recalculation.
 					unset($activityData[self::CONTENT_BLOCK_KEY]);
 
-					$contentBlock = $this->resolveContentBlock($activityData, $isTypeAdmitted);
-					if ($contentBlock !== null)
+					if ($construction->constructionType === ConstructionType::ACTION)
 					{
-						$activityData[self::CONTENT_BLOCK_KEY] = $contentBlock->toArray();
+						$contentBlock = $this->resolveContentBlock($activityData, $isTypeAdmitted);
+						if ($contentBlock !== null)
+						{
+							$activityData[self::CONTENT_BLOCK_KEY] = $contentBlock->toArray();
+						}
 					}
 
 					$construction->expression->activityData = $activityData;
@@ -319,6 +363,6 @@ final class RuleContentBlock
 		}
 		$this->remainingConstructions--;
 
-		return ContentBlockResolver::resolve($activityType, $properties);
+		return ContentBlockResolver::resolve($activityType, $properties, $this->context);
 	}
 }

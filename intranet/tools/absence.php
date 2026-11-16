@@ -260,7 +260,7 @@ endif;
 					<span id="uf_user_name"><?=$UserName?></span>
 
 					<?CUtil::InitJSCore(array('popup'));?>
-					<a href="javascript:void(0)" onclick="ShowSingleSelector" id="single-user-choice"><?=GetMessage("INTR_USER_CHOOSE")?></a>
+					<a href="javascript:void(0)" id="single-user-choice" style="display: none;"><?=GetMessage("INTR_USER_CHOOSE")?></a>
 					<script>// user_selector:
 						var multiPopup, singlePopup;
 						function onSingleSelect(arUser)
@@ -303,8 +303,10 @@ endif;
 						}
 
 						BX.ready(function() {
-							BX.bind(BX("single-user-choice"), "click", ShowSingleSelector);
+							var singleUserChoice = BX("single-user-choice");
+							BX.bind(singleUserChoice, "click", ShowSingleSelector);
 							BX.bind(BX("clear-user-choice"), "click", Clear);
+							singleUserChoice.style.display = "";
 						});
 					</script>
 					<?$name = $APPLICATION->IncludeComponent(

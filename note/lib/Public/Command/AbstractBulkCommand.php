@@ -55,7 +55,7 @@ abstract class AbstractBulkCommand extends AbstractCommand
 	{
 		$result = new Result();
 
-		$resolution = $this->selectionResolver->resolve($this->rootIds, $this->section, $this->withNested);
+		$resolution = $this->resolveSelection();
 		if ($resolution['limitExceeded'] === true)
 		{
 			$result->setData(['outcome' => BulkOutcome::limitExceeded()->toArray()]);
@@ -81,6 +81,8 @@ abstract class AbstractBulkCommand extends AbstractCommand
 		// restore heir overrides it to sort the whole allowed set ancestors-first BEFORE
 		// chunking — a parent then always lands in an equal or earlier chunk than its child.
 		$allowedIds = $this->orderAllowedIds($access['allowedIds']);
+
+		$this->beforeApply($allowedIds);
 
 		foreach (array_chunk($allowedIds, self::CHUNK_SIZE) as $chunk)
 		{
@@ -130,6 +132,46 @@ abstract class AbstractBulkCommand extends AbstractCommand
 	 * @return array{processedIds: int[], skippedOrphanCount?: int, skippedTransientCount?: int}
 	 */
 	abstract protected function applyChunk(array $documentIds): array;
+
+	/**
+	 * Where the affected set comes from. The resolver by default — the selection the client sent.
+	 * An heir whose set is resolved on the server ("all my documents of this base") overrides this
+	 * and returns the same shape, which is all the rest of the pipeline knows about the set.
+	 *
+	 * @return array{
+	 *     ids: int[],
+	 *     byCollection: array<int, int[]>,
+	 *     limitExceeded: bool,
+	 *     hasNested?: bool,
+	 *     rootsMeta: \Bitrix\Note\Internal\Model\Document[]
+	 * }
+	 */
+	protected function resolveSelection(): array
+	{
+		return $this->selectionResolver->resolve($this->rootIds, $this->section, $this->withNested);
+	}
+
+	/**
+	 * The nodes history events are recorded on — the roots of the operation. The constructor roots by
+	 * default; an heir with a server-resolved set names its own top nodes, because no root came in.
+	 *
+	 * @return int[]
+	 */
+	protected function selectionRootIds(): array
+	{
+		return $this->rootIds;
+	}
+
+	/**
+	 * Runs once on the whole allowed set, after access and ordering and before the first chunk is
+	 * applied. No-op by default; the author-scoped heirs re-hang the boundary of the set here, while
+	 * every node of it is still in place.
+	 *
+	 * @param int[] $allowedIds
+	 */
+	protected function beforeApply(array $allowedIds): void
+	{
+	}
 
 	/**
 	 * Orders the allowed set before it is chunked and applied. Identity by default; heirs

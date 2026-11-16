@@ -233,6 +233,8 @@ class PushNotificationService
 	 * @param array<string, mixed> $collectionPayloadExtra  Extra fields merged into the payload (next to collectionId / documentIds / requestRefetch).
 	 * @param string|null $globalCommand  Optional NOTE_GLOBAL broadcast (e.g. collection lifecycle).
 	 * @param array<string, mixed> $globalPayload  Payload for the global broadcast.
+	 * @param array<string, mixed> $granteePayloadExtra  Extra fields for the personal fan-out; only what a
+	 *                                                   document-level grantee is allowed to learn.
 	 */
 	public function emitDocumentCascade(
 		int $collectionId,
@@ -242,6 +244,7 @@ class PushNotificationService
 		?int $initiatorUserId = null,
 		?string $globalCommand = null,
 		array $globalPayload = [],
+		array $granteePayloadExtra = [],
 		int $threshold = self::REALTIME_BATCH_THRESHOLD,
 	): void
 	{
@@ -266,12 +269,12 @@ class PushNotificationService
 		// The payload is rebuilt from the ids alone, NOT forwarded: collectionPayloadExtra can carry
 		// collection-wide data (recycleBinMap on collectionDelete) about documents a grantee never
 		// had access to. The ids they do not hold are ignored client-side; anything else is theirs
-		// to not receive.
+		// to not receive - granteePayloadExtra is the opt-in for fields safe to share.
 		if ($collectionCommand !== self::COMMAND_ACCESS_CASCADE)
 		{
-			$granteePayload = $requestRefetch
+			$granteePayload = $granteePayloadExtra + ($requestRefetch
 				? ['requestRefetch' => true]
-				: ['documentIds' => $normalizedIds]
+				: ['documentIds' => $normalizedIds])
 			;
 			$this->notifyDocumentGrantees(
 				$collectionId,

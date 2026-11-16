@@ -104,6 +104,29 @@ class File extends Base
 	}
 
 	/**
+	 * The ids a value names when it is an id or a flat list of ids, null for any other shape:
+	 * toSingleValue() reads the keys of an associative array as ids, so only this shape is checkable.
+	 */
+	public static function toIdList(mixed $value): ?array
+	{
+		$ids = is_array($value) ? $value : [$value];
+		if (!array_is_list($ids))
+		{
+			return null;
+		}
+
+		foreach ($ids as $id)
+		{
+			if (!is_int($id) && !(is_string($id) && preg_match('/^[0-9]+$/D', $id) === 1))
+			{
+				return null;
+			}
+		}
+
+		return array_map('strval', $ids);
+	}
+
+	/**
 	 * Normalize single value.
 	 *
 	 * @param FieldType $fieldType Document field type.

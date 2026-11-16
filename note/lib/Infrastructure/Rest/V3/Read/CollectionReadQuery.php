@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Rest\V3\Read;
 
+use Bitrix\Note\Infrastructure\Rest\V3\Access\EntityState;
 use Bitrix\Note\Public\Provider\CollectionProvider;
 
 /**
@@ -30,21 +31,35 @@ final class CollectionReadQuery
 	/** @var array{position: int, id: int}|null */
 	public readonly ?array $cursor;
 
+	/** @var EntityState[] */
+	public readonly array $states;
+
 	/**
 	 * @param string[] $select names of DTO fields; an empty list means the default set
 	 * @param int[]|null $visibleIds null for an unrestricted caller, [] for one who sees nothing
+	 * @param EntityState[] $states an empty list means the live bases alone
 	 */
 	public function __construct(
 		array $select = [],
 		?array $visibleIds = null,
 		int $limit = 0,
 		?array $cursor = null,
+		array $states = [],
 	)
 	{
 		$this->select = $select;
 		$this->visibleIds = $visibleIds;
 		$this->limit = $limit > 0 ? min($limit, CollectionProvider::MAX_LIMIT) : CollectionProvider::DEFAULT_LIMIT;
 		$this->cursor = self::normalizeCursor($cursor);
+		$this->states = $states === [] ? [EntityState::Live] : $states;
+	}
+
+	/**
+	 * @return string[] the state names the repository filters by
+	 */
+	public function stateValues(): array
+	{
+		return array_map(static fn(EntityState $state): string => $state->value, $this->states);
 	}
 
 	public function fetchLimit(): int

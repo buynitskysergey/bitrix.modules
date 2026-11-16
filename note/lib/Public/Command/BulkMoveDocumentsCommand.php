@@ -40,15 +40,17 @@ use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
  */
 class BulkMoveDocumentsCommand extends AbstractCommand
 {
-	private readonly int $userId;
+	// protected: an heir substituting a server-resolved set through the seams below reads all of
+	// these — the target, the caller, the selection it came with and the three collaborators.
+	protected readonly int $userId;
 	/** @var int[] */
-	private readonly array $rootIds;
-	private readonly int $targetCollectionId;
-	private readonly ?int $targetParentId;
-	private readonly SelectionResolver $selectionResolver;
+	protected readonly array $rootIds;
+	protected readonly int $targetCollectionId;
+	protected readonly ?int $targetParentId;
+	protected readonly SelectionResolver $selectionResolver;
 	private readonly BulkAccessAggregator $accessAggregator;
-	private readonly PositionService $positionService;
-	private readonly DocumentRepository $repository;
+	protected readonly PositionService $positionService;
+	protected readonly DocumentRepository $repository;
 	private readonly PushNotificationService $pushService;
 	private readonly EventLogService $eventLogService;
 	private readonly DomainEventPublisher $eventPublisher;
@@ -90,13 +92,7 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 	{
 		$result = new Result();
 
-		// Move keeps only the selected roots (withNested=false): PositionService cascades the
-		// subtree, so expanding here would double-count and break the deterministic root order.
-		$resolution = $this->selectionResolver->resolve(
-			$this->rootIds,
-			SelectionResolver::SECTION_ACTIVE,
-			false,
-		);
+		$resolution = $this->resolveMoveSet();
 		if ($resolution['limitExceeded'] === true)
 		{
 			$result->setData(['outcome' => BulkOutcome::limitExceeded()->toArray(), 'invalidTargetForAll' => false]);
@@ -120,6 +116,22 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 			$metaById[(int)$document->getId()] = $document;
 		}
 
+		// A move is a write into the target base: an archived one takes nothing in, whoever asks.
+		CollectionAccessService::assertCollectionAcceptsWrites($this->targetCollectionId);
+
+		// Narrowing seam: identity by default. The heir that keeps kinship inside the selection
+		// assembles and dismantles the tree here and hands back the nodes the loop travels by.
+		$moveRootIds = $this->prepareMove($access['allowedIds']);
+		if ($moveRootIds === null)
+		{
+			$result->setData([
+				'outcome' => (new BulkOutcome())->toArray(),
+				'invalidTargetForAll' => true,
+			]);
+
+			return $result;
+		}
+
 		$processed = 0;
 		$cycleSkips = 0;
 		$transientSkips = 0;
@@ -130,7 +142,7 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 
 		// Deterministic order (collectionId, parentId, id) = a consistent branch-lock acquisition
 		// order across roots from different branches, so a bulk run cannot deadlock against itself.
-		foreach ($this->orderRoots($access['allowedIds'], $metaById) as $rootId)
+		foreach ($this->orderRoots($moveRootIds, $metaById) as $rootId)
 		{
 			$meta = $metaById[$rootId] ?? null;
 			if ($meta === null)
@@ -257,6 +269,7 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 						$subtreeIds,
 						$moveEvent['from'],
 						$moveEvent['to'],
+						initiatorId: $this->userId,
 					);
 				}
 				catch (\Throwable)
@@ -271,6 +284,44 @@ class BulkMoveDocumentsCommand extends AbstractCommand
 		]);
 
 		return $result;
+	}
+
+	/**
+	 * Where the set to move comes from, with the meta of its nodes. The resolver by default, and only
+	 * the selected roots (withNested=false): PositionService cascades the subtree, so expanding here
+	 * would double-count and break the deterministic root order.
+	 *
+	 * An heir resolving its set on the server returns the same shape and owes rootsMeta — a node
+	 * without meta is counted as a transient skip and moves nowhere.
+	 *
+	 * @return array{
+	 *     ids: int[],
+	 *     byCollection: array<int, int[]>,
+	 *     limitExceeded: bool,
+	 *     hasNested?: bool,
+	 *     rootsMeta: Document[]
+	 * }
+	 */
+	protected function resolveMoveSet(): array
+	{
+		return $this->selectionResolver->resolve($this->rootIds, SelectionResolver::SECTION_ACTIVE, false);
+	}
+
+	/**
+	 * Last stop before the move loop: it is handed the whole allowed set and returns the nodes the
+	 * loop actually travels by — the set itself by default. The set cannot be narrowed earlier, in
+	 * resolveMoveSet(): BulkAccessAggregator would then only see the top nodes and MANAGE would stop
+	 * being checked on every document.
+	 *
+	 * null means the request is unsatisfiable as a whole: nothing moves and the endpoint reads
+	 * invalidTargetForAll out of the same data as always.
+	 *
+	 * @param int[] $allowedIds
+	 * @return int[]|null
+	 */
+	protected function prepareMove(array $allowedIds): ?array
+	{
+		return $allowedIds;
 	}
 
 	/**

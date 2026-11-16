@@ -3,6 +3,7 @@
 namespace Bitrix\Crm\Integration\UI\UserField;
 
 use Bitrix\Crm\Integration\AI\AIManager;
+use Bitrix\Crm\Integration\AI\CopilotFeatureCode;
 use Bitrix\Crm\Integration\AI\EventHandler;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventResult;
@@ -40,6 +41,7 @@ final class RichTextCopilotProvider
 					'copilotOptions' => [
 						'moduleId' => 'crm',
 						'contextId' => 'uf-' . $entityId . '-' . $fieldName,
+						'feature' => CopilotFeatureCode::USER_FIELD_RICH_TEXT,
 						'category' => 'crm_comment_field',
 						'autoHide' => true,
 					],

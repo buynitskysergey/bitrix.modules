@@ -42,4 +42,9 @@ final class AiAgents extends Tool
 	{
 		return '/bizproc/ai/agents/';
 	}
+
+	public function getSettingsPath(): ?string
+	{
+		return SITE_DIR . 'bizproc/ai/agents/';
+	}
 }

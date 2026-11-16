@@ -63,6 +63,7 @@ class ConfigureDocument implements Contract\Operation
 		?MemberRepository $memberRepository = null,
 		?RequiredFieldRepository $requiredFieldRepository = null,
 		?Service\Cache\Memory\Sign\UserCache $userCache = null,
+		?Service\Integration\HumanResources\HcmLinkService $hcmLinkService = null,
 	) {
 		$container = Service\Container::instance();
 		$this->fieldsFillRequestValueFactory = new Factory\Api\Property\Request\Field\Fill\Value();
@@ -80,7 +81,7 @@ class ConfigureDocument implements Contract\Operation
 		$this->providerCodeService = $container->getProviderCodeService();
 		$this->directorSigningGuardService = $container->getDirectorSigningGuardService();
 		$this->logger = $container->getLogger('Operation');
-		$this->hcmLinkService = $container->getHcmLinkService();
+		$this->hcmLinkService = $hcmLinkService ?? $container->getHcmLinkService();
 		$this->hcmLinkFieldService = $container->getHcmLinkFieldService();
 		$this->fieldAliasService = $container->getFieldAliasService();
 	}
@@ -738,8 +739,11 @@ class ConfigureDocument implements Contract\Operation
 		}
 
 		$this->hcmLinkService->fillOneLinkedMembersWithEmployeeId($document, $notFilled, $document->representativeId);
-		$someoneNotFilled = $notFilled->findFirst(static fn(Item\Member $member) => !$member->employeeId);
-		if ($someoneNotFilled)
+
+		// The rule of who blocks the send is asked after the positions are filled: before that step the
+		// position is empty for everyone, the mapped members included.
+		$blocking = $this->hcmLinkService->resolveBlockingMembers($document, $notFilled);
+		if (!$blocking->isEmpty())
 		{
 			return (new Main\Result())->addError(new Main\Error(
 				Main\Localization\Loc::getMessage('SIGN_OPERATION_CONFIGURE_DOCUMENT_HCMLINK_NOT_ALL_MAPPED'),

@@ -256,10 +256,8 @@ class Task extends Controller
 			return true;
 		}
 
-		$canComplete = $completeWithChecklist
-			? $this->canCompleteTaskWithChecklist($taskId, $userId)
-			: $this->canPerformTaskAction($userId, ActionDictionary::ACTION_TASK_COMPLETE, $taskId);
-		if (!$canComplete)
+		// Both variants share the completion rule, including the required result; only the checklist differs
+		if (!$this->canCompleteTaskWithChecklist($taskId, $userId))
 		{
 			$this->addAccessDeniedError();
 

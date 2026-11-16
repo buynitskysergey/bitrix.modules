@@ -9,7 +9,10 @@ use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Entity\History\Event;
+use Bitrix\Note\Internal\Entity\History\Source;
+use Bitrix\Note\Internal\Entity\History\SourceType;
 use Bitrix\Note\Internal\Model\EventTable;
+use UnexpectedValueException;
 
 class EventRepository
 {
@@ -18,12 +21,15 @@ class EventRepository
 	 */
 	public function save(Event $event): int
 	{
+		$source = $event->getSource();
 		$result = EventTable::add([
 			'SCOPE' => $event->getScope(),
 			'ENTITY_ID' => $event->getEntityId(),
 			'EVENT_TYPE' => $event->getEventType(),
 			'USER_ID' => $event->getUserId(),
 			'VERSION_ID' => $event->getVersionId(),
+			'SOURCE_TYPE' => $source?->type->value,
+			'SOURCE_ID' => $source?->id,
 			'CREATED_AT' => $event->getCreatedAt(),
 		]);
 
@@ -88,7 +94,17 @@ class EventRepository
 		}
 
 		$query = EventTable::query()
-			->setSelect(['ID', 'SCOPE', 'ENTITY_ID', 'EVENT_TYPE', 'USER_ID', 'VERSION_ID', 'CREATED_AT'])
+			->setSelect([
+				'ID',
+				'SCOPE',
+				'ENTITY_ID',
+				'EVENT_TYPE',
+				'USER_ID',
+				'VERSION_ID',
+				'SOURCE_TYPE',
+				'SOURCE_ID',
+				'CREATED_AT',
+			])
 			->where('SCOPE', $scope)
 			->where('ENTITY_ID', $entityId)
 			->whereIn('EVENT_TYPE', array_values(array_unique($eventTypes)))
@@ -105,8 +121,8 @@ class EventRepository
 					->where('CREATED_AT', '<', $afterCreatedAt)
 					->where(Query::filter()
 						->where('CREATED_AT', $afterCreatedAt)
-						->where('ID', '<', $afterId)
-					)
+						->where('ID', '<', $afterId),
+					),
 				);
 			}
 			else
@@ -214,7 +230,17 @@ class EventRepository
 		}
 
 		$query = EventTable::query()
-			->setSelect(['ID', 'SCOPE', 'ENTITY_ID', 'EVENT_TYPE', 'USER_ID', 'VERSION_ID', 'CREATED_AT'])
+			->setSelect([
+				'ID',
+				'SCOPE',
+				'ENTITY_ID',
+				'EVENT_TYPE',
+				'USER_ID',
+				'VERSION_ID',
+				'SOURCE_TYPE',
+				'SOURCE_ID',
+				'CREATED_AT',
+			])
 			->where('ID', '>', max(0, $lastId))
 			->whereIn('EVENT_TYPE', array_values(array_unique($eventTypes)))
 			->addOrder('ID', 'ASC')
@@ -269,7 +295,7 @@ class EventRepository
 	private static function hydrate(array $row): Event
 	{
 		$createdAt = $row['CREATED_AT'] ?? null;
-		if (!($createdAt instanceof DateTime))
+		if (!$createdAt instanceof DateTime)
 		{
 			$createdAt = $createdAt ? DateTime::createFromUserTime((string)$createdAt) : new DateTime();
 		}
@@ -282,7 +308,25 @@ class EventRepository
 			(int)$row['USER_ID'],
 			isset($row['VERSION_ID']) ? (int)$row['VERSION_ID'] : null,
 			$createdAt,
+			self::hydrateSource($row),
 		);
+	}
+
+	private static function hydrateSource(array $row): ?Source
+	{
+		$type = $row['SOURCE_TYPE'] ?? null;
+		$id = isset($row['SOURCE_ID']) ? (int)$row['SOURCE_ID'] : null;
+		if ($type === null && $id === null)
+		{
+			return null;
+		}
+
+		if ($type === null)
+		{
+			throw new UnexpectedValueException('History source identifier is stored without a source type.');
+		}
+
+		return new Source(SourceType::from((string)$type), $id);
 	}
 
 	/**

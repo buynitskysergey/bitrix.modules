@@ -16,12 +16,16 @@ use Bitrix\Note\Internal\Service\Link\BacklinkLifecycleNotifier;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 use Bitrix\Note\Internal\Service\Bulk\RestoreOrderer;
 use Bitrix\Note\Internal\Service\History\EventLogService;
+use Bitrix\Note\Internal\Service\RecycleBin\ModeratedTrashedCollections;
 use Bitrix\Note\Internal\Service\RecycleBin\RestoreFromRecycleBinService;
 use Bitrix\Note\Internal\Service\Search\SearchIndexService;
 use Bitrix\Note\Public\Provider\RecycleBinProvider;
 
 class RestoreAllFromRecycleBinCommand extends AbstractCommand
 {
+	/** A base that refused to come back for a reason of its own that it did not name. */
+	public const ERROR_COLLECTION_RESTORE_FAILED = 'COLLECTION_RESTORE_FAILED';
+
 	private const CHUNK_SIZE = 200;
 
 	public function __construct(
@@ -37,10 +41,18 @@ class RestoreAllFromRecycleBinCommand extends AbstractCommand
 		private readonly RestoreOrderer $restoreOrderer = new RestoreOrderer(),
 		private readonly EventLogService $eventLogService = new EventLogService(),
 		private readonly BacklinkLifecycleNotifier $backlinkNotifier = new BacklinkLifecycleNotifier(),
+		private readonly ModeratedTrashedCollections $trashedCollections = new ModeratedTrashedCollections(),
 	) {}
 
 	protected function execute(): Result
 	{
+		// The bases come back first. While a base lies in the bin its own documents have nowhere to
+		// return to - the pre-flight of a restore refuses such a destination - so every row of theirs
+		// would be counted as an orphan and either skipped or dragged into a foreign base. Once the
+		// base is out, the rows left in the bin are the ones thrown away inside it on their own, and
+		// they go back the ordinary way in the pass below.
+		$collections = $this->restoreCollections();
+
 		$entryIds = $this->provider->listVisibleRestorableIdsForUser($this->userId, $this->accessCodes);
 		$restoredDocumentIds = [];
 		// Only documents that actually returned live (not straight back into archive) become RAG members again.
@@ -119,10 +131,10 @@ class RestoreAllFromRecycleBinCommand extends AbstractCommand
 				$connection->commitTransaction();
 				$restoredDocumentIds[] = $documentId;
 
-				// Documents that were live before being trashed are grouped per collection for the
-				// lifecycle event emitted below; the ones archived before trashing stay out of RAG.
+				// Documents that came back live are grouped per collection for the lifecycle event
+				// emitted below; the ones that came back archived stay out of RAG.
 				$data = $result->getData();
-				if (($data['wasArchivedBeforeTrash'] ?? false) !== true)
+				if (($data['restoredArchived'] ?? false) !== true)
 				{
 					$collectionId = (int)($data['collectionId'] ?? 0);
 					if ($collectionId > 0)
@@ -176,8 +188,58 @@ class RestoreAllFromRecycleBinCommand extends AbstractCommand
 		$result->setData([
 			'restoredCount' => count($restoredDocumentIds),
 			'skippedOrphans' => $skippedOrphans,
+			'restoredCollectionCount' => count($collections['restored']),
+			// Bases the caller may act on that did not come back all the same: past their retention,
+			// already being destroyed, or held by somebody else's operation. Named one by one with the
+			// reason, so a partial run is visible instead of being hidden inside a total.
+			'failedCollections' => $collections['failed'],
 		]);
 
 		return $result;
+	}
+
+	/**
+	 * Brings back every base of the bin this caller may act on. One base failing is not the end of
+	 * the run: the bin holds bases of many people and one of them being purged right now must not
+	 * keep the rest where they are.
+	 *
+	 * @return array{restored: int[], failed: array<int, array{collectionId: int, errorCode: string}>}
+	 */
+	private function restoreCollections(): array
+	{
+		$restored = [];
+		$failed = [];
+
+		foreach ($this->trashedCollections->iterate($this->userId, $this->accessCodes) as $collectionId)
+		{
+			try
+			{
+				$result = (new RestoreCollectionFromRecycleBinCommand($collectionId, $this->userId))->run();
+			}
+			catch (\Throwable)
+			{
+				$failed[] = [
+					'collectionId' => $collectionId,
+					'errorCode' => self::ERROR_COLLECTION_RESTORE_FAILED,
+				];
+
+				continue;
+			}
+
+			$data = $result->getData();
+			if (($data['success'] ?? false) === true)
+			{
+				$restored[] = $collectionId;
+
+				continue;
+			}
+
+			$failed[] = [
+				'collectionId' => $collectionId,
+				'errorCode' => (string)($data['errorCode'] ?? self::ERROR_COLLECTION_RESTORE_FAILED),
+			];
+		}
+
+		return ['restored' => $restored, 'failed' => $failed];
 	}
 }

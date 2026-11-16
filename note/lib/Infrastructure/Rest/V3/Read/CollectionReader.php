@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Rest\V3\Read;
 
-use Bitrix\Note\Internal\Access\PortalAdmin;
-use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
+use Bitrix\Note\Infrastructure\Rest\V3\Access\EntityState;
+use Bitrix\Note\Internal\Access\Service\CollectionVisibilityService;
 use Bitrix\Note\Internal\Model\Collection;
 use Bitrix\Note\Internal\Repository\CollectionRepository;
 
@@ -23,27 +23,16 @@ class CollectionReader
 	) {}
 
 	/**
+	 * Which bases this listing may show, asked of the one place that knows
+	 * ({@see CollectionVisibilityService}). The states are the only part of the question that is the
+	 * reader's own: the recycle bin is a slice the client asks for by name.
+	 *
+	 * @param EntityState[] $states states the listing is asked for
 	 * @return int[]|null null when the caller is not restricted, [] when nothing is visible
 	 */
-	public function visibleTo(int $userId): ?array
+	public function visibleTo(int $userId, array $states = []): ?array
 	{
-		if (PortalAdmin::isAdmin($userId))
-		{
-			return null;
-		}
-
-		$levels = CollectionAccessService::getAllUserLevels(CollectionAccessService::buildUserAccessCodes($userId));
-
-		$ids = [];
-		foreach ($levels['effective'] ?? [] as $collectionId => $level)
-		{
-			if ((int)$level >= CollectionAccessService::LEVEL_VIEW)
-			{
-				$ids[] = (int)$collectionId;
-			}
-		}
-
-		return $ids;
+		return CollectionVisibilityService::readableIds($userId, in_array(EntityState::Trashed, $states, true));
 	}
 
 	public function list(CollectionReadQuery $query): ReadResult
@@ -54,12 +43,18 @@ class CollectionReader
 		}
 
 		$rows = $query->visibleIds === null
-			? $this->collections->getList($query->fetchLimit(), $query->afterPosition(), $query->afterId())
+			? $this->collections->getList(
+				$query->fetchLimit(),
+				$query->afterPosition(),
+				$query->afterId(),
+				$query->stateValues(),
+			)
 			: $this->collections->getListByIds(
 				$query->visibleIds,
 				$query->fetchLimit(),
 				$query->afterPosition(),
 				$query->afterId(),
+				$query->stateValues(),
 			);
 
 		return ReadResult::paginate(

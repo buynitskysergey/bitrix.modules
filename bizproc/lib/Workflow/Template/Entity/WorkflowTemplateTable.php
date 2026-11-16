@@ -202,6 +202,9 @@ class WorkflowTemplateTable extends Main\ORM\Data\DataManager
 				'data_type' => 'enum',
 				'values' => array_column(CreateSource::cases(), 'value'),
 			],
+			// The moment the template first became a published process. Empty for the templates that
+			// existed before the column: they are not treated as new.
+			(new ORM\Fields\DatetimeField('FIRST_PUBLISHED_AT'))->configureNullable(),
 			new ORM\Fields\Relations\Reference(
 				'UPDATED_USER',
 				Main\UserTable::class,

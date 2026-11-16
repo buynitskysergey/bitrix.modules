@@ -17,6 +17,7 @@ use Bitrix\Sign\Item\Document;
 use Bitrix\Sign\Item\Document\Group as DocumentGroup;
 use Bitrix\Sign\Item\DocumentCollection;
 use Bitrix\Sign\Operation\Document\Validation\ValidateInviteMessage;
+use Bitrix\Sign\Operation\Placeholder\ValidateDocumentPlaceholders;
 use Bitrix\Sign\Operation\Result\AddGroupDocumentsResult;
 use Bitrix\Sign\Result\Service\Sign\Document\CreateGroupResult;
 use Bitrix\Sign\Service\Container;
@@ -24,6 +25,7 @@ use Bitrix\Sign\Service\Sign\Document\GroupService;
 use Bitrix\Sign\Type\Access\AccessibleItemType;
 use Bitrix\Sign\Operation;
 use Bitrix\Sign\Type\Document\InitiatedByType;
+use Bitrix\Sign\Type\DocumentStatus;
 use Bitrix\Sign\Type\ProviderCode;
 
 final class Group extends Controller
@@ -64,6 +66,7 @@ final class Group extends Controller
 		int $groupId = 0,
 		bool $hasPlaceholders = false,
 		?string $initiatedByType = null,
+		bool $autoDetectType = false,
 	): array
 	{
 		$fileIds = [];
@@ -79,7 +82,7 @@ final class Group extends Controller
 			$fileIds[] = $fileId;
 		}
 
-		if ($fileIds === [] || count($fileIds) > GroupService::MAX_DOCUMENT_COUNT)
+		if ($fileIds === [] || count($fileIds) > $this->getMaxBatchFileCount($autoDetectType))
 		{
 			$this->addError(new Error('Invalid file count', 'INVALID_FILE_LIST'));
 
@@ -103,6 +106,7 @@ final class Group extends Controller
 			groupId: $groupId,
 			hasPlaceholders: $hasPlaceholders,
 			initiatedByType: $initiatedBy,
+			autoDetectType: $autoDetectType,
 		))->launch();
 
 		if (!$result instanceof AddGroupDocumentsResult || !$result->isSuccess())
@@ -116,6 +120,28 @@ final class Group extends Controller
 			'groupId' => $result->getGroupId(),
 			'items' => $result->getItems(),
 		];
+	}
+
+	/**
+	 * How many files one request may carry, which is not the same as how many documents the group
+	 * may hold: automatic detection puts every image of a batch into a single document, so a batch
+	 * of images fills one place of the group. The places themselves are counted per created document
+	 * by the operation, and the free capacity of the group rejects the files over it one by one.
+	 *
+	 * The largest input the group can still take is one document of images, capped by the image
+	 * limit of a blank, plus one file for each remaining place. Without automatic detection every
+	 * file becomes a document of its own, so there the input limit is the limit of the group.
+	 */
+	private function getMaxBatchFileCount(bool $autoDetectType): int
+	{
+		if (!$autoDetectType)
+		{
+			return GroupService::MAX_DOCUMENT_COUNT;
+		}
+
+		$imagesPerDocument = max(Storage::instance()->getImagesCountLimitForBlankUpload(), 1);
+
+		return GroupService::MAX_DOCUMENT_COUNT - 1 + $imagesPerDocument;
 	}
 
 	#[Attribute\ActionAccess(
@@ -230,10 +256,7 @@ final class Group extends Controller
 			return [];
 		}
 
-		$documentList = $this->resolveAccessibleGroupDocuments(
-			$groupId,
-			$this->checkDocumentReadAccessForCurrentUser(...),
-		);
+		$documentList = $this->resolveAccessibleGroupDocumentAccessContexts($groupId);
 		if ($documentList === null)
 		{
 			$this->addAccessDeniedError();
@@ -241,9 +264,147 @@ final class Group extends Controller
 			return [];
 		}
 
+		$container = Container::instance();
+		$agentService = $container->getDocumentAgentService();
+		if ($agentService->hasUploadGroupBlanksChain($groupId))
+		{
+			return ['ready' => false];
+		}
+
+		if (!Storage::instance()->isPlaceholderRestrictionEnabled())
+		{
+			return ['ready' => true];
+		}
+
+		if ($agentService->hasRawPlaceholderWarmupChain($groupId))
+		{
+			return ['ready' => false];
+		}
+
+		$cacheService = $container->getDocumentPlaceholderCacheService();
+		$draftDocumentList = $container->getDocumentGroupService()->filterDraft($documentList);
+		$warmupScheduled = false;
+		foreach ($draftDocumentList as $document)
+		{
+			if (
+				$document->status === DocumentStatus::NEW
+				|| $document->id === null
+				|| $document->uid === null
+				|| $document->blankId === null
+				|| $cacheService->getRawPlaceholders($document->id, $document->blankId) !== null
+			)
+			{
+				continue;
+			}
+
+			$agentService->scheduleRawPlaceholderWarmup($groupId, $document);
+			$warmupScheduled = true;
+		}
+
 		return [
-			'ready' => !Container::instance()->getDocumentAgentService()->hasUploadGroupBlanksChain($groupId),
+			'ready' => !$warmupScheduled,
 		];
+	}
+
+	/**
+	 * @return array{hasUnsupported: bool, reasons: array<string, list<string>>}
+	 */
+	#[Attribute\Access\LogicOr(
+		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_ADD),
+		new Attribute\ActionAccess(ActionDictionary::ACTION_B2E_DOCUMENT_EDIT),
+	)]
+	public function validatePlaceholdersAction(int $groupId): array
+	{
+		if ($groupId < 1)
+		{
+			$this->addError(new Error('Invalid group id'));
+
+			return [];
+		}
+
+		$documentList = $this->resolveAccessibleGroupDocumentsWithBatchReadAccess($groupId);
+		if ($documentList === null)
+		{
+			$this->addAccessDeniedError();
+
+			return [];
+		}
+		if (!Storage::instance()->isPlaceholderRestrictionEnabled())
+		{
+			return [
+				'hasUnsupported' => false,
+				'reasons' => [],
+			];
+		}
+
+		$unsupportedCodesByReason = [];
+		$draftDocumentList = Container::instance()->getDocumentGroupService()->filterDraft($documentList);
+		foreach ($draftDocumentList as $document)
+		{
+			try
+			{
+				$operation = new ValidateDocumentPlaceholders($document);
+				$result = $operation->launch();
+			}
+			catch (\Throwable $exception)
+			{
+				$this->logPlaceholderValidationFailure($document, [$exception->getMessage()]);
+
+				continue;
+			}
+			if (!$result->isSuccess())
+			{
+				$this->logPlaceholderValidationFailure($document, $result->getErrorMessages());
+
+				continue;
+			}
+
+			$unsupportedCodesByReason = $this->mergeUnsupportedCodesByReason(
+				$unsupportedCodesByReason,
+				$operation->getUnsupportedCodesByReason(),
+			);
+		}
+
+		return [
+			'hasUnsupported' => $unsupportedCodesByReason !== [],
+			'reasons' => $unsupportedCodesByReason,
+		];
+	}
+
+	/**
+	 * @param array<string, list<string>> $target
+	 * @param array<string, list<string>> $source
+	 *
+	 * @return array<string, list<string>>
+	 */
+	private function mergeUnsupportedCodesByReason(array $target, array $source): array
+	{
+		foreach ($source as $reason => $codes)
+		{
+			foreach ($codes as $code)
+			{
+				$code = (string)$code;
+				$target[$reason] ??= [];
+				if (!in_array($code, $target[$reason], true))
+				{
+					$target[$reason][] = $code;
+				}
+			}
+		}
+
+		return $target;
+	}
+
+	/** @param list<string> $errors */
+	private function logPlaceholderValidationFailure(Document $document, array $errors): void
+	{
+		Container::instance()->getLogger('Controller')->warning(
+			'Unable to validate placeholders of B2E document {documentId}: {errors}',
+			[
+				'documentId' => $document->id,
+				'errors' => implode('; ', $errors),
+			],
+		);
 	}
 
 	#[Attribute\Access\LogicOr(
@@ -490,6 +651,50 @@ final class Group extends Controller
 		\Closure $isDocumentAccessible,
 	): ?DocumentCollection
 	{
+		return $this->resolveAccessibleGroupDocumentCollection(
+			$groupId,
+			fn(DocumentCollection $documents): ?int => $this->findDeniedDocumentId(
+				$documents,
+				$isDocumentAccessible,
+			),
+			static fn(int $id): DocumentCollection => Container::instance()
+				->getDocumentGroupService()
+				->getDocumentList($id, GroupService::MAX_DOCUMENT_COUNT + 1),
+		);
+	}
+
+	private function resolveAccessibleGroupDocumentAccessContexts(
+		int $groupId,
+	): ?DocumentCollection
+	{
+		return $this->resolveAccessibleGroupDocumentCollection(
+			$groupId,
+			$this->findDeniedReadAccessDocumentId(...),
+			static fn(int $id): DocumentCollection => Container::instance()
+				->getDocumentGroupRepository()
+				->listDocumentAccessContexts($id, GroupService::MAX_DOCUMENT_COUNT + 1),
+		);
+	}
+
+	private function resolveAccessibleGroupDocumentsWithBatchReadAccess(
+		int $groupId,
+	): ?DocumentCollection
+	{
+		return $this->resolveAccessibleGroupDocumentCollection(
+			$groupId,
+			$this->findDeniedReadAccessDocumentId(...),
+			static fn(int $id): DocumentCollection => Container::instance()
+				->getDocumentGroupService()
+				->getDocumentList($id, GroupService::MAX_DOCUMENT_COUNT + 1),
+		);
+	}
+
+	private function resolveAccessibleGroupDocumentCollection(
+		int $groupId,
+		\Closure $findDeniedDocumentId,
+		\Closure $loadDocuments,
+	): ?DocumentCollection
+	{
 		$group = Container::instance()->getDocumentGroupRepository()->getById($groupId);
 		if ($group === null)
 		{
@@ -498,10 +703,7 @@ final class Group extends Controller
 			return null;
 		}
 
-		$documents = Container::instance()
-			->getDocumentGroupService()
-			->getDocumentList($groupId, GroupService::MAX_DOCUMENT_COUNT + 1)
-		;
+		$documents = $loadDocuments($groupId);
 		if ($documents->count() > GroupService::MAX_DOCUMENT_COUNT)
 		{
 			$this->logGroupOverLimit($group, $documents->count());
@@ -521,22 +723,8 @@ final class Group extends Controller
 			return null;
 		}
 
-		$deniedDocumentId = null;
-		$accessible = $documents->all(
-			function (Document $document) use ($isDocumentAccessible, &$deniedDocumentId): bool
-			{
-				if ($isDocumentAccessible($document))
-				{
-					return true;
-				}
-
-				$deniedDocumentId = $document->id;
-
-				return false;
-			},
-		);
-
-		if (!$accessible)
+		$deniedDocumentId = $findDeniedDocumentId($documents);
+		if ($deniedDocumentId !== null)
 		{
 			$this->logGroupDocumentNotAccessible($group, $deniedDocumentId);
 
@@ -544,6 +732,50 @@ final class Group extends Controller
 		}
 
 		return $documents;
+	}
+
+	private function findDeniedDocumentId(
+		DocumentCollection $documents,
+		\Closure $isDocumentAccessible,
+	): ?int
+	{
+		foreach ($documents as $document)
+		{
+			if (!$isDocumentAccessible($document))
+			{
+				return $document->id;
+			}
+		}
+
+		return null;
+	}
+
+	private function findDeniedReadAccessDocumentId(DocumentCollection $documents): ?int
+	{
+		$accessController = $this->getCachedAccessController();
+		$editableIds = $accessController->filterAccessibleIds(
+			[ActionDictionary::ACTION_B2E_DOCUMENT_EDIT],
+			$documents,
+		);
+		$currentUserId = (int)CurrentUser::get()->getId();
+		$ownerDocuments = $documents->filter(
+			static fn(Document $document): bool => !isset($editableIds[$document->id])
+				&& $document->getOwnerId() === $currentUserId,
+		);
+		$addableIds = $accessController->filterAccessibleIds(
+			[ActionDictionary::ACTION_B2E_DOCUMENT_ADD],
+			$ownerDocuments,
+		);
+
+		foreach ($documents as $document)
+		{
+			if (!isset($editableIds[$document->id]) && !isset($addableIds[$document->id]))
+			{
+				return $document->id;
+			}
+		}
+
+		return null;
 	}
 
 	private function logGroupNotFoundOrForeign(int $groupId): void
@@ -643,14 +875,18 @@ final class Group extends Controller
 
 	private function checkDocumentAccessForCurrentUser(Document $document, string $action): bool
 	{
-		if ($this->accessController === null)
-		{
-			$userId = (int)CurrentUser::get()->getId();
-			$this->accessController = new AccessController($userId);
-		}
-
 		$item = Container::instance()->getAccessibleItemFactory()->createFromItem($document);
 
-		return $this->accessController->check($action, $item);
+		return $this->getCachedAccessController()->check($action, $item);
+	}
+
+	private function getCachedAccessController(): AccessController
+	{
+		if ($this->accessController === null)
+		{
+			$this->accessController = new AccessController((int)CurrentUser::get()->getId());
+		}
+
+		return $this->accessController;
 	}
 }

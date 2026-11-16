@@ -10,8 +10,10 @@ use Bitrix\Main\Validation\Rule\NotEmpty;
 use Bitrix\Note\Infrastructure\Rest\V3\Dto\Mapping\CollectionMapper;
 use Bitrix\Note\Internal\Model\CollectionTable;
 use Bitrix\Rest\V3\Attribute\Editable;
+use Bitrix\Rest\V3\Attribute\Filterable;
 use Bitrix\Rest\V3\Attribute\MappedBy;
 use Bitrix\Rest\V3\Attribute\Required;
+use Bitrix\Rest\V3\Documentation\Attributes\Deprecated;
 use Bitrix\Rest\V3\Dto\Dto;
 
 #[MappedBy(CollectionMapper::class)]
@@ -38,8 +40,14 @@ class CollectionItemDto extends Dto
 	// about the collection alone - a document inside it may be granted separately and higher.
 	public ?string $accessLevel;
 
-	// Read-only marker of the archive: an archived collection still answers reads, but every write into
-	// it is refused, and without this field the client cannot tell the caller why.
+	// "live" | "archived" | "trashed". Non-nullable on purpose: the domain knows three states and no
+	// fourth, exactly as isArchived below knows two, and read-only, so it is never required on input.
+	#[Filterable]
+	public string $state;
+
+	// Read-only marker of the archive, kept for the clients written against it and superseded by state
+	// above: an archived collection still answers reads, but every write into it is refused.
+	#[Deprecated]
 	public ?bool $isArchived;
 	public ?int $createdBy;
 	// Dates are carried as date objects, not strings: the canon serializes them to DATE_ATOM itself.

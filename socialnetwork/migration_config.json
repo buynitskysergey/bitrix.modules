@@ -4,6 +4,7 @@
         "install/activities": "activities",
         "install/components": "components",
         "install/gadgets": "gadgets",
+        "install/images": "images/socialnetwork",
         "install/js": "js"
     }
 }

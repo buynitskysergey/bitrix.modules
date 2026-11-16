@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Internal\Service\Registration;
 
 use Bitrix\Main\Application;
-use Bitrix\Main\Diag\ExceptionHandlerLog;
 use Bitrix\Vibecodeconnector\Internal\Entity\Pairing\Pairing;
 use Bitrix\Vibecodeconnector\Internal\Repository\Pairing\PairingRepository;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Message\UserListPullMessage;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\UserListPullQueueGuard;
+use Bitrix\Vibecodeconnector\Internal\Service\Balance\BalanceSyncCoordinator;
 use Bitrix\Vibecodeconnector\Internal\Service\Auth\CloudSharedVerifier;
 use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Deactivation\PairingCatalogDeactivator;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\EndpointResolver;
@@ -21,6 +21,7 @@ final class RegistrationService
 	private readonly \Closure $registrationRequest;
 	private readonly \Closure $unregisterRequest;
 	private readonly ?UserListPullQueueGuard $userListPullQueueGuard;
+	private readonly ?BalanceSyncCoordinator $balanceSyncCoordinator;
 
 	public function __construct(
 		private readonly PairingRepository $repository = new PairingRepository(),
@@ -31,6 +32,7 @@ final class RegistrationService
 		?\Closure $registrationRequest = null,
 		?UserListPullQueueGuard $userListPullQueueGuard = null,
 		?\Closure $unregisterRequest = null,
+		?BalanceSyncCoordinator $balanceSyncCoordinator = null,
 	) {
 		$this->registrationRequest = $registrationRequest
 			?? static fn (string $url): RegistrationResponse => (new RegistrationClient(new EndpointResolver($url)))->register();
@@ -39,6 +41,7 @@ final class RegistrationService
 				(new RegistrationClient(new EndpointResolver($url)))->unregister($iss);
 			};
 		$this->userListPullQueueGuard = $userListPullQueueGuard;
+		$this->balanceSyncCoordinator = $balanceSyncCoordinator;
 	}
 
 	public function register(string $endpointUrl): Pairing
@@ -71,33 +74,27 @@ final class RegistrationService
 		$userListPullQueueGuard = $this->userListPullQueueGuard ?? new UserListPullQueueGuard();
 		try
 		{
-			$enqueued = $userListPullQueueGuard->tryEnqueue($message);
+			$userListPullQueueGuard->tryEnqueue($message);
 		}
 		catch (\Throwable)
 		{
-			$enqueued = false;
 		}
 
-		if (!$enqueued)
-		{
-			$this->logInitialPullFailure();
-		}
-
-		return $pairing;
-	}
-
-	private function logInitialPullFailure(): void
-	{
 		try
 		{
-			Application::getInstance()->getExceptionHandler()->writeToLog(
-				new \RuntimeException('Unable to enqueue initial user list pull'),
-				ExceptionHandlerLog::CAUGHT_EXCEPTION,
+			($this->balanceSyncCoordinator ?? new BalanceSyncCoordinator())->request(
+				new \Bitrix\Vibecodeconnector\Internal\Entity\User\UserEventTarget(
+					$pairing->iss,
+					$pairing->endpointUrl,
+				),
+				0,
 			);
 		}
 		catch (\Throwable)
 		{
 		}
+
+		return $pairing;
 	}
 
 	public function unregister(string $iss): void

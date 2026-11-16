@@ -114,6 +114,7 @@ class CreateDocumentCommand extends AbstractCommand
 				OnDocumentLifecycleEvent::CREATED,
 				(int)$document->getCollectionId(),
 				[(int)$document->getId()],
+				initiatorId: $this->userId,
 			);
 		}
 

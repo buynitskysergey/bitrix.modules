@@ -156,7 +156,7 @@ class SelfDelete extends \Bitrix\Main\Engine\Controller
 
 		foreach ($userIds as $userId)
 		{
-			if (!is_int($userId) && !(is_string($userId) && ctype_digit($userId)))
+			if (!is_int($userId) && !(is_string($userId) && preg_match('/\A[0-9]+\z/', $userId) === 1))
 			{
 				continue;
 			}

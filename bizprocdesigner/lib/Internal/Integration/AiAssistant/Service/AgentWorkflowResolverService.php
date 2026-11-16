@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service;
 
 use Bitrix\Bizproc\Api\Enum\Template\WorkflowTemplateType;
+use Bitrix\Bizproc\Workflow\Template\AgentOwnedMetadata;
+use Bitrix\Bizproc\Workflow\Template\Converter\NodesToTemplate;
 use Bitrix\Bizproc\Workflow\Template\EO_WorkflowTemplateDraft;
 use Bitrix\Bizproc\Workflow\Template\Entity\EO_WorkflowTemplate;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
@@ -34,17 +36,8 @@ final class AgentWorkflowResolverService
 	 */
 	private array $templateById = [];
 
-	/**
-	 * @var array<int, array> request-scoped memo of the TEMPLATE_DATA blob of a draft. One reverse push reads it
-	 *      three times - for the constants the declaration ceiling is measured against
-	 *      ({@see self::getDraftConstants()}), for the graph the agent was handed
-	 *      ({@see self::getDraftOrTemplateData()}) and for the meta fields the write carries over
-	 *      ({@see AgentDraftService::saveAndPush()}) - and all three readings happen before that push writes
-	 *      anything. Unlike the published row above, a draft IS what a push writes, so the writer drops the entry
-	 *      afterwards ({@see self::forgetDraftTemplateData()}) and a second push of the same process reads the blob
-	 *      it left - as does the read-back the push answers with.
-	 */
-	private array $draftTemplateDataById = [];
+	/** @var array<int, array{TEMPLATE_DATA: array, STATUS: int}> */
+	private array $draftRowById = [];
 
 	public function __construct(
 		?AiAssistantWorkflowTemplateConverterService $converterService = null,
@@ -165,6 +158,135 @@ final class AgentWorkflowResolverService
 	}
 
 	/**
+	 * Every activity name the published bound template carries, at any depth of its tree, keyed as written.
+	 *
+	 * Read from the RAW published row rather than from the agent projection of {@see self::getPublishedAgentTemplate()}:
+	 * a complex node runs its sub-actions as children of its own, the runtime resolves a reference to one of them
+	 * by name ({@see \CBPWorkflow::getActivityByName()}), and the projection carries no name for such a child at
+	 * all - its rules hold `{activityCode, settings}` and nothing more. The shipped system agents address exactly
+	 * such a child, so without this reading an expression the server itself wrote reads as a block that does not
+	 * exist ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\ValidationContext::$baselinePublishedNames}).
+	 *
+	 * Walked by the same rule as the by-name lookup of the runtime: depth-first, a node before its children. Empty
+	 * when the template has no published version.
+	 *
+	 * @return array<string, true>
+	 *
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
+	public function getPublishedTemplateActivityNames(int $templateId): array
+	{
+		$templateData = $this->getTemplate($templateId)?->getTemplate();
+
+		$names = [];
+		if (is_array($templateData))
+		{
+			self::collectActivityNames($templateData, $names);
+		}
+
+		return $names;
+	}
+
+	/**
+	 * @param array<array-key, mixed> $activities
+	 * @param array<string, true> $names
+	 */
+	private static function collectActivityNames(array $activities, array &$names): void
+	{
+		foreach ($activities as $activity)
+		{
+			if (!is_array($activity))
+			{
+				continue;
+			}
+
+			$name = is_scalar($activity['Name'] ?? null) ? (string)$activity['Name'] : '';
+			if ($name !== '')
+			{
+				$names[$name] = true;
+			}
+
+			if (is_array($activity['Children'] ?? null))
+			{
+				self::collectActivityNames($activity['Children'], $names);
+			}
+		}
+	}
+
+	/**
+	 * Identity and saved geometry of every block of the bound graph, keyed by block id (AGT-ALG-01). The graph
+	 * is the very one {@see self::getAgentTemplate()} answers a read with - the bound draft when the identifier
+	 * carries one, the published version otherwise - through the same request memo, so the sizes a write keeps
+	 * belong to the revision the agent was handed and never to another one.
+	 *
+	 * The preset is the saved field verbatim, without the Document-based recovery the reverse projection applies
+	 * to a node saved before that field existed: a size is kept only when the block is provably the same one,
+	 * and such a node is simply rebuilt from the catalog.
+	 *
+	 * @return array<string, array{
+	 *     type: string,
+	 *     presetId: string|null,
+	 *     dimensions: array{width: int|null, height: int|null}
+	 * }>
+	 *
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
+	public function getBoundBlocks(WorkflowTemplateIdentifier $identifier): array
+	{
+		$children = $this->getDraftOrTemplateData($identifier)[0][NodesToTemplate::ELEMENT_CHILDREN] ?? null;
+		if (!is_array($children))
+		{
+			return [];
+		}
+
+		$boundBlocks = [];
+		foreach ($children as $child)
+		{
+			if (!is_array($child))
+			{
+				continue;
+			}
+
+			$id = $child[NodesToTemplate::ELEMENT_NAME] ?? null;
+			$type = $child[NodesToTemplate::ELEMENT_TYPE] ?? null;
+			if (!is_string($id) || $id === '' || !is_string($type))
+			{
+				continue;
+			}
+
+			$node = $child[AiAssistantWorkflowTemplateConverterService::NODE_ELEMENT] ?? null;
+			$dimensions = is_array($node) ? ($node['dimensions'] ?? null) : null;
+			$presetId = $child[AiAssistantWorkflowTemplateConverterService::PRESET_ID_ELEMENT] ?? null;
+
+			$boundBlocks[$id] = [
+				'type' => $type,
+				'presetId' => is_string($presetId) && $presetId !== '' ? $presetId : null,
+				'dimensions' => [
+					'width' => self::readDimension($dimensions, 'width'),
+					'height' => self::readDimension($dimensions, 'height'),
+				],
+			];
+		}
+
+		return $boundBlocks;
+	}
+
+	/**
+	 * A saved dimension of a bound block, under the same "unset is not zero" rule as
+	 * {@see \Bitrix\BizprocDesigner\Internal\Entity\Block::readDimension()}.
+	 */
+	private static function readDimension(mixed $dimensions, string $key): ?int
+	{
+		$value = is_array($dimensions) ? ($dimensions[$key] ?? null) : null;
+
+		return $value === null ? null : (int)$value;
+	}
+
+	/**
 	 * Constants the published bound template declares, keyed by code. Read from the same memoised row
 	 * {@see self::getPublishedAgentTemplate} uses, so the enforcement baseline of a request is assembled from one
 	 * and the same published version. Never the draft: the draft would let the graph under validation vouch for
@@ -205,7 +327,7 @@ final class AgentWorkflowResolverService
 	}
 
 	/**
-	 * TEMPLATE_DATA of a draft, as stored, memoised for the request ({@see self::$draftTemplateDataById}). Empty
+	 * TEMPLATE_DATA of a draft, as stored, memoised for the request ({@see self::$draftRowById}). Empty
 	 * for a draft that does not exist, so a caller reading a field off it needs no state of its own.
 	 *
 	 * @return array<string, mixed>
@@ -216,34 +338,82 @@ final class AgentWorkflowResolverService
 	 */
 	public function getDraftTemplateData(int $draftId): array
 	{
+		return $this->getDraftRow($draftId)['TEMPLATE_DATA'] ?? [];
+	}
+
+	/**
+	 * @return array{NAME: string, DESCRIPTION: string}
+	 *
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
+	public function getEffectiveMetadata(WorkflowTemplateIdentifier $identifier): array
+	{
+		$draftId = (int)($identifier->draftId ?? 0);
+		$draftRow = $this->getDraftRow($draftId);
+		$draftData = $draftRow['TEMPLATE_DATA'] ?? [];
+		$isRestored = WorkflowTemplateDraftTable::hasRestoredMetadata($draftRow ?: null);
+
+		$template = $this->getTemplate((int)($identifier->templateId ?? 0));
+		$published = [
+			AgentOwnedMetadata::FIELD_NAME => (string)$template?->getName(),
+			AgentOwnedMetadata::FIELD_DESCRIPTION => (string)$template?->getDescription(),
+		];
+
+		$metadata = [];
+		foreach ($published as $field => $publishedValue)
+		{
+			$followsDraft = isset($draftData[$field])
+				&& ($template === null || AgentOwnedMetadata::isFieldOwned($draftData, $field, $isRestored))
+			;
+
+			$metadata[$field] = $followsDraft ? (string)$draftData[$field] : $publishedValue;
+		}
+
+		return $metadata;
+	}
+
+	public function forgetDraftTemplateData(int $draftId): void
+	{
+		unset($this->draftRowById[$draftId]);
+	}
+
+	/**
+	 * @return array{TEMPLATE_DATA: array, STATUS: int}|array{} empty for a draft that does not exist, so a
+	 *         caller reading a field off it needs no state of its own
+	 *
+	 * @throws ArgumentException
+	 * @throws ObjectPropertyException
+	 * @throws SystemException
+	 */
+	private function getDraftRow(int $draftId): array
+	{
 		if ($draftId <= 0)
 		{
 			return [];
 		}
 
-		if (!array_key_exists($draftId, $this->draftTemplateDataById))
+		if (!array_key_exists($draftId, $this->draftRowById))
 		{
 			$draft = WorkflowTemplateDraftTable::query()
 				->where('ID', $draftId)
-				->setSelect(['TEMPLATE_DATA'])
+				->setSelect(['TEMPLATE_DATA', 'STATUS'])
 				->setLimit(1)
 				->fetchObject()
 			;
 
 			$templateData = $draft?->getTemplateData();
-			$this->draftTemplateDataById[$draftId] = is_array($templateData) ? $templateData : [];
+			$this->draftRowById[$draftId] = $draft === null
+				? []
+				: [
+					'TEMPLATE_DATA' => is_array($templateData) ? $templateData : [],
+					'STATUS' => (int)$draft->getStatus(),
+				]
+			;
 		}
 
-		return $this->draftTemplateDataById[$draftId];
-	}
-
-	/**
-	 * Drops the memoised blob of one draft. Called by the writer of that draft, so the next reader of the request
-	 * sees what was written and not what the write was assembled from.
-	 */
-	public function forgetDraftTemplateData(int $draftId): void
-	{
-		unset($this->draftTemplateDataById[$draftId]);
+		return $this->draftRowById[$draftId];
 	}
 
 	/**

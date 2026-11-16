@@ -11,9 +11,10 @@ use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\BlockDescrip
 class BlockDescriptionCache
 {
 	/**
-	 * @var array<string, BlockTypeDetail|null> keyed by "blockType:source:presetId:module|entityType|documentType",
-	 *      so a Rest and a Marta lookup of the same block type never collide within one request, and neither do
-	 *      the lookups of two document types.
+	 * @var array<string, BlockTypeDetail|null> keyed by
+	 *      "blockType:source:presetId:module|entityType|documentType:context", so a Rest and a Marta lookup of
+	 *      the same block type never collide within one request, and neither do the lookups of two document
+	 *      types or of two description contexts.
 	 */
 	private array $blockDetailsByType = [];
 	private readonly BlockDescriptionService $blockDescriptionService;
@@ -48,15 +49,27 @@ class BlockDescriptionCache
 	 * block's answer to every other block of the same type in the graph. The document type is in the key for the
 	 * same reason and answers for the parameter it comes in as: the catalog is computed for a document type, so
 	 * a key blind to it would answer a lead template with the schema described for a deal as soon as one instance
-	 * served two of them.
+	 * served two of them. The description context is the third such parameter and the sharpest of them: a block
+	 * describes the keys of its map from the storage its own values name, so a key blind to it would hand the
+	 * columns of one storage to a block that addresses another.
+	 *
+	 * @param array<string, mixed> $contextProperties plain data, keyed the same way the description keys it
+	 *        ({@see \Bitrix\Bizproc\Service\AiDescription::getActivityDescription()}); empty is the plain read
+	 *        the validation run makes, which has no context of its own.
 	 */
-	public function get(string $blockType, DocumentDescription $documentType, ?string $presetId = null): ?BlockTypeDetail
+	public function get(
+		string $blockType,
+		DocumentDescription $documentType,
+		?string $presetId = null,
+		array $contextProperties = [],
+	): ?BlockTypeDetail
 	{
 		$cacheKey = implode(':', [
 			$blockType,
 			$this->source->value,
 			$presetId ?? '',
 			implode('|', $documentType->toBizprocComplexType()),
+			$contextProperties === [] ? '' : md5(serialize($contextProperties)),
 		]);
 		if (!array_key_exists($cacheKey, $this->blockDetailsByType))
 		{
@@ -66,6 +79,7 @@ class BlockDescriptionCache
 				$this->source,
 				$this->baselineBlockTypes,
 				$presetId,
+				$contextProperties,
 			);
 			$this->blockDetailsByType[$cacheKey] = $result instanceof BlockSettingsResult ? $result->blockDetail : null;
 		}

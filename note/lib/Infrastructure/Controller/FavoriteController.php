@@ -49,15 +49,15 @@ class FavoriteController extends Controller
 
 	/**
 	 * One page of the caller's own list, ordered (POSITION DESC, ID DESC). The end of the
-	 * list is `nextCursor === null` - never the number of returned rows, which the visibility and
-	 * notification filters may leave short.
+	 * list is `nextCursor === null` - never the number of returned rows, which a row whose object
+	 * vanished between two queries may leave short.
 	 *
-	 * `onlyNotified` arrives from an urlencoded request, where a plain false would travel as the
-	 * string "false", so the flag is read tolerantly (1/0/"1"/"0"/true/false/"true"/"false").
+	 * The list carries no filters: subscribed articles are a list of their own, served by
+	 * SubscriptionController::listAction().
 	 *
 	 * @param array{position: int, id: int}|null $afterCursor
 	 */
-	public function listAction(int $limit = FavoriteListService::DEFAULT_LIMIT, ?array $afterCursor = null, $onlyNotified = false): ?array
+	public function listAction(int $limit = FavoriteListService::DEFAULT_LIMIT, ?array $afterCursor = null): ?array
 	{
 		$userId = (int)$this->getCurrentUser()->getId();
 		if ($userId <= 0)
@@ -65,12 +65,7 @@ class FavoriteController extends Controller
 			return null;
 		}
 
-		return (new FavoriteProvider())->getPage(
-			$userId,
-			$limit,
-			$afterCursor,
-			$this->normalizeFlag($onlyNotified),
-		);
+		return (new FavoriteProvider())->getPage($userId, $limit, $afterCursor);
 	}
 
 	/**
@@ -114,8 +109,8 @@ class FavoriteController extends Controller
 	}
 
 	/**
-	 * Removes the target from the caller's favorites together with the positive subscription
-	 * on it, and returns what was taken away so a caller can put it back.
+	 * Removes the target from the caller's favorites and returns what was taken away so a caller
+	 * can put it back. The notification subscription on the same object is left untouched.
 	 */
 	public function removeAction(string $entityType, int $entityId): ?array
 	{
@@ -165,16 +160,6 @@ class FavoriteController extends Controller
 		}
 
 		return $result->getData();
-	}
-
-	private function normalizeFlag(mixed $value): bool
-	{
-		if (is_string($value))
-		{
-			return in_array(mb_strtolower(trim($value)), ['1', 'true', 'y'], true);
-		}
-
-		return (bool)$value;
 	}
 
 	private function normalizeEntityType(string $entityType): ?string

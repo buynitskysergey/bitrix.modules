@@ -195,8 +195,14 @@ return [
 			'humanresources.repository.hcmlink.job' => [
 				'className' => \Bitrix\HumanResources\Repository\HcmLink\JobRepository::class,
 			],
+			'humanresources.repository.hcmlink.job.monitoring' => [
+				'className' => \Bitrix\HumanResources\Repository\HcmLink\JobMonitoringRepository::class,
+			],
 			'humanresources.repository.hcmlink.user' => [
 				'className' => \Bitrix\HumanResources\Repository\HcmLink\UserRepository::class,
+			],
+			'humanresources.repository.hcmlink.exclusion' => [
+				'className' => \Bitrix\HumanResources\Repository\HcmLink\ExclusionRepository::class,
 			],
 			'humanresources.service.hcmlink.field' => [
 				'className' => \Bitrix\HumanResources\Service\HcmLink\FieldService::class,
@@ -229,6 +235,26 @@ return [
 				'constructorParams' => static function() {
 					return [
 						'personRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkPersonRepository(),
+					];
+				},
+			],
+			'humanresources.service.hcmlink.company.disconnect' => [
+				'className' => \Bitrix\HumanResources\Service\HcmLink\CompanyDisconnectService::class,
+				'constructorParams' => static function() {
+					return [
+						'companyRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkCompanyRepository(),
+						'fieldRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkFieldRepository(),
+						'exclusionRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkExclusionRepository(),
+					];
+				},
+			],
+			'humanresources.service.hcmlink.exclusion' => [
+				'className' => \Bitrix\HumanResources\Service\HcmLink\ExclusionService::class,
+				'constructorParams' => static function() {
+					return [
+						'exclusionRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkExclusionRepository(),
+						'personRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkPersonRepository(),
+						'companyCounterService' => \Bitrix\HumanResources\Service\Container::getHcmLinkCompanyCounterService(),
 					];
 				},
 			],
@@ -270,6 +296,14 @@ return [
 			],
 			'humanresources.integration.bizproc.processLauncher' => [
 				'className' => \Bitrix\HumanResources\Integration\Bizproc\ProcessLauncher::class,
+			],
+			'humanresources.integration.bizproc.structurePositionJournal' => [
+				'className' => \Bitrix\HumanResources\Integration\Bizproc\StructurePositionJournal::class,
+				'constructorParams' => static function() {
+					return [
+						'application' => \Bitrix\Main\Application::getInstance(),
+					];
+				},
 			],
 			'humanresources.access.authProvider.structureAuthProvider' => [
 				'className' => \Bitrix\HumanResources\Access\AuthProvider\StructureAuthProvider::class,
@@ -315,6 +349,15 @@ return [
 			],
 			'humanresources.public.service.access' => [
 				'className' => \Bitrix\HumanResources\Public\Service\AccessService::class,
+			],
+			'humanresources.public.service.hcmLinkMonitoring' => [
+				'className' => \Bitrix\HumanResources\Public\Service\HcmLink\MonitoringService::class,
+				'constructorParams' => static function() {
+					return [
+						'jobMonitoringRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkJobMonitoringRepository(),
+						'companyRepository' => \Bitrix\HumanResources\Service\Container::getHcmLinkCompanyRepository(),
+					];
+				},
 			],
 			'humanresources.private.internal.service.structure.roleService' => [
 				'className' => \Bitrix\HumanResources\Internals\Service\Structure\RoleService::class,

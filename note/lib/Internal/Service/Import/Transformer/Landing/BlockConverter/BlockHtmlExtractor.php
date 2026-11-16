@@ -196,7 +196,9 @@ final class BlockHtmlExtractor
 	}
 
 	/**
-	 * @return array<int, array{src:string, alt:string, align:?string, width:?int}>
+	 * `fileId` is the file the <img> names itself, see {@see imageFileId()}.
+	 *
+	 * @return array<int, array{src:string, alt:string, align:?string, width:?int, fileId:?int}>
 	 */
 	public static function extractImageDescriptors(string $html): array
 	{
@@ -219,10 +221,30 @@ final class BlockHtmlExtractor
 				'alt' => $img->getAttribute('alt'),
 				'align' => self::extractAlign($img),
 				'width' => self::extractWidthPercent($img),
+				'fileId' => self::imageFileId($img),
 			];
 		}
 
 		return $result;
+	}
+
+	/**
+	 * The b_file id a landing <img> names itself: the retina `data-fileid2x` when present - the
+	 * highest-resolution managed copy - otherwise `data-fileid`; null without a positive id.
+	 *
+	 * The attribute is what the landing editor rewrites when a picture is replaced, while the rows of
+	 * b_landing_file keep the replaced files until publication, so it is authoritative over the order
+	 * of those rows.
+	 */
+	public static function imageFileId(\DOMElement $img): ?int
+	{
+		$fileId = (int)$img->getAttribute('data-fileid2x');
+		if ($fileId <= 0)
+		{
+			$fileId = (int)$img->getAttribute('data-fileid');
+		}
+
+		return $fileId > 0 ? $fileId : null;
 	}
 
 	/**
@@ -652,10 +674,33 @@ final class BlockHtmlExtractor
 		return '//*[' . implode(' or ', $tests) . ']';
 	}
 
+	/**
+	 * Unwraps the paragraphs a heading holds, one space standing for each tag and the spaces around
+	 * it. The HTML parser closes a heading on a `<p>` and makes the tail a paragraph of its own - and
+	 * landing titles carry one put in by hand. Every DOM load of block markup goes through here first.
+	 */
+	public static function unwrapHeadingParagraphs(string $html): string
+	{
+		if (stripos($html, '<p') === false)
+		{
+			return $html;
+		}
+
+		return preg_replace_callback(
+			// The body never runs past the next tag of the same level: an unclosed heading is given
+			// up at once instead of being scanned to the end of the content.
+			'#(<h([1-6])\b[^>]*>)((?:(?!</?h\2\b).)*+)(</h\2\s*>)#is',
+			static fn (array $match): string => $match[1]
+				. (preg_replace('#\s*</?p\b[^>]*>\s*#i', ' ', $match[3]) ?? $match[3])
+				. $match[4],
+			$html,
+		) ?? $html;
+	}
+
 	private static function loadDom(string $html): ?\DOMDocument
 	{
 		$dom = new \DOMDocument('1.0', 'UTF-8');
-		$wrapped = '<?xml encoding="UTF-8"?><html><body>' . $html . '</body></html>';
+		$wrapped = '<?xml encoding="UTF-8"?><html><body>' . self::unwrapHeadingParagraphs($html) . '</body></html>';
 
 		$previous = libxml_use_internal_errors(true);
 		try

@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Model;
 
 use Bitrix\Main\ORM\Data\DataManager;
 use Bitrix\Main\ORM\Data\Internal\DeleteByFilterTrait;
+use Bitrix\Main\ORM\Fields\BooleanField;
 use Bitrix\Main\ORM\Fields\DatetimeField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\ORM\Fields\Relations\Reference;
@@ -23,6 +24,8 @@ use Bitrix\Main\Type\DateTime;
  * <li> TRASHED_AT datetime mandatory
  * <li> TRASHED_BY int mandatory
  * <li> ORIGIN string(40) mandatory
+ * <li> COLLECTION_ID int mandatory
+ * <li> IS_ROOT bool mandatory
  * </ul>
  *
  * DO NOT WRITE ANYTHING BELOW THIS
@@ -45,6 +48,11 @@ class RecycleBinTable extends DataManager
 	public const ORIGIN_USER_DELETE = 'user_delete';
 	public const ORIGIN_CASCADE_DOCUMENT = 'cascade_document';
 	public const ORIGIN_CASCADE_COLLECTION_DELETED = 'cascade_collection_deleted';
+
+	// IS_ROOT flag values (BooleanField CHAR(1)). 'Y' marks the top level of a section of the bin:
+	// the document is not the description of a base and no parent of it lies in the bin beside it.
+	public const IS_ROOT_YES = 'Y';
+	public const IS_ROOT_NO = 'N';
 
 	public static function getTableName()
 	{
@@ -90,6 +98,22 @@ class RecycleBinTable extends DataManager
 				[
 					'required' => true,
 					'validation' => static fn() => [new LengthValidator(null, 40)],
+				],
+			),
+			// Copy of the document's knowledge base: 0 when the document has no base row to belong to.
+			new IntegerField(
+				'COLLECTION_ID',
+				[
+					'required' => true,
+					'default_value' => 0,
+				],
+			),
+			new BooleanField(
+				'IS_ROOT',
+				[
+					'required' => true,
+					'values' => [self::IS_ROOT_NO, self::IS_ROOT_YES],
+					'default_value' => self::IS_ROOT_NO,
 				],
 			),
 			new Reference(

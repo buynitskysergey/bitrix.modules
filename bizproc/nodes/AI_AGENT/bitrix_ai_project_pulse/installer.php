@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Bitrix\Bizproc\Internal\AiAgent\Scenario\ProjectPulse\LaunchStepper;
 use Bitrix\Bizproc\Public\Entity\Template\NodesInstaller;
-use Bitrix\Main\Config\Option;
+use Bitrix\Bizproc\Public\Feature\AiAgent\ProjectPulseAgentFlag;
 use Bitrix\Main\Loader;
 use Bitrix\Socialnetwork\V2\Feature;
 
@@ -21,7 +21,7 @@ return new class() extends NodesInstaller
 	public function shouldInstall(): bool
 	{
 		return
-			Option::get('bizproc', 'bitrix_ai_project_pulse_available', 'N') === 'Y'
+			\Bitrix\Main\Config\Feature::isEnabled(ProjectPulseAgentFlag::class)
 			&& $this->isNewProjectsAvailable();
 	}
 

@@ -439,9 +439,9 @@ class ConfigurationSettings extends AbstractSettings
 			$data["allCanBuyTariff"] = new Switcher(
 				'settings-configuration-field-allCanBuyTariff',
 				'allCanBuyTariff',
-				Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_ALL_CAN_BUY_TARIFF'),
+				Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_ALL_CAN_BUY_TARIFF_MSGVER_1'),
 				$this->getAllCanBuyTariff()['value'],
-				['on' => Loc::getMessage('INTRANET_SETTINGS_FIELD_HINT_ALL_CAN_BUY_TARIFF_CLICK_ON')],
+				['on' => Loc::getMessage('INTRANET_SETTINGS_FIELD_HINT_ALL_CAN_BUY_TARIFF_CLICK_ON_MSGVER_1')],
 				isEnable: $this->getAllCanBuyTariff()['isEnable'],
 			);
 
@@ -1004,7 +1004,7 @@ class ConfigurationSettings extends AbstractSettings
 				'allowUserInstallApplication' => Label::isRenamedMarket()
 					? Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_ALLOW_ALL_USER_INSTALL_APPLICATION_MSGVER_1')
 					: Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_ALLOW_ALL_USER_INSTALL_APPLICATION'),
-				'allCanBuyTariff' => Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_ALL_CAN_BUY_TARIFF'),
+				'allCanBuyTariff' => Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_ALL_CAN_BUY_TARIFF_MSGVER_1'),
 				'closingDocumentsAllEmployees' => Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_CLOSING_DOCUMENTS_ALL_EMPLOYEES'),
 				'closingDocumentsAudience' => Loc::getMessage('INTRANET_SETTINGS_FIELD_LABEL_CLOSING_DOCUMENTS_AUDIENCE'),
 				//TODO: commented on issue task#488392

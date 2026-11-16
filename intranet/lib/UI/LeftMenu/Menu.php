@@ -1,6 +1,7 @@
 <?php
 namespace Bitrix\Intranet\UI\LeftMenu;
 
+use Bitrix\Intranet\Internal\Integration\Vibecodeconnector\LeftMenuItemProvider;
 use Bitrix\Intranet\Integration\Templates\Air\AirTemplate;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Intranet\Portal\FirstPage;
@@ -74,6 +75,14 @@ class Menu
 		foreach ((new Favorites\ProjectSectionDecorator())->apply($this->items) as $itemToHide)
 		{
 			$this->unsetItem($itemToHide);
+		}
+		if ($userId !== null)
+		{
+			$item = (new LeftMenuItemProvider())->getForUser($userId, $this->getSiteId());
+			if ($item !== null)
+			{
+				$this->setItem($item);
+			}
 		}
 
 		if ($this->mainPage->isEnabled())

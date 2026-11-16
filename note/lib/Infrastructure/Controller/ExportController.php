@@ -14,6 +14,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Security\Sign\BadSignatureException;
 use Bitrix\Main\Security\Sign\TimeSigner;
+use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Export\DocumentZipExportService;
 use Bitrix\Note\Public\Provider\Param\Document\DocumentLimits;
@@ -144,9 +145,17 @@ class ExportController extends Controller
 		return (new File($package['path'], $package['displayName'], 'application/zip'))->showInline(false);
 	}
 
+	/**
+	 * A document of a knowledge base lying in the recycle bin stays readable, and is deliberately not
+	 * downloadable: the bin is a place to sort out what was deleted, not a way to carry it out of the
+	 * portal. The state is asked about before the level, because the answer is the same for everybody.
+	 */
 	private function assertDocumentViewAccess(int $documentId, int $collectionId): bool
 	{
-		if (AccessService::canViewDocument($documentId, $collectionId))
+		if (
+			DocumentAccessService::isCollectionAlive($collectionId)
+			&& AccessService::canViewDocument($documentId, $collectionId)
+		)
 		{
 			return true;
 		}

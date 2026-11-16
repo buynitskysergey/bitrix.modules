@@ -10,24 +10,29 @@ use Bitrix\Bizproc\Runtime\ActivitySearcher\Activities;
 use Bitrix\Bizproc\Runtime\ActivitySearcher\Searcher;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Bizproc\Activity\ContentBlockResolver;
+use Bitrix\Bizproc\Activity\Dto\ContentBlockContext;
 use Bitrix\Bizproc\Activity\ReturnPropertiesResolver;
 
 final class TemplateToNodes
 {
 	/**
-	 * @param bool $complexNodeConnectionsAvailable Verdict of the rollout option of the feature
-	 *     (`bizprocdesigner`/`complex_node_connections_available`), passed in by the editor: the option belongs
-	 *     to that module. It gates the relations block of a node and the surface a translated node is served
-	 *     by ({@see \Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider::isSurfaceAvailableForNode()}).
+	 * @param bool $complexNodeConnectionsAvailable Verdict of the designer feature flag
+	 *     \Bitrix\BizprocDesigner\Public\Feature\Node\ComplexNodeConnectionsFlag, passed in by the editor. It
+	 *     gates the relations block of a node and the surface a translated node is served by
+	 *     ({@see \Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider::isSurfaceAvailableForNode()}).
 	 * @param Activities|null $catalog The catalog of the node and trigger activities, when the caller has
 	 *     already walked it out for a judgement of its own on the same request: the walk reads five folders and
 	 *     includes every `.description.php` in them, and nothing about it differs between the two callers. Left
 	 *     out, the converter walks it itself, which is what every caller loading a scheme does.
+	 * @param ?ContentBlockContext $baseContentBlockContext Context of the caller, passed in by the editor the
+	 *     same way: the readable form of an expression needs the document type and the declarations of the
+	 *     schema, and the converter is handed a tree of activities alone. No context means no readable form.
 	 */
 	public function __construct(
 		private readonly array $template,
 		private readonly bool $complexNodeConnectionsAvailable = false,
 		private readonly ?Activities $catalog = null,
+		private readonly ?ContentBlockContext $baseContentBlockContext = null,
 	)
 	{}
 
@@ -308,7 +313,7 @@ final class TemplateToNodes
 
 	private function transformBlockActivities(array $activities): array
 	{
-		$contentBlocks = ContentBlockResolver::resolveForTemplate($activities);
+		$contentBlocks = ContentBlockResolver::resolveForTemplate($activities, $this->baseContentBlockContext);
 
 		foreach ($activities as &$activity)
 		{

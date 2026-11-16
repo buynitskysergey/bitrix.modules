@@ -32,7 +32,7 @@ final class UnhideCatalogItemCommandHandler
 		if (!$this->itemRepository->isAccessibleToUser(
 			$command->catalogItemId,
 			$command->userId,
-			$this->accessCodes->getUserCodes($command->userId),
+			$this->accessCodes->getUserCodesForItems($command->userId, [$command->catalogItemId]),
 		))
 		{
 			throw new AccessDeniedException('User has no access to this catalog item');

@@ -13,13 +13,18 @@ use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Enum\RequestSource;
  * Marta catalog (BlockDescriptionService) must hide the same blocks, or an agent is offered a block it cannot build.
  *
  * Hidden from both: legacy composite containers (own children/branches, no NODE_TYPE - the draft converter would
- * silently lose their structure) and converter-unbuildable topologies (SERVICE, TOOL). COMPLEX and OPERATORS nodes
- * are buildable and stay visible; the staged rollout of COMPLEX is handled by environment guards (EXCLUDED, the
- * node-readiness option, switchnode dev-ENV registration), never by re-adding it here.
+ * silently lose their structure), converter-unbuildable topologies (SERVICE, TOOL) and the presentational pool
+ * (POOL, a container nobody authors from an agent). COMPLEX and OPERATORS nodes are buildable and stay visible;
+ * the staged rollout of COMPLEX is handled by environment guards (EXCLUDED, the node-readiness option, switchnode
+ * dev-ENV registration), never by re-adding it here.
  *
  * Visible to REST only: FRAME (a presentational overlay Marta stays isolated from), plus the storage and
- * reverse-visible external CLASSes, which reverse validation must read back verbatim so a system AI agent's own
+ * reverse-visible CLASSes, which reverse validation must read back verbatim so a system AI agent's own
  * template.get output survives template.validate. Every other node type resolves identically on both predicates.
+ *
+ * Hiding a node from the catalogs and letting it back in on the reverse path are two separate questions: the pool
+ * is hidden from both catalogs and still reverse-visible, because a user may draw one into a template an agent
+ * later reads.
  */
 final class ActivityVisibilityFilter
 {
@@ -50,20 +55,31 @@ final class ActivityVisibilityFilter
 	];
 
 	/**
-	 * NODE_TYPE values that map to topologies the agent draft converter cannot build. Rejected on both
-	 * predicates (REST and Marta).
+	 * NODE_TYPE values no agent catalog offers. Rejected on both predicates (REST and Marta).
+	 *
+	 * SERVICE and TOOL map to topologies the agent draft converter cannot build. POOL is buildable and
+	 * is withheld for the opposite reason: it is a presentational container the user draws to group a
+	 * diagram by participant, it carries no ports and drives nothing an agent could author. Its rollout
+	 * flag withholds nothing here - EXCLUDED hides the palette card only while the flag is off, and the
+	 * pool stays out of both catalogs once the flag is on.
+	 *
+	 * Authoring a pool is what this list refuses, never reading one back: the forward converter emits a
+	 * pool the user drew as an ordinary block, so template.get hands it to the agent and template.validate
+	 * must accept it again. That read-back is granted by {@see self::REVERSE_VISIBLE_CLASS_WHITELIST},
+	 * which lifts this barrier on the reverse path alone and leaves the catalog predicate untouched.
 	 *
 	 * COMPLEX is intentionally absent: the rule-engine ({@see \Bitrix\BizprocDesigner\Internal\Command\Activity\Complex\ConvertRuleCommand})
 	 * now assembles the complex sub-graph, so complex nodes are buildable and visible. Their staged
 	 * rollout is enforced by environment guards (EXCLUDED option, node-readiness option, switchnode
 	 * dev-ENV registration), not by this list.
 	 *
-	 * FRAME is intentionally absent too: it is not converter-unbuildable, it is a presentational overlay
-	 * offered to REST but withheld from Marta - see {@see self::MARTA_HIDDEN_NODE_TYPES}.
+	 * FRAME is intentionally absent too: presentational like the pool, but offered to REST and withheld
+	 * from Marta alone - see {@see self::MARTA_HIDDEN_NODE_TYPES}.
 	 */
-	private const INCOMPATIBLE_NODE_TYPES = [
+	private const ALWAYS_HIDDEN_NODE_TYPES = [
 		ActivityNodeType::SERVICE->value,
 		ActivityNodeType::TOOL->value,
+		ActivityNodeType::POOL->value,
 	];
 
 	/**
@@ -78,11 +94,11 @@ final class ActivityVisibilityFilter
 	/**
 	 * Storage-subsystem CLASSes the external REST agent must read back verbatim, so its own template.get output
 	 * survives template.validate. They declare NODE_TYPE=SERVICE, so the whitelist inverts
-	 * {@see self::INCOMPATIBLE_NODE_TYPES} point-wise for them. Matched by CLASS: the lowercase catalog type-code
+	 * {@see self::ALWAYS_HIDDEN_NODE_TYPES} point-wise for them. Matched by CLASS: the lowercase catalog type-code
 	 * is not available inside the predicates.
 	 *
 	 * EXCLUDED still wins (it is checked before the predicate), so setuptemplateactivity stays gated by
-	 * setExcluded(feature_ai_agents).
+	 * setExcluded(AiAgentSectionFlag).
 	 *
 	 * @see isNodeCompatible(), isNodeCompatibleFromRaw()
 	 */
@@ -95,9 +111,11 @@ final class ActivityVisibilityFilter
 	];
 
 	/**
-	 * External-module CLASSes a system AI agent's template.get emits and reverse validation must read back
-	 * verbatim. An entry lifts the topology barrier of {@see self::INCOMPATIBLE_NODE_TYPES} (SERVICE and TOOL
-	 * alike) outright, and is a precondition - not a licence on its own - for lifting the EXCLUDED barrier
+	 * CLASSes a system AI agent's template.get emits and reverse validation must read back verbatim: the
+	 * external-module nodes a system agent authors, plus the pool, which no agent authors but any user may
+	 * draw into a template an agent then reads. An entry lifts the topology barrier of
+	 * {@see self::ALWAYS_HIDDEN_NODE_TYPES} (SERVICE, TOOL and POOL alike) outright, and is a precondition -
+	 * not a licence on its own - for lifting the EXCLUDED barrier
 	 * checked before the predicate ({@see self::bypassesExcludedFromRaw()}): that one also demands the block type
 	 * be present in the published baseline. Which of the two barriers a given CLASS actually hits is decided by
 	 * its owner module and can change there, so entries are not grouped by barrier here.
@@ -113,6 +131,10 @@ final class ActivityVisibilityFilter
 		'BIConnectorDashboardResultActivity',
 		'CrmClientSummaryActivity',
 		'AiProcessingActivity',
+		// Drawn by the user, never by an agent: read back so a template carrying a pool survives
+		// template.get -> template.validate. The catalog predicate ignores this list, so the pool
+		// stays out of the palette the agent is offered.
+		'PoolNode',
 	];
 
 	/**
@@ -121,7 +143,7 @@ final class ActivityVisibilityFilter
 	 *
 	 * Returns false for:
 	 *   - legacy composite containers (CLASS blacklist)
-	 *   - incompatible NODE_TYPE topologies (SERVICE/TOOL)
+	 *   - NODE_TYPE values no catalog offers (SERVICE/TOOL/POOL)
 	 *
 	 * Storage CLASSes and FRAME pass: this predicate always runs in the REST catalog context, so the storage
 	 * whitelist is unconditional here. Marta withholds both via {@see self::isNodeCompatibleFromRaw()}.
@@ -139,7 +161,7 @@ final class ActivityVisibilityFilter
 			return true;
 		}
 
-		return !in_array($d->getNodeType(), self::INCOMPATIBLE_NODE_TYPES, true);
+		return !in_array($d->getNodeType(), self::ALWAYS_HIDDEN_NODE_TYPES, true);
 	}
 
 	/**
@@ -151,7 +173,7 @@ final class ActivityVisibilityFilter
 	 *
 	 * Returns false for:
 	 *   - legacy composite containers (CLASS blacklist)
-	 *   - incompatible NODE_TYPE topologies (SERVICE/TOOL)
+	 *   - NODE_TYPE values no catalog offers (SERVICE/TOOL/POOL)
 	 *   - Marta-hidden NODE_TYPE topologies (FRAME) - visible to REST but withheld from Marta
 	 * Both whitelists apply only for source=Rest.
 	 */
@@ -175,7 +197,7 @@ final class ActivityVisibilityFilter
 		}
 
 		$nodeType = (string)($activity['NODE_TYPE'] ?? '');
-		if (in_array($nodeType, self::INCOMPATIBLE_NODE_TYPES, true))
+		if (in_array($nodeType, self::ALWAYS_HIDDEN_NODE_TYPES, true))
 		{
 			return false;
 		}
@@ -192,7 +214,7 @@ final class ActivityVisibilityFilter
 	 * agent that invents a node of a switched-off CLASS finds no baseline entry for its type and stays refused.
 	 *
 	 * The storage whitelist is deliberately absent here - storage keeps its own EXCLUDED gate (setuptemplate /
-	 * feature_ai_agents). The caller still runs {@see self::isNodeCompatibleFromRaw()} afterwards: the bypass
+	 * AiAgentSectionFlag). The caller still runs {@see self::isNodeCompatibleFromRaw()} afterwards: the bypass
 	 * lifts EXCLUDED only, never the topology check.
 	 *
 	 * @param string $blockType lowercase catalog type-code of the activity, as the baseline indexes it

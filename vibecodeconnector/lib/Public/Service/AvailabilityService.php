@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Public\Service;
 
+use Bitrix\Main\Config\Feature;
+use Bitrix\Vibecodeconnector\Internal\Config\Feature\VibeBalance;
 use Bitrix\Vibecodeconnector\Internal\Integration\Intranet\IntranetGate;
 use Bitrix\Vibecodeconnector\Internal\Repository\Pairing\PairingRepository;
 use Bitrix\Vibecodeconnector\Internal\Service\Auth\CloudSharedVerifier;
@@ -26,6 +28,11 @@ class AvailabilityService
 	public function isAvailableForUser(int $userId): bool
 	{
 		return $userId > 0 && $this->isEnabled() && $this->isAllowedForUser($userId);
+	}
+
+	public function isVibeBalanceEnabled(): bool
+	{
+		return Feature::isEnabled(VibeBalance::class);
 	}
 
 	/**

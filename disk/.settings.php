@@ -9,24 +9,62 @@ use Bitrix\Disk\Document\Vibeoffice;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\CapabilitiesGetMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\ChangesListMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\ContentGetMethodProvider;
+use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\IndexGetMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\SessionCreateMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\SnapshotListMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\StateCheckMethodProvider;
 use Bitrix\Disk\Integration\Bitrix24Manager;
+use Bitrix\Disk\Integration\HumanResources\TeamDirectory;
+use Bitrix\Disk\Integration\Ui\EntitySelector\FileProvider;
 use Bitrix\Disk\Integration\Ui\EntitySelector\SpecialAccessProvider;
 use Bitrix\Disk\Internal\Entity\CustomServers\OnlyOfficeCustomServer;
 use Bitrix\Disk\Internal\Entity\CustomServers\R7CustomServer;
 use Bitrix\Disk\Internal\Interface\CustomServerDataRepositoryInterface;
+use Bitrix\Disk\Internal\Interface\TeamDirectoryInterface;
+use Bitrix\Disk\Internal\Messenger\Audit\AuditReceiver;
+use Bitrix\Disk\Internal\Model\AuditMessengerMessageTable;
+use Bitrix\Disk\Internal\Repository\Audit\AuditEventRepository;
+use Bitrix\Disk\Internal\Repository\Mapper\AuditEventMapper;
 use Bitrix\Disk\Internal\Repository\BitrixOrmDocumentRestrictionLogRepository;
 use Bitrix\Disk\Internal\Repository\BitrixOrmDocumentSessionRepository;
+use Bitrix\Disk\Internal\Repository\BitrixOrmUserQuotaRepository;
+use Bitrix\Disk\Internal\Repository\FormatPolicyRuleRepository;
 use Bitrix\Disk\Internal\Repository\CustomServerDataOptionRepository;
+use Bitrix\Disk\Internal\Repository\DockedUpload\DockedUploadQueueRepository;
 use Bitrix\Disk\Internal\Repository\ExternalLinkBitrixOrmRepository;
 use Bitrix\Disk\Internal\Repository\Interface\DocumentRestrictionLogRepositoryInterface;
+use Bitrix\Disk\Internal\Repository\Interface\DockedUploadQueueRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\Interface\DocumentSessionRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\Interface\ExternalLinkRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\Interface\LimitEncounterCounterRepositoryInterface;
+use Bitrix\Disk\Internal\Repository\Interface\UserQuotaAssignmentRepositoryInterface;
+use Bitrix\Disk\Internal\Repository\Interface\UserQuotaRecalculationRepositoryInterface;
+use Bitrix\Disk\Internal\Repository\Interface\UserQuotaRepositoryInterface;
 use Bitrix\Disk\Internal\Repository\LimitEncounterCounterPersistentStorageRepository;
+use Bitrix\Disk\Internal\Service\Audit\AuditCaptureService;
+use Bitrix\Disk\Internal\Service\Audit\AuditCaptureValidator;
+use Bitrix\Disk\Internal\Service\Audit\AuditAccessService;
+use Bitrix\Disk\Internal\Service\Audit\AuditAvailabilityService;
+use Bitrix\Disk\Internal\Service\Audit\AuditIdempotencyKeyBuilder;
+use Bitrix\Disk\Internal\Service\Audit\AuditLicenseResolver;
+use Bitrix\Disk\Internal\Service\Audit\AuditLicenseResolverInterface;
+use Bitrix\Disk\Internal\Service\Audit\AuditOutboxService;
+use Bitrix\Disk\Internal\Service\Audit\AuditQueryService;
+use Bitrix\Disk\Internal\Service\Audit\AuditRecordService;
+use Bitrix\Disk\Internal\Service\Audit\AuditRetentionService;
+use Bitrix\Disk\Internal\Service\Audit\AuditSettingsEventFactory;
+use Bitrix\Disk\Internal\Service\Audit\AuditSettingsService;
+use Bitrix\Disk\Internal\Service\Audit\AuditSettingsUpdateLock;
 use Bitrix\Disk\Internal\Service\CustomServerConfig;
+use Bitrix\Disk\Internal\Service\DockedUpload\QueueRateLimiter;
+use Bitrix\Disk\Internal\Service\Restrictions\EffectivePolicyResolver;
+use Bitrix\Disk\Internal\Service\Restrictions\ExtensionListNormalizer;
+use Bitrix\Disk\Internal\Service\Restrictions\FormatPolicyRuleCreationLock;
+use Bitrix\Disk\Internal\Service\Restrictions\FormatPolicyRuleIndex;
+use Bitrix\Disk\Internal\Service\Restrictions\FormatPolicyRuleService;
+use Bitrix\Disk\Internal\Service\Restrictions\FormatPolicyService;
+use Bitrix\Disk\Internal\Service\Restrictions\FormatPolicyStorage;
+use Bitrix\Disk\Internal\Service\Restrictions\FormatPresetMap;
 use Bitrix\Disk\Internal\Service\DocumentHeader\HeaderCompositionService;
 use Bitrix\Disk\Internal\Service\DocumentHeader\OpeningContextFactory;
 use Bitrix\Disk\Internal\Service\DocumentHeader\RenameService;
@@ -46,12 +84,15 @@ use Bitrix\Disk\Internal\Service\OnlyOffice\Save\InterruptedSessionService;
 use Bitrix\Disk\Internal\Service\OnlyOffice\Save\KeptDocumentRecovery;
 use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SaveTimingConfig;
 use Bitrix\Disk\Internal\Service\OnlyOffice\Save\SavingMarker;
+use Bitrix\Disk\Internal\Service\Sync\Relation\RelationProviderRegistry;
 use Bitrix\Disk\Internal\Service\Sync\Snapshot\SnapshotService;
 use Bitrix\Disk\Internal\Service\VersionMatcher\DottedMatcher;
 use Bitrix\Disk\Internal\Service\VersionMatcher\Matcher;
 use Bitrix\Disk\Internals\DeletedLogManager;
 use Bitrix\Disk\Internals\DeletionNotifyManager;
+use Bitrix\Disk\Integration\AiAssistant\ToolSet\DiskToolSet;
 use Bitrix\Disk\Internals\Runtime\StorageRuntimeCache;
+use Bitrix\Disk\Public\Provider\RestrictionsAvailabilityProvider;
 use Bitrix\Disk\QuickAccess;
 use Bitrix\Disk\QuickAccess\Config\ConfigInterface;
 use Bitrix\Disk\QuickAccess\FileInfo\DiskProvider;
@@ -65,10 +106,14 @@ use Bitrix\Disk\Search\IndexManager;
 use Bitrix\Disk\Uf\UserFieldManager;
 use Bitrix\Disk\UrlManager;
 use Bitrix\Disk\TrackedObjectManager;
+use Bitrix\Main\Application;
+use Bitrix\Main\Data\ManagedCache;
+use Bitrix\Main\Data\Storage\PersistentStorageInterface;
 use Bitrix\Main\DI\ServiceLocator;
-use Bitrix\Main\Diag\LoggerFactory;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Diag\LoggerFactory;
+use Psr\Log\NullLogger;
 
 $supportedOnlyOfficeVersions = [
 	'9.2.*.*',
@@ -82,12 +127,26 @@ $supportedR7Versions = [
 $supportedOnlyOfficeAndR7Versions = array_merge($supportedOnlyOfficeVersions, $supportedR7Versions);
 
 return [
+	'aiassistant.marta' => [
+		'value' => [
+			'toolSets' => [
+				DiskToolSet::class,
+			],
+		],
+		'readonly' => true,
+	],
 	'controllers' => [
 		'value' => [
 			'namespaces' => [
 				'\\Bitrix\\Disk\\Controller' => 'api',
 			],
 			'defaultNamespace' => '\\Bitrix\\Disk\\Controller',
+		],
+		'readonly' => true,
+	],
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Disk\\Public\\Features',
 		],
 		'readonly' => true,
 	],
@@ -105,6 +164,7 @@ return [
 					'disk.sync.changes.list' => ChangesListMethodProvider::class,
 					'disk.sync.state.check' => StateCheckMethodProvider::class,
 					'disk.sync.content.get' => ContentGetMethodProvider::class,
+					'disk.sync.index.get' => IndexGetMethodProvider::class,
 				],
 			],
 		],
@@ -248,6 +308,11 @@ return [
 			SnapshotService::class => [
 				'className' => SnapshotService::class,
 			],
+			// One registry per request: it asks the owner modules for their providers once, and holding
+			// the answer any longer would outlive the installation or the switching off of a module.
+			RelationProviderRegistry::class => [
+				'className' => RelationProviderRegistry::class,
+			],
 			'disk.storageRuntimeCache' => [
 				'className' => StorageRuntimeCache::class,
 			],
@@ -264,11 +329,46 @@ return [
 			'disk.rightsManager' => [
 				'className' => RightsManager::class,
 			],
+			// The very instance 'disk.rightsManager' keeps, under the name of the class: RightsManager
+			// orders the background jobs it makes by a counter of its own, so a second instance of it
+			// would number its jobs over the ones the first has already made. Autowiring must therefore
+			// hand out the one instance the module works with.
+			RightsManager::class => [
+				'constructor' => static function () {
+					return ServiceLocator::getInstance()->get('disk.rightsManager');
+				},
+			],
 			'disk.ufManager' => [
 				'className' => UserFieldManager::class,
 			],
 			'disk.indexManager' => [
 				'className' => IndexManager::class,
+			],
+			'disk.boardIndexingLogger' => [
+				'constructor' => static function () {
+					return (new LoggerFactory(false))->createById(
+						'disk.boardIndexing',
+						isCheckEnabledFromRegistry: false,
+						returnDefaultLoggerIfNotExists: false,
+					) ?? new \Bitrix\Main\Diag\EventLogger(
+						'disk',
+						'DISK_BOARD_INDEXING_FAILED',
+						static fn (array $context): array => ['ITEM_ID' => (string)$context['objectId']],
+					);
+				},
+			],
+			'disk.searchIndexingLogger' => [
+				'constructor' => static function () {
+					return (new LoggerFactory(false))->createById(
+						'disk.searchIndexing',
+						isCheckEnabledFromRegistry: false,
+						returnDefaultLoggerIfNotExists: false,
+					) ?? new \Bitrix\Main\Diag\EventLogger(
+						'disk',
+						'DISK_SEARCH_INDEXING_SKIPPED',
+						static fn (array $context): array => ['ITEM_ID' => (string)$context['objectId']],
+					);
+				},
 			],
 			'disk.recentlyUsedManager' => [
 				'className' => RecentlyUsedManager::class,
@@ -329,6 +429,190 @@ return [
 			ExternalLinkRepositoryInterface::class => [
 				'className' => ExternalLinkBitrixOrmRepository::class,
 			],
+			UserQuotaRepositoryInterface::class => [
+				'className' => BitrixOrmUserQuotaRepository::class,
+			],
+			UserQuotaRecalculationRepositoryInterface::class => [
+				'className' => BitrixOrmUserQuotaRepository::class,
+			],
+			UserQuotaAssignmentRepositoryInterface::class => [
+				'className' => BitrixOrmUserQuotaRepository::class,
+			],
+			// A string service id is built without autowiring, so the provider is resolved by its
+			// own class key: the id stays a stable handle while dependencies stay in the constructor.
+			'disk.restrictionsAvailabilityProvider' => [
+				'constructor' => static function () {
+					return ServiceLocator::getInstance()->get(RestrictionsAvailabilityProvider::class);
+				},
+			],
+			'disk.formatPolicyService' => [
+				'constructor' => static function () {
+					return ServiceLocator::getInstance()->get(FormatPolicyService::class);
+				},
+			],
+			// One index per hit: it keeps the rules it has read for the rest of the request.
+			FormatPolicyRuleIndex::class => [
+				'className' => FormatPolicyRuleIndex::class,
+				'constructorParams' => static function () {
+					$locator = ServiceLocator::getInstance();
+
+					return [
+						$locator->get(ManagedCache::class),
+						$locator->get(FormatPolicyRuleRepository::class),
+					];
+				},
+			],
+			// One resolver per hit: it keeps the policy of every user it was asked about.
+			EffectivePolicyResolver::class => [
+				'className' => EffectivePolicyResolver::class,
+				'constructorParams' => static function () {
+					$locator = ServiceLocator::getInstance();
+
+					return [
+						$locator->get(FormatPolicyRuleIndex::class),
+						$locator->get(FormatPolicyStorage::class),
+						$locator->get(FormatPolicyRuleRepository::class),
+					];
+				},
+			],
+			// Shares the index of the hit, so a saved or removed rule is seen by the rest of the request.
+			FormatPolicyRuleService::class => [
+				'className' => FormatPolicyRuleService::class,
+				'constructorParams' => static function () {
+					$locator = ServiceLocator::getInstance();
+
+					return [
+						$locator->get(FormatPolicyRuleRepository::class),
+						$locator->get(FormatPolicyRuleIndex::class),
+						$locator->get(ExtensionListNormalizer::class),
+						$locator->get(FormatPresetMap::class),
+						$locator->get(EffectivePolicyResolver::class),
+						$locator->get(FormatPolicyRuleCreationLock::class),
+						$locator->get(TeamDirectory::class),
+					];
+				},
+			],
+			// One directory per hit: it remembers whether humanresources is installed and the default structure.
+			TeamDirectory::class => [
+				'className' => TeamDirectory::class,
+			],
+			// The same directory of the hit, by the abstraction the format rules depend on.
+			TeamDirectoryInterface::class => [
+				'constructor' => static function () {
+					return ServiceLocator::getInstance()->get(TeamDirectory::class);
+				},
+			],
+			FormatPolicyRuleCreationLock::class => [
+				'className' => FormatPolicyRuleCreationLock::class,
+				'constructorParams' => static function () {
+					return [Application::getConnection()];
+				},
+			],
+			AuditEventRepository::class => [
+				'className' => AuditEventRepository::class,
+			],
+			AuditEventMapper::class => [
+				'className' => AuditEventMapper::class,
+			],
+			AuditIdempotencyKeyBuilder::class => [
+				'className' => AuditIdempotencyKeyBuilder::class,
+			],
+			AuditRecordService::class => [
+				'className' => AuditRecordService::class,
+				'constructorParams' => static function() {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+
+					return [
+						$locator->get(AuditEventRepository::class),
+						$locator->get(AuditEventMapper::class),
+						$locator->get(AuditIdempotencyKeyBuilder::class),
+					];
+				},
+			],
+			AuditRetentionService::class => [
+				'className' => AuditRetentionService::class,
+			],
+			AuditOutboxService::class => [
+				'className' => AuditOutboxService::class,
+			],
+			AuditCaptureValidator::class => [
+				'className' => AuditCaptureValidator::class,
+				'constructorParams' => static function() {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+
+					return [
+						$locator->get(AuditIdempotencyKeyBuilder::class),
+					];
+				},
+			],
+			AuditCaptureService::class => [
+				'className' => AuditCaptureService::class,
+				'constructorParams' => static function() {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+
+					return [
+						$locator->get(AuditOutboxService::class),
+						$locator->get(AuditCaptureValidator::class),
+					];
+				},
+			],
+			AuditSettingsService::class => [
+				'className' => AuditSettingsService::class,
+				'constructorParams' => static function() {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+
+					return [
+						$locator->get(AuditSettingsUpdateLock::class),
+					];
+				},
+			],
+			AuditLicenseResolverInterface::class => [
+				'className' => AuditLicenseResolver::class,
+			],
+			AuditLicenseResolver::class => [
+				'className' => AuditLicenseResolver::class,
+			],
+			AuditAvailabilityService::class => [
+				'className' => AuditAvailabilityService::class,
+				'constructorParams' => static function() {
+					$locator = \Bitrix\Main\DI\ServiceLocator::getInstance();
+
+					return [
+						$locator->get(AuditSettingsService::class),
+						$locator->get(AuditLicenseResolverInterface::class),
+					];
+				},
+			],
+			AuditAccessService::class => [
+				'className' => AuditAccessService::class,
+				'constructorParams' => static function() {
+					return [
+						\Bitrix\Main\DI\ServiceLocator::getInstance()->get(AuditAvailabilityService::class),
+					];
+				},
+			],
+			AuditQueryService::class => [
+				'className' => AuditQueryService::class,
+			],
+			AuditSettingsEventFactory::class => [
+				'className' => AuditSettingsEventFactory::class,
+			],
+			AuditSettingsUpdateLock::class => [
+				'className' => AuditSettingsUpdateLock::class,
+			],
+			AuditReceiver::class => [
+				'className' => AuditReceiver::class,
+				'constructorParams' => static function() {
+					return [
+						\Bitrix\Main\DI\ServiceLocator::getInstance()->get(AuditRecordService::class),
+					];
+				},
+			],
+			'disk.audit' => [
+				'constructor' => static function() {
+					return (new LoggerFactory())->createById('disk.audit') ?? new NullLogger();
+				},
+			],
 			ExternalLinkOpenPolicy::class => [
 				'constructor' => static function() {
 					return ExternalLinkOpenPolicy::fromPortalConfiguration();
@@ -359,6 +643,16 @@ return [
 			DualMode\BoardApiServiceFactory::class => [
 				'className' => DualMode\DefaultBoardApiServiceFactory::class,
 			],
+			DockedUploadQueueRepositoryInterface::class => [
+				'className' => DockedUploadQueueRepository::class,
+			],
+			'disk.dockedUpload.rateLimiter' => [
+				'constructor' => static function () {
+					return new QueueRateLimiter(
+						ServiceLocator::getInstance()->get(PersistentStorageInterface::class),
+					);
+				},
+			],
 		],
 		'readonly' => true,
 	],
@@ -382,6 +676,13 @@ return [
 					'provider' => [
 						'moduleId' => 'disk',
 						'className' => SpecialAccessProvider::class,
+					],
+				],
+				[
+					'entityId' => 'disk-file',
+					'provider' => [
+						'moduleId' => 'disk',
+						'className' => FileProvider::class,
 					],
 				],
 			],
@@ -493,6 +794,15 @@ return [
 	],
 	'messenger' => [
 		'value' => [
+			'brokers' => [
+				'disk_audit' => [
+					'type' => 'db',
+					'params' => [
+						'module' => 'disk',
+						'table' => AuditMessengerMessageTable::class,
+					],
+				],
+			],
 			'queues' => [
 				'download_board' => [
 					'handler' => \Bitrix\Disk\Document\Flipchart\Messenger\DownloadBoardReceiver::class,
@@ -500,6 +810,25 @@ return [
 				// Must match KeptDocumentSaveMessage::QUEUE; see the literal of the save logger above.
 				'onlyoffice_kept_document_save' => [
 					'handler' => \Bitrix\Disk\Internal\Service\OnlyOffice\Save\Messenger\KeptDocumentSaveReceiver::class,
+				],
+				'index_board' => [
+					'handler' => \Bitrix\Disk\Search\Messenger\IndexBoardReceiver::class,
+					'limit' => 1,
+					'total_processing_limit' => 1,
+					'retry_strategy' => [
+						'max_retries' => 3,
+						'delay' => 1,
+						'multiplier' => 2,
+					],
+				],
+				'disk_audit' => [
+					'broker' => 'disk_audit',
+					'handler' => AuditReceiver::class,
+					'retry_strategy' => [
+						'max_retries' => 3,
+						'delay' => 1,
+						'multiplier' => 2,
+					],
 				],
 			],
 		],

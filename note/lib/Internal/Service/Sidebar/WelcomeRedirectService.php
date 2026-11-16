@@ -68,6 +68,8 @@ class WelcomeRedirectService
 				return null;
 			}
 
+			// The default is right here: the welcome document is a live landing point, and an
+			// archived one is already refused above.
 			$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $collectionId, false);
 			if (!$snapshot['canViewCollection'])
 			{

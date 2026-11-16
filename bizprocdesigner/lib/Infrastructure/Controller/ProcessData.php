@@ -29,6 +29,7 @@ use Bitrix\Bizproc\Workflow\Type\GlobalConst;
 use Bitrix\Bizproc\Workflow\Type\GlobalVar;
 use Bitrix\Bizproc\Workflow\Type\GlobalsManager;
 use Bitrix\BizprocDesigner\Internal\Config\Feature;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\ReadableExpressionContextFactory;
 use Bitrix\Main\DB\DuplicateEntryException;
 use Bitrix\Main\Engine\ActionFilter;
 use Bitrix\Main\Engine\JsonController;
@@ -49,6 +50,7 @@ use Bitrix\Main\Type\ParameterDictionary;
 class ProcessData extends JsonController
 {
 	private ?TemplateAccessService $accessService = null;
+	private ?ReadableExpressionContextFactory $readableExpressionContextFactory = null;
 
 	protected function init(): void
 	{
@@ -159,6 +161,7 @@ class ProcessData extends JsonController
 		return $this->answerChange(
 			$this->writeService($context)->rename($sourceType, $key, $newKey),
 			withNodes: true,
+			documentType: $context['documentType'],
 		);
 	}
 
@@ -201,6 +204,7 @@ class ProcessData extends JsonController
 			return $this->answerChange(
 				$this->moveToShared($context, $sourceType, $key, $property, $sharedSourceType),
 				withNodes: true,
+				documentType: $context['documentType'],
 			);
 		}
 
@@ -214,6 +218,7 @@ class ProcessData extends JsonController
 		return $this->answerChange(
 			$this->changeTemplatePurpose($context, $sourceType, $key, $targetPurpose, $property),
 			withNodes: true,
+			documentType: $context['documentType'],
 		);
 	}
 
@@ -263,8 +268,13 @@ class ProcessData extends JsonController
 		$manager = self::sharedManagerOfSourceType()[$sharedSourceType]
 			?? ($sourceType === SourceType::Constant ? GlobalConst::class : GlobalVar::class)
 		;
+		$sharedProperty = $property === [] ? $element->property : $property;
+		$visibility = $sharedProperty['Visibility'] ?? 'GLOBAL';
 
-		if (!$manager::canUserUpsert($context['documentType'], $context['userId']))
+		if (
+			!is_string($visibility)
+			|| !$manager::canUserCreate($context['documentType'], $context['userId'], $visibility)
+		)
 		{
 			return (new Result())->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
 		}
@@ -291,7 +301,7 @@ class ProcessData extends JsonController
 
 		$prepared = $this->prepareSharedProperty(
 			$context['documentType'],
-			$property === [] ? $element->property : $property,
+			$sharedProperty,
 			$element->property,
 		);
 		if (!$prepared->isSuccess())
@@ -366,7 +376,26 @@ class ProcessData extends JsonController
 			return $this->refuseInvalidParam('sourceType', $sourceType);
 		}
 
-		if (!$manager::canUserUpsert($context['documentType'], $context['userId']))
+		$stored = $manager::getById($id);
+		$visibility = $stored === null ? $property['Visibility'] ?? 'GLOBAL' : $stored['Visibility'] ?? null;
+		if ($stored === null && is_string($visibility))
+		{
+			$refusal = $this->refuseUnavailableVisibility($context['documentType'], $property, null);
+			if ($refusal !== null)
+			{
+				$this->addErrors($refusal->getErrors());
+
+				return null;
+			}
+		}
+
+		$canUpsert = $stored === null
+			? is_string($visibility)
+				&& $manager::canUserCreate($context['documentType'], $context['userId'], $visibility)
+			: is_string($visibility)
+				&& $manager::canUserUpdateByVisibility($context['documentType'], $context['userId'], $visibility)
+		;
+		if (!$canUpsert)
 		{
 			$this->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
 
@@ -383,14 +412,9 @@ class ProcessData extends JsonController
 			return null;
 		}
 
-		// A value of a scope this document type does not see belongs to somebody else: the identifier of the
-		// request must not reach it, neither to be rewritten nor to be answered about.
-		$stored = $manager::getVisibleById($id, $context['documentType']);
-		if ($stored === null && $manager::getById($id) !== null)
+		if ($stored !== null && ($property['Visibility'] ?? '') === '')
 		{
-			$this->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
-
-			return null;
+			$property['Visibility'] = $stored['Visibility'];
 		}
 
 		$refusal = $this->guardSharedProperty($id, $property, $stored);
@@ -411,7 +435,12 @@ class ProcessData extends JsonController
 
 		$written = $stored === null
 			? $this->insertShared($manager, $id, $prepared->getData()['property'], $context['userId'])
-			: $manager::upsertByProperty($id, $prepared->getData()['property'], $context['userId'])
+			: $manager::updateByPropertyIfVisibility(
+				$id,
+				$prepared->getData()['property'],
+				$visibility,
+				$context['userId'],
+			)
 		;
 		if (!$written->isSuccess())
 		{
@@ -445,16 +474,12 @@ class ProcessData extends JsonController
 			return $this->refuseInvalidParam('sourceType', $sourceType);
 		}
 
-		if (!$manager::canUserDelete($context['documentType'], $context['userId']))
-		{
-			$this->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
-
-			return null;
-		}
-
-		// The right of the document type opens the values it sees: a value of another scope is not deleted
-		// by its identifier alone.
-		if ($manager::getVisibleById($id, $context['documentType']) === null)
+		$field = $manager::getFieldAccessDataById($id);
+		$visibility = $field['Visibility'] ?? null;
+		if (
+			!is_string($visibility)
+			|| !$manager::canUserUpdateByVisibility($context['documentType'], $context['userId'], $visibility)
+		)
 		{
 			$this->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
 
@@ -492,7 +517,7 @@ class ProcessData extends JsonController
 			return null;
 		}
 
-		if (!$manager::delete($id))
+		if (!$manager::deleteIfVisibility($id, $visibility))
 		{
 			$this->addError(ErrorMessage::ENTITY_NOT_EXISTS->getCodedError([], ['key' => $id]));
 
@@ -702,8 +727,11 @@ class ProcessData extends JsonController
 	/**
 	 * The answer of a changing action: the new blocks of the data and the rebuilt catalog. The nodes travel
 	 * back only where the references inside them were rewritten.
+	 *
+	 * @param array $documentType Document type of the request, its access already checked. Read only where
+	 *     the nodes travel back: their labels name the fields of that very type.
 	 */
-	private function answerChange(Result $result, bool $withNodes = false): ?array
+	private function answerChange(Result $result, bool $withNodes = false, array $documentType = []): ?array
 	{
 		if (!$result->isSuccess())
 		{
@@ -729,6 +757,11 @@ class ProcessData extends JsonController
 			[$blocks, $connections] = (new TemplateToNodes(
 				$fields['TEMPLATE'],
 				Feature::instance()->areComplexNodeConnectionsAvailable(),
+				// Named by the scheme the write has just produced, so a renamed declaration is named in the
+				// answer the way the nodes coming back reference it.
+				baseContentBlockContext: $this->readableExpressionContextFactory()
+					->createForAuthorizedSchema($fields, $documentType)
+				,
 			))->convert();
 
 			$answer['blocks'] = $blocks;
@@ -966,5 +999,11 @@ class ProcessData extends JsonController
 	private function accessService(): TemplateAccessService
 	{
 		return $this->accessService ??= new TemplateAccessService();
+	}
+
+	/** One instance per request, so the labels it resolves are shared by the whole answer. */
+	private function readableExpressionContextFactory(): ReadableExpressionContextFactory
+	{
+		return $this->readableExpressionContextFactory ??= new ReadableExpressionContextFactory();
 	}
 }

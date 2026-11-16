@@ -25,11 +25,9 @@ final class Embed extends Controller
 
 	public function openLayoutAction(CurrentUser $currentUser, string $view): array
 	{
-		return [
-			'html' => ServiceLocator::getInstance()->get(EmbedOpenLayoutService::class)->render(
-				$view,
-				(int)$currentUser->getId(),
-			),
-		];
+		return ServiceLocator::getInstance()->get(EmbedOpenLayoutService::class)->open(
+			$view,
+			(int)$currentUser->getId(),
+		);
 	}
 }

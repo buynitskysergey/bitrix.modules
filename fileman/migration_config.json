@@ -1,0 +1,7 @@
+{
+    "defaultTableName": "b_medialib_collection",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/js": "js"
+    }
+}

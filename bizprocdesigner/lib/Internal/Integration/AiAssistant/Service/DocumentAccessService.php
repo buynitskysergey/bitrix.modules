@@ -33,6 +33,29 @@ final readonly class DocumentAccessService
 	}
 
 	/**
+	 * Whether the user may read the elements of this document type, which is what reading its field schema
+	 * asks for.
+	 *
+	 * Deliberately weaker than {@see self::canCreate()}: authoring a template of a type is a configuration
+	 * right, while reading the codes of its fields is the right to see its items. For crm this lands on
+	 * canReadItems() of the entity type, true for anyone with access to at least one of its funnels. The
+	 * asymmetry is accepted on purpose (BRIEF § 6.2, § 15.11) - the stricter right would close the agent to
+	 * everyone without administrative rights in crm, and what is disclosed is the structure of the entity and
+	 * never the values of its records.
+	 *
+	 * Asked once per entity by whoever filters a field list by it ({@see RelatedDocumentFieldPolicy}): a check
+	 * per field would run hundreds of identical permission lookups for one answer.
+	 */
+	public function canViewDocumentType(int $userId, DocumentDescription $documentType): bool
+	{
+		return \CBPDocument::CanUserOperateDocumentType(
+			\CBPCanUserOperateOperation::ViewWorkflow,
+			$userId,
+			$documentType->toBizprocComplexType(),
+		);
+	}
+
+	/**
 	 * Type-aware authoring guard for the AI-agent integration.
 	 *
 	 * Authoring on the WORKFLOW pseudo type is admin-only by design (fix #2: a non-admin could

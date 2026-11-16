@@ -17,6 +17,7 @@ use Bitrix\Tasks\V2\Public\Command\Task\DeleteTaskCommand;
 use Bitrix\Tasks\V2\Public\Command\Task\UpdateTaskCommand;
 use Bitrix\Tasks\V2\Internal\Entity;
 use Bitrix\Tasks\V2\Internal\Access\Task\Permission;
+use Bitrix\Tasks\V2\Internal\Service\Interaction\InteractionOrigin;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Add\Config\AddConfig;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Delete\Config\DeleteConfig;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Update\Config\UpdateConfig;
@@ -156,6 +157,7 @@ class Task extends BaseController
 			userId: $this->userId,
 			useConsistency: true,
 			manualDeadline: $deadlineManuallySet,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new AddTaskCommand(
@@ -191,6 +193,7 @@ class Task extends BaseController
 		$config = new UpdateConfig(
 			userId: $this->userId,
 			useConsistency: true,
+			origin: InteractionOrigin::Ui,
 		);
 
 		$result = (new UpdateTaskCommand(

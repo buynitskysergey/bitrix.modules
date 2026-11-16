@@ -76,7 +76,7 @@ final class ComplexBlockDetailFactory
 				sort: $nodeAction?->sort ?? ($nodeActivity->getSort() ?? 0),
 				presetId: $nodeAction?->presetId,
 				settingsSchema: $subActionDescription?->settings ?? new SettingCollection(),
-				skippedSettings: $subActionDescription?->skippedSettings ?? [],
+				skippedSettings: $this->namesAllowedBesideTheSchema($subActionDescription),
 				documentSchema: $this->buildDocumentSchema($handlesDocument, $fixedDocumentType),
 			);
 		}
@@ -125,6 +125,27 @@ final class ComplexBlockDetailFactory
 		;
 
 		return $description instanceof ActivityAiDescriptionResult ? $description : null;
+	}
+
+	/**
+	 * The names a sub-step may carry beside its typed schema: the ones the description could not express and the
+	 * ones the activity declares as carried from the published template. An ordinary block judges a name by the
+	 * same union ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\AgentSettingNameValidator::validate()}),
+	 * and a sub-step has to get the same verdict: the AI sub-action carries `pinnedContext` that way, and
+	 * refusing it would cost the agent the whole template.
+	 *
+	 * @return list<string>
+	 */
+	private function namesAllowedBesideTheSchema(?ActivityAiDescriptionResult $description): array
+	{
+		if ($description === null)
+		{
+			return [];
+		}
+
+		return array_values(array_unique(
+			array_merge($description->skippedSettings, $description->carriedSettings)
+		));
 	}
 
 	/**

@@ -10,17 +10,28 @@ use Bitrix\Note\Infrastructure\Rest\V3\Access\DocumentIntent;
 use Bitrix\Note\Infrastructure\Rest\V3\Access\DocumentStateResolver;
 use Bitrix\Note\Infrastructure\Rest\V3\Access\ResolvedDocument;
 use Bitrix\Note\Infrastructure\Rest\V3\Controller\ActionFilter\NoteRestAccess;
+use Bitrix\Note\Infrastructure\Rest\V3\Read\DocumentListCursor;
+use Bitrix\Note\Infrastructure\Rest\V3\Read\DocumentListQuery;
+use Bitrix\Note\Infrastructure\Rest\V3\Read\DocumentListReader;
 use Bitrix\Note\Infrastructure\Rest\V3\Read\DocumentReader;
+use Bitrix\Note\Infrastructure\Rest\V3\Read\StateFilter;
+use Bitrix\Note\Infrastructure\Rest\V3\Dto\DocumentCursorDto;
 use Bitrix\Note\Infrastructure\Rest\V3\Dto\DocumentItemDto;
+use Bitrix\Note\Infrastructure\Rest\V3\Dto\Mapping\DocumentMapper;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\DocumentHasUnsavedChangesException;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\EmptyUpdateException;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\InvalidParentException;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\MarkdownTooLargeException;
 use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\MoveAccessEscalationException;
+use Bitrix\Note\Infrastructure\Rest\V3\Exceptions\RestoreTargetRequiredException;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\ArchiveDocumentRequest;
+use Bitrix\Note\Infrastructure\Rest\V3\Request\ListDocumentsRequest;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\MoveDocumentRequest;
+use Bitrix\Note\Infrastructure\Rest\V3\Request\RestoreDocumentRequest;
 use Bitrix\Note\Infrastructure\Rest\V3\Request\UpdateDocumentRequest;
+use Bitrix\Note\Infrastructure\Rest\V3\Response\DocumentListResponse;
 use Bitrix\Note\Infrastructure\Rest\V3\Write\PositionSlotResolver;
+use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException as DomainAccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
 use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
@@ -29,19 +40,22 @@ use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
 use Bitrix\Note\Internal\Exceptions\MainDocumentOperationException;
 use Bitrix\Note\Internal\Exceptions\MoveAccessEscalationException as DomainMoveAccessEscalationException;
+use Bitrix\Note\Internal\Exceptions\OrphanRestoreTargetRequiredException as DomainOrphanRestoreTargetRequiredException;
 use Bitrix\Note\Internal\Exceptions\ParentDocumentMismatchException;
 use Bitrix\Note\Internal\Model\Document as DocumentEntity;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsDictionary;
 use Bitrix\Note\Internal\Service\Analytics\AnalyticsService;
+use Bitrix\Note\Internal\Service\Document\Position\PositionService;
 use Bitrix\Note\Public\Command\ArchiveDocumentCommand;
 use Bitrix\Note\Public\Command\CreateDocumentCommand;
 use Bitrix\Note\Public\Command\DeleteDocumentCommand;
 use Bitrix\Note\Public\Command\MoveDocumentCommand;
 use Bitrix\Note\Public\Command\OverwriteDocumentContentCommand;
+use Bitrix\Note\Public\Command\RestoreDocumentCommand;
+use Bitrix\Note\Public\Command\RestoreDocumentFromRecycleBinCommand;
 use Bitrix\Note\Public\Command\UpdateDocumentCommand;
-use Bitrix\Note\Public\Provider\CollectionProvider;
 use Bitrix\Note\Public\Provider\Param\Document\DocumentLimits;
 use Bitrix\Note\Public\Service\AccessService;
 use Bitrix\Main\Command\Exception\CommandException;
@@ -75,6 +89,34 @@ class Document extends RestController
 			...parent::getDefaultPreFilters(),
 			new NoteRestAccess(),
 		];
+	}
+
+	public function listAction(ListDocumentsRequest $request): DocumentListResponse
+	{
+		$filter = $request->filter?->getSimpleFilterConditions() ?? [];
+		$select = $request->getSelect();
+
+		$result = (new DocumentListReader())->list(
+			new DocumentListQuery(
+				collectionId: array_key_exists('collectionId', $filter) ? (int)$filter['collectionId'] : null,
+				states: StateFilter::parse($request->filter),
+				select: $select,
+				limit: $request->getLimit(),
+				cursor: DocumentListCursor::parse($request->getAfterCursor()),
+			),
+			$this->getCurrentUserId(),
+		);
+
+		return new DocumentListResponse(
+			// A page answers with metainformation and never with content. A select that named the text
+			// was already refused on the way in, so the narrowing here is about the caller who named
+			// nothing: they are given everything the list has, which is everything but the text.
+			$this->getDtoMapper()->mapCollection(
+				$result->items,
+				$select === [] ? DocumentMapper::fieldsWithout(DocumentListQuery::HEAVY_FIELDS) : $select,
+			),
+			$this->buildCursor($result->nextCursor),
+		);
 	}
 
 	public function getAction(GetRequest $request): GetResponse
@@ -119,6 +161,11 @@ class Document extends RestController
 				new Error('collectionId must be a positive integer', 'collectionId'),
 			]);
 		}
+
+		// The state of the collection is asked about before the level, the same way the far end of a
+		// move is: a collection in the recycle bin takes no new documents, and answering that with "no
+		// access" would send the caller asking for a right that would change nothing.
+		$this->requireUsableCollection($collectionId);
 
 		try
 		{
@@ -299,6 +346,48 @@ class Document extends RestController
 	}
 
 	#[Idempotent]
+	#[Title('Bring a document back from the archive')]
+	#[Description(
+		'Takes the document and everything nested under it out of the archive and back into the tree. '
+		. 'An archived collection around it is lifted out of the archive too - a document returned into '
+		. 'one would be invisible anyway. A document that is not in the archive is answered as missing, '
+		. 'the mirror of what archiving an already archived one answers: the archive is a state to '
+		. 'enter and to leave, not a flag to set and clear. A document in the recycle bin is not in the '
+		. 'archive - it is restored with note.document.restore. Requires the right to edit the '
+		. 'collection it belongs to.'
+	)]
+	public function unarchiveAction(ArchiveDocumentRequest $request): UpdateResponse
+	{
+		$id = (int)$request->id;
+		$resolved = $this->resolveVisible($id);
+		$this->assertCanEditOwningCollection($resolved);
+
+		// Asked here rather than left to the command, which only looks at the archive flag: a document
+		// deleted while archived keeps that flag in the bin, and clearing it there would quietly decide
+		// what state the bin gives it back in.
+		if (!$resolved->isArchived())
+		{
+			throw new EntityNotFoundException($id);
+		}
+
+		try
+		{
+			$result = (new RestoreDocumentCommand($id, $this->getCurrentUserId()))->run();
+		}
+		catch (CommandException $e)
+		{
+			$this->mapDocumentDomainException($e->getPrevious() ?? $e, $id);
+		}
+
+		if (!(($result->getData()['document'] ?? null) instanceof DocumentEntity))
+		{
+			throw new EntityNotFoundException($id);
+		}
+
+		return new UpdateResponse(true);
+	}
+
+	#[Idempotent]
 	#[Title('Move a document, or change where it sits among its neighbours')]
 	#[Description(
 		'Moves the document with everything nested under it: to another collection, under another '
@@ -394,6 +483,69 @@ class Document extends RestController
 		return new DeleteResponse(true);
 	}
 
+	#[Idempotent]
+	#[Title('Bring a document back from the recycle bin')]
+	#[Description(
+		'Takes the document and everything nested under it out of the recycle bin. It returns to the '
+		. 'collection it was deleted from, under its original parent whenever that parent is back in '
+		. 'place; `collectionId` sends it elsewhere and takes the right to edit that collection. A '
+		. 'document whose collection is gone has nowhere to return to and is refused as '
+		. '`NOTE_RESTORE_TARGET_REQUIRED` until `collectionId` names one. A document that is not in '
+		. 'the bin is answered as missing, and one whose collection is in the bin is refused: the '
+		. 'collection comes back whole, so a document pulled out of it now would be missing from it.'
+	)]
+	public function restoreAction(RestoreDocumentRequest $request): GetResponse
+	{
+		$id = $request->id;
+		$resolved = $this->resolveVisible($id);
+
+		// The resolver has already read the recycle-bin row to answer whether the document is visible
+		// at all; its absence means the document is not in the bin.
+		$record = $resolved->recycleBinRecord;
+		if ($record === null)
+		{
+			throw new EntityNotFoundException($id);
+		}
+
+		// Not the ordinary edit right: who may take a document out of the bin is a question of its own,
+		// and the same gate answers it for the web.
+		if (!DocumentAccessService::canRestoreFromRecycleBin($this->getCurrentUserId(), $record))
+		{
+			throw new AccessDeniedException();
+		}
+
+		$targetCollectionId = $request->collectionId;
+		if ($targetCollectionId !== null)
+		{
+			$this->requireWritableCollection($targetCollectionId);
+		}
+
+		try
+		{
+			$result = (new RestoreDocumentFromRecycleBinCommand(
+				(int)$record->getId(),
+				$this->getCurrentUserId(),
+				$targetCollectionId,
+			))->run();
+		}
+		catch (CommandException $e)
+		{
+			$this->mapRestoreDomainException($e->getPrevious() ?? $e, $id);
+		}
+
+		if (!$result->isSuccess())
+		{
+			$this->refuseFailedRestore($result, $id);
+		}
+
+		// A reader of its own, not the shared one: the resolver behind it has already answered about
+		// this document while it was in the bin, and it answers from memory for the rest of the
+		// request - the state that matters here is the one the restore has just produced.
+		return new GetResponse(
+			$this->getDtoMapper()->mapOne((new DocumentReader())->read($id, $this->getCurrentUserId())),
+		);
+	}
+
 	/**
 	 * The gate every write of a document goes through first, and the reason it is one call rather than
 	 * two checks in a row: a write used to answer "no access" about a document the caller was never
@@ -429,22 +581,42 @@ class Document extends RestController
 	}
 
 	/**
-	 * The far end of a move. A collection the caller may not open is answered as a missing one, the
-	 * same way the collection methods answer about it; an archived one is refused as a write into an
-	 * archive, because that is what landing a document there would be.
+	 * Whether a collection can hold a document that is being put into it at all - asked before any
+	 * question about the caller, because the answer is the same for everybody.
+	 *
+	 * A collection the caller may not open is answered as a missing one, the same way the collection
+	 * methods answer about it; so is one in the recycle bin, which for REST has stopped being. An
+	 * archived one is refused as a write into an archive, because that is what landing a document
+	 * there would be.
 	 */
-	private function requireWritableCollection(int $collectionId): void
+	private function requireUsableCollection(int $collectionId): void
 	{
-		$collection = (new CollectionProvider())->getById($collectionId);
-		if ($collection === null || !AccessService::canViewCollection($collectionId))
+		// The state comes from the access layer rather than from the provider: the write path asks it
+		// again further down, and asked this way both questions share one read.
+		$state = DocumentAccessService::collectionState($collectionId);
+		if ($state === null || !AccessService::canViewCollection($collectionId))
 		{
 			throw new EntityNotFoundException($collectionId);
 		}
 
-		if ($collection->getIsArchived())
+		if ($state['trashed'])
+		{
+			throw new EntityNotFoundException($collectionId);
+		}
+
+		if ($state['archived'])
 		{
 			throw new AccessDeniedException();
 		}
+	}
+
+	/**
+	 * The far end of a move: the collection has to be usable, and the caller has to hold the right to
+	 * edit it - a move hands the whole branch over to it.
+	 */
+	private function requireWritableCollection(int $collectionId): void
+	{
+		$this->requireUsableCollection($collectionId);
 
 		try
 		{
@@ -471,6 +643,27 @@ class Document extends RestController
 		}
 
 		return $documentId;
+	}
+
+	/**
+	 * The cursor as the client sees it: three fields it passes back untouched. What they mean is the
+	 * reader's business - the client is told only that the answer carries the next page start.
+	 *
+	 * @param array{stream: string, collectionId: int|null, id: int}|null $cursor
+	 */
+	private function buildCursor(?array $cursor): ?DocumentCursorDto
+	{
+		if ($cursor === null)
+		{
+			return null;
+		}
+
+		$dto = new DocumentCursorDto();
+		$dto->stream = $cursor['stream'];
+		$dto->collectionId = $cursor['collectionId'];
+		$dto->id = $cursor['id'];
+
+		return $dto;
 	}
 
 	private function getStateResolver(): DocumentStateResolver
@@ -542,6 +735,38 @@ class Document extends RestController
 		}
 
 		$this->mapDocumentDomainException($cause, $documentId);
+	}
+
+	/**
+	 * A restore fails in one way no other write does: the collection the document came from is gone,
+	 * and the request has to name another one. That refusal keeps its own code, because "bad request"
+	 * would leave the client guessing which field it is about.
+	 */
+	private function mapRestoreDomainException(\Throwable $cause, int $documentId): never
+	{
+		if ($cause instanceof DomainOrphanRestoreTargetRequiredException)
+		{
+			throw new RestoreTargetRequiredException();
+		}
+
+		$this->mapDocumentDomainException($cause, $documentId);
+	}
+
+	/**
+	 * A restore refused before it wrote anything. Only one of those refusals is worth a code of its
+	 * own, and it is the one a move has too: landing in a branch shared wider than what is being
+	 * restored would hand that audience the whole branch. The rest - a row that has gone, a collection
+	 * that went into the bin between the check and the call - are races with somebody else's write,
+	 * and the document the caller asked about is no longer where they think it is.
+	 */
+	private function refuseFailedRestore(Result $result, int $documentId): never
+	{
+		if ($result->getErrorCollection()->getErrorByCode(PositionService::ERROR_MOVE_ACCESS_ESCALATION) !== null)
+		{
+			throw new MoveAccessEscalationException();
+		}
+
+		throw new EntityNotFoundException($documentId);
 	}
 
 	private function mapDocumentDomainException(\Throwable $cause, int $documentId): never

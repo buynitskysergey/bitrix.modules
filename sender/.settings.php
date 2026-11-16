@@ -9,6 +9,14 @@ return [
 		],
 		"readonly" => true,
 	],
+	'services' => [
+		'value' => [
+			\Bitrix\Sender\Dispatch\DurationFormatter::class => [
+				'className' => \Bitrix\Sender\Dispatch\DurationFormatter::class,
+			],
+		],
+		'readonly' => true,
+	],
 	"yandex.integration.widget" => [
 		"value" => [
 			"partnerId" => 2706070

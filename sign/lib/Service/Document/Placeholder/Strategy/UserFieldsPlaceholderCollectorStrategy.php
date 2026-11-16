@@ -40,6 +40,33 @@ class UserFieldsPlaceholderCollectorStrategy extends AbstractPlaceholderCollecto
 	}
 
 	/**
+	 * Raw user field types by the code create() puts into the placeholder name.
+	 *
+	 * The name carries the type resolveFieldType() converted the field to, and the conversion turns a
+	 * url into a plain string, so a restriction that judges a url reads the type from here instead.
+	 *
+	 * @param array<int, array<string, mixed>> $fields descriptors of the fields list
+	 * @return array<string, string>
+	 */
+	public static function collectRawFieldTypes(array $fields): array
+	{
+		$rawFieldTypes = [];
+
+		foreach ($fields as $field)
+		{
+			$fieldCode = (string)($field['name'] ?? '');
+			if ($fieldCode === '')
+			{
+				continue;
+			}
+
+			$rawFieldTypes[self::USER_FIELD_CODE_PREFIX . $fieldCode] = (string)($field['type'] ?? '');
+		}
+
+		return $rawFieldTypes;
+	}
+
+	/**
 	 * The descriptor of the fields list carries the raw user field type, while the meaning of a legal
 	 * field is known to the profile provider, so the type is taken from the field description.
 	 */

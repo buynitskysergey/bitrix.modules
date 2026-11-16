@@ -3,7 +3,6 @@
 namespace Bitrix\Intranet\Public\Provider\Portal;
 
 use Bitrix\Intranet\Internal\Repository\LanguageRepository;
-use Bitrix\Intranet\Internal\Util\LanguageTag;
 use Bitrix\Main\ModuleManager;
 use Bitrix\Main\Config\Option;
 
@@ -27,7 +26,7 @@ class LanguageProvider
 			$value = [
 				'NAME' => $language['NAME'],
 				'IS_BETA' => in_array($language['ID'], self::BETA_LANGUAGE_LIST),
-				'LANG_TAG' => LanguageTag::getByLanguageId((string)$language['ID']),
+				'LANG_TAG' => $language['CODE'] ?: null,
 			];
 
 			if ($language['ID'] === LANGUAGE_ID)

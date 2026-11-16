@@ -1,8 +1,10 @@
 {
     "defaultTableName": "b_note_collection",
     "installDirectoriesMapping": {
+        "install/activities": "activities",
         "install/components": "components",
         "install/js": "js",
+        "install/mobileapp": "mobileapp",
         "install/templates": "templates"
     }
 }

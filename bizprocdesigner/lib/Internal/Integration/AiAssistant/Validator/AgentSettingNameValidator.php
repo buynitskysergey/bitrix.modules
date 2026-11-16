@@ -3,6 +3,7 @@
 namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator;
 
 use Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Enum\GraphErrorCode;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Error\GraphError;
 use Bitrix\Main\Result;
 use Bitrix\Bizproc\Internal\Entity\Activity\Setting;
@@ -21,12 +22,17 @@ final class AgentSettingNameValidator
 			return $this->validateNameShape($name, $path);
 		}
 
+		// Both lists name a setting the typed schema does not hold, and both are accepted by name alone: the
+		// carried one because the activity declares it as carried from the published template, the skipped one
+		// because the description could not express it. Refusing either would cost the agent the whole template.
 		return $this->validateAgainstSchema(
 			$name,
 			$value,
 			$path,
 			$blockTypeDetail->settings,
-			$blockTypeDetail->skippedSettings,
+			array_values(array_unique(
+				array_merge($blockTypeDetail->skippedSettings, $blockTypeDetail->carriedSettings)
+			)),
 		);
 	}
 
@@ -62,7 +68,11 @@ final class AgentSettingNameValidator
 		{
 			return $isPassthrough
 				? new Result()
-				: (new Result())->addError(GraphError::at("{$path}.name", "{$path}.name is incorrect"))
+				: (new Result())->addError(GraphError::at(
+					"{$path}.name",
+					"{$path}.name is incorrect",
+					GraphErrorCode::SettingNameUnknown,
+				))
 			;
 		}
 
@@ -86,7 +96,11 @@ final class AgentSettingNameValidator
 	{
 		return is_string($name) && $name !== ''
 			? new Result()
-			: (new Result())->addError(GraphError::at("{$path}.name", "{$path}.name should be not empty string"))
+			: (new Result())->addError(GraphError::at(
+				"{$path}.name",
+				"{$path}.name should be not empty string",
+				GraphErrorCode::SettingEntryInvalid,
+			))
 		;
 	}
 }

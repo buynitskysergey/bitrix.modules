@@ -88,7 +88,14 @@ class MoveToRecycleBinService
 
 		do
 		{
-			$chunk = $this->documentRepository->listByCollectionForCascadeDelete($collectionId, $afterId, 500);
+			// The main document goes along: the base itself survives now, so its description has
+			// somewhere to come back to.
+			$chunk = $this->documentRepository->listByCollectionForCascadeDelete(
+				$collectionId,
+				$afterId,
+				500,
+				includeMain: true,
+			);
 			if (empty($chunk))
 			{
 				break;

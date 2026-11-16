@@ -26,6 +26,33 @@ class CollectionPositionService
 
 	public function move(int $collectionId, ?int $targetPosition, int $userId): Result
 	{
+		return $this->apply($collectionId, $targetPosition, null, $userId);
+	}
+
+	/**
+	 * Moves the collection next to a named neighbour instead of onto a place counted in a list.
+	 *
+	 * The order is one for the whole portal, but a person sees only the bases open to them, so the
+	 * place counted in their panel points at someone else's gap: the second row of the panel can be
+	 * the fifth row of the portal. The neighbour is the same row on both sides, so it says where the
+	 * base must land no matter what is hidden around it.
+	 */
+	public function moveNextTo(int $collectionId, int $targetId, string $placement, int $userId): Result
+	{
+		$result = new Result();
+
+		if ($targetId <= 0 || $targetId === $collectionId || !in_array($placement, ['before', 'after'], true))
+		{
+			$result->addError(new Error('Invalid collection move target.'));
+
+			return $result;
+		}
+
+		return $this->apply($collectionId, null, ['id' => $targetId, 'placement' => $placement], $userId);
+	}
+
+	private function apply(int $collectionId, ?int $targetPosition, ?array $anchor, int $userId): Result
+	{
 		$result = new Result();
 
 		if ($collectionId <= 0)
@@ -39,6 +66,20 @@ class CollectionPositionService
 		if ($collection === null)
 		{
 			return $result;
+		}
+
+		if ($anchor !== null)
+		{
+			// The neighbour is looked up before the transaction opens, the way the REST resolver does
+			// it: a move racing another one lands a place off, which is the same answer two people
+			// dragging in one list get, and the order that comes out of it is still a valid order.
+			$targetPosition = $this->resolveAnchorSlot($this->repository->getActivePositions(), $collectionId, $anchor);
+			if ($targetPosition === null)
+			{
+				$result->addError(new Error('Collection move target is not in the list.'));
+
+				return $result;
+			}
 		}
 
 		$connection = Application::getConnection();
@@ -106,6 +147,28 @@ class CollectionPositionService
 
 			return $result;
 		}
+	}
+
+	private function resolveAnchorSlot(array $rows, int $movedId, array $anchor): ?int
+	{
+		$slot = 1;
+		foreach ($rows as $row)
+		{
+			$id = (int)$row['id'];
+			if ($id === $movedId)
+			{
+				continue;
+			}
+
+			if ($id === (int)$anchor['id'])
+			{
+				return $anchor['placement'] === 'before' ? $slot : $slot + 1;
+			}
+
+			$slot++;
+		}
+
+		return null;
 	}
 
 	private function extractSiblingPositions(array $rows, int $excludeId): array

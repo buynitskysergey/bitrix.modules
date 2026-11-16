@@ -6,6 +6,7 @@ namespace Bitrix\Note\Internal\Service;
 
 use Bitrix\Main\Application;
 use Bitrix\Main\Event;
+use Bitrix\Note\Internal\Enum\WriteSource;
 use Bitrix\Note\Public\Event\OnDocumentContentSettledEvent;
 use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
 
@@ -36,6 +37,8 @@ class DomainEventPublisher
 	 * @param int[] $documentIds Full list of affected document ids.
 	 * @param array{collectionId: int, parentId: int|null}|null $from Only for `moved` — old root location.
 	 * @param array{collectionId: int, parentId: int|null}|null $to Only for `moved` — new root location.
+	 * @param int|null $initiatorId Who performed the write; null when the command has no user.
+	 * @param WriteSource|null $writeSource Where the write came from; null means the default source.
 	 */
 	public function emitLifecycle(
 		string $reason,
@@ -43,13 +46,23 @@ class DomainEventPublisher
 		array $documentIds,
 		?array $from = null,
 		?array $to = null,
+		?int $initiatorId = null,
+		?WriteSource $writeSource = null,
 	): void
 	{
-		$event = new OnDocumentLifecycleEvent($reason, $collectionId, $documentIds, $from, $to);
+		$event = new OnDocumentLifecycleEvent(
+			$reason,
+			$collectionId,
+			$documentIds,
+			$from,
+			$to,
+			$initiatorId,
+			$writeSource,
+		);
 
-		// Empty cascade => nothing to say. Normalization already happened in the event ctor,
-		// so ask the event rather than re-normalizing here.
-		if ($event->getDocumentIds() === [])
+		// Empty cascade => nothing to say, unless the event is about the base itself and not about its
+		// documents. Normalization already happened in the event ctor, so ask the event here.
+		if ($event->getDocumentIds() === [] && $reason !== OnDocumentLifecycleEvent::COLLECTION_HARD_DELETED)
 		{
 			return;
 		}

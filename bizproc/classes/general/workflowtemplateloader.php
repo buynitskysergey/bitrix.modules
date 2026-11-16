@@ -10,6 +10,7 @@ use Bitrix\Bizproc\Internal\Service\Pilot\PilotPresence;
 use Bitrix\Bizproc\Internal\Service\Pilot\RestrictedTemplateArea;
 use Bitrix\Bizproc\Internal\Service\Pilot\SettingsFreezeGate;
 use Bitrix\Bizproc\Internal\Service\ProcessData\ProcessDataPublicationValidator;
+use Bitrix\Bizproc\Internal\Service\Template\FirstPublicationWriter;
 use Bitrix\Bizproc\Internal\Service\WorkflowTemplate\AutoExecuteFilter;
 use Bitrix\Bizproc\Public\ProcessData\Service\ProcessDataMechanicsResolver;
 use Bitrix\Bizproc\Public\Provider\PilotVisibilityProvider;
@@ -790,13 +791,25 @@ class CBPWorkflowTemplateLoader
 	 * checks rights for one user while the global holds another would otherwise hand the row to the wrong
 	 * owner. Callers with no request user of their own (install, import, conversion) pass nothing and keep
 	 * the global.
+	 *
+	 * $markFirstPublication says whether this creation is an act of publishing a process; null leaves the
+	 * answer to $systemImport. See {@see FirstPublicationWriter}.
 	 */
-	public static function add($fields, $systemImport = false, ?int $actorId = null)
+	public static function add(
+		$fields,
+		$systemImport = false,
+		?int $actorId = null,
+		?bool $markFirstPublication = null,
+	)
 	{
 		$loader = CBPWorkflowTemplateLoader::GetLoader();
 		$templateType = $loader->getTemplateType($fields);
 		$loader->setShowInTimelineBeforeAdd($fields);
 		$loader->setTemplateType($fields, $templateType);
+
+		$fields = (new FirstPublicationWriter())
+			->prepareForInsert($fields, (bool)$systemImport, $markFirstPublication)
+		;
 
 		$authorId = $loader->resolveActorId($actorId);
 		$fields['CREATED_BY'] = $authorId;
@@ -883,6 +896,10 @@ class CBPWorkflowTemplateLoader
 			}
 
 			self::guardFrozenSettings($templateId, $fields, $publishesCommonVersion);
+
+			$fields = (new FirstPublicationWriter())
+				->prepareForUpdate($templateId, $fields, $publishesCommonVersion)
+			;
 
 			$returnId = $loader->UpdateTemplate($templateId, $fields, $systemImport, $validationRequired);
 			$loader->updateTemplateSettings($templateId, $fields);
@@ -1891,7 +1908,7 @@ class CBPWorkflowTemplateLoader
 		if ($id > 0)
 			self::Update($id, $templateData, $systemImport);
 		else
-			$id = self::Add($templateData, $systemImport);
+			$id = self::Add($templateData, $systemImport, markFirstPublication: false);
 
 		if ($templateFields['DOCUMENT_FIELDS'] && is_array($templateFields['DOCUMENT_FIELDS']))
 		{

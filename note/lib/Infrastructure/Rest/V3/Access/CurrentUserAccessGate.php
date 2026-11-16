@@ -20,7 +20,15 @@ final class CurrentUserAccessGate implements DocumentAccessGate
 
 	public function snapshot(int $documentId, int $collectionId, bool $isArchived): array
 	{
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $collectionId, $isArchived);
+		// An archived knowledge base is still read here - the resolver above answers Archived and the
+		// caller is told why writes are refused. A base in the recycle bin is not: it is closed on this
+		// surface, and its documents keep their own rows, so nothing else would close them.
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$collectionId,
+			$isArchived,
+			allowStates: [DocumentAccessService::STATE_ARCHIVED],
+		);
 
 		return [
 			'canView' => (bool)$snapshot['canView'],

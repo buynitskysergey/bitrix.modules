@@ -4,6 +4,7 @@ namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator;
 
 use Bitrix\BizprocDesigner\Internal\Entity\BlockTypeDetail;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\AgentSetting;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Enum\GraphErrorCode;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Error\GraphError;
 use Bitrix\Main\Result;
 
@@ -29,13 +30,16 @@ final class AgentBlockSettingValidator
 		?BlockTypeDetail $blockTypeDetail,
 		?string $blockType = null,
 		?string $presetId = null,
+		bool $allowPublishedExpressionKeys = false,
 	): Result
 	{
 		$this->validSetting = null;
 
 		if (!is_array($setting))
 		{
-			return (new Result())->addError(GraphError::at($path, "{$path} should be object"));
+			return (new Result())->addError(
+				GraphError::at($path, "{$path} should be object", GraphErrorCode::SettingEntryInvalid),
+			);
 		}
 
 		$result = new Result();
@@ -45,7 +49,14 @@ final class AgentBlockSettingValidator
 		$result->addErrors($nameValidateResult->getErrors());
 		$settingConfig = $this->nameValidator->getSetting();
 
-		$valueValidateResult = $this->valueValidator->validate($value, $path, $settingConfig, $blockType, $presetId);
+		$valueValidateResult = $this->valueValidator->validate(
+			$value,
+			$path,
+			$settingConfig,
+			$blockType,
+			$presetId,
+			$allowPublishedExpressionKeys,
+		);
 		$result->addErrors($valueValidateResult->getErrors());
 
 		if ($nameValidateResult->isSuccess()

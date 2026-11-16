@@ -127,8 +127,9 @@ final class UserDepartmentProvider
 
 	private function getNodeIdsDataByUserIds(array $userIds): array
 	{
-		$nodeMemberCollection = HumanResourcesContainer::getNodeMemberRepository()->findAllByEntityIds(
+		$nodeMemberCollection = PublicHrContainer::getNodeMemberService()->findAllByEntityIds(
 			$userIds,
+			memberActive: null,
 		);
 
 		if ($nodeMemberCollection->empty())

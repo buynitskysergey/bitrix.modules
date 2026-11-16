@@ -29,6 +29,14 @@ final class NewEmployeeTrigger
 	public const FILTER_REFUSAL_CODE_PREFIX = 'HUMANRESOURCES_NEW_EMPLOYEE_TRIGGER_';
 
 	public const REFUSAL_UNRESOLVED_FILTER = self::FILTER_REFUSAL_CODE_PREFIX . 'UNRESOLVED_FILTER';
+
+	/**
+	 * The binding names an employee by hand, which the node selector of the setting cannot express any
+	 * more. The whole binding is refused for it: narrowing such a setting down to the nodes standing next
+	 * to the employee would change what a published scenario does no less than taking everyone would.
+	 */
+	public const REFUSAL_STALE_USER_CODES = self::FILTER_REFUSAL_CODE_PREFIX . 'STALE_USER_CODES';
+
 	public const REFUSAL_NO_STRUCTURE_CODES = self::FILTER_REFUSAL_CODE_PREFIX . 'NO_STRUCTURE_CODES';
 	public const REFUSAL_NO_MEMBER_NODES = self::FILTER_REFUSAL_CODE_PREFIX . 'NO_MEMBER_NODES';
 	public const REFUSAL_OUTSIDE_SELECTION = self::FILTER_REFUSAL_CODE_PREFIX . 'OUTSIDE_SELECTION';

@@ -57,7 +57,8 @@ class Search extends RestController
 			throw new SearchQueryTooLongException(SearchLimits::MAX_QUERY_LENGTH);
 		}
 
-		$limit = ($request->pagination ?? new SearchPaginationStructure())->getLimit();
+		$pagination = $request->pagination ?? new SearchPaginationStructure();
+		$limit = $pagination->getLimit();
 		$fields = $request->select?->getStructuredList() ?? [];
 		// A snippet costs the whole body of every row on the page: it is selected, decoded out of its
 		// emoji storage and cut around the tokens. A caller that asked for titles alone should not pay
@@ -66,7 +67,7 @@ class Search extends RestController
 
 		$collection = (new SearchProvider())->search(
 			query: new SearchQuery($raw),
-			pager: new Pager($limit),
+			pager: new Pager($limit, $pagination->getOffset()),
 			withSnippets: $withSnippets,
 			collectionId: $collectionId,
 		);

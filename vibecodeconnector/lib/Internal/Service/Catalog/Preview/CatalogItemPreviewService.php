@@ -106,7 +106,7 @@ class CatalogItemPreviewService
 			&& $this->itemRepository->isAccessibleToUser(
 				(int)$item->getId(),
 				$userId,
-				$this->accessCodes->getUserCodes($userId),
+				$this->accessCodes->getUserCodesForItems($userId, [(int)$item->getId()]),
 			);
 	}
 

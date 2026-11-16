@@ -17,6 +17,9 @@ use Bitrix\Note\Public\Provider\DocumentProvider;
  * something visible may be starred or subscribed to. The two answers are kept apart - a missing
  * target is 404, an invisible one is 403 - and neither of them carries data about the object.
  *
+ * A target inside a base lying in the recycle bin is answered as missing: the base keeps its row,
+ * but on every live surface it is gone.
+ *
  * Each host controller keeps its own vocabulary (FavoriteTable::ENTITY_TYPE_*, SubscriptionTable::
  * SCOPE_*) and dispatches to the two methods below.
  *
@@ -27,7 +30,7 @@ trait TargetViewAccessTrait
 	private function assertTargetDocumentViewAccess(int $documentId): bool
 	{
 		$ownership = (new DocumentProvider())->getOwnershipInfo($documentId);
-		if ($ownership === null)
+		if ($ownership === null || !DocumentAccessService::isCollectionAlive((int)$ownership['collectionId']))
 		{
 			Context::getCurrent()->getResponse()->setStatus(404);
 
@@ -47,7 +50,10 @@ trait TargetViewAccessTrait
 
 	private function assertTargetCollectionViewAccess(int $collectionId): bool
 	{
-		if ((new CollectionProvider())->getById($collectionId) === null)
+		if (
+			(new CollectionProvider())->getById($collectionId) === null
+			|| !DocumentAccessService::isCollectionAlive($collectionId)
+		)
 		{
 			Context::getCurrent()->getResponse()->setStatus(404);
 

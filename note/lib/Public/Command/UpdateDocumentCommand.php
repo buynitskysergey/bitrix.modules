@@ -6,6 +6,7 @@ namespace Bitrix\Note\Public\Command;
 
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
 use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
@@ -64,6 +65,13 @@ class UpdateDocumentCommand extends AbstractCommand
 		if ($existing !== null && $existing->getIsArchived())
 		{
 			throw new DocumentArchivedException();
+		}
+
+		// Archiving a base does not touch its documents, so their own flags say nothing about it:
+		// the ban lives on the state of the base and has to be asked for separately.
+		if ($existing !== null)
+		{
+			CollectionAccessService::assertCollectionAcceptsWrites((int)$existing->getCollectionId());
 		}
 
 		// Uncached previous title for accurate change detection (see getTitleById): the cached $existing

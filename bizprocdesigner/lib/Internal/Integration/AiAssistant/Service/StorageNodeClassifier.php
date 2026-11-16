@@ -33,6 +33,7 @@ final class StorageNodeClassifier
 
 	private const STORAGE_CODE_SETTING = 'StorageCode';
 	private const STORAGE_ID_SETTING = 'StorageId';
+	private const STORAGE_COLUMNS_SETTING = 'SelectedFields';
 	private const REWRITE_MODE_SETTING = 'RewriteMode';
 
 	// write RewriteMode value that means "create a new item"; anything else is an update of an existing item.
@@ -74,6 +75,16 @@ final class StorageNodeClassifier
 	public static function extractStorageId(AgentSettingCollection $settings): mixed
 	{
 		return self::findSettingValue($settings, self::STORAGE_ID_SETTING);
+	}
+
+	/**
+	 * The columns a create node declares, as written. Read here rather than by the caller so every setting name of
+	 * a storage node keeps being named in one place ({@see StorageNodeFingerprint::columnContractOf()} turns the
+	 * value into the contract the code stands for).
+	 */
+	public static function extractStorageColumns(AgentSettingCollection $settings): mixed
+	{
+		return self::findSettingValue($settings, self::STORAGE_COLUMNS_SETTING);
 	}
 
 	private static function isWriteUpdate(AgentSettingCollection $settings): bool

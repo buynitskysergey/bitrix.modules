@@ -78,6 +78,7 @@ final class CatalogProvider
 
 		$filter = (new CatalogItemFilter())
 			->accessibleToUser($userId, $userCodes)
+			->type(CatalogItemType::Application)
 			->query($query)
 			->hiddenState($state->hiddenPredicate())
 			->favoriteState($state->favoritePredicate())
@@ -197,9 +198,9 @@ final class CatalogProvider
 
 	public function countNewAppsForUser(int $userId, bool $useCache = true): int
 	{
-		$compute = fn(): int => $this->computeNewAppsCount($userId);
+		$compute = fn (): array => $this->computeNewAppsCount($userId);
 
-		return $useCache ? $this->countCache->remember($userId, $compute) : $compute();
+		return $useCache ? $this->countCache->rememberConditional($userId, $compute) : $compute()['count'];
 	}
 
 	public function forgetNewAppsCount(int $userId): void
@@ -207,12 +208,15 @@ final class CatalogProvider
 		$this->countCache->forget($userId);
 	}
 
-	private function computeNewAppsCount(int $userId): int
+	private function computeNewAppsCount(int $userId): array
 	{
-		$userCodes = $this->accessCodes->getUserCodes($userId);
+		$result = $this->accessCodes->getUserCodeResult($userId);
 		$baseline = $this->baselineResolver->resolveForUser($userId);
 
-		return $this->itemRepository->getNewAppCount($userId, $userCodes, $baseline);
+		return [
+			'count' => $this->itemRepository->getNewAppCount($userId, $result->codes, $baseline),
+			'cacheable' => !$result->degraded,
+		];
 	}
 
 	public function listDiscoverableToUser(int $userId, ?string $query = null, int $offset = 0, int $limit = 20): CatalogItemCollection

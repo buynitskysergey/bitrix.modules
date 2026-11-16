@@ -30,7 +30,7 @@ class ProvisioningAccessPolicy
 		$this->paidTariff = $paidTariff ?? new PaidTariff($this->license);
 	}
 
-	public function ensureAvailable(bool $requirePaidTariff = true): void
+	public function ensureAvailable(bool $requirePaidTariff): void
 	{
 		$isMarketRegion = in_array($this->license->getRegion(), self::SUBSCRIPTION_REQUIRED_REGION, true);
 

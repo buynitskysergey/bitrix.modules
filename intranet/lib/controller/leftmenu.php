@@ -11,6 +11,7 @@ use Bitrix\Intranet\Settings\Tools\Tasks;
 use Bitrix\Intranet\Settings\Tools\TeamWork;
 use Bitrix\Intranet\Portal\FirstPage;
 use Bitrix\Intranet\Internal\Service\Portal\PortalFirstPageUrlNormalizer;
+use Bitrix\Intranet\Internal\Service\Portal\FirstPageUrlPolicy;
 use Bitrix\Intranet\UI\LeftMenu\MenuItem\ItemUserFavorites;
 use Bitrix\Intranet\UI\LeftMenu\Preset;
 use Bitrix\Intranet\Internal\MainTool\AccessPolicy;
@@ -676,7 +677,10 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 			),
 		);
 
-		if (isset($_POST['firstItemLink']))
+		if (
+			isset($_POST['firstItemLink'])
+			&& FirstPageUrlPolicy::isAllowedAsFirstPage($_POST['firstItemLink'])
+		)
 		{
 			\CUserOptions::SetOption('intranet', 'left_menu_first_page_' . SITE_ID, $_POST['firstItemLink']);
 		}
@@ -1086,7 +1090,11 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		}
 
 		Option::set('intranet', 'left_menu_preset', 'custom', false, SITE_ID);
-		if (isset($_POST['firstItemLink']) && is_string($_POST['firstItemLink']))
+		if (
+			isset($_POST['firstItemLink'])
+			&& is_string($_POST['firstItemLink'])
+			&& FirstPageUrlPolicy::isAllowedAsFirstPage($_POST['firstItemLink'])
+		)
 		{
 			$firstPageUrl = (new PortalFirstPageUrlNormalizer())
 				->normalize($_POST['firstItemLink'])
@@ -1147,7 +1155,6 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		{
 			return null;
 		}
-
 		if ($this->isMainToolPickerEnabled())
 		{
 			$state = $this->getMainToolState();
@@ -1160,7 +1167,24 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 			return null;
 		}
 
+		if ($this->rejectInvalidFirstPage($_POST['firstPageUrl']))
+		{
+			return null;
+		}
+
 		\CUserOptions::SetOption('intranet', 'left_menu_first_page_' . SITE_ID, $_POST['firstPageUrl']);
+	}
+
+	private function rejectInvalidFirstPage(mixed $url): bool
+	{
+		if (!FirstPageUrlPolicy::isAllowedAsFirstPage($url))
+		{
+			$this->addMainToolError('MAIN_TOOL_INVALID_ARGUMENT');
+
+			return true;
+		}
+
+		return false;
 	}
 
 	protected function getMainToolState(): array
@@ -1192,6 +1216,10 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		{
 			$this->addMainToolError('MAIN_TOOL_INVALID_ARGUMENT');
 
+			return false;
+		}
+		if ($this->rejectInvalidFirstPage($url))
+		{
 			return false;
 		}
 		if ($state['source'] === 'forced')
@@ -1248,10 +1276,16 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 
 			return null;
 		}
-		if (
-			isset($_POST['firstItemLink'])
-			&& !$this->isMainToolFirstPageAllowed($_POST['firstItemLink'], $state)
-		)
+		if (isset($_POST['firstItemLink']) && !is_string($_POST['firstItemLink']))
+		{
+			$this->addMainToolError('MAIN_TOOL_INVALID_ARGUMENT');
+
+			return null;
+		}
+		$saveFirstPage = isset($_POST['firstItemLink'])
+			&& FirstPageUrlPolicy::isAllowedAsFirstPage($_POST['firstItemLink'])
+		;
+		if ($saveFirstPage && !$this->isMainToolFirstPageAllowed($_POST['firstItemLink'], $state))
 		{
 			return null;
 		}
@@ -1259,7 +1293,7 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		{
 			return null;
 		}
-		if (isset($_POST['firstItemLink']))
+		if ($saveFirstPage)
 		{
 			$this->saveMainToolPersonalOption('left_menu_first_page_' . SITE_ID, $_POST['firstItemLink']);
 		}
@@ -1300,10 +1334,16 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 
 			return null;
 		}
-		if (
-			isset($_POST['firstItemLink'])
-			&& !$this->isMainToolFirstPageAllowed($_POST['firstItemLink'], $state)
-		)
+		if (isset($_POST['firstItemLink']) && !is_string($_POST['firstItemLink']))
+		{
+			$this->addMainToolError('MAIN_TOOL_INVALID_ARGUMENT');
+
+			return null;
+		}
+		$saveFirstPage = isset($_POST['firstItemLink'])
+			&& FirstPageUrlPolicy::isAllowedAsFirstPage($_POST['firstItemLink'])
+		;
+		if ($saveFirstPage && !$this->isMainToolFirstPageAllowed($_POST['firstItemLink'], $state))
 		{
 			return null;
 		}
@@ -1345,7 +1385,7 @@ class LeftMenu extends \Bitrix\Main\Engine\Controller
 		}
 		Option::set('intranet', 'left_menu_preset', 'custom', SITE_ID);
 		Preset\Manager::clearCache(SITE_ID);
-		if (isset($_POST['firstItemLink']))
+		if ($saveFirstPage)
 		{
 			$firstPageUrl = $_POST['firstItemLink'];
 			if (preg_match('~company/personal/user/\d+/tasks/$~i', $firstPageUrl))

@@ -5,21 +5,26 @@ declare(strict_types=1);
 namespace Bitrix\BizprocDesigner\Infrastructure\Controller\Activity;
 
 use Bitrix\Bizproc\Activity\ActivityDescription;
+use Bitrix\Bizproc\Activity\ContentBlockResolver;
 use Bitrix\Bizproc\Activity\Enum\NodeBlockType;
 use Bitrix\Bizproc\Api\Enum\ErrorMessage;
 use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\Service\Activity\ComplexActivityService;
 use Bitrix\Bizproc\Internal\Service\Container;
+use Bitrix\Bizproc\Public\Activity\BaseComplexActivity;
 use Bitrix\Bizproc\Public\Activity\Configurator;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\AvailableBlocksDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\CapabilityCatalogResponseDto;
+use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\ConditionDocumentTypeResponseDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\SaveSettingsRequestDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\Rule\ActionExpressionDto;
+use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\Rule\BaseSettingsExpressionDto;
 use Bitrix\BizprocDesigner\Infrastructure\Enum\ConstructionType;
 use Bitrix\BizprocDesigner\Internal\Exception\CommandValidateException;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\ActionDictionaryEntryDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\LoadSettingsResponseDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\PortRuleDto;
+use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\RuleDto;
 use Bitrix\BizprocDesigner\Internal\Command\Activity\Complex\ConvertRuleCommand;
 use Bitrix\BizprocDesigner\Internal\Command\Activity\Complex\ConvertRuleCommandResult;
 use Bitrix\BizprocDesigner\Internal\Command\Activity\Complex\SaveSingleRuleCommand;
@@ -27,6 +32,11 @@ use Bitrix\BizprocDesigner\Internal\Command\Activity\Complex\SaveSingleRuleComma
 use Bitrix\BizprocDesigner\Internal\Command\Activity\Complex\ValidateSingleRuleCommand;
 use Bitrix\BizprocDesigner\Internal\Config\Feature;
 use Bitrix\BizprocDesigner\Internal\Entity\ActivityData;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\NodeConditionDocumentResolver;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\UnifiedPanelSurfaceAvailability;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\BaseSettingsPayload;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\ReadableExpressionContextFactory;
+use Bitrix\BizprocDesigner\Internal\Service\Activity\RelationCreateTargetType;
 use Bitrix\BizprocDesigner\Internal\Service\Activity\RuleContentBlock;
 use Bitrix\BizprocDesigner\Internal\Service\Container as DesignerContainer;
 use Bitrix\BizprocDesigner\Internal\Service\RelationAutofillMatcher;
@@ -54,6 +64,8 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	// Field of the settings form that is edited on the basic tab of the panel and never counted among the
 	// base settings, exactly as the form of those settings leaves it out (EditBaseSettings.prepareNodeControls).
 	private const TITLE_FIELD_NAME = 'title';
+
+	private ?ReadableExpressionContextFactory $readableExpressionContextFactory = null;
 
 	protected function init()
 	{
@@ -83,6 +95,15 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	}
 
 	/**
+	 * One instance per request, so the schema of the template is read at most once and the labels it
+	 * resolved are shared by every construction. Also the seam a test replaces with a context of its own.
+	 */
+	protected function readableExpressionContextFactory(): ReadableExpressionContextFactory
+	{
+		return $this->readableExpressionContextFactory ??= new ReadableExpressionContextFactory();
+	}
+
+	/**
 	 * @param ActivityData $activity Target complex node whose settings are loaded.
 	 * @param array $sources Relation ancestors of the target node (canonical source shape, owned here):
 	 *   list of {
@@ -106,7 +127,9 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	 * @param array $documentType Edited template document type ([moduleId, entity, documentType]). Used as the
 	 *   node's effective document type when it has no fixed one, feeding node-action resolution and the
 	 *   available-blocks lookup. Legacy loads omit it and stay unaffected.
-	 * @param int $templateId Edited template identifier for requests with relation sources; zero for a new template.
+	 * @param int $templateId Edited template identifier; arrives with every load. Its declarations name the
+	 *   references a rule preview resolves its labels by, and with non-empty `$sources` it also takes part in
+	 *   the access check of the relation autofill. Zero for a new template.
 	 */
 	public function loadSettingsAction(
 		ActivityData $activity,
@@ -165,6 +188,13 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		// panel works in - it also carries the document type of the event of a trigger.
 		$fixedDocumentType = $complexActivityService->getFixedDocumentTypeForNodeAction($activity->type);
 		$publishedDocumentType = $complexActivityService->getPublishedDocumentTypeForNode(
+			$activity->type,
+			$activity->properties,
+		);
+
+		// A third answer, and the only one the condition of the node is decided by. It reuses the published type
+		// resolved just above for a node that declares no channel of its own, so nothing is instantiated twice.
+		$conditionDocumentType = $complexActivityService->getConditionDocumentTypeForNode(
 			$activity->type,
 			$activity->properties,
 		);
@@ -284,25 +314,30 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		// one it would accept.
 		$filterSupported = $filterAvailability->isAvailableForNode($availableBlocks, $filterRuntimeAvailable);
 
-		// The target type always comes from the node declaration.
+		// The type the node creates, which is the declared one only while the creating sub-action carries
+		// no type of its own. The surfaces above keep asking the declaration: there it answers for the
+		// node itself rather than for what the node creates.
 		$autofillMap = [];
 		$autofillRequiredFields = [];
 		$autofillConflicts = [];
-		if (
-			$relationsAvailable
-			&& $hasRelationCreateAction
-			&& $sources
-			&& is_array($fixedDocumentType)
-		)
+		$targetDocumentType = $relationsAvailable && $hasRelationCreateAction && $sources
+			? (new RelationCreateTargetType())->resolveTargetDocumentType($activity, $fixedDocumentType)
+			: null;
+		if (is_array($targetDocumentType))
 		{
-			$accessGranted = $isTemplateAutofillRequest;
+			$accessGranted = $this->isAutofillTargetAlreadyAuthorized(
+				$targetDocumentType,
+				$isTemplateAutofillRequest,
+				$templateId,
+				$documentType,
+			);
 			if (!$accessGranted)
 			{
 				try
 				{
 					$accessGranted = $this->validateCurrentUserOperateDocument(
 						operation: CBPCanUserOperateOperation::CreateWorkflow,
-						documentType: $fixedDocumentType,
+						documentType: $targetDocumentType,
 					)->isSuccess();
 				}
 				catch (\Throwable)
@@ -316,8 +351,8 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 				$autofillResult
 					= (new RelationAutofillMatcher(Container::instance()->getRelationFieldResolverRegistry()))
 						->buildAutofillResult(
-							$this->buildSourceCandidates($sources, $fixedDocumentType),
-							$fixedDocumentType,
+							$this->buildSourceCandidates($sources, $targetDocumentType),
+							$targetDocumentType,
 						)
 				;
 				$autofillMap = $autofillResult->autofillMap;
@@ -332,8 +367,16 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		// Only the actions this very node offers are admitted, which is what keeps the client from naming
 		// an arbitrary activity of the product and having its provider called. The relation container is
 		// drawn by the same preview and admits the single action the node declares for relations - the only
-		// one its cards may carry. One instance for both: the budget of recalculations is per request.
-		$ruleContentBlock = new RuleContentBlock();
+		// one its cards may carry. One instance for both: the budget of recalculations is per request, and so
+		// is the context the readable form of an expression is resolved against. That context is built for the
+		// template this request names and only for a user who may edit it; that the node being edited belongs
+		// to that very template is not checked.
+		// A document field is named in the document type this very node works in - the one it publishes, since
+		// that is the document its nested actions act on - and the type is authorized above.
+		$ruleContentBlock = new RuleContentBlock(
+			$this->readableExpressionContextFactory()->createForTemplate($templateId, $documentType),
+			$effectiveDocumentType,
+		);
 		$ruleContentBlock->resolveForNode($portRuleDtoDictionary, $actionDictionary);
 		$ruleContentBlock->resolveForNode(
 			$relationPortRuleDtoDictionary,
@@ -362,6 +405,10 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 			autofillConflicts: $autofillConflicts,
 			relationAction: $relationActionDto,
 			relationPortRuleDtoDictionary: $relationPortRuleDtoDictionary,
+			conditionDocumentType: $conditionDocumentType,
+			conditionDocumentSourceFields: $complexActivityService->getConditionDocumentSourceFieldNames(
+				$activity->type,
+			),
 			baseSettingsHasFillableFields: $this->hasFillableBaseSettingsFields(
 				$activity,
 				$baseSettingsDocumentType,
@@ -378,9 +425,18 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 				$access = new TemplateEditAccess();
 				$template = $access->resolve($templateId);
 
-				return $template !== null
+				$isAllowed = $template !== null
 					&& ($documentType === [] || $this->isSameDocumentType($template->getDocumentComplexType(), $documentType))
 					&& $access->canEdit($template, (int)($this->getCurrentUser()?->getId() ?? 0));
+
+				// Told the answer of this very check, the factory does not walk the rights of the template again.
+				$this->readableExpressionContextFactory()->declareAuthorizedDocumentType(
+					$templateId,
+					$documentType,
+					$isAllowed ? $template?->getDocumentComplexType() : null,
+				);
+
+				return $isAllowed;
 			}
 
 			return $documentType !== [] && $this->validateCurrentUserOperateDocument(
@@ -392,6 +448,41 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		{
 			return false;
 		}
+	}
+
+	private function isAutofillTargetAlreadyAuthorized(
+		array $targetDocumentType,
+		bool $isTemplateAutofillRequest,
+		int $templateId,
+		array $documentType,
+	): bool
+	{
+		if (!$isTemplateAutofillRequest)
+		{
+			return false;
+		}
+
+		if ($documentType !== [])
+		{
+			return $this->isSameDocumentType($targetDocumentType, $documentType);
+		}
+
+		if ($templateId <= 0)
+		{
+			return false;
+		}
+
+		try
+		{
+			$template = (new TemplateEditAccess())->resolve($templateId);
+		}
+		catch (\Throwable)
+		{
+			return false;
+		}
+
+		return $template !== null
+			&& $this->isSameDocumentType($targetDocumentType, $template->getDocumentComplexType());
 	}
 
 	/**
@@ -752,10 +843,83 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		return CapabilityCatalogResponseDto::fromNodeCapabilityCatalog($catalog);
 	}
 
+	/**
+	 * Document type the condition of a node is decided on, by the raw values of the form of its general
+	 * settings - the question the panel re-asks while that form is being edited, and the reason its answer
+	 * cannot be read off the saved node: the document has not been saved yet.
+	 *
+	 * Two gates, and both are needed. The document type of the edited template is authorized first, the same
+	 * way every neighbouring action authorizes it. The settings surface of the node is gated second, which is
+	 * the asymmetry with the neighbouring read request this action does not repeat: a node the panel does not
+	 * serve is not answered about its panel. A third gate, on the resolved condition document type, is
+	 * deliberately absent - the data of that document is protected by the provider of its fields, which
+	 * authorizes the reader itself.
+	 *
+	 * Read-only: neither the template nor its draft is touched.
+	 *
+	 * @param ActivityData $activity Node being edited; only its `Type` is read.
+	 * @param array $formData Raw values of the form of the general settings, the same payload the save of a
+	 *     rule is sent. `formData.activityType` is ignored - the type comes from `activity.Type` alone.
+	 * @param array $documentType Document type of the edited template, required: the first gate runs on it.
+	 */
+	public function getConditionDocumentTypeAction(
+		ActivityData $activity,
+		array $formData,
+		array $documentType,
+	): ?ConditionDocumentTypeResponseDto
+	{
+		// Every refusal of this action carries the code of its own error, the three `API-01` names among them:
+		// the answer is machine-read, and a shared gate reporting an uncoded refusal would leave two of them
+		// indistinguishable. An empty document type is refused here and not by the gate below - the gate is
+		// asked about a document, and an empty value names none.
+		$accessGranted = $documentType !== [] && $this->validateCurrentUserOperateDocument(
+			operation: CBPCanUserOperateOperation::CreateWorkflow,
+			documentType: $documentType,
+		)->isSuccess();
+		if (!$accessGranted)
+		{
+			$this->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
+
+			return null;
+		}
+
+		$resolveResult = (new NodeConditionDocumentResolver())
+			->resolveByFormData($activity->type, $formData, $documentType)
+		;
+		if (!$resolveResult->isSuccess())
+		{
+			$this->addErrors($resolveResult->getErrors());
+
+			return null;
+		}
+
+		// The configurator comes back from the resolver, so the gate below reads a properties map that was
+		// built once for this request.
+		$complexActivityName = strtolower($activity->type);
+		$surfaceAvailable = $this->isNodeSettingsSurfaceAvailable(
+			$complexActivityName,
+			$resolveResult->getData()['configurator'],
+			Container::instance()->getComplexActivityService()->getActivityDescriptionByCode($complexActivityName),
+		);
+		if (!$surfaceAvailable)
+		{
+			$this->addError(ErrorMessage::ACCESS_DENIED->getCodedError());
+
+			return null;
+		}
+
+		return new ConditionDocumentTypeResponseDto($resolveResult->getData()['conditionDocumentType']);
+	}
+
+	/**
+	 * @param int $templateId Edited template identifier the declarations of the node are named by; zero for a
+	 *   new template.
+	 */
 	public function saveSettingsAction(
 		SaveSettingsRequestDto $saveSettingsRequest,
 		ActivityData $activity,
 		array $documentType,
+		int $templateId = 0,
 	): ?array
 	{
 		$result = $this->validateCurrentUserOperateDocument(
@@ -839,8 +1003,7 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		$availableBlocks = $nodeDescription->getComplexActivitySettings()?->availableBlocks;
 		$maxItems = $availableBlocks !== null && method_exists($availableBlocks, 'getMaxItems')
 			? $availableBlocks->getMaxItems(NodeBlockType::RELATIONS)
-			: null
-		;
+			: null;
 		if ($maxItems !== null)
 		{
 			// Counted on the set the node ends up with, not on the submitted one: while the surface is
@@ -941,7 +1104,13 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 						continue;
 					}
 
-					$saveRuleResult = (new SaveSingleRuleCommand($relationPortRuleDto, $documentType))->run();
+					// The host node travels with the rule: the property map of the relation action reads its
+					// filter to learn the actual source type, exactly as it does when the form is loaded.
+					$saveRuleResult = (new SaveSingleRuleCommand(
+						$relationPortRuleDto,
+						$documentType,
+						[$activity->toArray()],
+					))->run();
 				}
 				catch (Exception)
 				{
@@ -957,13 +1126,27 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 					return null;
 				}
 
+				// Asked of the normalised port and not of the submitted one: the form of the block arrives
+				// as rawActivityData and becomes activityData.Properties only here, so its contents cannot
+				// be read before the command above.
+				if (self::standsOnEmptyBaseSettingsAlone($saveRuleResult->portRuleDto))
+				{
+					$hasUnfilledRelationCard = true;
+
+					continue;
+				}
+
 				$relationPortRuleDtoDictionary[$portId] = $saveRuleResult->portRuleDto;
 			}
 
 			if ($hasUnfilledRelationCard)
 			{
 				return [
-					'activity' => $this->markActivityFilled($activity, isFilled: false),
+					'activity' => $this->markActivityFilled(
+						$activity,
+						isFilled: false,
+						unfilledBlock: BaseComplexActivity::NOT_FILLED_RELATIONS,
+					),
 				];
 			}
 
@@ -982,7 +1165,11 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		catch (CommandValidateException $e)
 		{
 			return [
-				'activity' => $this->markActivityFilled($activity, isFilled: false),
+				'activity' => $this->markActivityFilled(
+					$activity,
+					isFilled: false,
+					unfilledBlock: self::resolveUnfilledBlock($e->errors),
+				),
 			];
 		}
 		catch (Exception)
@@ -1020,14 +1207,34 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 			return null;
 		}
 
+		// Display data derived from the properties this very save wrote, so the copy the request carried is
+		// dropped whatever it held: a node whose provider answers nothing is answered without the key at all.
+		$savedActivity = $convertedActivity->toArray();
+		unset($savedActivity['ContentBlock']);
+		$contentBlock = ContentBlockResolver::resolve(
+			$convertedActivity->type,
+			$convertedActivity->properties,
+			$this->readableExpressionContextFactory()->createForTemplate($templateId, $documentType),
+		)?->toArray();
+		if ($contentBlock !== null)
+		{
+			$savedActivity['ContentBlock'] = $contentBlock;
+		}
+
 		return [
-			'activity' => $this->markActivityFilled($convertedActivity),
+			'activity' => $this->markActivityFilled(ActivityData::createFromArray($savedActivity)),
 		];
 	}
 
+	/**
+	 * @param int $templateId Edited template identifier the declarations of the rule are named by; zero for a
+	 *   new template.
+	 */
 	public function saveRuleAction(
 		PortRuleDto $portRule,
 		array $documentType,
+		int $templateId = 0,
+		?ActivityData $activity = null,
 	): ?PortRuleDto {
 		$result = $this->validateCurrentUserOperateDocument(
 			operation: CBPCanUserOperateOperation::CreateWorkflow,
@@ -1042,7 +1249,11 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 
 		try
 		{
-			$result = (new SaveSingleRuleCommand($portRule, $documentType))->run();
+			$result = (new SaveSingleRuleCommand(
+				$portRule,
+				$documentType,
+				$activity === null ? [] : [$activity->toArray()],
+			))->run();
 		}
 		catch (Exception)
 		{
@@ -1061,7 +1272,25 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		// The rule returns to the panel with the preview of its action recalculated from the values the save
 		// has just normalised. Admitted are the actions of the node the container names as its host, the same
 		// set the load path admits; the document type is the authorized argument of this request.
-		(new RuleContentBlock())->resolveForRule($result->portRuleDto, $documentType);
+		//
+		// The readable form of an expression is resolved against the template this request names. The factory
+		// admits it only to someone who may edit it and only while it carries the document type authorized
+		// above; that the rule being saved belongs to that very template is not checked. A refused template is
+		// answered like one naming none: a reference to a declaration stays as it is.
+		// A document field is named in the document type of the node hosting the rule, as the read path names it.
+		// The node is the one the payload carries, so a type it publishes is named only under the right to
+		// author workflows on it - the gate the factory applies to every type it has not authorized itself.
+		(new RuleContentBlock(
+			$this->readableExpressionContextFactory()->createForTemplate($templateId, $documentType),
+			$activity === null
+				? null
+				: Container::instance()->getComplexActivityService()->getPublishedDocumentTypeForNode(
+					$activity->type,
+					$activity->properties,
+				),
+		))
+			->resolveForRule($result->portRuleDto, $documentType)
+		;
 
 		return $result->portRuleDto;
 	}
@@ -1088,8 +1317,13 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	 * No rule card may carry an action other than the expected relation action, nor a construction
 	 * type outside the relation-port allowlist. The type check runs here, before any NotFilled
 	 * return, because those returns persist the activity while ConvertRuleCommand (the allowlist's
-	 * other enforcement point) never runs on them — a base-settings/filter smuggled next to an
-	 * unfinished card would otherwise reach Properties.Relations.
+	 * other enforcement point) never runs on them - a filter smuggled next to an unfinished card
+	 * would otherwise reach Properties.Relations.
+	 *
+	 * The general-settings block of the input answers to the very same check: it is the head block of the
+	 * relation input and describes the action the node declares for its relations, so it becomes a child of
+	 * that class exactly as the "Action" card does. `activityType` is not submitted for relations, so this
+	 * is the only contour bounding the class of a relation child on this layer.
 	 */
 	private function isRelationActionAllowed(PortRuleDto $portRuleDto, string $expectedActionClass): bool
 	{
@@ -1108,13 +1342,22 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 					return false;
 				}
 
-				if ($construction->constructionType !== ConstructionType::ACTION)
+				if (
+					$construction->constructionType !== ConstructionType::ACTION
+					&& $construction->constructionType !== ConstructionType::BASE_SETTINGS
+				)
 				{
 					continue;
 				}
 
 				$expression = $construction->expression;
-				if (!$expression instanceof ActionExpressionDto || $expression->actionId !== $expectedActionClass)
+				if (
+					(
+						!$expression instanceof ActionExpressionDto
+						&& !$expression instanceof BaseSettingsExpressionDto
+					)
+					|| $expression->actionId !== $expectedActionClass
+				)
 				{
 					return false;
 				}
@@ -1136,37 +1379,140 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	}
 
 	/**
-	 * A relation card without an action is an unfinished card, whatever else it carries: the port only
-	 * makes sense once its relation action is chosen. An empty port and an empty card are the extreme
-	 * cases of the same state — ValidateSingleRuleCommand treats an empty rule list as filled, so they
-	 * would otherwise save without the NotFilled marker.
+	 * A relation card without an action is an unfinished card, whatever else it carries: the card only
+	 * makes sense once its relation action is chosen. What is weakened here is the demand on the input as
+	 * a whole, not the demand on a card: an input whose only card is a head one asks for no action at all,
+	 * because the general settings of the input already describe the relation and build their own chain.
+	 *
+	 * An empty port and an empty card stay the extreme cases of the same unfinished state -
+	 * ValidateSingleRuleCommand treats an empty rule list as filled, so they would otherwise save without
+	 * the NotFilled marker. Hence no "at least one card per input" clause here: it belongs to the limit
+	 * ({@see self::countRelationCards()}) and would make this answer true for an input with no card at all.
 	 */
 	private function hasRuleMissingRelationAction(PortRuleDto $portRuleDto): bool
 	{
-		if ($portRuleDto->rules === [])
+		$relationCards = array_filter($portRuleDto->rules, self::isRelationCard(...));
+
+		if ($relationCards === [] && !self::hasBaseSettingsBlock($portRuleDto))
 		{
 			return true;
 		}
 
-		foreach ($portRuleDto->rules as $rule)
+		foreach ($relationCards as $relationCard)
 		{
-			if (empty($rule->constructions))
+			if (!self::carriesAction($relationCard))
 			{
 				return true;
 			}
-
-			foreach ($rule->constructions as $construction)
-			{
-				if ($construction->constructionType === ConstructionType::ACTION)
-				{
-					continue 2;
-				}
-			}
-
-			return true;
 		}
 
 		return false;
+	}
+
+	/**
+	 * A card carrying no block that asks for a relation action beside it speaks for the input itself and is
+	 * not a relation card. An empty card still is one: it is a card the user started and left, not a head of
+	 * the input.
+	 */
+	private static function isRelationCard(RuleDto $ruleCard): bool
+	{
+		if ($ruleCard->constructions === [])
+		{
+			return true;
+		}
+
+		foreach ($ruleCard->constructions as $construction)
+		{
+			if (!self::isActionlessConstructionType($construction->constructionType))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * A block that never asks for a relation action beside it: the head blocks of the input (general
+	 * settings, filter), and an output, which wires the end of a chain to an output port and builds a stub
+	 * child of its own when it stands alone ({@see ConvertRuleCommand::processRuleCollection()}). A card of
+	 * such blocks alone is finished as it is - held to an action, it would mark the whole node unfilled.
+	 */
+	private static function isActionlessConstructionType(?ConstructionType $constructionType): bool
+	{
+		return self::isHeadConstructionType($constructionType)
+			|| $constructionType === ConstructionType::OUTPUT
+		;
+	}
+
+	private static function carriesAction(RuleDto $ruleCard): bool
+	{
+		foreach ($ruleCard->constructions as $construction)
+		{
+			if ($construction->constructionType === ConstructionType::ACTION)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static function hasBaseSettingsBlock(PortRuleDto $portRuleDto): bool
+	{
+		foreach ($portRuleDto->rules as $ruleCard)
+		{
+			foreach ($ruleCard->constructions as $construction)
+			{
+				if ($construction->constructionType === ConstructionType::BASE_SETTINGS)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * An input whose only block is an untouched general-settings form is as unfinished as an input with no
+	 * card at all. The editor puts that block on every input it opens (initBaseSettingsIfNeeded), so its
+	 * presence says nothing of the user; and ConvertRuleCommand builds no child of a form nobody filled
+	 * ({@see BaseSettingsPayload::isFormEmpty()}), which would leave the input without a child action,
+	 * without InputNames and without a data package - while the save path cleared NotFilled off the node.
+	 * Hence the same emptiness rule the converter follows, asked on this layer too.
+	 */
+	private static function standsOnEmptyBaseSettingsAlone(PortRuleDto $portRuleDto): bool
+	{
+		if (array_filter($portRuleDto->rules, self::isRelationCard(...)) !== [])
+		{
+			return false;
+		}
+
+		foreach ($portRuleDto->rules as $ruleCard)
+		{
+			foreach ($ruleCard->constructions as $construction)
+			{
+				$expression = $construction->expression;
+				if (
+					$construction->constructionType === ConstructionType::BASE_SETTINGS
+					&& $expression instanceof BaseSettingsExpressionDto
+					&& !BaseSettingsPayload::isFormEmpty($expression)
+				)
+				{
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	private static function isHeadConstructionType(?ConstructionType $constructionType): bool
+	{
+		return $constructionType === ConstructionType::BASE_SETTINGS
+			|| $constructionType === ConstructionType::FILTER
+		;
 	}
 
 	/**
@@ -1255,6 +1601,14 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	 * One relation port is one card to the user, so a port counts as at least one even before it holds a rule:
 	 * the same arithmetic the panel counts the add button by (`relationRuleCardsCount` of node-settings-store).
 	 * A server answer below it would let the interface offer a card the save path then refuses.
+	 *
+	 * The head card of an input is not one of them. It is a card of the interface, not a relation the user
+	 * asked for, and the editor puts it there by itself the moment the node is opened - counted, it would
+	 * spend the only unit of a node whose limit is one and take the whole node down.
+	 *
+	 * This runs on the raw request payload, before any of it has become a DTO, so the same notion of a
+	 * relation card is read here off plain arrays ({@see self::hasRuleMissingRelationAction()} reads it off
+	 * the DTO). Whatever carries a block asking for an action of its own counts as a relation card.
 	 */
 	private function countRelationCards(mixed $portRuleCollectionDictionary): int
 	{
@@ -1267,10 +1621,40 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		foreach ($portRuleCollectionDictionary as $ruleCollection)
 		{
 			$ruleCards = is_array($ruleCollection) ? ($ruleCollection['ruleCards'] ?? []) : [];
-			$count += max(1, is_array($ruleCards) ? count($ruleCards) : 0);
+			$relationCards = is_array($ruleCards)
+				? array_filter($ruleCards, self::isRawRelationCard(...))
+				: []
+			;
+
+			$count += max(1, count($relationCards));
 		}
 
 		return $count;
+	}
+
+	/**
+	 * {@see self::isRelationCard()} on the raw request payload.
+	 */
+	private static function isRawRelationCard(mixed $ruleCard): bool
+	{
+		$constructions = is_array($ruleCard) ? ($ruleCard['constructions'] ?? []) : [];
+		if (!is_array($constructions) || $constructions === [])
+		{
+			return true;
+		}
+
+		foreach ($constructions as $construction)
+		{
+			$type = is_array($construction) ? ($construction['type'] ?? null) : null;
+			$constructionType = is_string($type) ? ConstructionType::tryFrom($type) : null;
+
+			if (!self::isActionlessConstructionType($constructionType))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -1300,7 +1684,7 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	 * A node with a descriptor is answered by the rollout gate of the panel alone and never by its configurator:
 	 * a translated node with the feature rolled back has to be refused even though its class renders a form of
 	 * its own, otherwise the very settings the panel is not offering could still be sent in
-	 * ({@see self::isUnifiedPanelSurfaceAvailable()}).
+	 * ({@see UnifiedPanelSurfaceAvailability::isAvailableForNode()}).
 	 *
 	 * @param ?ActivityDescription $nodeDescription Description of the node, already gated on owning a
 	 *     complex-settings descriptor by {@see ComplexActivityService::getActivityDescriptionByCode()}, so a
@@ -1314,30 +1698,10 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 	{
 		if ($nodeDescription !== null)
 		{
-			return $this->isUnifiedPanelSurfaceAvailable($activityCode, $nodeDescription);
+			return UnifiedPanelSurfaceAvailability::isAvailableForNode($activityCode, $nodeDescription);
 		}
 
 		return !empty($configurator->getActivityType());
-	}
-
-	/**
-	 * Rollout gate of the panel, applied to every surface of it alike: a node whose complex-settings descriptor
-	 * was completed for it - a trigger, a base node - is served by the panel only while the feature is rolled
-	 * out, so with the flag off the editor stays on the legacy form of that node and the server refuses the
-	 * unified settings a client would send for it. A complex node, declaring its descriptor itself, is not what
-	 * the flag decides about, and settings the panel saved earlier keep running and keep publishing either way
-	 * ({@see \Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider::isSurfaceAvailableForNode()}).
-	 */
-	private function isUnifiedPanelSurfaceAvailable(
-		string $activityCode,
-		ActivityDescription $nodeDescription,
-	): bool
-	{
-		return Container::instance()->getUnifiedPanelDescriptorProvider()->isSurfaceAvailableForNode(
-			$activityCode,
-			$nodeDescription,
-			Feature::instance()->areComplexNodeConnectionsAvailable(),
-		);
 	}
 
 	/**
@@ -1769,7 +2133,16 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		return $result;
 	}
 
-	private function markActivityFilled(ActivityData $activityData, bool $isFilled = true): ActivityData
+	/**
+	 * @param string|null $unfilledBlock Block the node was left unfinished in, named to the person by the
+	 *     refusal of the publication. Null where the save path cannot tell which one it was: the mark is
+	 *     then the plain one of a node unfinished as a whole.
+	 */
+	private function markActivityFilled(
+		ActivityData $activityData,
+		bool $isFilled = true,
+		?string $unfilledBlock = null,
+	): ActivityData
 	{
 		$activityData = $activityData->toArray();
 		if ($isFilled)
@@ -1778,9 +2151,35 @@ class Complex extends \Bitrix\Main\Engine\JsonController
 		}
 		else
 		{
-			$activityData['Properties']['NotFilled'] = 'Y';
+			$activityData['Properties']['NotFilled'] = $unfilledBlock ?? 'Y';
 		}
 
 		return ActivityData::createFromArray($activityData);
+	}
+
+	/**
+	 * Which block the conversion refused, read off the code of its refusal and off nothing else: a refusal
+	 * of another kind leaves the block unnamed instead of guessing one.
+	 *
+	 * @param Error[] $errors
+	 */
+	private static function resolveUnfilledBlock(array $errors): ?string
+	{
+		foreach ($errors as $error)
+		{
+			$block = match ($error->getCode())
+			{
+				ConvertRuleCommand::ERR_RULES_NOT_FILLED => BaseComplexActivity::NOT_FILLED_RULES,
+				ConvertRuleCommand::ERR_RELATION_RULES_NOT_FILLED => BaseComplexActivity::NOT_FILLED_RELATIONS,
+				default => null,
+			};
+
+			if ($block !== null)
+			{
+				return $block;
+			}
+		}
+
+		return null;
 	}
 }

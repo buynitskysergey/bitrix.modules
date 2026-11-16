@@ -118,7 +118,7 @@ final class CatalogItemEmbeddingOwnerProvider implements EmbeddingOwnerProviderI
 	 */
 	private function loadAccessibleItems(array $itemIds, int $userId): array
 	{
-		$userCodes = $this->accessCodes->getUserCodes($userId);
+		$userCodes = $this->accessCodes->getUserCodesForItems($userId, $itemIds);
 
 		$requestedCount = count($itemIds);
 		if ($requestedCount > CatalogItemPager::MAX_LIMIT)

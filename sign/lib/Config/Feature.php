@@ -4,6 +4,8 @@ namespace Bitrix\Sign\Config;
 
 use Bitrix\Main\Config\Option;
 use Bitrix\Main;
+use Bitrix\Sign\Contract\Document\ManualFillingDecisionProvider;
+use Bitrix\Sign\Service\Container;
 
 final class Feature
 {
@@ -12,6 +14,7 @@ final class Feature
 	public const SIGN_B2E_BIZPROC_CHAIN_ENABLED_OPTION = 'SIGN_B2E_BIZPROC_CHAIN_ENABLED';
 	public const SIGN_DOCUMENT_MESSAGE_ENABLED_OPTION = 'sign_document_message_enabled';
 	public const SIGN_KEDO_RUN_PROCESS_ENABLED_OPTION = 'SIGN_KEDO_RUN_PROCESS_ENABLED_OPTION';
+	public const SIGN_KEDO_BIZPROC_FLAGS_MIGRATED_TO_MAIN_OPTION = 'SIGN_KEDO_BIZPROC_FLAGS_MIGRATED_TO_MAIN';
 	private static ?self $instance = null;
 
 	public static function instance(): self
@@ -76,10 +79,30 @@ final class Feature
 			&& Storage::instance()->isAvailable();
 	}
 
-	public function isB2eBizprocChainEnabled(?string $region = null): bool
+	public function isB2eBizprocChainEnabled(?string $region = null, ?int $userId = null): bool
 	{
 		$region ??= Main\Application::getInstance()->getLicense()->getRegion();
 
+		if (!$this->areKedoBizprocFlagsMigratedToMain())
+		{
+			return $this->isB2eBizprocChainEnabledByLegacyState($region);
+		}
+
+		if (!Storage::instance()->isB2eAvailable($region))
+		{
+			return false;
+		}
+
+		if (!$this->isB2eRobotEnabled($region))
+		{
+			return false;
+		}
+
+		return $this->isMainFeatureEnabled(Feature\B2eBizprocChainFlag::class, $region, $userId);
+	}
+
+	private function isB2eBizprocChainEnabledByLegacyState(?string $region): bool
+	{
 		if (!Storage::instance()->isB2eAvailable($region))
 		{
 			return false;
@@ -143,6 +166,33 @@ final class Feature
 	{
 		$region ??= Main\Application::getInstance()->getLicense()->getRegion();
 
+		if (!$this->areKedoBizprocFlagsMigratedToMain())
+		{
+			return $this->isKedoRunProcessEnabledByLegacyState($region);
+		}
+
+		$publicitySettings = $this->read('service.b2e.run-process.publicity');
+		if (!is_array($publicitySettings))
+		{
+			return false;
+		}
+
+		$isPublic = (bool)($publicitySettings[$region] ?? false);
+		if (!$isPublic)
+		{
+			return false;
+		}
+
+		if (!$this->isMainFeatureEnabled(Feature\KedoRunProcessFlag::class, $region))
+		{
+			return false;
+		}
+
+		return Storage::instance()->isB2eAvailable($region);
+	}
+
+	private function isKedoRunProcessEnabledByLegacyState(?string $region): bool
+	{
 		$publicitySettings = $this->read('service.b2e.run-process.publicity');
 		if (!is_array($publicitySettings))
 		{
@@ -159,6 +209,91 @@ final class Feature
 			$this->isOptionEnabled(self::SIGN_KEDO_RUN_PROCESS_ENABLED_OPTION, true)
 			&& Storage::instance()->isB2eAvailable($region)
 		;
+	}
+
+	public function isKedoStageReorderEnabled(): bool
+	{
+		try
+		{
+			if (
+				!interface_exists(ManualFillingDecisionProvider::class)
+				|| !class_exists(Container::class)
+				|| !method_exists(Container::class, 'instance')
+				|| !method_exists(Container::class, 'getManualFillingDecisionProvider')
+				|| !class_exists(Main\Config\Feature\Context::class)
+			)
+			{
+				return false;
+			}
+
+			$provider = Container::instance()->getManualFillingDecisionProvider();
+			if (
+				!$provider instanceof ManualFillingDecisionProvider
+				|| !method_exists($provider, 'isReady')
+				|| $provider->isReady() !== true
+			)
+			{
+				return false;
+			}
+
+			return $this->isMainFeatureEnabled(
+				Feature\KedoStageReorderFlag::class,
+				null,
+				null,
+				new Main\Config\Feature\Context(null),
+			);
+		}
+		catch (\Throwable)
+		{
+			return false;
+		}
+	}
+
+	private function areKedoBizprocFlagsMigratedToMain(): bool
+	{
+		return Option::getRealValue(
+			'sign',
+			self::SIGN_KEDO_BIZPROC_FLAGS_MIGRATED_TO_MAIN_OPTION,
+			'',
+		) === 'Y';
+	}
+
+	private function isMainFeatureEnabled(
+		string $flag,
+		?string $region,
+		?int $userId = null,
+		?Main\Config\Feature\Context $context = null,
+	): bool
+	{
+		try
+		{
+			if (
+				!class_exists(Main\Config\Feature::class)
+				|| !class_exists(Main\Config\Feature\AbstractFlag::class)
+				|| !class_exists(Main\Config\Feature\Context::class)
+				|| !method_exists(Main\Config\Feature::class, 'isEnabled')
+				|| !class_exists($flag)
+				|| !is_subclass_of($flag, Main\Config\Feature\AbstractFlag::class)
+			)
+			{
+				return false;
+			}
+
+			if ($context === null)
+			{
+				$currentContext = Main\Config\Feature\Context::getCurrent();
+				$context = new Main\Config\Feature\Context(
+					$userId ?? $currentContext->userId,
+					['region' => $region],
+				);
+			}
+
+			return Main\Config\Feature::isEnabled($flag, $context);
+		}
+		catch (\Throwable)
+		{
+			return false;
+		}
 	}
 
 	public function enableOption(string $name): void

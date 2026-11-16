@@ -17,6 +17,8 @@ return [
 		'value' => [
 			\Bitrix\StaffTrackMobile\Public\Features\CheckInFeature::class,
 			\Bitrix\StaffTrackMobile\Public\Features\CheckInV3StaffSelectorFeature::class,
+			\Bitrix\StaffTrackMobile\Public\Features\PresenceListFeature::class,
+			\Bitrix\StaffTrackMobile\Public\Features\WorkReportCounterFeature::class,
 		],
 		'readonly' => true,
 	],

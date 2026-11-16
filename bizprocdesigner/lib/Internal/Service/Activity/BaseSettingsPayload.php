@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\BizprocDesigner\Internal\Service\Activity;
 
+use Bitrix\Bizproc\Internal\Service\Activity\UnifiedPanelDescriptorProvider;
+use Bitrix\Bizproc\Internal\Service\Container;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\Rule\BaseSettingsExpressionDto;
 
 /**
@@ -37,10 +39,45 @@ final class BaseSettingsPayload
 		return $properties;
 	}
 
+	/**
+	 * The same payload as the node itself receives it. Asked only where the construction is merged into its
+	 * host, so the emptiness of a form - it answers for a proxy child too - is left reading the payload whole.
+	 */
+	public static function extractHostMergedProperties(BaseSettingsExpressionDto $expression): array
+	{
+		$properties = self::extractProperties($expression);
+
+		foreach (self::nodeGraphProperties() as $key)
+		{
+			unset($properties[$key]);
+		}
+
+		return $properties;
+	}
+
 	/** Whether the form behind the construction holds nothing the user put there. */
 	public static function isFormEmpty(BaseSettingsExpressionDto $expression): bool
 	{
 		return self::isEmptyValue(self::extractProperties($expression));
+	}
+
+	/**
+	 * Properties describing the graph of the node, the settings of its filters and the verdict of the panel
+	 * over its cards, never a value of a settings form. A construction extracted through the node-action path
+	 * is shaped as a full activity and carries its own empty copy of them; host-merging that copy would
+	 * replace the rules of the node with the empty scaffold of its own card and lose every setting the person
+	 * saved.
+	 *
+	 * Asked of the one place the set is declared in and never listed here: the panel owns it whole
+	 * ({@see UnifiedPanelDescriptorProvider::getServiceProperties()}), and a name it gains later would
+	 * otherwise be left out of the cleanup - an empty copy of the form silently replacing a real value of the
+	 * node, by the very mechanism this cleanup exists against.
+	 *
+	 * @return list<string>
+	 */
+	private static function nodeGraphProperties(): array
+	{
+		return Container::instance()->getUnifiedPanelDescriptorProvider()->getServicePropertyNames();
 	}
 
 	/**

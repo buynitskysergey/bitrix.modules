@@ -7,8 +7,8 @@ namespace Bitrix\Note\Infrastructure\Controller;
 use Bitrix\Main\Engine\ActionFilter\Authentication;
 use Bitrix\Main\Engine\ActionFilter\CloseSession;
 use Bitrix\Main\Engine\ActionFilter\Csrf;
+use Bitrix\Main\Engine\ActionFilter\HttpMethod;
 use Bitrix\Main\Engine\Controller;
-use Bitrix\Main\Engine\Contract\Controllerable;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Engine\Response\BFile;
 use Bitrix\Main\Error;
@@ -22,11 +22,16 @@ use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Service\DocumentFileCleanupService;
 use Bitrix\Note\Internal\Service\DocumentFileService;
 use Bitrix\Note\Internal\Service\File\FileReachabilityService;
+use Bitrix\Note\Internal\Service\File\ImagePreviewService;
+use Bitrix\Note\Internal\Service\File\RemoteImageImportService;
 use Bitrix\Note\Internal\Util\IdNormalizer;
 use Bitrix\Note\Internal\Service\NoteFileUrlService;
 
 class FileController extends Controller
 {
+	// The public circuit serves with the same time.
+	public const SHOW_CACHE_TIME = ImagePreviewService::CACHE_TIME;
+
 	// Matches Disk's own ceiling for a signed picker config; a document has no reason to want more
 	// in a single pick.
 	private const DISK_PICKER_MAX_ITEMS = 100;
@@ -54,6 +59,15 @@ class FileController extends Controller
 				'+prefilters' => [
 					new Csrf(),
 					new Authentication(),
+				],
+			],
+			'uploadImageByUrl' => [
+				'+prefilters' => [
+					new Csrf(),
+					new Authentication(),
+					new HttpMethod([HttpMethod::METHOD_POST]),
+					new CloseSession(),
+					new ActionFilter\RemoteImageImportRateLimiter(),
 				],
 			],
 			'show' => [
@@ -141,6 +155,73 @@ class FileController extends Controller
 			return null;
 		}
 
+		return $this->saveDocumentFile($documentId, $uploadedFile);
+	}
+
+	public function uploadImageByUrlAction(
+		int $documentId,
+		string $url,
+		int $collectionId = 0,
+	): ?array
+	{
+		$document = (new DocumentRepository())->getById($documentId);
+		if ($document === null)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_UPLOAD_ERROR_DOCUMENT')));
+
+			return null;
+		}
+
+		$documentCollectionId = (int)$document->getCollectionId();
+		if ($collectionId > 0 && $collectionId !== $documentCollectionId)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_UPLOAD_ERROR_DOCUMENT_COLLECTION')));
+
+			return null;
+		}
+
+		if (!$this->assertDocumentEditAccess(
+			$documentId,
+			$documentCollectionId,
+			'NOTE_FILE_CONTROLLER_UPLOAD_ERROR_ACCESS',
+		))
+		{
+			return null;
+		}
+
+		$importResult = (new RemoteImageImportService())->import($url);
+
+		if (!$importResult->isSuccess())
+		{
+			$this->addErrors($importResult->getErrors());
+
+			return null;
+		}
+
+		$uploadedFile = $importResult->getData()['file'] ?? null;
+		if (!is_array($uploadedFile))
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_UPLOAD_ERROR_SAVE')));
+
+			return null;
+		}
+
+		try
+		{
+			return $this->saveDocumentFile($documentId, $uploadedFile);
+		}
+		finally
+		{
+			$tempPath = (string)($uploadedFile['tmp_name'] ?? '');
+			if ($tempPath !== '' && is_file($tempPath))
+			{
+				unlink($tempPath);
+			}
+		}
+	}
+
+	private function saveDocumentFile(int $documentId, array $uploadedFile): ?array
+	{
 		$fileId = (int)\CFile::SaveFile([
 			'name' => (string)($uploadedFile['name'] ?? ''),
 			'size' => (int)($uploadedFile['size'] ?? 0),
@@ -193,7 +274,11 @@ class FileController extends Controller
 		return $payload;
 	}
 
-	public function showAction(int $fileId): ?BFile
+	/**
+	 * With `preview` a large picture is served as its reduced copy; for any other file the flag
+	 * changes nothing.
+	 */
+	public function showAction(int $fileId, bool $preview = false): ?BFile
 	{
 		if ($fileId <= 0)
 		{
@@ -232,15 +317,20 @@ class FileController extends Controller
 			return null;
 		}
 
-		$documentFileService = new DocumentFileService();
-		if ($documentFileService->getValidatedNoteFile($fileId) === null)
+		$fileData = (new DocumentFileService())->getValidatedNoteFile($fileId);
+		if ($fileData === null)
 		{
 			$this->addError(new Error(Loc::getMessage('NOTE_FILE_CONTROLLER_DOWNLOAD_ERROR_FILE_SOURCE')));
 
 			return null;
 		}
 
-		return BFile::createByFileId($fileId);
+		if ($preview)
+		{
+			return (new ImagePreviewService())->createResponse($fileData, inline: false);
+		}
+
+		return BFile::createByFileId($fileId)->setCacheTime(self::SHOW_CACHE_TIME);
 	}
 
 	public function resolveFileUrlsBatchAction(int $documentId, array $fileIds): ?array
@@ -285,6 +375,9 @@ class FileController extends Controller
 			$linkedFileIds[(int)$link['FILE_ID']] = true;
 		}
 
+		// And one read of b_file for the linked ones, as in the public batch.
+		$validatedFiles = $documentFileService->getValidatedNoteFilesMap(array_keys($linkedFileIds));
+
 		foreach ($fileIds as $rawFileId)
 		{
 			$fileId = (int)$rawFileId;
@@ -311,7 +404,7 @@ class FileController extends Controller
 				continue;
 			}
 
-			if ($documentFileService->getValidatedNoteFile($fileId) === null)
+			if (!isset($validatedFiles[$fileId]))
 			{
 				$failed[] = [
 					'fileId' => $fileId,
@@ -322,7 +415,7 @@ class FileController extends Controller
 				continue;
 			}
 
-			$payload = $documentFileService->buildFilePayload($fileId);
+			$payload = $documentFileService->buildFilePayload($fileId, fileData: $validatedFiles[$fileId]);
 			if ($payload === null)
 			{
 				$failed[] = [
@@ -556,6 +649,11 @@ class FileController extends Controller
 	 *
 	 * Gated by the feature flag, like the picker config it follows: this is the picking path, and a
 	 * portal with the feature off must not attach anything new.
+	 *
+	 * [API-01] Answers with the objects the document actually holds and the kind of block each belongs
+	 * in, so both clients — the web picker and the native one — build their blocks from one source. An
+	 * object the reader may not read, and one the document's ceiling left no room for, is absent from
+	 * `items` exactly as it is absent from the attachments, and nothing is said about it.
 	 */
 	public function attachDiskObjectsAction(int $documentId, array $objectIds): ?array
 	{
@@ -571,7 +669,7 @@ class FileController extends Controller
 		$normalizedObjectIds = array_slice(IdNormalizer::normalize($objectIds), 0, self::DISK_PICKER_MAX_ITEMS);
 		if ($documentId <= 0 || $normalizedObjectIds === [])
 		{
-			return ['attached' => false];
+			return ['attached' => false, 'items' => []];
 		}
 
 		$document = (new DocumentRepository())->getById($documentId);
@@ -590,9 +688,13 @@ class FileController extends Controller
 
 		// Silent about the outcome per object on purpose: a file the actor cannot read is skipped by the
 		// gateway, and the resolve that follows this call is what tells the editor how each block stands.
-		(new DiskGateway())->attach($documentId, $normalizedObjectIds, (int)CurrentUser::get()->getId());
+		$items = (new DiskGateway())->attach(
+			$documentId,
+			$normalizedObjectIds,
+			(int)CurrentUser::get()->getId(),
+		);
 
-		return ['attached' => true];
+		return ['attached' => true, 'items' => $items];
 	}
 
 	/**
@@ -665,7 +767,7 @@ class FileController extends Controller
 
 	private function assertDocumentViewAccess(int $documentId, int $collectionId): bool
 	{
-		if (DocumentAccessService::currentUserHasLevel($documentId, $collectionId, DocumentAccessService::LEVEL_VIEW))
+		if (DocumentAccessService::currentUserCanViewDocumentContent($documentId, $collectionId))
 		{
 			return true;
 		}
@@ -674,5 +776,4 @@ class FileController extends Controller
 
 		return false;
 	}
-
 }

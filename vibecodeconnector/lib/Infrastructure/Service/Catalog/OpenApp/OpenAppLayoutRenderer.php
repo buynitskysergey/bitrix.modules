@@ -8,6 +8,7 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\Web\Json;
 use Bitrix\Vibecodeconnector\Infrastructure\Service\Embed\SignedFormRenderer;
+use Bitrix\Vibecodeconnector\Internal\Entity\Vibecode\VibecodeBrand;
 use Bitrix\Vibecodeconnector\Internal\Dto\Catalog\OpenApp\OpenAppPayload;
 use Bitrix\Vibecodeconnector\Internal\Dto\Embed\SignedFormPayload;
 use Bitrix\Vibecodeconnector\Internal\Service\Vibecode\VibecodeBrandResolver;
@@ -37,7 +38,32 @@ final class OpenAppLayoutRenderer
 
 	public function renderError(string $code, string $title, string $message): string
 	{
-		return $this->renderer->renderError($code, $title, $message);
+		if (!in_array($code, ['ACCESS_DENIED', 'ITEM_NOT_FOUND'], true))
+		{
+			return $this->renderer->renderError($code, $title, $message);
+		}
+
+		$isAlaio = $this->brandResolver->resolve() === VibecodeBrand::Alaio;
+		$logo = $isAlaio ? 'logo-alaio.svg' : 'logo.svg';
+		$illustration = $isAlaio
+			? 'error-state-alert-access-denied-intl.webp'
+			: 'error-state-alert-access-denied.webp'
+		;
+		$css = AccessDeniedAssets::load();
+
+		return ($css === null ? '' : '<style>' . $css . '</style>')
+			. '<div class="vibecodeconnector-open-app-error" data-error-code="' . htmlspecialcharsbx($code) . '">'
+			. '<div class="vibecodeconnector-open-app-error__composition">'
+			. '<img class="vibecodeconnector-open-app-error__logo"'
+			. ' src="/bitrix/js/vibecodeconnector/open-app-loader/images/' . $logo . '"'
+			. ' alt="" aria-hidden="true" width="120" height="32">'
+			. '<img class="vibecodeconnector-open-app-error__illustration"'
+			. ' src="/bitrix/js/vibecodeconnector/open-app-access-denied/images/' . $illustration . '"'
+			. ' alt="" aria-hidden="true" width="120" height="120">'
+			. '<h3 class="vibecodeconnector-open-app-error__title">' . htmlspecialcharsbx($title) . '</h3>'
+			. '<p class="vibecodeconnector-open-app-error__message">' . htmlspecialcharsbx($message) . '</p>'
+			. '</div></div>'
+		;
 	}
 
 	public function renderPage(OpenAppPayload $payload): string

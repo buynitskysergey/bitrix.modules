@@ -316,6 +316,11 @@ class Template extends BaseController
 		if (!$startResult->isSuccess())
 		{
 			$this->addErrors($startResult->getErrors());
+			$deleteResult = $this->templateDeleteService->rollbackFailedTemplateCopy(
+				templateId: $copyResult->templateId,
+				initiator: new CBPWorkflowTemplateUser(CBPWorkflowTemplateUser::CurrentUser),
+			);
+			$this->addErrors($deleteResult->getErrors());
 
 			return [];
 		}

@@ -32,8 +32,8 @@ use CBPRuntime;
  *   {@see NodeFilterMetadataProvider} - otherwise an explicit error, not a silent degradation.
  *
  * A nested activity carries its settings as verbatim as the host node does, so the restricted-setting barrier
- * (ALG-04) reaches this level too: a name the nested activity declares restricted is held to the published
- * baseline here exactly as {@see AgentBlockValidator} holds a top-level one.
+ * (ALG-04) reaches this level too: a name the nested activity declares restricted is held here to the graph the
+ * server wrote exactly as {@see AgentBlockValidator} holds a top-level one.
  *
  * On success {@see self::getValidRules()} returns the {@see AgentComplexRules} projection.
  */
@@ -136,7 +136,11 @@ final class AgentComplexRulesValidator
 
 		if (!is_array($rules) || $rules === [])
 		{
-			return $result->addError(GraphError::at($path, "{$path} should be a non-empty map of input ports to rules"));
+			return $result->addError(GraphError::at(
+				$path,
+				"{$path} should be a non-empty map of input ports to rules",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		$allowedActivityCodes = $this->collectAllowedActivityCodes($complexDetail);
@@ -159,7 +163,11 @@ final class AgentComplexRulesValidator
 
 			if (!is_array($portRuleList) || $portRuleList === [])
 			{
-				$result->addError(GraphError::at($portPath, "{$portPath} should be a non-empty list of rules"));
+				$result->addError(GraphError::at(
+					$portPath,
+					"{$portPath} should be a non-empty list of rules",
+					GraphErrorCode::GraphElementInvalid,
+				));
 
 				continue;
 			}
@@ -209,7 +217,7 @@ final class AgentComplexRulesValidator
 	{
 		if (!is_array($rawRule))
 		{
-			$result->addError(GraphError::at($path, "{$path} should be object"));
+			$result->addError(GraphError::at($path, "{$path} should be object", GraphErrorCode::GraphElementInvalid));
 
 			return null;
 		}
@@ -218,14 +226,22 @@ final class AgentComplexRulesValidator
 		if (!is_string($id) || $id === '')
 		{
 			$idPath = "{$path}.id";
-			$result->addError(GraphError::at($idPath, "{$idPath} should be not empty string"));
+			$result->addError(GraphError::at(
+				$idPath,
+				"{$idPath} should be not empty string",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		$constructions = $rawRule['constructions'] ?? null;
 		if (!is_array($constructions) || $constructions === [])
 		{
 			$constructionsPath = "{$path}.constructions";
-			$result->addError(GraphError::at($constructionsPath, "{$constructionsPath} should be a non-empty list"));
+			$result->addError(GraphError::at(
+				$constructionsPath,
+				"{$constructionsPath} should be a non-empty list",
+				GraphErrorCode::GraphElementInvalid,
+			));
 
 			return null;
 		}
@@ -264,7 +280,7 @@ final class AgentComplexRulesValidator
 	{
 		if (!is_array($rawConstruction))
 		{
-			$result->addError(GraphError::at($path, "{$path} should be object"));
+			$result->addError(GraphError::at($path, "{$path} should be object", GraphErrorCode::GraphElementInvalid));
 
 			return null;
 		}
@@ -274,7 +290,11 @@ final class AgentComplexRulesValidator
 		$type = $rawConstruction['type'] ?? null;
 		if (!is_string($type) || $type === '')
 		{
-			$result->addError(GraphError::at($typePath, "{$typePath} should be not empty string"));
+			$result->addError(GraphError::at(
+				$typePath,
+				"{$typePath} should be not empty string",
+				GraphErrorCode::GraphElementInvalid,
+			));
 
 			return null;
 		}
@@ -284,6 +304,7 @@ final class AgentComplexRulesValidator
 			$result->addError(GraphError::at(
 				$typePath,
 				"{$typePath} '{$type}': code conditions are not allowed in complex node rules",
+				GraphErrorCode::GraphElementInvalid,
 			));
 
 			return null;
@@ -294,6 +315,7 @@ final class AgentComplexRulesValidator
 			$result->addError(GraphError::at(
 				$typePath,
 				"{$typePath} '{$type}' is not one of: " . implode(', ', AgentComplexConstruction::TYPES),
+				GraphErrorCode::GraphElementInvalid,
 			));
 
 			return null;
@@ -304,7 +326,11 @@ final class AgentComplexRulesValidator
 		$expression = $rawConstruction[$type] ?? null;
 		if (!is_array($expression))
 		{
-			$result->addError(GraphError::at($expressionPath, "{$expressionPath} should be object"));
+			$result->addError(GraphError::at(
+				$expressionPath,
+				"{$expressionPath} should be object",
+				GraphErrorCode::GraphElementInvalid,
+			));
 
 			return null;
 		}
@@ -349,6 +375,7 @@ final class AgentComplexRulesValidator
 			return $result->addError(GraphError::at(
 				$path,
 				"{$path}: condition rules are not supported by this node",
+				GraphErrorCode::GraphElementNotAllowed,
 			));
 		}
 
@@ -357,7 +384,11 @@ final class AgentComplexRulesValidator
 		$field = $condition['field'] ?? null;
 		if (!is_array($field))
 		{
-			$result->addError(GraphError::at($fieldPath, "{$fieldPath} should be object"));
+			$result->addError(GraphError::at(
+				$fieldPath,
+				"{$fieldPath} should be object",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 		else
 		{
@@ -365,14 +396,22 @@ final class AgentComplexRulesValidator
 			$object = $field['object'] ?? null;
 			if (!is_string($object) || $object === '')
 			{
-				$result->addError(GraphError::at($objectPath, "{$objectPath} should be not empty string"));
+				$result->addError(GraphError::at(
+					$objectPath,
+					"{$objectPath} should be not empty string",
+					GraphErrorCode::GraphElementInvalid,
+				));
 			}
 
 			$fieldIdPath = "{$fieldPath}.fieldId";
 			$fieldId = $field['fieldId'] ?? null;
 			if (!is_string($fieldId) || $fieldId === '')
 			{
-				$result->addError(GraphError::at($fieldIdPath, "{$fieldIdPath} should be not empty string"));
+				$result->addError(GraphError::at(
+					$fieldIdPath,
+					"{$fieldIdPath} should be not empty string",
+					GraphErrorCode::GraphElementInvalid,
+				));
 			}
 		}
 
@@ -380,14 +419,22 @@ final class AgentComplexRulesValidator
 		$operator = $condition['operator'] ?? null;
 		if (!is_string($operator) || $operator === '')
 		{
-			$result->addError(GraphError::at($operatorPath, "{$operatorPath} should be not empty string"));
+			$result->addError(GraphError::at(
+				$operatorPath,
+				"{$operatorPath} should be not empty string",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		$joinerPath = "{$path}.joiner";
 		$joiner = $condition['joiner'] ?? null;
 		if ($joiner !== null && !in_array($joiner, ['AND', 'OR'], true))
 		{
-			$result->addError(GraphError::at($joinerPath, "{$joinerPath} should be 'AND' or 'OR'"));
+			$result->addError(GraphError::at(
+				$joinerPath,
+				"{$joinerPath} should be 'AND' or 'OR'",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		return $result;
@@ -415,7 +462,11 @@ final class AgentComplexRulesValidator
 		$activityCode = $action['activityCode'] ?? null;
 		if (!is_string($activityCode) || $activityCode === '')
 		{
-			return $result->addError(GraphError::at($activityCodePath, "{$activityCodePath} should be not empty string"));
+			return $result->addError(GraphError::at(
+				$activityCodePath,
+				"{$activityCodePath} should be not empty string",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		if ($allowedActivityCodes === [])
@@ -424,6 +475,7 @@ final class AgentComplexRulesValidator
 			return $result->addError(GraphError::at(
 				$path,
 				"{$path}: this complex node does not allow sub-actions (only condition/output)",
+				GraphErrorCode::GraphElementNotAllowed,
 			));
 		}
 
@@ -432,6 +484,7 @@ final class AgentComplexRulesValidator
 			return $result->addError(GraphError::at(
 				$activityCodePath,
 				"{$activityCodePath} '{$activityCode}' is not in the allowed sub-action dictionary",
+				GraphErrorCode::SubActionUnknown,
 			));
 		}
 
@@ -479,6 +532,7 @@ final class AgentComplexRulesValidator
 					$documentPath,
 					"{$documentPath} must be a document id or a bizproc expression naming one"
 					. " (e.g. '42', '{=Constant:X}', '{=<triggerId>:ReturnDocument}'), not a document-type array",
+					GraphErrorCode::GraphElementInvalid,
 				));
 			}
 
@@ -491,6 +545,7 @@ final class AgentComplexRulesValidator
 				$documentPath,
 				"{$documentPath} is required for this sub-action (it handles the document): give it a document id"
 				. " or a bizproc expression naming one",
+				GraphErrorCode::GraphElementInvalid,
 			));
 		}
 
@@ -503,7 +558,11 @@ final class AgentComplexRulesValidator
 
 		if (!$complexDetail->filterSupported)
 		{
-			return $result->addError(GraphError::at($path, "{$path}: node filter is not supported in this environment"));
+			return $result->addError(GraphError::at(
+				$path,
+				"{$path}: node filter is not supported in this environment",
+				GraphErrorCode::GraphElementNotAllowed,
+			));
 		}
 
 		$activityCodePath = "{$path}.activityCode";
@@ -511,7 +570,11 @@ final class AgentComplexRulesValidator
 		$activityCode = $filter['activityCode'] ?? null;
 		if (!is_string($activityCode) || $activityCode === '')
 		{
-			return $result->addError(GraphError::at($activityCodePath, "{$activityCodePath} should be not empty string"));
+			return $result->addError(GraphError::at(
+				$activityCodePath,
+				"{$activityCodePath} should be not empty string",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		if (!self::isNodeFilterBackingActivity($activityCode))
@@ -519,6 +582,7 @@ final class AgentComplexRulesValidator
 			return $result->addError(GraphError::at(
 				$activityCodePath,
 				"{$activityCodePath} '{$activityCode}' is not a node-filter backing activity",
+				GraphErrorCode::SubActionUnknown,
 			));
 		}
 
@@ -531,15 +595,15 @@ final class AgentComplexRulesValidator
 	/**
 	 * The nested half of ALG-04, kept identical to {@see AgentBlockValidator::authorizeRestrictedSettings()} down to
 	 * the fingerprint and the wording: a setting the nested activity declares restricted carries an executable
-	 * payload, so the agent may only re-send what the published template already carries. The names are asked of the
-	 * activity the construction names, never of the host node - a sub-action is a different class with restrictions
-	 * of its own.
+	 * payload, so the agent may only re-send what the server wrote. The names are asked of the activity the
+	 * construction names, never of the host node - a sub-action is a different class with restrictions of its own.
 	 *
-	 * The baseline it is matched against is the one the context assembled from the published version, sub-steps
-	 * included ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\ValidationContextFactory}), so
-	 * a nested value is inherited when the very same (name, value) pair is published anywhere in that template - at
-	 * this level or the top one. Collecting the top level alone would refuse a sub-step the published template
-	 * already carries, breaking the round-trip of an untouched template rather than the barrier.
+	 * What it is matched against is what the context assembled from the graphs the server wrote - the published
+	 * version and the graph the agent was handed - sub-steps of both included
+	 * ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\ValidationContextFactory}), so a nested
+	 * value is inherited when the very same (name, value) pair stands anywhere in one of them - at this level or the
+	 * top one. Collecting the top level alone would refuse a sub-step such a graph already carries, breaking the
+	 * round-trip of an untouched template rather than the barrier.
 	 */
 	private function authorizeRestrictedSettings(array $expression, string $activityCode, string $path): Result
 	{
@@ -558,7 +622,6 @@ final class AgentComplexRulesValidator
 			return $result;
 		}
 
-		$baseline = $this->context?->baselineRestrictedSettingFingerprints ?? [];
 		foreach ($settings as $name => $value)
 		{
 			if (!is_string($name) || !in_array(mb_strtolower($name), $restrictedNames, true))
@@ -571,12 +634,14 @@ final class AgentComplexRulesValidator
 				continue;
 			}
 
-			if (!isset($baseline[RestrictedSettingRegistry::fingerprintOf($name, $value)]))
+			// Fail-closed exactly as the top-level half is: no context is no graph the server wrote.
+			if (!$this->context?->carriesRestrictedSettingValue($name, $value))
 			{
 				$result->addError(GraphError::at(
 					"{$path}.settings.{$name}",
 					"{$path}.settings.{$name} must match the published template baseline"
 					. ' (this setting carries an executable payload and can only be passed through unchanged)',
+					GraphErrorCode::ImmutableNodePolicyViolation,
 				));
 			}
 		}
@@ -603,6 +668,7 @@ final class AgentComplexRulesValidator
 			$result->addError(GraphError::at(
 				$settingsPath,
 				"{$settingsPath} should be a settings map (an object keyed by setting name), not a list",
+				GraphErrorCode::SettingValueInvalid,
 			));
 		}
 
@@ -675,7 +741,11 @@ final class AgentComplexRulesValidator
 
 				$result->addErrors(
 					$isSettingName
-						? [GraphError::at($settingPath, "{$settingPath} is not a known setting of this sub-action")]
+						? [GraphError::at(
+							$settingPath,
+							"{$settingPath} is not a known setting of this sub-action",
+							GraphErrorCode::SettingNameUnknown,
+						)]
 						: $nameResult->getErrors()
 				);
 
@@ -736,7 +806,11 @@ final class AgentComplexRulesValidator
 		$title = $output['title'] ?? null;
 		if (!is_string($title) || $title === '')
 		{
-			$result->addError(GraphError::at($titlePath, "{$titlePath} should be not empty string"));
+			$result->addError(GraphError::at(
+				$titlePath,
+				"{$titlePath} should be not empty string",
+				GraphErrorCode::GraphElementInvalid,
+			));
 		}
 
 		return $result;

@@ -11,19 +11,20 @@ use Bitrix\Tasks\Integration\Extranet\User;
 use Bitrix\Tasks\Internals\Routes\RouteDictionary;
 use Bitrix\Tasks\Util\UserField\Task;
 use Bitrix\Tasks\Util\UserField\Task\Template;
+use Bitrix\Tasks\V2\AnalyticsFeature;
 use Bitrix\Tasks\V2\FormV2Feature;
 use Bitrix\Tasks\V2\Internal\Access\Service\FlowRightService;
 use Bitrix\Tasks\V2\Internal\Access\Service\TaskRightService;
 use Bitrix\Tasks\Flow\FlowFeature;
 use Bitrix\Tasks\V2\Internal\Access\Service\TemplateRightService;
 use Bitrix\Tasks\V2\Internal\DI\Container;
+use Bitrix\Tasks\V2\Internal\Entity\CheckList\Type;
 use Bitrix\Tasks\V2\Internal\Integration\HumanResources\Repository\StructureRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Integration\Im\Chat;
 use Bitrix\Tasks\V2\Internal\Integration\Intranet\Service\ToolService;
 use Bitrix\Tasks\V2\Internal\Integration\Intranet\Service\UserUrlService;
 use Bitrix\Tasks\V2\Internal\Integration\Socialnetwork\Service\FeatureService;
 use Bitrix\Tasks\V2\Internal\Repository\GroupRepository;
-use Bitrix\Tasks\V2\Internal\Repository\TaskAccessRequestRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\UserFieldSchemeRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\UserOptionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Service\AnalyticsService;
@@ -32,6 +33,7 @@ use Bitrix\Tasks\V2\Internal\Service\TariffService;
 use Bitrix\Tasks\V2\Internal\Repository\UserRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Service\OptionDictionary;
 use Bitrix\Tasks\V2\Internal\Service\State\StateFlagsService;
+use Bitrix\Tasks\V2\Internal\Service\CheckList\ViewOptionService;
 use Bitrix\Tasks\V2\Internal\Service\Task\StateService;
 
 class ConfigService
@@ -51,11 +53,10 @@ class ConfigService
 		private readonly UserFieldSchemeRepositoryInterface $userFieldSchemeRepository,
 		private readonly UserUrlService $userUrlService,
 		private readonly StructureRepositoryInterface $structureRepository,
-		private readonly TaskAccessRequestRepositoryInterface $taskAccessRequestRepository,
 		private readonly UserOptionRepositoryInterface $userOptionRepository,
+		private readonly ViewOptionService $checkListViewOptionService,
 	)
 	{
-
 	}
 
 	public function getCoreSettings(int $userId): array
@@ -77,6 +78,10 @@ class ConfigService
 			'userOptions' => [
 				'fullCard' => \CUserOptions::getOption('tasks', 'fullCard'),
 				'filesViewMode' => $this->userOptionRepository->get(OptionDictionary::FilesViewMode, $userId),
+				'hideCompleted' => [
+					'task' => $this->checkListViewOptionService->isCompletedHidden(Type::Task, $userId),
+					'template' => $this->checkListViewOptionService->isCompletedHidden(Type::Template, $userId),
+				],
 			],
 			'rights' => [
 				'user' => [
@@ -125,6 +130,7 @@ class ConfigService
 		return [
 			'userType' => $this->analyticsService->getUserTypeParameter($userId),
 			'isDemo' => $this->tariffService->isDemo(),
+			'p5Format' => AnalyticsFeature::getP5Format(),
 		];
 	}
 

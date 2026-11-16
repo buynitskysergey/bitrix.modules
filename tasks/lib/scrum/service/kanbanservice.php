@@ -45,25 +45,16 @@ class KanbanService implements Errorable
 		$updates = $this->deferredTaskStageUpdates;
 		$this->deferredTaskStageUpdates = [];
 
+		$success = true;
 		foreach ($updates as $taskId => $stageId)
 		{
-			try
+			if (!$this->updateTaskStageId($taskId, $stageId))
 			{
-				if (!$this->updateTaskStageId($taskId, $stageId))
-				{
-					$this->deferredTaskStageUpdates[$taskId] = $stageId;
-				}
-			}
-			catch (\Throwable $exception)
-			{
-				$this->errorCollection->setError(
-					new Error($exception->getMessage(), self::ERROR_COULD_NOT_ADD_ONE_TASK)
-				);
-				$this->deferredTaskStageUpdates[$taskId] = $stageId;
+				$success = false;
 			}
 		}
 
-		return !$this->deferredTaskStageUpdates;
+		return $success;
 	}
 
 	/**
@@ -673,95 +664,24 @@ class KanbanService implements Errorable
 				'TASK_ID' => $taskId,
 				'=STAGE.ENTITY_TYPE' => StagesTable::WORK_MODE_ACTIVE_SPRINT,
 				'STAGE.ENTITY_ID' => $entity->getId()
-			],
-			'order' => ['ID' => 'ASC'],
+			]
 		]);
 
-		$stageService = Container::getInstance()->getTaskStageService();
-
-		$sourceTaskStage = null;
-		$targetTaskStage = null;
-		while ($taskStage = $queryObject->fetch())
+		$taskStage = $queryObject->fetch();
+		if (!$taskStage)
 		{
-			if ((int)$taskStage['STAGE_ID'] === $stageId)
-			{
-				$targetTaskStage = $taskStage;
-				continue;
-			}
-
-			if ($sourceTaskStage !== null)
-			{
-				$this->errorCollection->setError(new Error(
-					'Multiple active sprint stage relations',
-					self::ERROR_COULD_NOT_ADD_ONE_TASK,
-				));
-
-				return false;
-			}
-
-			$sourceTaskStage = $taskStage;
-		}
-
-		if ($sourceTaskStage !== null || $targetTaskStage !== null)
-		{
-			$targetRelationExists = TaskStageTable::getCount([
-				'=TASK_ID' => $taskId,
-				'=STAGE_ID' => $stageId,
-			]) > 0;
-			$connection = \Bitrix\Main\Application::getInstance()->getConnection();
-			$connection->startTransaction();
-			$taskStageUpdated = false;
-			try
-			{
-				if ($sourceTaskStage !== null && $targetRelationExists)
-				{
-					$stageService->clearRelations([(int)$sourceTaskStage['ID']]);
-				}
-				elseif ($sourceTaskStage !== null)
-				{
-					$stageService->move((int)$sourceTaskStage['ID'], $stageId);
-				}
-				$taskStageUpdated = $this->applyTaskStageUpdate($taskId, $stageId);
-			}
-			catch (\Throwable $exception)
-			{
-				$this->rollbackMoveTaskTransaction($connection);
-				\Bitrix\Main\Application::getInstance()->getExceptionHandler()->writeToLog($exception);
-				$this->errorCollection->setError(
-					new Error('Could not move task stage', self::ERROR_COULD_NOT_ADD_ONE_TASK)
-				);
-
-				return false;
-			}
-			if ($taskStageUpdated)
-			{
-				$connection->commitTransaction();
-
-				return true;
-			}
-			$this->rollbackMoveTaskTransaction($connection);
-
 			return false;
 		}
 
-		return false;
-	}
+		$stageService = Container::getInstance()->getTaskStageService();
+		$stageService->move((int)$taskStage['ID'], $stageId);
 
-	private function rollbackMoveTaskTransaction(\Bitrix\Main\DB\Connection $connection): void
-	{
-		try
+		if (!$this->applyTaskStageUpdate($taskId, $stageId))
 		{
-			$connection->rollbackTransaction();
+			return false;
 		}
-		catch (\Bitrix\Main\DB\TransactionException $exception)
-		{
-			if ($exception->getMessage() === 'Nested rollbacks are unsupported.')
-			{
-				return;
-			}
 
-			throw $exception;
-		}
+		return true;
 	}
 
 	public function getLastCompletedSprintIdSameGroup(int $sprintId): int
@@ -1071,7 +991,7 @@ class KanbanService implements Errorable
 		return $this->updateTaskStageId($taskId, $stageId);
 	}
 
-	protected function updateTaskStageId(int $taskId, int $stageId): bool
+	private function updateTaskStageId(int $taskId, int $stageId): bool
 	{
 		$parameters = $this->skipTaskUpdateEvent
 			? UpdateEventSuppression::getParameters()

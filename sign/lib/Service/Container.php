@@ -9,7 +9,6 @@ use Bitrix\Sign\Access\Service\AccessService;
 use Bitrix\Sign\Access\Service\RolePermissionService;
 use Bitrix\Sign\Debug;
 use Bitrix\Sign\Factory\Access\AccessibleItemFactory;
-use Bitrix\Sign\Integration;
 use Bitrix\Sign\Repository;
 use Bitrix\Sign\Connector;
 use Bitrix\Sign\Service;
@@ -187,11 +186,6 @@ class Container
 	public function getCrmProcessTypeService(): Service\Integration\Crm\ProcessTypeService
 	{
 		return self::getService('sign.service.integration.crm.processType');
-	}
-
-	public function getCrmProcessActivityHandler(): Integration\CRM\Activity\ProcessActivityHandler
-	{
-		return self::getService('sign.service.integration.crm.processActivity');
 	}
 
 	public function getBizprocProcessCatalogService(): Service\Integration\Bizproc\ProcessCatalogService
@@ -452,6 +446,21 @@ class Container
 		return static::getService('sign.service.sign.document.directorSigningGuard');
 	}
 
+	public function getCompanyInitiatedPartyPlanService(): Service\Sign\Document\CompanyInitiatedPartyPlanService
+	{
+		return static::getService('sign.service.sign.document.companyInitiatedPartyPlan');
+	}
+
+	public function getManualFillingDecisionProvider(): Contract\Document\ManualFillingDecisionProvider
+	{
+		$provider = static::getService(Contract\Document\ManualFillingDecisionProvider::class);
+
+		return $provider instanceof Contract\Document\ManualFillingDecisionProvider
+			? $provider
+			: new Service\Sign\Document\UnavailableManualFillingDecisionProvider()
+		;
+	}
+
 	public function getRequiredFieldRepository(): Repository\RequiredFieldRepository
 	{
 		return static::getService('sign.repository.required_field');
@@ -587,6 +596,21 @@ class Container
 		return static::getService('sign.service.placeholder.aliasRoleResolver');
 	}
 
+	public function getPlaceholderRestrictionService(): Service\Placeholder\Restriction\PlaceholderRestrictionService
+	{
+		return static::getService('sign.service.placeholder.restriction');
+	}
+
+	public function getScenarioContextFactory(): Service\Placeholder\Restriction\ScenarioContextFactory
+	{
+		return static::getService('sign.service.placeholder.scenarioContextFactory');
+	}
+
+	public function getBrokenAliasResolver(): Service\Placeholder\Restriction\BrokenAliasResolver
+	{
+		return static::getService('sign.service.placeholder.brokenAliasResolver');
+	}
+
 	public function getLogger(string $channel = 'Default'): Debug\Logger
 	{
 		static $cache = [];
@@ -702,6 +726,11 @@ class Container
 	public function getTemplateFolderRelationService(): Service\Sign\Document\Template\TemplateFolderRelationService
 	{
 		return static::getService('sign.service.document.template.templateFolderRelation');
+	}
+
+	public function getTemplateBlankDownloadService(): Service\Sign\Document\Template\BlankDownloadService
+	{
+		return static::getService('sign.service.document.template.blankDownload');
 	}
 
 	public function getSignUntilService(): Service\Sign\Document\SignUntilService

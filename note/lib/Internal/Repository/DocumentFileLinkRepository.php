@@ -7,6 +7,7 @@ namespace Bitrix\Note\Internal\Repository;
 use Bitrix\Main\Application;
 use Bitrix\Main\Error;
 use Bitrix\Main\Result;
+use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Model\DocumentFileTable;
 use Bitrix\Note\Internal\Util\IdNormalizer;
 
@@ -72,6 +73,12 @@ class DocumentFileLinkRepository
 		return $result;
 	}
 
+	/**
+	 * CREATED_AT rides along with every row: the age of the link is what the background sweeps cut
+	 * by, so reachability can drop a file uploaded minutes ago from the candidate set.
+	 *
+	 * @return array<int, array{DOCUMENT_ID: int, FILE_ID: int, CREATED_AT: ?DateTime}>
+	 */
 	public function getByDocumentIds(array $documentIds): array
 	{
 		$normalizedDocumentIds = IdNormalizer::normalize($documentIds);
@@ -80,12 +87,63 @@ class DocumentFileLinkRepository
 			return [];
 		}
 
-		$items = DocumentFileTable::getList([
-			'select' => ['DOCUMENT_ID', 'FILE_ID'],
+		$rows = DocumentFileTable::getList([
+			'select' => ['DOCUMENT_ID', 'FILE_ID', 'CREATED_AT'],
 			'filter' => ['=DOCUMENT_ID' => $normalizedDocumentIds],
-		])->fetchCollection();
+		])->fetchAll();
 
-		return $this->collectionToRows($items);
+		$result = [];
+		foreach ($rows as $row)
+		{
+			$documentId = (int)$row['DOCUMENT_ID'];
+			$fileId = (int)$row['FILE_ID'];
+			if ($documentId <= 0 || $fileId <= 0)
+			{
+				continue;
+			}
+
+			$result[] = [
+				'DOCUMENT_ID' => $documentId,
+				'FILE_ID' => $fileId,
+				'CREATED_AT' => $row['CREATED_AT'] instanceof DateTime ? $row['CREATED_AT'] : null,
+			];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Keyset page of the file links of one document: FILE_ID > $afterFileId, ascending, capped at
+	 * $limit. The cursor rides the primary key, so a page never repeats a link and never skips one.
+	 * CREATED_AT comes along because the age of the link is what both note.file.list and the
+	 * background sweep answer by.
+	 *
+	 * @return array<int, array{FILE_ID: int, CREATED_AT: ?DateTime}>
+	 */
+	public function listByDocument(int $documentId, int $limit, int $afterFileId): array
+	{
+		if ($documentId <= 0 || $limit <= 0)
+		{
+			return [];
+		}
+
+		$rows = DocumentFileTable::getList([
+			'select' => ['FILE_ID', 'CREATED_AT'],
+			'filter' => [
+				'=DOCUMENT_ID' => $documentId,
+				'>FILE_ID' => max($afterFileId, 0),
+			],
+			'order' => ['FILE_ID' => 'ASC'],
+			'limit' => $limit,
+		])->fetchAll();
+
+		return array_map(
+			static fn(array $row): array => [
+				'FILE_ID' => (int)$row['FILE_ID'],
+				'CREATED_AT' => $row['CREATED_AT'] instanceof DateTime ? $row['CREATED_AT'] : null,
+			],
+			$rows,
+		);
 	}
 
 	/**

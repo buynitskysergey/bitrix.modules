@@ -3,13 +3,13 @@
 declare(strict_types=1);
 
 use Bitrix\Bizproc\Public\Entity\Template\NodesInstaller;
-use Bitrix\Main\Config\Option;
+use Bitrix\Bizproc\Public\Feature\AiAgent\BossReportAgentFlag;
 
 return new class extends NodesInstaller
 {
 	public function shouldInstall(): bool
 	{
-		return Option::get('bizproc', 'bitrix_ai_boss_report_available', 'N') === 'Y';
+		return \Bitrix\Main\Config\Feature::isEnabled(BossReportAgentFlag::class);
 	}
 
 	public function getModifiedTime(): int

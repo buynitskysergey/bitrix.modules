@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Integration\UI\EntitySelector;
 
-use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\Service\Feature\AiAgentsFeature;
+use Bitrix\Bizproc\Workflow\Template\SystemValueCatalog;
 
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\CurrentUser;
@@ -21,30 +21,7 @@ class SystemProvider extends BaseProvider
 	protected const TAB_ID = 'bizproc-system-tab';
 	protected const ENTITY_ID = 'bizproc-system';
 	protected const ENTITY_TYPE_SYSTEM = 'System';
-	protected const ENTITY_TYPE_WORKFLOW = 'Workflow';
-	protected const ENTITY_TYPE_USER = 'User';
-	protected const ENTITY_TYPE_TEMPLATE = 'Template';
 	protected const ENTITY_TYPE_FUNCTION = 'Function';
-
-	/** [object, field, label phrase key, value type] */
-	private const SYSTEM_VALUES = [
-		[self::ENTITY_TYPE_WORKFLOW, 'ID', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_WORKFLOW_ID', FieldType::STRING],
-		[self::ENTITY_TYPE_WORKFLOW, 'TemplateId', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_WORKFLOW_TEMPLATE_ID', FieldType::INT],
-		[self::ENTITY_TYPE_TEMPLATE, 'TargetUser', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_TARGET_USER', FieldType::USER],
-		[self::ENTITY_TYPE_USER, 'ID', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_USER_ID', FieldType::USER],
-		[self::ENTITY_TYPE_SYSTEM, 'Now', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_NOW', FieldType::DATETIME],
-		[self::ENTITY_TYPE_SYSTEM, 'NowLocal', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_NOW_LOCAL', FieldType::DATETIME],
-		[self::ENTITY_TYPE_SYSTEM, 'Date', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_DATE', FieldType::DATE],
-		[self::ENTITY_TYPE_SYSTEM, 'Eol', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_EOL', FieldType::STRING],
-		[self::ENTITY_TYPE_SYSTEM, 'HostUrl', 'BIZPROC_ENTITY_SELECTOR_SYSTEM_HOST_URL', FieldType::STRING],
-	];
-
-	private const AI_AGENTS_SYSTEM_VALUE = [
-		self::ENTITY_TYPE_WORKFLOW,
-		'TemplateActivatedBy',
-		'BIZPROC_ENTITY_SELECTOR_SYSTEM_TEMPLATE_ACTIVATED_BY',
-		FieldType::USER,
-	];
 
 	public function __construct(array $options = [])
 	{
@@ -109,11 +86,11 @@ class SystemProvider extends BaseProvider
 
 	public static function getSystemValues(): array
 	{
-		$systemValues = self::SYSTEM_VALUES;
+		$systemValues = SystemValueCatalog::getSystemValues();
 
 		if (ServiceLocator::getInstance()->get(AiAgentsFeature::class)?->isAvailable())
 		{
-			$systemValues[] = self::AI_AGENTS_SYSTEM_VALUE;
+			$systemValues[] = SystemValueCatalog::getAiAgentsSystemValue();
 		}
 
 		$result = [];

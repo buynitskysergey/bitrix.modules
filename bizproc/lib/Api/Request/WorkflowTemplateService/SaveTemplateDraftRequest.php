@@ -10,6 +10,10 @@ final class SaveTemplateDraftRequest
 	/**
 	 * @param int|null $revision revision of the draft the writer has seen; null skips only the content comparison
 	 * while the conflict guard still protects the identity of the draft and its conditional write
+	 * @param list<string> $fieldsToClaim metadata fields the writer declares its own (AGT-TPL-01), out of
+	 * {@see \Bitrix\Bizproc\Workflow\Template\AgentOwnedMetadata}. Empty by default: a writer that claims
+	 * nothing leaves the marker of the bound draft to the carry-over rule, exactly as before the parameter
+	 * existed.
 	 */
 	public readonly TemplateChangeAttribution $attribution;
 	public function __construct(
@@ -22,6 +26,7 @@ final class SaveTemplateDraftRequest
 		public readonly ?int $revision = null,
 		?TemplateChangeAttribution $attribution = null,
 		public readonly bool $useEditConflictGuard = false,
+		public readonly array $fieldsToClaim = [],
 	)
 	{
 		$this->attribution = $attribution

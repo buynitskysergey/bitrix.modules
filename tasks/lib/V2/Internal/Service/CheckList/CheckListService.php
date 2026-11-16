@@ -64,7 +64,7 @@ class CheckListService extends BaseCheckListService
 		int $taskId,
 		array $taskItemsFields,
 		?Entity\CheckList $existingCheckList = null,
-		bool $useBatch = false,
+		bool $useBatch = true,
 	): CheckListStatusResult
 	{
 		$facade = $this->checkListFacadeResolver->resolveByType($this->getEntityType());

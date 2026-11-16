@@ -28,7 +28,6 @@ final class FavoriteProvider
 		int $userId,
 		int $limit = FavoriteListService::DEFAULT_LIMIT,
 		?array $afterCursor = null,
-		bool $onlyNotified = false,
 	): array
 	{
 		if ($userId <= 0)
@@ -36,19 +35,14 @@ final class FavoriteProvider
 			return ['items' => [], 'nextCursor' => null];
 		}
 
-		// The refill budget does NOT bound the first window - it is checked on entering an iteration,
-		// when nothing has been read yet - so the page size needs its own cap.
-		$normalizedLimit = min(
-			FavoriteListService::MAX_LIMIT,
-			$limit > 0 ? $limit : FavoriteListService::DEFAULT_LIMIT,
-		);
-
 		return $this->listService->listPage(
 			$userId,
 			CollectionAccessService::buildUserAccessCodes($userId),
-			$normalizedLimit,
+			min(
+				FavoriteListService::MAX_LIMIT,
+				$limit > 0 ? $limit : FavoriteListService::DEFAULT_LIMIT,
+			),
 			$afterCursor,
-			$onlyNotified,
 		);
 	}
 

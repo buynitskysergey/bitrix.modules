@@ -42,12 +42,30 @@ class SelectionResolver
 	 */
 	public function resolve(array $rootIds, string $section, bool $withNested): array
 	{
+		$limit = Configuration::getBulkSelectionLimit();
+
+		// Every root is at least one affected document, so a longer list is over the cap before it
+		// is expanded - and it must not reach the IN of the lookups below.
+		$uniqueRootIds = array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $rootIds),
+			static fn(int $id): bool => $id > 0,
+		));
+		if (count($uniqueRootIds) > $limit)
+		{
+			return [
+				'ids' => [],
+				'byCollection' => [],
+				'limitExceeded' => true,
+				'hasNested' => false,
+				'rootsMeta' => [],
+			];
+		}
+
 		// A collection's main document is never part of a bulk selection: it is hidden from every
 		// listing, so it can only arrive here from a hand-crafted request.
 		$roots = $this->documentRepository->getMetaByIds(
-			$this->documentRepository->filterOutMainDocumentIds($rootIds),
+			$this->documentRepository->filterOutMainDocumentIds($uniqueRootIds),
 		);
-		$limit = Configuration::getBulkSelectionLimit();
 
 		// Computed independently of $withNested: it answers "could the toggle matter here?".
 		$hasNested = $this->anyRootHasChildren($roots);
@@ -74,6 +92,14 @@ class SelectionResolver
 					// Active-section bulk targets live documents: already-archived descendants
 					// are not re-archived, so they must not inflate the dry-run affected count.
 					excludeArchived: $section === self::SECTION_ACTIVE,
+					// A branch is the node plus its descendants IN THE SAME STATE. In the
+					// archive that has to be said out loud: a live document under an archived one
+					// would otherwise be dragged along by an operation it is not part of.
+					onlyArchived: $section === self::SECTION_ARCHIVE,
+					// One id past the cap is all the answer needs: the check below only has to tell
+					// "over the limit" from "within it", and a single root with a wide branch used to
+					// be walked and materialised whole before it was asked.
+					limit: $limit + 1,
 				)
 				: [$rootId]
 			;

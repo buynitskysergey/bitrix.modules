@@ -18,7 +18,12 @@ use Bitrix\UI\EntitySelector\Item;
 use Bitrix\UI\EntitySelector\SearchQuery;
 use Bitrix\UI\EntitySelector\Tab;
 
-// Not final: unit tests subclass to override the LicenseService seam.
+/**
+ * A deleted base is out of the dialog for the same reason an archived one is: nothing new is written
+ * pointing at it.
+ *
+ * Not final: unit tests subclass to override the LicenseService seam.
+ */
 class CollectionProvider extends BaseProvider
 {
 	public const ENTITY_ID = 'note-collection';
@@ -73,13 +78,15 @@ class CollectionProvider extends BaseProvider
 			return [];
 		}
 
-		$rows = CollectionTable::query()
+		$query = CollectionTable::query()
 			->setSelect(['ID', 'NAME'])
 			->whereIn('ID', $allowedIds)
 			->where('IS_ARCHIVED', 'N')
+			->whereNull('TRASHED_AT')
 			->setOrder(['NAME' => 'ASC'])
-			->exec()
 		;
+
+		$rows = $query->exec();
 
 		$items = [];
 		while ($row = $rows->fetch())
@@ -105,6 +112,7 @@ class CollectionProvider extends BaseProvider
 		$query = CollectionTable::query()
 			->setSelect(['ID', 'NAME'])
 			->where('IS_ARCHIVED', 'N')
+			->whereNull('TRASHED_AT')
 			->setOrder(['UPDATED_AT' => 'DESC', 'ID' => 'DESC'])
 			->setLimit(self::RECENT_LIMIT)
 		;
@@ -140,6 +148,7 @@ class CollectionProvider extends BaseProvider
 		$query = CollectionTable::query()
 			->setSelect(['ID', 'NAME'])
 			->where('IS_ARCHIVED', 'N')
+			->whereNull('TRASHED_AT')
 			->whereLike('NAME', $queryText . '%')
 			->setOrder(['NAME' => 'ASC'])
 			->setLimit(self::SEARCH_LIMIT)

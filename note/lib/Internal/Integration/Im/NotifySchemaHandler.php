@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Internal\Integration\Im;
 
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Note\Internal\Configuration;
+use Bitrix\Note\Internal\Config\Feature\DocumentNotifications;
 use Bitrix\Note\Internal\Service\Notification\NotificationShippingPolicy;
 
 /**
@@ -38,9 +39,9 @@ final class NotifySchemaHandler
 
 	public static function onGetNotifySchema(): array
 	{
-		// Nothing is delivered while the option is off, so the settings screen is given no group to
+		// Nothing is delivered while the feature is off, so the settings screen is given no group to
 		// hold toggles for it.
-		if (!Configuration::isNotificationsEnabled())
+		if (!Feature::isEnabled(DocumentNotifications::class))
 		{
 			return [];
 		}

@@ -40,6 +40,7 @@ use Bitrix\Tasks\Internals\Task\Template\TemplateDependenceTable;
 use Bitrix\Tasks\Internals\Task\UserOptionTable;
 use Bitrix\Tasks\Internals\TaskTable;
 use Bitrix\Tasks\Internals\UserOption\Option;
+use Bitrix\Tasks\Kanban\TaskStageTable;
 use Bitrix\Tasks\Provider\Exception\InvalidFilterException;
 use Bitrix\Tasks\Provider\TasksUFManager;
 use Bitrix\Tasks\Scrum\Form\EntityForm;
@@ -49,6 +50,8 @@ use Bitrix\Tasks\V2\Internal\Integration\CRM\Repository\Mapper\CrmIdMapper;
 
 class TaskFilterBuilder
 {
+	public const FILTER_PERSONAL_KANBAN_UNPLANNED = 'PERSONAL_KANBAN_UNPLANNED';
+
 	private const FILTER_ROLE_KEY = '::SUBFILTER-ROLEID';
 
 	private const OPERATION_EQUAL = '=';
@@ -699,6 +702,7 @@ class TaskFilterBuilder
 				case 'ALLOW_CHANGE_DEADLINE':
 				case 'MATCH_WORK_TIME':
 				case 'IS_REGULAR':
+				case 'ZOMBIE':
 					$subFilter = $this->createSubfilter($field, $val, $operation, self::CAST_STRING_EQ);
 					if ($subFilter)
 					{
@@ -1140,6 +1144,21 @@ class TaskFilterBuilder
 					$this->registerRuntimeField(TaskQueryBuilder::ALIAS_TASK_STAGES);
 					break;
 
+				case self::FILTER_PERSONAL_KANBAN_UNPLANNED:
+					if (
+						!$val instanceof PersonalKanbanUnplannedFilter
+						|| $val->newStageId <= 0
+						|| !$val->ownerStageIds
+						|| min($val->ownerStageIds) <= 0
+						|| !in_array($val->newStageId, $val->ownerStageIds, true)
+					)
+					{
+						throw new InvalidFilterException('Invalid personal kanban unplanned filter');
+					}
+
+					$conditionTree->where($this->createPersonalKanbanUnplannedFilter($val));
+					break;
+
 				case 'PROJECT_NEW_COMMENTS':
 				case 'PROJECT_EXPIRED':
 				case 'MENTIONED':
@@ -1400,6 +1419,37 @@ class TaskFilterBuilder
 		}
 
 		return $conditionTree;
+	}
+
+	private function createPersonalKanbanUnplannedFilter(
+		PersonalKanbanUnplannedFilter $filter
+	): ConditionTree
+	{
+		$linkedToNew = TaskQueryBuilder::createQuery(
+			'PKUN_NEW',
+			TaskStageTable::getEntity()
+		);
+		$linkedToNew
+			->setSelect(['ID'])
+			->where('TASK_ID', new SqlExpression('%1$s'))
+			->where('STAGE_ID', $filter->newStageId)
+		;
+
+		$linkedToAny = TaskQueryBuilder::createQuery(
+			'PKUN_ANY',
+			TaskStageTable::getEntity()
+		);
+		$linkedToAny
+			->setSelect(['ID'])
+			->where('TASK_ID', new SqlExpression('%1$s'))
+			->whereIn('STAGE_ID', $filter->ownerStageIds)
+		;
+
+		return Query::filter()
+			->logic('or')
+			->whereExpr("EXISTS({$linkedToNew->getQuery()})", ['ID'])
+			->whereExpr("NOT EXISTS({$linkedToAny->getQuery()})", ['ID'])
+		;
 	}
 
 	/**

@@ -54,7 +54,7 @@ final class VersionProvider
 		}
 
 		$collectionId = (int)$document->getCollectionId();
-		if (!DocumentAccessService::currentUserHasLevel($documentId, $collectionId, DocumentAccessService::LEVEL_VIEW))
+		if (!DocumentAccessService::currentUserCanViewDocumentContent($documentId, $collectionId))
 		{
 			throw new AccessDeniedException();
 		}

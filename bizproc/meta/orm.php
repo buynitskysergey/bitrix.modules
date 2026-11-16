@@ -9264,6 +9264,16 @@ namespace Bitrix\Bizproc\Workflow\Template\Entity {
 	 * @method \Bitrix\Bizproc\Workflow\Template\Tpl resetCreateSource()
 	 * @method \Bitrix\Bizproc\Workflow\Template\Tpl unsetCreateSource()
 	 * @method \string fillCreateSource()
+	 * @method null|\Bitrix\Main\Type\DateTime getFirstPublishedAt()
+	 * @method \Bitrix\Bizproc\Workflow\Template\Tpl setFirstPublishedAt(null|\Bitrix\Main\Type\DateTime|\Bitrix\Main\DB\SqlExpression $firstPublishedAt)
+	 * @method bool hasFirstPublishedAt()
+	 * @method bool isFirstPublishedAtFilled()
+	 * @method bool isFirstPublishedAtChanged()
+	 * @method null|\Bitrix\Main\Type\DateTime remindActualFirstPublishedAt()
+	 * @method null|\Bitrix\Main\Type\DateTime requireFirstPublishedAt()
+	 * @method \Bitrix\Bizproc\Workflow\Template\Tpl resetFirstPublishedAt()
+	 * @method \Bitrix\Bizproc\Workflow\Template\Tpl unsetFirstPublishedAt()
+	 * @method null|\Bitrix\Main\Type\DateTime fillFirstPublishedAt()
 	 * @method \Bitrix\Main\EO_User getUpdatedUser()
 	 * @method \Bitrix\Main\EO_User remindActualUpdatedUser()
 	 * @method \Bitrix\Main\EO_User requireUpdatedUser()
@@ -9389,6 +9399,8 @@ namespace Bitrix\Bizproc\Workflow\Template\Entity {
 	 * @method \Bitrix\Main\Type\DateTime[] fillActivatedAt()
 	 * @method \string[] getCreateSourceList()
 	 * @method \string[] fillCreateSource()
+	 * @method null|\Bitrix\Main\Type\DateTime[] getFirstPublishedAtList()
+	 * @method null|\Bitrix\Main\Type\DateTime[] fillFirstPublishedAt()
 	 * @method \Bitrix\Main\EO_User[] getUpdatedUserList()
 	 * @method \Bitrix\Bizproc\Workflow\Template\Entity\EO_WorkflowTemplate_Collection getUpdatedUserCollection()
 	 * @method \Bitrix\Main\EO_User_Collection fillUpdatedUser()
@@ -14225,4 +14237,151 @@ namespace Bitrix\Bizproc\Workflow\Template\Fragment\Entity {
 	 * @method \Bitrix\Bizproc\Workflow\Template\Fragment\Entity\EO_TemplateFragment_Collection wakeUpCollection($rows)
 	 */
 	class EO_TemplateFragment_Entity extends \Bitrix\Main\ORM\Entity {}
+}
+/* ORMENTITYANNOTATION:Bitrix\Bizproc\Internal\Model\StartStat\WorkflowStartStatTable */
+namespace Bitrix\Bizproc\Internal\Model\StartStat {
+	/**
+	 * EO_WorkflowStartStat
+	 * @see \Bitrix\Bizproc\Internal\Model\StartStat\WorkflowStartStatTable
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int getTemplateId()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat setTemplateId(\int|\Bitrix\Main\DB\SqlExpression $templateId)
+	 * @method bool hasTemplateId()
+	 * @method bool isTemplateIdFilled()
+	 * @method bool isTemplateIdChanged()
+	 * @method \Bitrix\Main\Type\Date getStatDate()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat setStatDate(\Bitrix\Main\Type\Date|\Bitrix\Main\DB\SqlExpression $statDate)
+	 * @method bool hasStatDate()
+	 * @method bool isStatDateFilled()
+	 * @method bool isStatDateChanged()
+	 * @method \int getCnt()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat setCnt(\int|\Bitrix\Main\DB\SqlExpression $cnt)
+	 * @method bool hasCnt()
+	 * @method bool isCntFilled()
+	 * @method bool isCntChanged()
+	 * @method \int remindActualCnt()
+	 * @method \int requireCnt()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat resetCnt()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat unsetCnt()
+	 * @method \int fillCnt()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @property-read array $primary
+	 * @property-read int $state @see \Bitrix\Main\ORM\Objectify\State
+	 * @property-read \Bitrix\Main\Type\Dictionary $customData
+	 * @property \Bitrix\Main\Authentication\Context $authContext
+	 * @method mixed get($fieldName)
+	 * @method mixed remindActual($fieldName)
+	 * @method mixed require($fieldName)
+	 * @method bool has($fieldName)
+	 * @method bool isFilled($fieldName)
+	 * @method bool isChanged($fieldName)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat set($fieldName, $value)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat reset($fieldName)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat unset($fieldName)
+	 * @method void addTo($fieldName, $value)
+	 * @method void removeFrom($fieldName, $value)
+	 * @method void removeAll($fieldName)
+	 * @method \Bitrix\Main\ORM\Data\Result delete()
+	 * @method mixed fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method mixed[] collectValues($valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL)
+	 * @method \Bitrix\Main\ORM\Data\AddResult|\Bitrix\Main\ORM\Data\UpdateResult|\Bitrix\Main\ORM\Data\Result save()
+	 * @method static \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat wakeUp($data)
+	 */
+	class EO_WorkflowStartStat extends \Bitrix\Main\ORM\Objectify\EntityObject {
+		/* @var \Bitrix\Bizproc\Internal\Model\StartStat\WorkflowStartStatTable */
+		static public $dataClass = '\Bitrix\Bizproc\Internal\Model\StartStat\WorkflowStartStatTable';
+		/**
+		 * @param bool|array $setDefaultValues
+		 */
+		public function __construct($setDefaultValues = true) {}
+	}
+}
+namespace Bitrix\Bizproc\Internal\Model\StartStat {
+	/**
+	 * EO_WorkflowStartStat_Collection
+	 *
+	 * Custom methods:
+	 * ---------------
+	 *
+	 * @method \int[] getTemplateIdList()
+	 * @method \Bitrix\Main\Type\Date[] getStatDateList()
+	 * @method \int[] getCntList()
+	 * @method \int[] fillCnt()
+	 *
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @property-read \Bitrix\Main\ORM\Entity $entity
+	 * @method void add(\Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat $object)
+	 * @method bool has(\Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat $object)
+	 * @method bool hasByPrimary($primary)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat getByPrimary($primary)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat[] getAll()
+	 * @method bool remove(\Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat $object)
+	 * @method void removeByPrimary($primary)
+	 * @method array|\Bitrix\Main\ORM\Objectify\Collection|null fill($fields = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL) flag or array of field names
+	 * @method static \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection wakeUp($data)
+	 * @method \Bitrix\Main\ORM\Data\Result save($ignoreEvents = false)
+	 * @method void offsetSet() ArrayAccess
+	 * @method void offsetExists() ArrayAccess
+	 * @method void offsetUnset() ArrayAccess
+	 * @method void offsetGet() ArrayAccess
+	 * @method void rewind() Iterator
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat current() Iterator
+	 * @method mixed key() Iterator
+	 * @method void next() Iterator
+	 * @method bool valid() Iterator
+	 * @method int count() Countable
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection merge(?\Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection $collection)
+	 * @method bool isEmpty()
+	 * @method array collectValues(int $valuesType = \Bitrix\Main\ORM\Objectify\Values::ALL, int $fieldsMask = \Bitrix\Main\ORM\Fields\FieldTypeMask::ALL, bool $recursive = false)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat|null find(callable $callback)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection filter(callable $callback)
+	 */
+	class EO_WorkflowStartStat_Collection extends \Bitrix\Main\ORM\Objectify\Collection implements \ArrayAccess, \Iterator, \Countable {
+		/* @var \Bitrix\Bizproc\Internal\Model\StartStat\WorkflowStartStatTable */
+		static public $dataClass = '\Bitrix\Bizproc\Internal\Model\StartStat\WorkflowStartStatTable';
+	}
+}
+namespace Bitrix\Bizproc\Internal\Model\StartStat {
+	/**
+	 * @method static EO_WorkflowStartStat_Query query()
+	 * @method static EO_WorkflowStartStat_Result getByPrimary($primary, array $parameters = [])
+	 * @method static EO_WorkflowStartStat_Result getById($id)
+	 * @method static EO_WorkflowStartStat_Result getList(array $parameters = [])
+	 * @method static EO_WorkflowStartStat_Entity getEntity()
+	 * @method static \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat createObject($setDefaultValues = true)
+	 * @method static \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection createCollection()
+	 * @method static \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat wakeUpObject($row)
+	 * @method static \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection wakeUpCollection($rows)
+	 */
+	class WorkflowStartStatTable extends \Bitrix\Main\ORM\Data\DataManager {}
+	/**
+	 * Common methods:
+	 * ---------------
+	 *
+	 * @method EO_WorkflowStartStat_Result exec()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat fetchObject()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection fetchCollection()
+	 */
+	class EO_WorkflowStartStat_Query extends \Bitrix\Main\ORM\Query\Query {}
+	/**
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat fetchObject()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection fetchCollection()
+	 */
+	class EO_WorkflowStartStat_Result extends \Bitrix\Main\ORM\Query\Result {}
+	/**
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat createObject($setDefaultValues = true)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection createCollection()
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat wakeUpObject($row)
+	 * @method \Bitrix\Bizproc\Internal\Model\StartStat\EO_WorkflowStartStat_Collection wakeUpCollection($rows)
+	 */
+	class EO_WorkflowStartStat_Entity extends \Bitrix\Main\ORM\Entity {}
 }

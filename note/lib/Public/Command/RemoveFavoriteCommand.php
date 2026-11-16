@@ -4,63 +4,29 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Public\Command;
 
-use Bitrix\Main\Application;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
-use Bitrix\Note\Internal\Model\SubscriptionTable;
 use Bitrix\Note\Internal\Repository\FavoriteRepository;
-use Bitrix\Note\Internal\Repository\SubscriptionRepository;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
-use Bitrix\Note\Internal\Service\Favorite\FavoriteLockService;
 
 /**
- * Takes one object out of the caller's favorites together with the positive
- * notification subscription on it, and reports what was taken away so a caller can put it back.
+ * Takes one object out of the caller's favorites and reports where it stood, so a caller can put it
+ * back. The notification subscription on the same object is a row of its own and stays untouched.
  *
  * ACL is deliberately not checked anywhere on this path: a user must be able to clean their own list
  * even after losing access to the object.
  */
 final class RemoveFavoriteCommand extends AbstractCommand
 {
-	private const POSITIVE_MODES = [
-		SubscriptionTable::MODE_SELF,
-		SubscriptionTable::MODE_SUBTREE,
-		SubscriptionTable::MODE_ALL,
-	];
-
 	public function __construct(
 		private readonly int $userId,
 		private readonly string $entityType,
 		private readonly int $entityId,
 		private readonly FavoriteRepository $repository = new FavoriteRepository(),
-		private readonly SubscriptionRepository $subscriptionRepository = new SubscriptionRepository(),
 		private readonly PushNotificationService $pushService = new PushNotificationService(),
-		private readonly FavoriteLockService $lockService = new FavoriteLockService(),
 	) {}
 
-	/**
-	 * The other half of the invariant SetSubscriptionCommand holds: without the same lock, a subscribe
-	 * that has already checked the star can commit after the star is gone, and the object keeps
-	 * notifying with no row left to switch it off from.
-	 */
 	protected function execute(): Result
-	{
-		if (!$this->lockService->acquire($this->userId, $this->entityType, $this->entityId))
-		{
-			throw new \RuntimeException('Failed to acquire the favorite lock of the removed object');
-		}
-
-		try
-		{
-			return $this->write();
-		}
-		finally
-		{
-			$this->lockService->release($this->userId, $this->entityType, $this->entityId);
-		}
-	}
-
-	private function write(): Result
 	{
 		$row = $this->repository->findRow($this->userId, $this->entityType, $this->entityId);
 		if ($row === null)
@@ -69,48 +35,15 @@ final class RemoveFavoriteCommand extends AbstractCommand
 		}
 
 		$ordinal = $this->resolveOrdinal($row['id']);
-		$removedMode = null;
 
-		$connection = Application::getConnection();
-		$connection->startTransaction();
+		$this->repository->remove($this->userId, $this->entityType, $this->entityId);
 
-		try
-		{
-			// The mode is read for the report only; whether the row goes is decided by the DELETE
-			// filter itself, so a mode switched concurrently cannot leave a positive subscription on an
-			// object that is no longer starred.
-			// Only positive modes go: a muted row must survive, otherwise unstarring a muted object
-			// would resume notifications on it and there would be nowhere left to mute it again.
-			// MutePruner is intentionally not called here - an orphaned mute is what a restore comes back to.
-			$removedMode = $this->resolvePositiveMode();
-			$subscriptionRemoved = $this->subscriptionRepository->removeByModes(
-				$this->userId,
-				$this->entityType,
-				$this->entityId,
-				self::POSITIVE_MODES,
-			);
-			if (!$subscriptionRemoved)
-			{
-				$removedMode = null;
-			}
-
-			$this->repository->remove($this->userId, $this->entityType, $this->entityId);
-			$connection->commitTransaction();
-		}
-		catch (\Throwable $e)
-		{
-			$connection->rollbackTransaction();
-
-			throw $e;
-		}
-
-		$this->emitRemove($row['id'], $removedMode !== null);
+		$this->emitRemove($row['id']);
 
 		return $this->createResult([
 			'success' => true,
 			'removed' => [
 				'position' => $ordinal,
-				'notifyMode' => $removedMode,
 			],
 		]);
 	}
@@ -134,41 +67,23 @@ final class RemoveFavoriteCommand extends AbstractCommand
 		return $ordinal;
 	}
 
-	private function resolvePositiveMode(): ?string
-	{
-		$state = $this->subscriptionRepository->getUserState($this->userId, $this->entityType, $this->entityId);
-		$mode = $state['mode'] ?? null;
-
-		return in_array($mode, self::POSITIVE_MODES, true) ? (string)$mode : null;
-	}
-
 	/**
-	 * The only place in the feature where one command publishes two events: a
-	 * bell opened in another tab has no other way to learn the subscription went with the star.
+	 * favoriteRemove into the personal channel. The initiator is not excluded: the same list
+	 * may be open in another tab and in the mobile app.
 	 */
-	private function emitRemove(int $favoriteId, bool $subscriptionRemoved): void
+	private function emitRemove(int $favoriteId): void
 	{
-		$favoritePayload = [
+		$payload = [
 			'id' => $favoriteId,
 			'entityType' => $this->entityType,
-			'entityId' => $this->entityId,
-		];
-		$subscriptionPayload = [
-			'scope' => $this->entityType,
 			'entityId' => $this->entityId,
 		];
 
 		$pushService = $this->pushService;
 		$userId = $this->userId;
-		$pushService->dispatchAfterCommit(
-			static function () use ($pushService, $userId, $favoritePayload, $subscriptionPayload, $subscriptionRemoved): void {
-				$pushService->sendToUserChannel($userId, 'favoriteRemove', $favoritePayload);
-				if ($subscriptionRemoved)
-				{
-					$pushService->sendToUserChannel($userId, 'subscriptionRemove', $subscriptionPayload);
-				}
-			}
-		);
+		$pushService->dispatchAfterCommit(static function () use ($pushService, $userId, $payload): void {
+			$pushService->sendToUserChannel($userId, 'favoriteRemove', $payload);
+		});
 	}
 
 	private function createResult(array $data = []): Result

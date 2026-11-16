@@ -9,6 +9,7 @@ use Bitrix\Main\Result;
 use Bitrix\Note\Internal\Entity\RecycleBin\RecycleBinRecord;
 use Bitrix\Note\Public\Event\OnDocumentLifecycleEvent;
 use Bitrix\Note\Internal\Model\EventTable;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
 use Bitrix\Note\Internal\Repository\RecycleBinRepository;
 use Bitrix\Note\Internal\Service\Bulk\BulkOutcome;
@@ -64,6 +65,10 @@ class DeleteAllInCollectionCommand extends AbstractCommand
 
 	protected function execute(): Result
 	{
+		// Emptying is a write into the base, so its state decides it: an archived base is read-only,
+		// and bulk-delete gets no exception to that.
+		CollectionAccessService::assertCollectionAcceptsWrites($this->collectionId);
+
 		$result = new Result();
 
 		$documentIds = $this->repository->getLiveCollectionDocumentIds($this->collectionId);

@@ -8,15 +8,14 @@ use Bitrix\Im\V2\Chat\CopilotChat;
 use Bitrix\Im\V2\Integration\AiAssistant\AiAssistantService;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Loader;
-use Bitrix\Note\Internal\Configuration;
 use Bitrix\Ui\Public\Services\Copilot\CopilotNameService;
 
 /**
  * Single source of truth for whether the BitrixGPT side chat may be offered to the current user,
  * and for the region-aware product name shown in its phrases. Ported from
- * biconnector/lib/Internal/Integration/AiAssistant/BitrixGptChat.php: the flag source differs, and
- * im's own copilot gate is checked on top of it — unlike the BI dashboard, this panel orders a
- * COPILOT chat itself (API-02), so it must not offer a button when that order cannot succeed.
+ * biconnector/lib/Internal/Integration/AiAssistant/BitrixGptChat.php. Unlike the BI dashboard, this
+ * panel orders a COPILOT chat itself (API-02), so it must not offer a button when that order cannot
+ * succeed.
  *
  * Instance-based on purpose: every foreign call sits behind a protected seam, so the verdict is
  * unit-testable without a portal (same pattern as Internal\Service\License\LicenseService).
@@ -31,17 +30,11 @@ class AiChatAvailability
 	private const FALLBACK_NAME = 'BitrixGPT';
 
 	/**
-	 * Condition order is normative and short-circuiting: flag -> modules -> service -> redesign
-	 * gate and bot -> im's copilot gate. The flag never replaces the rest of the conditions, it only
-	 * precedes them.
+	 * Condition order is normative and short-circuiting: modules -> service -> redesign gate and bot
+	 * -> im's copilot gate.
 	 */
 	public function isAvailable(): bool
 	{
-		if (!$this->isFlagEnabled())
-		{
-			return false;
-		}
-
 		if (!$this->isAiAssistantAvailable() || !$this->isImAvailable())
 		{
 			return false;
@@ -74,11 +67,6 @@ class AiChatAvailability
 		}
 
 		return $this->getCopilotName();
-	}
-
-	protected function isFlagEnabled(): bool
-	{
-		return Configuration::isAiChatEnabled();
 	}
 
 	protected function isAiAssistantAvailable(): bool

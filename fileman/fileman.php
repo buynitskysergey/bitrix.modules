@@ -7,6 +7,8 @@
  * @copyright 2001-2025 Bitrix
  */
 
+use Bitrix\Main\Web\Uri;
+
 IncludeModuleLangFile(__FILE__);
 define("DEBUG_FILE_MAN", false);
 if(!defined("CACHED_stickers_count")) define("CACHED_stickers_count", 36000000);
@@ -961,7 +963,7 @@ class CFileMan
 		{
 			?>
 			<script>
-				window.location = '<?= CUtil::JSEscape(CHTTP::URN2URI(GetDirPath($Params['path'])))?>';
+				window.location = '<?= CUtil::JSEscape((string)(new Uri(GetDirPath($Params['path'])))->toAbsolute())?>';
 			</script>
 		<?
 		}
@@ -1534,8 +1536,8 @@ class CFileMan
 			$bUseOnlyDefinedStyles = false;
 		}
 
-		$arParams["body_class"] = COption::GetOptionString("fileman", "editor_body_class", "");
-		$arParams["body_id"] = COption::GetOptionString("fileman", "editor_body_id", "");
+		$arParams["body_class"] = htmlspecialcharsbx(COption::GetOptionString("fileman", "editor_body_class"));
+		$arParams["body_id"] = htmlspecialcharsbx(COption::GetOptionString("fileman", "editor_body_id"));
 
 		?>
 		<script bxrunfirst="true">
@@ -1980,15 +1982,15 @@ class CFileMan
 			_ar.show = <?echo($show == 'true' ? 'true' : 'false');?>;
 			_ar.docked = <?echo($docked=='true' ? 'true' : 'false');?>;
 			<?if ($docked=='true'):?>
-			_ar.position = [<?echo$arPos[0];?>,<?echo$arPos[1];?>,<?echo$arPos[2];?>];
+			_ar.position = [<?= intval($arPos[0])?>,<?= intval($arPos[1])?>,<?= intval($arPos[2])?>];
 			<?else:?>
 			_ar.position = {
-				x : '<?echo(mb_substr($arPos[0], -2) == "px"? mb_substr($arPos[0], 0, -2) : $arPos[0]);?>',
-				y : '<?echo(mb_substr($arPos[1], -2) == "px"? mb_substr($arPos[1], 0, -2) : $arPos[1]);?>'
+				x : '<?echo CUtil::JSEscape(mb_substr($arPos[0], -2) == "px"? mb_substr($arPos[0], 0, -2) : $arPos[0]);?>',
+				y : '<?echo CUtil::JSEscape(mb_substr($arPos[1], -2) == "px"? mb_substr($arPos[1], 0, -2) : $arPos[1]);?>'
 			};
 			<?endif;?>
 
-			SETTINGS['<?= $edname?>'].arToolbarSettings["<?=$tlbrname?>"] = _ar;
+			SETTINGS['<?= $edname?>'].arToolbarSettings["<?= CUtil::JSEscape($tlbrname)?>"] = _ar;
 			<?
 							}
 						}
@@ -2008,7 +2010,7 @@ class CFileMan
 			foreach($taskbars as $tname => $tskbr)
 			{
 				// Display settings
-				?>SETTINGS['<?= $edname?>'].arTaskbarSettings["<?=$tname;?>"] = {show: <?= $tskbr['show'] ? 'true' : 'false'?>, set: <?= $tskbr['set'] == 2 ? 2 : 3?>, active: <?= $tskbr['active'] ? 'true' : 'false'?>};<?
+				?>SETTINGS['<?= $edname?>'].arTaskbarSettings["<?= CUtil::JSEscape($tname)?>"] = {show: <?= $tskbr['show'] ? 'true' : 'false'?>, set: <?= $tskbr['set'] == 2 ? 2 : 3?>, active: <?= $tskbr['active'] ? 'true' : 'false'?>};<?
 				if ($tskbr['show'] && in_array($tname, $arTaskbars))
 				{
 					switch ($tname)
@@ -2059,7 +2061,7 @@ class CFileMan
 			SETTINGS['<?= $edname?>'].showTooltips4Components = <?echo $show_tooltips == "N" ? "false" : "true";?>;
 			SETTINGS['<?= $edname?>'].visualEffects = <?echo $visualEffects == "N" ? "false" : "true";?>;
 
-			window.comp2_dialog_size = {width: '<?= $arC2DS['width']?>', height: '<?= $arC2DS['height']?>'};
+			window.comp2_dialog_size = {width: '<?= CUtil::JSEscape($arC2DS['width'])?>', height: '<?= CUtil::JSEscape($arC2DS['height'])?>'};
 		</script>
 		<?
 		//return $str_res;
@@ -2107,10 +2109,67 @@ class CFileMan
 		$GLOBALS["CACHE_MANAGER"]->CleanDir("fileman_component_tree_array");
 	}
 
+	/**
+	 * Whether the value is a safe single name (file or directory): non-empty,
+	 * not "." / "..", free of path separators and NUL. The caller trims and
+	 * rejects on false.
+	 */
+	public static function IsSafeName($name): bool
+	{
+		if (!is_string($name) || $name === '' || $name === '.' || $name === '..')
+		{
+			return false;
+		}
+
+		return strpbrk($name, "/\\\0") === false;
+	}
+
 	public static function SecurePathVar($str)
 	{
 		$str = preg_replace("/\.\.+[\/\\\]+/i", "", $str);
 		return $str;
+	}
+
+	/**
+	 * Resolves the menu template path to store on menu save.
+	 *
+	 * The template is included as PHP when the menu is rendered, so only a user
+	 * with edit_php may set an arbitrary path. Without edit_php the submitted
+	 * value is ignored and the previously stored path is kept intact.
+	 *
+	 * @param string $submitted Path from the form (empty means "default template").
+	 * @param string $current Path currently stored in the menu file.
+	 * @param bool $canEditPhp Whether the user has the edit_php operation.
+	 * @return string Path to store.
+	 */
+	public static function ResolveMenuTemplatePath($submitted, $current, $canEditPhp): string
+	{
+		if (!$canEditPhp)
+		{
+			return (string)$current;
+		}
+
+		if (!is_string($submitted) || $submitted === '')
+		{
+			return '';
+		}
+
+		try
+		{
+			$absolute = Rel2Abs("/", $submitted);
+			if ($absolute === false)
+			{
+				return '';
+			}
+
+			$normalized = \Bitrix\Main\IO\Path::normalize($absolute);
+		}
+		catch (\Bitrix\Main\IO\InvalidPathException $e)
+		{
+			return '';
+		}
+
+		return (string)$normalized;
 	}
 
 	public static function GetUnixFilePermissions($file)

@@ -184,8 +184,8 @@ final class LandingSource implements SourceInterface
 		$folders = $this->foldersForSite($siteId);
 		// The home page (LANDING_ID_INDEX) is left out of the listing: it becomes no document of
 		// its own, its content is written into the knowledge base description instead (see
-		// getDocumentsPage()). It is a SYS='Y' page, so the plain listing already excludes it;
-		// buildTree() drops it by id as well, for a base whose home page is a regular one.
+		// getDocumentsPage()). The listing hands it out like any other page, so buildTree() drops it
+		// by id.
 		$pages = $this->pageReader->listForSite($siteId);
 		// Read once per step: the menu supplies the author's order for every tree level.
 		$menu = $this->menuReader->getMenuForSite($siteId);
@@ -219,9 +219,9 @@ final class LandingSource implements SourceInterface
 		$windowLimit = min($limit, PageReader::MAX_PAGE_LIMIT);
 
 		// Section documents come first (offset 0), then pages ordered by ID asc.
-		// The SYS='Y' home page (LANDING_ID_INDEX) is opted into the page listing so its content -
-		// and the in-body cross-page links it carries - gets imported too, while the index page of a
-		// section is left out of it: it is the body of that section.
+		// The home page (LANDING_ID_INDEX) is part of the page listing, so its content - and the in-body
+		// cross-page links it carries - gets imported too, while the index page of a section is left
+		// out of it: it is the body of that section.
 		$folders = $this->foldersForSite($siteId);
 		$folderCodes = $this->folderCodesById($folders);
 		$sectionBodyPageIds = array_keys($this->sectionIdsByIndexPage($folders, $indexPageId));
@@ -257,7 +257,6 @@ final class LandingSource implements SourceInterface
 				$siteId,
 				$pageOffset,
 				$remaining,
-				$indexPageId,
 				$sectionBodyPageIds,
 			);
 			$consumed += count($pageIds);
@@ -1378,6 +1377,7 @@ final class LandingSource implements SourceInterface
 				$formUrls,
 				$diskUrls,
 				$sectionIdsByIndexPage,
+				$homePageId,
 				$siteId,
 				$siteCode,
 				$landingHref,
@@ -1399,9 +1399,14 @@ final class LandingSource implements SourceInterface
 							: (string)$lid;
 
 						// The binding already names the element, so the marker is built straight
-						// from its id - no address has to be resolved back into one.
+						// from its id - no address has to be resolved back into one. The home page
+						// is the description of the collection, as in addressIndex().
+						$anchor = $lid === $homePageId
+							? LandingId::collectionAnchor($siteId)
+							: self::elementAnchor($lid, (bool)($page['IS_FOLDER'] ?? false), $sectionIdsByIndexPage);
+
 						return '[' . $label . '](' . LandingMentionTransformer::linkMarker(
-							self::elementAnchor($lid, (bool)($page['IS_FOLDER'] ?? false), $sectionIdsByIndexPage),
+							$anchor,
 							'/knowledge/' . $siteCode . '/' . $pageCode . '/',
 						) . ')';
 					}
@@ -1733,7 +1738,9 @@ final class LandingSource implements SourceInterface
 	 *
 	 * The index page of a section is indexed under the anchor of the SECTION, at both its own
 	 * address and its bare code: the page is converted as the body of that section, so an address
-	 * that used to open it has to arrive at the section document.
+	 * that used to open it has to arrive at the section document. The home page of the base is
+	 * indexed under the anchor of the COLLECTION the same way: its content is the description of
+	 * the collection, not a document of its own.
 	 *
 	 * $siteId and $indexPageId are passed for the base being converted, whose site row the
 	 * caller already holds; for any other base both are resolved here.
@@ -1787,11 +1794,13 @@ final class LandingSource implements SourceInterface
 		$sectionIdsByIndexPage = $this->sectionIdsByIndexPage($folders, $indexPageId);
 
 		$pageAnchorByCode = [];
-		foreach ($this->pageReader->listForSite($siteId, $indexPageId) as $page)
+		foreach ($this->pageReader->listForSite($siteId) as $page)
 		{
 			$pageId = (int)$page['ID'];
 			// The listing returns leaf pages only, so no row here is a section of the old model.
-			$anchor = self::elementAnchor($pageId, false, $sectionIdsByIndexPage);
+			$anchor = $pageId === $indexPageId
+				? LandingId::collectionAnchor($siteId)
+				: self::elementAnchor($pageId, false, $sectionIdsByIndexPage);
 			$code = mb_strtolower($this->rowCode($page));
 			$folderId = (int)($page['FOLDER_ID'] ?? 0);
 			// A page whose folder is not part of this listing keeps its bare code only.

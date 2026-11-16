@@ -31,6 +31,11 @@ final class RecycleBinProvider
 	 * and collectionTitle, mirroring the /shared/ contract. Orphan rows (collection already gone)
 	 * are unaffected and keep collectionId for the restore flow.
 	 *
+	 * An entry the reader may not view is dropped whole - title, excerpt, author, parent and the
+	 * name of its base alike. The selection is deliberately wider than that: it keeps a base that
+	 * is in the bin itself, which answers at MODERATE and not at VIEW, so the answer is cut by the
+	 * ACL already computed here, the same way {@see ContentList\LevelProvider} cuts its levels.
+	 *
 	 * @param array<int, string> $accessCodes
 	 * @param array{trashedAt: string, recycleBinId: int}|null $afterCursor
 	 * @return array{
@@ -109,7 +114,12 @@ final class RecycleBinProvider
 			$collectionId = $document !== null ? (int)$document->getCollectionId() : 0;
 			$collectionAlive = isset($collectionTitles[$collectionId]);
 			$trashedBy = (int)$record->getTrashedBy();
-			$entryAcl = $acl[(int)$record->getId()] ?? ['canRestore' => false, 'canHardDelete' => false];
+			$entryAcl = $acl[(int)$record->getId()]
+				?? ['canView' => false, 'canRestore' => false, 'canHardDelete' => false];
+			if ($entryAcl['canView'] !== true)
+			{
+				continue;
+			}
 
 			$meta = $cardMeta[$documentId] ?? ['excerpt' => '', 'author' => null];
 			$collectionLevel = $collectionLevels[$collectionId] ?? CollectionAccessService::LEVEL_NONE;

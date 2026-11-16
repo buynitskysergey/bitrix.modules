@@ -75,6 +75,7 @@ class Social extends PresetAbstract
 		}
 
 		$structure = static::STRUCTURE;
+		array_unshift($structure['shown']['menu_marketplace_group'], 'menu_vibecode');
 
 		$structure['shown']['menu_teamwork'] = [
 			'menu_im_messenger',

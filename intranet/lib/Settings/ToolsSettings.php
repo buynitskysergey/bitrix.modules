@@ -3,6 +3,7 @@
 namespace Bitrix\Intranet\Settings;
 
 use Bitrix\Intranet\Integration\Templates\Air\CollaborationWebMenu;
+use Bitrix\Intranet\Internal\Integration\Bitrix24;
 use Bitrix\Intranet\Settings\Controls\Section;
 use Bitrix\Intranet\Settings\Search\SearchEngine;
 use Bitrix\Main\Analytics\AnalyticsEvent;
@@ -29,7 +30,9 @@ class ToolsSettings extends AbstractSettings
 	public function save(): Result
 	{
 		$isChanged = false;
-		$isCollaborationModelAvailable = CollaborationWebMenu::isModelAvailable();
+		$isCollaborationModelAvailable = Bitrix24\CollaborationWebMenu::isEnabled()
+			&& CollaborationWebMenu::isModelAvailable()
+		;
 
 		foreach ($this->baseTools as $tool)
 		{
@@ -123,7 +126,9 @@ class ToolsSettings extends AbstractSettings
 	public function get(): SettingsInterface
 	{
 		$data = [];
-		$isCollaborationModelAvailable = CollaborationWebMenu::isModelAvailable();
+		$isCollaborationModelAvailable = Bitrix24\CollaborationWebMenu::isEnabled()
+			&& CollaborationWebMenu::isModelAvailable()
+		;
 
 		$data['sectionTools'] = new Section(
 			'settings-tools-section-tools',

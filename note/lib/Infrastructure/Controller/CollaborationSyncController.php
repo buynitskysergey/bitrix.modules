@@ -478,7 +478,7 @@ class CollaborationSyncController extends Controller
 
 	private function assertDocumentViewAccess(int $documentId, int $collectionId): bool
 	{
-		if (DocumentAccessService::currentUserHasLevel($documentId, $collectionId, DocumentAccessService::LEVEL_VIEW))
+		if (DocumentAccessService::currentUserCanViewDocumentContent($documentId, $collectionId))
 		{
 			return true;
 		}

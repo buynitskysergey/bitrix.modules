@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Vibecodeconnector\Internal\Integration\HumanResources;
 
+use Bitrix\HumanResources\Enum\DepthLevel;
 use Bitrix\HumanResources\Item\Collection\NodeCollection;
 use Bitrix\HumanResources\Item\Node;
 use Bitrix\HumanResources\Public\Service\Container as HrContainer;
@@ -17,7 +18,9 @@ use Bitrix\Vibecodeconnector\Internal\Exception\OrgStructureUnavailableException
 
 class OrgStructureGateway
 {
-	private const OLD_ACCESS_CODE_PATTERN = '/^D[1-9][0-9]*$/';
+	private const OLD_ACCESS_CODE_PATTERN = '/^D[1-9][0-9]*$/D';
+	private const MATCH_ACCESS_CODE_PATTERN = '/^(D|DR)([1-9][0-9]*)$/D';
+	private const RECURSIVE_PREFIX = 'DR';
 	private const SCAN_CHUNK_SIZE = 500;
 
 	/**
@@ -95,6 +98,8 @@ class OrgStructureGateway
 	}
 
 	/**
+	 * D<n> matches direct membership in the department, DR<n> also membership in any of its subdepartments.
+	 *
 	 * @param list<string> $accessCodes
 	 *
 	 * @return array{matched: list<string>, unresolved: list<string>}
@@ -104,44 +109,81 @@ class OrgStructureGateway
 	{
 		$structureId = $this->getDefaultStructureId();
 
-		$askedCodes = [];
+		$plainCodeByAskedCode = [];
+		$hasRecursiveCode = false;
 		foreach ($accessCodes as $accessCode)
 		{
-			if (is_string($accessCode))
+			if (!is_string($accessCode) || array_key_exists($accessCode, $plainCodeByAskedCode))
 			{
-				$askedCodes[$accessCode] = true;
+				continue;
+			}
+
+			$plainCodeByAskedCode[$accessCode] = null;
+			if (preg_match(self::MATCH_ACCESS_CODE_PATTERN, $accessCode, $parts) === 1)
+			{
+				// Nodes are always asked by the plain code: older humanresources does not know DR codes.
+				$plainCodeByAskedCode[$accessCode] = 'D' . $parts[2];
+				$hasRecursiveCode = $hasRecursiveCode || $parts[1] === self::RECURSIVE_PREFIX;
 			}
 		}
 
-		$resolvableCodes = array_values(array_filter(array_keys($askedCodes), self::isOldAccessCode(...)));
+		$resolvableCodes = array_values(array_unique(array_filter($plainCodeByAskedCode)));
 		$nodeIdsByCode = $resolvableCodes === []
 			? []
 			: $this->getNodeService()->getNodeIdsGroupedByAccessCode($resolvableCodes)
 		;
 
 		$departmentIds = $this->filterDepartmentIds($nodeIdsByCode, $structureId);
-		$memberNodeIds = $departmentIds === []
-			? []
-			: $this->getMemberNodeIds($userId, $departmentIds, $structureId)
-		;
+		$memberNodeIds = [];
+		$coveringNodeIds = [];
+		if ($departmentIds !== [] && $hasRecursiveCode)
+		{
+			$recursiveNodeIds = [];
+			foreach ($plainCodeByAskedCode as $accessCode => $plainCode)
+			{
+				if ($plainCode !== null && str_starts_with((string)$accessCode, self::RECURSIVE_PREFIX))
+				{
+					foreach ($nodeIdsByCode[$plainCode] ?? [] as $nodeId)
+					{
+						$recursiveNodeIds[(int)$nodeId] = true;
+					}
+				}
+			}
+
+			$memberNodeIds = $this->getMemberNodeIds($userId, null, $structureId);
+			$coveringNodeIds = $this->findCoveringNodeIds(
+				array_values(array_intersect(array_keys($recursiveNodeIds), $departmentIds)),
+				$memberNodeIds,
+				$structureId,
+			);
+		}
+		elseif ($departmentIds !== [])
+		{
+			$memberNodeIds = $this->getMemberNodeIds($userId, $departmentIds, $structureId);
+		}
 
 		$matched = [];
 		$unresolved = [];
-		foreach (array_keys($askedCodes) as $accessCode)
+		foreach ($plainCodeByAskedCode as $accessCode => $plainCode)
 		{
-			$nodeIds = array_values(array_intersect($nodeIdsByCode[$accessCode] ?? [], $departmentIds));
+			$accessCode = (string)$accessCode;
+			$nodeIds = $plainCode === null
+				? []
+				: array_values(array_intersect($nodeIdsByCode[$plainCode] ?? [], $departmentIds))
+			;
 			if ($nodeIds === [])
 			{
-				$unresolved[] = (string)$accessCode;
+				$unresolved[] = $accessCode;
 
 				continue;
 			}
 
+			$acceptedNodeIds = str_starts_with($accessCode, self::RECURSIVE_PREFIX) ? $coveringNodeIds : $memberNodeIds;
 			foreach ($nodeIds as $nodeId)
 			{
-				if (isset($memberNodeIds[$nodeId]))
+				if (isset($acceptedNodeIds[$nodeId]))
 				{
-					$matched[] = (string)$accessCode;
+					$matched[] = $accessCode;
 
 					break;
 				}
@@ -149,6 +191,40 @@ class OrgStructureGateway
 		}
 
 		return ['matched' => $matched, 'unresolved' => $unresolved];
+	}
+
+	/**
+	 * @param list<int> $recursiveNodeIds
+	 * @param array<int, true> $memberNodeIds
+	 *
+	 * @return array<int, true> departments containing the user within the requested subtrees
+	 * @throws OrgStructureUnavailableException
+	 */
+	private function findCoveringNodeIds(array $recursiveNodeIds, array $memberNodeIds, int $structureId): array
+	{
+		$nodes = $this->getNodeService()->findChildrenByNodeIds(
+			nodeIds: $recursiveNodeIds,
+			structureId: $structureId,
+			nodeTypes: [NodeEntityType::DEPARTMENT],
+			depthLevel: DepthLevel::FULL,
+		);
+		$parentIds = [];
+		foreach ($nodes as $node)
+		{
+			$parentIds[(int)$node->id] = (int)$node->parentId;
+		}
+
+		$result = [];
+		foreach (array_keys($memberNodeIds) as $nodeId)
+		{
+			while (isset($parentIds[$nodeId]) && !isset($result[$nodeId]))
+			{
+				$result[$nodeId] = true;
+				$nodeId = $parentIds[$nodeId];
+			}
+		}
+
+		return $result;
 	}
 
 	/**
@@ -182,11 +258,12 @@ class OrgStructureGateway
 	}
 
 	/**
-	 * @param list<int> $departmentIds
+	 * @param list<int>|null $departmentIds null asks about every department of the user
 	 *
 	 * @return array<int, true>
+	 * @throws OrgStructureUnavailableException
 	 */
-	private function getMemberNodeIds(int $userId, array $departmentIds, int $structureId): array
+	private function getMemberNodeIds(int $userId, ?array $departmentIds, int $structureId): array
 	{
 		$members = $this->getNodeMemberService()->findAllByEntityIds(
 			entityIds: [$userId],

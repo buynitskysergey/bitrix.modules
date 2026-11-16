@@ -25,6 +25,11 @@ class NewAppsCountCache
 	 */
 	public function remember(int $userId, callable $compute): int
 	{
+		return $this->rememberConditional($userId, fn (): array => ['count' => $compute(), 'cacheable' => true]);
+	}
+
+	public function rememberConditional(int $userId, callable $compute): int
+	{
 		$cacheId = $this->cacheId($userId);
 		if ($this->managedCache->read(self::TTL, $cacheId, self::TABLE_ID))
 		{
@@ -36,9 +41,12 @@ class NewAppsCountCache
 		}
 
 		$value = $compute();
-		$this->managedCache->set($cacheId, $value);
+		if ($value['cacheable'])
+		{
+			$this->managedCache->set($cacheId, $value['count']);
+		}
 
-		return $value;
+		return $value['count'];
 	}
 
 	public function forget(int $userId): void

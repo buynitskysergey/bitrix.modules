@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Internal\Config;
 
+use Bitrix\Bizproc\Public\Feature\Template\TemplateVersionHistoryFlag;
 use Bitrix\Main\Config\Option;
 
 /**
@@ -14,7 +15,6 @@ class TemplateHistory
 {
 	private const MODULE_ID = 'bizproc';
 
-	private const ENABLED_OPTION = 'template_version_history_enabled';
 	private const VERSION_LIMIT_OPTION = 'template_version_limit';
 	private const MERGE_WINDOW_OPTION = 'template_change_merge_window';
 	private const RETENTION_DAYS_OPTION = 'template_change_retention_days';
@@ -25,7 +25,7 @@ class TemplateHistory
 
 	public static function isEnabled(): bool
 	{
-		return Option::get(self::MODULE_ID, self::ENABLED_OPTION, 'N') === 'Y';
+		return \Bitrix\Main\Config\Feature::isEnabled(TemplateVersionHistoryFlag::class);
 	}
 
 	/**

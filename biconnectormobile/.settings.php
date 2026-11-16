@@ -10,10 +10,4 @@ return [
 		],
 		'readonly' => true,
 	],
-	'feature-flags' => [
-		'value' => [
-			Bitrix\BIConnectorMobile\Public\Features\MobileBIFeature::class,
-		],
-		'readonly' => true,
-	],
 ];

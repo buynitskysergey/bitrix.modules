@@ -46,7 +46,7 @@ class SiteReader
 		// Calling hasAccessForSite outside the scope yields false for every KB site.
 		return LandingScope::runInKnowledgeScope(function () use ($userId): array {
 			$rows = SiteTable::getList([
-				'select' => ['ID', 'CODE', 'TITLE', 'LANDING_ID_INDEX'],
+				'select' => ['ID', 'CODE', 'TITLE', 'LANDING_ID_404', 'LANDING_ID_503'],
 				'filter' => [
 					'=TYPE' => self::KNOWLEDGE_TYPE,
 					'=DELETED' => 'N',
@@ -61,19 +61,21 @@ class SiteReader
 			}
 
 			$siteIds = array_map(static fn(array $r): int => (int)$r['ID'], $rows);
-			// The home page of a base (LANDING_ID_INDEX) is SYS='Y', and the conversion reads it like
-			// any other page, so it belongs in the count. What comes out is how many PAGES a base has
-			// and not how many documents converting it creates - {@see countPagesForSitesScoped}.
-			$indexPageIds = [];
+			// The 404/503 pages of a base are service pages, like the areas of its layout, and are left
+			// out of the count the way the conversion leaves them out - {@see countPagesForSitesScoped}.
+			$errorPageIds = [];
 			foreach ($rows as $row)
 			{
-				$indexPageId = (int)($row['LANDING_ID_INDEX'] ?? 0);
-				if ($indexPageId > 0)
+				foreach (['LANDING_ID_404', 'LANDING_ID_503'] as $field)
 				{
-					$indexPageIds[] = $indexPageId;
+					$pageId = (int)($row[$field] ?? 0);
+					if ($pageId > 0)
+					{
+						$errorPageIds[] = $pageId;
+					}
 				}
 			}
-			$pageCounts = $this->countPagesForSitesScoped($siteIds, $indexPageIds);
+			$pageCounts = $this->countPagesForSitesScoped($siteIds, $errorPageIds);
 
 			$accessible = [];
 			foreach ($rows as $row)
@@ -235,10 +237,10 @@ class SiteReader
 	 * Caller MUST already be inside LandingScope::runInKnowledgeScope().
 	 *
 	 * @param int[] $siteIds
-	 * @param int[] $indexPageIds home-page ids (SYS='Y') to count alongside SYS='N' pages
+	 * @param int[] $errorPageIds 404/503 pages of these sites, left out of the count
 	 * @return array<int, int> site id => how many pages the base has
 	 */
-	private function countPagesForSitesScoped(array $siteIds, array $indexPageIds = []): array
+	private function countPagesForSitesScoped(array $siteIds, array $errorPageIds = []): array
 	{
 		$counts = [];
 		foreach ($siteIds as $id)
@@ -246,31 +248,30 @@ class SiteReader
 			$counts[(int)$id] = 0;
 		}
 
-		// SYS='N' content pages plus each site's SYS='Y' home page (opted in by id): how many pages a
-		// base has, which is not how many documents converting it creates. A section is a document and
-		// no page at all, so it is not counted here; the index page of a section is a page and becomes
-		// no document of its own - it is the body of that section - and the home page becomes the
-		// description of the base rather than a document ([P3.T19],
+		// The pages the conversion reads, service pages left out by their role and not by `SYS` - areas
+		// of a layout and 404/503, the same rule as {@see PageReader::listForSite}; the home page is
+		// counted. How many pages a base has, which is not how many documents converting it creates. A
+		// section is a document and no page at all, so it is not counted here; the index page of a
+		// section is a page and becomes no document of its own - it is the body of that section - and the
+		// home page becomes the description of the base rather than a document ([P3.T19],
 		// {@see \Bitrix\Note\Internal\Service\Import\Source\LandingSource::getDocumentsPage}). Telling
 		// the two numbers apart takes the folder structure of every base of the list, which the action
 		// that draws that list does not read.
-		$pageFilter = empty($indexPageIds)
-			? ['=SYS' => 'N']
-			: [
-				'LOGIC' => 'OR',
-				['=SYS' => 'N'],
-				['=ID' => array_values($indexPageIds)],
-			];
+		$filter = [
+			'=SITE_ID' => $siteIds,
+			'=DELETED' => 'N',
+			'=FOLDER' => 'N',
+			'==AREAS.ID' => null,
+			'CHECK_PERMISSIONS' => 'N',
+		];
+		if ($errorPageIds !== [])
+		{
+			$filter['!@ID'] = array_values(array_unique($errorPageIds));
+		}
 
 		$rows = LandingTable::getList([
 			'select' => ['SITE_ID', 'CNT'],
-			'filter' => [
-				'=SITE_ID' => $siteIds,
-				'=DELETED' => 'N',
-				'=FOLDER' => 'N',
-				$pageFilter,
-				'CHECK_PERMISSIONS' => 'N',
-			],
+			'filter' => $filter,
 			'runtime' => [
 				new \Bitrix\Main\Entity\ExpressionField('CNT', 'COUNT(*)'),
 			],

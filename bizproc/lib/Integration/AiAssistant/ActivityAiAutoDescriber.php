@@ -8,6 +8,7 @@ use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\Entity\Activity\ActivityAiDescriptionSource;
 use Bitrix\Bizproc\Internal\Entity\Activity\Result\ActivityAiDescriptionResult;
 use Bitrix\Bizproc\Internal\Entity\Activity\Setting;
+use Bitrix\Bizproc\Internal\Entity\Activity\SettingCategory;
 use Bitrix\Bizproc\Internal\Entity\Activity\SettingCollection;
 use Bitrix\Bizproc\Internal\Service\Container;
 use Bitrix\Bizproc\RestActivityTable;
@@ -23,10 +24,13 @@ class ActivityAiAutoDescriber
 	public const ERROR_ACTIVITY_NOT_FOUND = 'AUTO_DESCRIPTION_ACTIVITY_NOT_FOUND';
 	public const ERROR_DISABLED = 'AUTO_DESCRIPTION_DISABLED';
 	public const ERROR_NOT_SUITABLE = 'AUTO_DESCRIPTION_NOT_SUITABLE';
+	public const CONTEXT_AI_DESCRIPTION = 'AiDescription';
 
 	private const PROPERTIES_MAP_METHOD = 'getPropertiesMap';
 	private const PROPERTIES_DIALOG_MAP_METHOD = 'getPropertiesDialogMap';
 	private const PASSTHROUGH_SETTING_NAMES_METHOD = 'getAiPassthroughSettingNames';
+	private const RESTRICTED_SETTING_NAMES_METHOD = 'getAiRestrictedSettingNames';
+	private const ENFORCED_SETTING_VALUES_METHOD = 'getAiEnforcedSettingValues';
 	private const SERVICE_PROPERTIES = ['Title', 'EditorComment'];
 
 	/**
@@ -139,7 +143,62 @@ class ActivityAiAutoDescriber
 	 */
 	public function passthroughSettingNames(string $code, array $documentType): array
 	{
-		$names = $this->callActivityStaticMethod($code, self::PASSTHROUGH_SETTING_NAMES_METHOD, [$documentType]);
+		return $this->settingNamesOf($code, self::PASSTHROUGH_SETTING_NAMES_METHOD, $documentType);
+	}
+
+	/**
+	 * Lifecycle category of every name the activity declares through its three AI hooks, by the compatibility
+	 * rule of TPL-01: a passthrough name with no restricted twin is a free map, a restricted one is carried, an
+	 * enforced key is enforced. Enforced wins over the others - the server writes that value on every save, so
+	 * nothing sent under the name survives, not even what the published template carries.
+	 *
+	 * An activity that declares no hook answers with an empty map and keeps behaving exactly as it did before
+	 * categories existed.
+	 *
+	 * @return array<string, SettingCategory>
+	 */
+	public function hookSettingCategories(string $code, array $documentType): array
+	{
+		$categories = [];
+
+		foreach ($this->passthroughSettingNames($code, $documentType) as $name)
+		{
+			$categories[$name] = SettingCategory::EditableFreeMap;
+		}
+
+		foreach ($this->settingNamesOf($code, self::RESTRICTED_SETTING_NAMES_METHOD, $documentType) as $name)
+		{
+			$categories[$name] = SettingCategory::Carried;
+		}
+
+		foreach ($this->enforcedSettingNames($code, $documentType) as $name)
+		{
+			$categories[$name] = SettingCategory::Enforced;
+		}
+
+		return $categories;
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private function enforcedSettingNames(string $code, array $documentType): array
+	{
+		$values = $this->callActivityStaticMethod($code, self::ENFORCED_SETTING_VALUES_METHOD, [$documentType]);
+		if (!is_array($values))
+		{
+			return [];
+		}
+
+		return array_values(array_filter(array_keys($values), 'is_string'));
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private function settingNamesOf(string $code, string $method, array $documentType): array
+	{
+		$names = $this->callActivityStaticMethod($code, $method, [$documentType]);
 		if (!is_array($names))
 		{
 			return [];
@@ -166,6 +225,7 @@ class ActivityAiAutoDescriber
 		// agent is handed a required setting with no allowed values it could possibly know.
 		// Empty stays the default: without pinned values an activity must answer with its full schema rather
 		// than one trimmed to a half-filled dialog, which is what the designer sees on first open.
+		$context[self::CONTEXT_AI_DESCRIPTION] = true;
 		$map = $this->callActivityStaticMethod($code, self::PROPERTIES_MAP_METHOD, [$documentType, $context]);
 		if (!is_array($map) || !$map)
 		{

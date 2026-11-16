@@ -6,13 +6,27 @@ namespace Bitrix\Intranet\Integration\Templates\Air;
 
 use Bitrix\Intranet\Internal\Integration;
 use Bitrix\Intranet\Site\Sections\CollaborationSection;
+use Bitrix\Intranet\UI\LeftMenu\MenuItem\ItemUserFavorites;
 use Bitrix\Main\Context;
 use Bitrix\Main\Engine\CurrentUser;
+use Bitrix\Main\Loader;
 
 class CollaborationWebMenu
 {
 	private const SYNC_MAIN_ITEM_ID = 'menu_sync_main';
 	private const SYNC_TELEPHONY_ITEM_ID = 'menu_sync_telephony';
+
+	private static ?string $renderedMenuId = null;
+
+	public static function setRenderedMenuId(?string $menuId): void
+	{
+		self::$renderedMenuId = $menuId;
+	}
+
+	public static function getRenderedMenuId(): ?string
+	{
+		return self::$renderedMenuId;
+	}
 
 	public static function getMenuId(string $context): ?string
 	{
@@ -123,10 +137,6 @@ class CollaborationWebMenu
 				$item['ITEMS'] = self::getSyncItems($item, $chatItems['call']);
 			}
 
-			if (in_array($id, ['feed', 'disk'], true))
-			{
-				$item['IS_DISABLED'] = true;
-			}
 			$items[] = $item;
 		}
 
@@ -246,6 +256,7 @@ class CollaborationWebMenu
 				$item['PARAMS']['collaboration_entry_url'] = $entryUrl;
 				$item['PARAMS']['top_menu_id'] = $menuId;
 				$item['PARAMS']['can_be_first_item'] = false;
+				$item['PARAMS'][ItemUserFavorites::PARAM_BIND_SLIDER] = 'N';
 				$collaborationItemIndex = count($result);
 			}
 			$result[] = $item;
@@ -357,12 +368,22 @@ class CollaborationWebMenu
 
 	private static function isEnabled(): bool
 	{
+		$userId = (int)CurrentUser::get()->getId();
 		$extranetService = new Integration\Extranet\ExtranetService();
 		if (
 			!defined('AIR_SITE_TEMPLATE')
 			|| $extranetService->isExtranet()
-			|| $extranetService->isCollaber((int)CurrentUser::get()->getId())
-			|| !Integration\Bitrix24\CollaborationWebMenu::isEnabled()
+			|| $extranetService->isCollaber($userId)
+			|| !Integration\Bitrix24\CollaborationWebMenu::isTopMenuEnabled()
+		)
+		{
+			return false;
+		}
+
+		if (
+			Loader::includeModule('extranet')
+			&& !\CExtranet::IsIntranetUser()
+			&& \CExtranet::IsExtranetUser()
 		)
 		{
 			return false;

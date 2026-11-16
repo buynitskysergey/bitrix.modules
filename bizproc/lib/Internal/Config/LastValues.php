@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Internal\Config;
 
+use Bitrix\Bizproc\Public\Feature\Template\LastValuesCaptureFlag;
 use Bitrix\Main\Config\Option;
 
 /**
@@ -14,7 +15,6 @@ class LastValues
 {
 	private const MODULE_ID = 'bizproc';
 
-	private const CAPTURE_OPTION = 'last_values_capture';
 	private const THROTTLE_OPTION = 'last_values_throttle';
 	private const VALUE_LIMIT_OPTION = 'last_values_value_limit';
 	private const SNAPSHOT_LIMIT_OPTION = 'last_values_snapshot_limit';
@@ -35,7 +35,7 @@ class LastValues
 
 	public function isCaptureEnabled(): bool
 	{
-		return Option::get(self::MODULE_ID, self::CAPTURE_OPTION, 'N') === 'Y';
+		return \Bitrix\Main\Config\Feature::isEnabled(LastValuesCaptureFlag::class);
 	}
 
 	/**

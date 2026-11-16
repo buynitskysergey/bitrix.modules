@@ -42,6 +42,7 @@ class UnwatchTaskHandler
 				$config = new UpdateConfig(
 					userId: $command->userId,
 					useConsistency: $command->useConsistency,
+					origin: $command->origin,
 				);
 
 				return $this->updateTaskService->update(

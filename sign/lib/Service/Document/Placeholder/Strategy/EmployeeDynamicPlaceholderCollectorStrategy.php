@@ -26,6 +26,35 @@ class EmployeeDynamicPlaceholderCollectorStrategy extends AbstractPlaceholderCol
 		);
 	}
 
+	/**
+	 * Raw user field types by the code create() puts into the placeholder name.
+	 *
+	 * The name carries the type resolveFieldType() converted the field to, and the conversion turns a
+	 * url into a plain string, so a restriction that judges a url reads the type from here instead.
+	 * The codes of this source keep the name of their user field, which no other source of the list
+	 * produces (MemberDynamicFieldInfoProvider::isFieldCodeMemberDynamicField).
+	 *
+	 * @param array<int, array<string, mixed>> $fields descriptors of the fields list
+	 * @return array<string, string>
+	 */
+	public static function collectRawFieldTypes(array $fields): array
+	{
+		$rawFieldTypes = [];
+
+		foreach ($fields as $field)
+		{
+			$fieldCode = (string)($field['name'] ?? '');
+			if ($fieldCode === '')
+			{
+				continue;
+			}
+
+			$rawFieldTypes[$fieldCode] = (string)($field['type'] ?? '');
+		}
+
+		return $rawFieldTypes;
+	}
+
 	protected function resolveFieldType(string $fieldCode, string $descriptorType): string
 	{
 		return $this->fieldService->convertUserFieldType($descriptorType);

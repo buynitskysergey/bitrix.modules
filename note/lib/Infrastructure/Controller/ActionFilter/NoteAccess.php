@@ -9,6 +9,7 @@ use Bitrix\Main\Error;
 use Bitrix\Main\Event;
 use Bitrix\Main\EventResult;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Note\Infrastructure\Controller\ErrorCodeDictionary;
 use Bitrix\Note\Internal\Access\AccessController;
 use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Service\License\LicenseService;
@@ -21,7 +22,7 @@ class NoteAccess extends Base
 		// module feature is unavailable or the Notes tool is turned off.
 		if ($this->createLicenseService()->isAccessBlocked())
 		{
-			return $this->denied();
+			return $this->denied(ErrorCodeDictionary::LICENSE_BLOCKED);
 		}
 
 		if (AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_ACCESS))
@@ -29,7 +30,7 @@ class NoteAccess extends Base
 			return null;
 		}
 
-		return $this->denied();
+		return $this->denied(ErrorCodeDictionary::ACCESS_DENIED);
 	}
 
 	protected function createLicenseService(): LicenseService
@@ -37,9 +38,9 @@ class NoteAccess extends Base
 		return new LicenseService();
 	}
 
-	private function denied(): EventResult
+	private function denied(string $code): EventResult
 	{
-		$this->addError(new Error(Loc::getMessage('NOTE_ACCESS_DENIED')));
+		$this->addError(new Error(Loc::getMessage('NOTE_ACCESS_DENIED'), $code));
 
 		return new EventResult(EventResult::ERROR, null, null, $this);
 	}

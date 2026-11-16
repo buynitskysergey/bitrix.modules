@@ -8,8 +8,11 @@ use Bitrix\Disk\AttachedObject;
 use Bitrix\Disk\Configuration as DiskConfiguration;
 use Bitrix\Disk\Driver;
 use Bitrix\Disk\File;
+use Bitrix\Disk\FilePicker\FileTypeClassifier;
+use Bitrix\Disk\FilePicker\Filter;
 use Bitrix\Disk\FilePicker\SignedConfig;
 use Bitrix\Disk\FilePicker\SignedConfigBuilder;
+use Bitrix\Disk\QuickAccess\FileDataParameterService;
 use Bitrix\Disk\Uf\FileUserType;
 use Bitrix\Disk\Uf\Integration\DiskUploaderController;
 use Bitrix\Disk\UrlManager;
@@ -46,10 +49,20 @@ final class DiskGateway
 	 */
 	public const MAX_ATTACHMENTS_PER_DOCUMENT = 500;
 
+	/**
+	 * Fallback name of Disk's quick-access parameter, for the case their class is not there to be
+	 * asked. The name is only ever used to REMOVE the parameter, so a stale literal cannot widen
+	 * access - it would leave the parameter in place, and the test asserting its absence says so.
+	 */
+	private const QUICK_ACCESS_PARAMETER_FALLBACK = '_efd';
+
 	public function __construct(
 		// A default rather than a constant used directly, so it can be lowered where creating five
 		// hundred files to reach it is not an option.
 		private readonly int $maxAttachmentsPerDocument = self::MAX_ATTACHMENTS_PER_DOCUMENT,
+		// Whether the urls of an attachment may carry Disk's quick-access descriptor.
+		// Off for the public circuit, see stripQuickAccessParameter().
+		private readonly bool $quickAccessAllowed = true,
 	)
 	{
 	}
@@ -230,7 +243,66 @@ final class DiskGateway
 			];
 		}
 
+		return $this->quickAccessAllowed ? $attributes : $this->stripQuickAccessParameter($attributes);
+	}
+
+	/**
+	 * Removes Disk's quick-access descriptor from every url of the described attachments.
+	 *
+	 * The descriptor is a signed self-sufficient pass to the bytes of the file: it is intercepted
+	 * before the prologue (disk/tools/uf.php), lives about a week and is never asked whether the
+	 * link that produced it still works. Left in place, "a revoke takes effect at once" would stop
+	 * being true for files - a saved address would keep serving them for days after the link was
+	 * put out.
+	 *
+	 * Stripping is done here, on the consumer side, and does not rely on a setting of the stand: the
+	 * parameter is added by Disk unconditionally for an attached object, and nothing in their api
+	 * asks for a description without it.
+	 *
+	 * Every string is walked, not just the three url fields: the same address is repeated inside
+	 * viewerAttrs (the viewer builds its own download button from it), and one place left carrying
+	 * the descriptor is the whole removal undone.
+	 *
+	 * @param array<int, array<string, mixed>> $attributes
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function stripQuickAccessParameter(array $attributes): array
+	{
+		$pattern = '/([?&])' . preg_quote($this->getQuickAccessParameterName(), '/') . '=[^&#]*/';
+
+		array_walk_recursive(
+			$attributes,
+			static function (&$value) use ($pattern): void {
+				if (!is_string($value) || $value === '')
+				{
+					return;
+				}
+
+				// The separator of the removed parameter is kept when it opened the query, so the
+				// parameter following it does not lose its '?'.
+				$stripped = preg_replace_callback(
+					$pattern,
+					static fn(array $matches): string => $matches[1] === '?' ? '?' : '',
+					$value,
+				);
+				if ($stripped === null)
+				{
+					return;
+				}
+
+				$value = rtrim((string)preg_replace(['/\?&+/', '/&{2,}/'], ['?', '&'], $stripped), '?&');
+			},
+		);
+
 		return $attributes;
+	}
+
+	private function getQuickAccessParameterName(): string
+	{
+		return $this->isAvailable() && defined(FileDataParameterService::class . '::PARAMETER_NAME')
+			? (string)FileDataParameterService::PARAMETER_NAME
+			: self::QUICK_ACCESS_PARAMETER_FALLBACK
+		;
 	}
 
 	/**
@@ -247,29 +319,63 @@ final class DiskGateway
 	 * The document's ceiling ({@see MAX_ATTACHMENTS_PER_DOCUMENT}) is held here for the same reason: it
 	 * is the one place both callers pass through.
 	 *
+	 * Reports what the document actually holds of what was asked for — an object attached here and an
+	 * object that was already attached alike, each with the kind of block it belongs in. The picker
+	 * needs that report to build the blocks, and the kind is Disk's own answer, read by the very
+	 * classifier their picker sorts its files with. An object the actor cannot read, and one the ceiling
+	 * left no room for, is absent from the report exactly as it is absent from the attachments. The
+	 * projection sync asks for the same work and ignores the report.
+	 *
 	 * @param int[] $objectIds
+	 * @return array<int, array{objectId: int, assetType: string}>
 	 */
-	public function attach(int $documentId, array $objectIds, int $actorId): void
+	public function attach(int $documentId, array $objectIds, int $actorId): array
 	{
 		if ($objectIds === [] || $documentId <= 0 || $actorId <= 0 || !$this->isAvailable())
 		{
-			return;
+			return [];
 		}
 
 		// Every attachment of the document, not just the ones asked about: what is already there is what
 		// decides how much room is left. The row set is bounded by the ceiling itself.
 		$existing = $this->listAttachments($documentId);
-		$objectIds = array_values(array_diff($objectIds, array_keys($existing)));
 		$room = $this->maxAttachmentsPerDocument - count($existing);
-		if ($objectIds === [] || $room <= 0)
-		{
-			return;
-		}
+		$classifier = new FileTypeClassifier();
+		$attached = [];
 
-		$objectIds = array_slice($objectIds, 0, $room);
+		$requested = array_values(array_unique($objectIds));
 
-		foreach ($this->loadFiles($objectIds) as $file)
+		// What is loaded is bounded before the query, not inside the loop: the projection sync asks with
+		// whatever the document's text holds, and an import or a REST write can put thousands of tokens
+		// there. Already attached ids are bounded by the document's ceiling, new ones by the room left.
+		$known = array_values(array_intersect($requested, array_keys($existing)));
+		$fresh = array_slice(array_values(array_diff($requested, array_keys($existing))), 0, max($room, 0));
+		$files = $this->loadFiles([...$known, ...$fresh]);
+
+		// The order of the report is the order that was asked for: the picker builds the blocks in it,
+		// and the order the files come back from Disk in is not the order the reader chose them in.
+		foreach ($requested as $objectId)
 		{
+			$file = $files[$objectId] ?? null;
+			if ($file === null)
+			{
+				continue;
+			}
+
+			// Already attached: nothing to do and nothing to spend room on, but the document holds the
+			// file, so the block for it is as good as any other.
+			if (isset($existing[$objectId]))
+			{
+				$attached[] = ['objectId' => $objectId, 'assetType' => $this->resolveAssetType($classifier, $file)];
+
+				continue;
+			}
+
+			if ($room <= 0)
+			{
+				continue;
+			}
+
 			$storage = $file->getStorage();
 			if ($storage === null)
 			{
@@ -301,7 +407,27 @@ final class DiskGateway
 					'createdBy' => $actorId,
 				],
 			);
+
+			$room--;
+			$attached[] = ['objectId' => $objectId, 'assetType' => $this->resolveAssetType($classifier, $file)];
 		}
+
+		return $attached;
+	}
+
+	/**
+	 * Which kind of block a Disk file belongs in. The map lives here and nowhere else: the web picker
+	 * used to hold one of its own, and two maps of the same thing drift apart the moment Disk adds a
+	 * kind. Everything Disk does not call a picture or a video is a plain file block.
+	 */
+	private function resolveAssetType(FileTypeClassifier $classifier, File $file): string
+	{
+		return match ($classifier->classify($file))
+		{
+			Filter::TYPE_IMAGE => 'image',
+			Filter::TYPE_VIDEO => 'video',
+			default => 'file',
+		};
 	}
 
 	/**
@@ -336,7 +462,7 @@ final class DiskGateway
 
 		$attachedObjectIds = [];
 		$attachments = AttachedObject::getModelList([
-			'select' => ['*'],
+			'select' => ['ID'],
 			'filter' => [
 				'=ENTITY_TYPE' => $this->resolveStoredEntityType(),
 				'@ENTITY_ID' => $documentIds,

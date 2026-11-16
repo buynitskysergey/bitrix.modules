@@ -8,6 +8,8 @@ use Bitrix\Tasks\Control\Exception\TaskNotExistsException;
 use Bitrix\Tasks\V2\Internal\Entity\Task;
 use Bitrix\Tasks\V2\Internal\Repository\TaskRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Service\Consistency\ConsistencyResolverInterface;
+use Bitrix\Tasks\V2\Internal\Service\Interaction\InteractionRecorder;
+use Bitrix\Tasks\V2\Internal\Service\Ranking\EventType;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Add\AddSearchIndex;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Add\AddUserFields;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Add\Config\AddConfig;
@@ -21,6 +23,7 @@ class AddTaskService
 		private readonly AddService $addService,
 		private readonly ConsistencyResolverInterface $consistencyResolver,
 		private readonly TaskRepositoryInterface $taskRepository,
+		private readonly InteractionRecorder $interactionRecorder,
 	)
 	{
 	}
@@ -48,6 +51,16 @@ class AddTaskService
 				deferSearchIndex: true,
 			);
 		}
+
+		// Outside the consistency wrapper: a rolled back add must not leave an event
+		// on a task that does not exist.
+		$this->interactionRecorder->record(
+			userId: $config->getUserId(),
+			taskId: (int)$task->id,
+			eventType: EventType::Create,
+			relationKind: null,
+			origin: $config->getOrigin(),
+		);
 
 		try
 		{

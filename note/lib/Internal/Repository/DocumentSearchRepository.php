@@ -13,6 +13,7 @@ use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\ORM\Fields\FloatField;
 use Bitrix\Main\ORM\Fields\IntegerField;
 use Bitrix\Main\DB\SqlHelper;
+use Bitrix\Main\ORM\Query\Filter\ConditionTree;
 use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Repository\Exception\PersistenceException;
 use Bitrix\Main\Repository\RepositoryInterface;
@@ -269,6 +270,447 @@ class DocumentSearchRepository implements RepositoryInterface
 	}
 
 	/**
+	 * Which knowledge bases the query hits, and how much of each, over a bounded window of
+	 * the ranking. Discovery and counting are the same pass: the window is walked anyway, so a
+	 * counter per section would be a second walk of rows already in hand.
+	 *
+	 * The tally is what the window saw, and the window is what already decides which sections exist
+	 * at all - a base whose hits all fall outside it has no section either way. So a count here can
+	 * fall short of the whole corpus, and does so together with the section list, not against it.
+	 *
+	 * @param int[]|null $allowedCollectionIds null for a viewer whose reach is the whole portal - a
+	 *        portal administrator. Standing in for that with a list of every base would put a growing
+	 *        `IN (...)` into the query and, cut to a bound, would hide the bases past it.
+	 * @param string[]|null $userAccessCodes
+	 * @return array<int, int> collectionId => hits, 0 standing for hits reachable only through a
+	 *         document grant
+	 */
+	public function tallyHitsByCollection(
+		string $booleanQuery,
+		?array $allowedCollectionIds,
+		int $windowSize,
+		?array $userAccessCodes = null,
+		bool $hasDocumentGrants = false,
+		array $titleBoostTokens = [],
+	): array
+	{
+		if ($booleanQuery === '' || $windowSize <= 0)
+		{
+			return [];
+		}
+
+		$query = NoteDocumentSearchTable::query()
+			->setSelect(['COLLECTION_ID' => 'DOCUMENT.COLLECTION_ID'])
+			->registerRuntimeField(
+				'SCORE',
+				(new ExpressionField('SCORE', $this->buildMatchExpression($booleanQuery), ['BODY']))
+					->configureValueType(FloatField::class),
+			)
+			->addSelect('SCORE')
+			->whereMatch('BODY', $booleanQuery)
+			->where('DOCUMENT.IS_ARCHIVED', 'N')
+			->where('DOCUMENT.IS_MAIN', DocumentTable::IS_MAIN_NO)
+			// The window is read in the order the results themselves are read in. Unordered, which
+			// rows a LIMIT returns is the database's own business, so past the window it was chance
+			// that decided which bases got a section at all - and a base holding the best hit of the
+			// query could go missing along with everything the viewer could have reached through it.
+			->setLimit($windowSize)
+		;
+
+		// Down to the title boost: the window is the head of the same ranking the pages are cut from,
+		// so a base is offered a section exactly when one of the first rows of the answer belongs to it.
+		$order = ['SCORE' => 'DESC', 'DOCUMENT_ID' => 'DESC'];
+		if ($titleBoostTokens !== [])
+		{
+			$this->registerTitleMatchField($query, Application::getConnection()->getSqlHelper(), $titleBoostTokens);
+			$order = ['TITLE_MATCH' => 'DESC'] + $order;
+		}
+		$query->setOrder($order);
+
+		// The same gate the ranked reads carry: an archived or gone base is off every live surface,
+		// and its documents stay indexed - without this the search draws a section for a base that
+		// is not there, and that section takes the place of a real one in the fifty the answer holds.
+		$stateGate = DocumentAccessService::buildCollectionStateFilter('DOCUMENT.COLLECTION_ID', []);
+		if ($stateGate !== null)
+		{
+			$query->where($stateGate);
+		}
+
+		$canUseDocumentGrants = $hasDocumentGrants && !empty($userAccessCodes);
+		if ($canUseDocumentGrants)
+		{
+			$query->where($this->buildAclCondition($allowedCollectionIds ?? [], $userAccessCodes));
+		}
+		elseif ($allowedCollectionIds === null)
+		{
+			// The whole portal: nothing to narrow by.
+		}
+		elseif (!empty($allowedCollectionIds))
+		{
+			$query->whereIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
+		}
+		else
+		{
+			return [];
+		}
+
+		$allowed = $allowedCollectionIds === null ? null : array_flip($allowedCollectionIds);
+		$out = [];
+		foreach ($query->fetchAll() as $row)
+		{
+			$collectionId = (int)($row['COLLECTION_ID'] ?? 0);
+			// A hit in a base the viewer cannot see as a whole has no name to show; it joins the
+			// technical section instead of naming somebody else's knowledge base.
+			$key = ($allowed === null || isset($allowed[$collectionId])) ? $collectionId : 0;
+			$out[$key] = ($out[$key] ?? 0) + 1;
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Scopes a search query to one section. A positive collection id narrows to that knowledge base;
+	 * zero means the technical section - hits reachable only through a document grant, whose
+	 * knowledge base has no name to show the viewer.
+	 *
+	 * @param int[]|null $allowedCollectionIds null is the whole portal: every base is the viewer's own,
+	 *        so no section of theirs is reachable per document only.
+	 * @param string[]|null $userAccessCodes
+	 */
+	private function applySectionScope(
+		Query $query,
+		int $collectionId,
+		?array $allowedCollectionIds,
+		?array $userAccessCodes,
+		bool $hasDocumentGrants,
+	): void
+	{
+		// Same gate as in the flat ranking: a section is scoped by a grant just as often, and
+		// a grant alone must not carry a document out of an archived or gone base.
+		$stateGate = DocumentAccessService::buildCollectionStateFilter('DOCUMENT.COLLECTION_ID', []);
+		if ($stateGate !== null)
+		{
+			$query->where($stateGate);
+		}
+
+		if ($collectionId > 0)
+		{
+			$query->where('DOCUMENT.COLLECTION_ID', $collectionId);
+
+			if ($allowedCollectionIds !== null && !in_array($collectionId, $allowedCollectionIds, true))
+			{
+				// Reachable only per document: the section exists for the viewer, the knowledge base
+				// as a whole does not.
+				$query->where(DocumentAccessService::buildDocumentGrantFilter(
+					'DOCUMENT_ID',
+					DocumentAccessService::personalCodes($userAccessCodes ?? []),
+				));
+			}
+
+			return;
+		}
+
+		if (!$hasDocumentGrants || empty($userAccessCodes))
+		{
+			// Deliberately unsatisfiable: without personal codes the technical section has no members.
+			$query->where('DOCUMENT_ID', '<', 0);
+
+			return;
+		}
+
+		$query->where(DocumentAccessService::buildDocumentGrantFilter(
+			'DOCUMENT_ID',
+			DocumentAccessService::personalCodes($userAccessCodes),
+		));
+		if (!empty($allowedCollectionIds))
+		{
+			$query->whereNotIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
+		}
+	}
+
+	/**
+	 * One page inside a section. The two-phase shape is what stops a knowledge base from
+	 * landing on the first page and again on the third: the page is asked for by section, not sliced
+	 * off a single flat ranking.
+	 *
+	 * @param int[]|null $allowedCollectionIds null is the whole portal (see tallyHitsByCollection)
+	 * @param string[] $snippetTokens
+	 * @param string[]|null $userAccessCodes
+	 * @param string[] $titleBoostTokens
+	 */
+	public function searchInSection(
+		string $booleanQuery,
+		int $collectionId,
+		int $limit,
+		int $offset,
+		?array $allowedCollectionIds,
+		array $snippetTokens = [],
+		?array $userAccessCodes = null,
+		bool $hasDocumentGrants = false,
+		array $titleBoostTokens = [],
+	): SearchResultCollection
+	{
+		return $this->runRanked(
+			booleanQuery: $booleanQuery,
+			limit: $limit,
+			offset: $offset,
+			allowedCollectionIds: $allowedCollectionIds,
+			snippetTokens: $snippetTokens,
+			titleBoostTokens: $titleBoostTokens,
+			applyScope: function (Query $query) use (
+				$collectionId,
+				$allowedCollectionIds,
+				$userAccessCodes,
+				$hasDocumentGrants,
+			): bool {
+				$this->applySectionScope($query, $collectionId, $allowedCollectionIds, $userAccessCodes, $hasDocumentGrants);
+
+				return true;
+			},
+		);
+	}
+
+	/**
+	 * One ranked window over every section the viewer may see, in the same order a section page uses.
+	 * The first page of several sections at once is cut out of it, so opening the results costs one
+	 * ranking read instead of one per knowledge base found.
+	 *
+	 * The two sets of bases here answer different questions and neither stands in for the other:
+	 * $allowedCollectionIds is the reach of the reader and gates the rows, $sectionCollectionIds is
+	 * what the caller asked about and narrows them. Left wide, the window is spent on the ranking of
+	 * bases nobody asked about, and a base that was asked about drops out of the answer with hits of
+	 * its own - which the caller then has to go and read one by one.
+	 *
+	 * @param int[]|null $allowedCollectionIds null is the whole portal (see tallyHitsByCollection)
+	 * @param int[]|null $sectionCollectionIds null asks the ranking to stay as wide as the reach
+	 * @param string[] $snippetTokens
+	 * @param string[]|null $userAccessCodes
+	 * @param string[] $titleBoostTokens
+	 */
+	public function searchAcrossSections(
+		string $booleanQuery,
+		int $limit,
+		?array $allowedCollectionIds,
+		array $snippetTokens = [],
+		?array $userAccessCodes = null,
+		bool $hasDocumentGrants = false,
+		array $titleBoostTokens = [],
+		?array $sectionCollectionIds = null,
+	): SearchResultCollection
+	{
+		return $this->runRanked(
+			booleanQuery: $booleanQuery,
+			limit: $limit,
+			offset: 0,
+			allowedCollectionIds: $allowedCollectionIds,
+			snippetTokens: $snippetTokens,
+			titleBoostTokens: $titleBoostTokens,
+			applyScope: function (Query $query) use (
+				$allowedCollectionIds,
+				$userAccessCodes,
+				$hasDocumentGrants,
+				$sectionCollectionIds,
+			): bool {
+				$stateGate = DocumentAccessService::buildCollectionStateFilter('DOCUMENT.COLLECTION_ID', []);
+				if ($stateGate !== null)
+				{
+					$query->where($stateGate);
+				}
+
+				// Narrowed before the gate and independently of it: asking about no base at all is an
+				// empty answer, not a portal-wide read.
+				if ($sectionCollectionIds !== null)
+				{
+					if (empty($sectionCollectionIds))
+					{
+						return false;
+					}
+
+					$query->whereIn('DOCUMENT.COLLECTION_ID', $sectionCollectionIds);
+				}
+
+				if ($hasDocumentGrants && !empty($userAccessCodes))
+				{
+					$query->where($this->buildAclCondition($allowedCollectionIds ?? [], $userAccessCodes));
+
+					return true;
+				}
+
+				// The whole portal: the ranking is read as it stands, with nothing to narrow it by.
+				if ($allowedCollectionIds === null)
+				{
+					return true;
+				}
+
+				if (empty($allowedCollectionIds))
+				{
+					return false;
+				}
+
+				$query->whereIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
+
+				return true;
+			},
+		);
+	}
+
+	/**
+	 * Snippets for rows already chosen, read apart from the ranking.
+	 *
+	 * A window read for several sections at once asks for more rows than it keeps - the ranking is
+	 * portal-wide and a base may hold none of the top of it - and carrying `BODY` through that window
+	 * meant reading the texts of documents the answer then dropped. The texts of `mediumtext` size,
+	 * decoded once more per row on the way to the snippet. So the window goes without them and the
+	 * bodies are read here, for the rows that survived the split.
+	 *
+	 * @param int[] $documentIds
+	 * @param string[] $snippetTokens
+	 * @return array<int, string> documentId => snippet, only for rows that have one
+	 */
+	public function fetchSnippets(array $documentIds, array $snippetTokens): array
+	{
+		$ids = array_values(array_unique(array_filter(
+			array_map(static fn($id): int => (int)$id, $documentIds),
+			static fn(int $id): bool => $id > 0,
+		)));
+		if (empty($ids) || empty($snippetTokens))
+		{
+			return [];
+		}
+
+		$out = [];
+		foreach (array_chunk($ids, 200) as $chunk)
+		{
+			$rows = NoteDocumentSearchTable::query()
+				->setSelect(['DOCUMENT_ID', 'BODY'])
+				->whereIn('DOCUMENT_ID', $chunk)
+				->fetchAll()
+			;
+			foreach ($rows as $row)
+			{
+				$snippet = $this->snippetExtractor->extract(
+					Emoji::decode((string)($row['BODY'] ?? '')),
+					$snippetTokens,
+				);
+				if ($snippet !== '')
+				{
+					$out[(int)$row['DOCUMENT_ID']] = $snippet;
+				}
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param int[]|null $allowedCollectionIds null is the whole portal (see tallyHitsByCollection)
+	 * @param string[] $snippetTokens
+	 * @param string[] $titleBoostTokens
+	 * @param callable(Query): bool $applyScope false when the scope cannot match anything
+	 */
+	/**
+	 * How well a row answers the query, in the dialect of the database under it. One expression for
+	 * the ranked reads and for the window that decides which bases they are read from: ordered by
+	 * anything else, the window would not be the beginning of the same list.
+	 */
+	private function buildMatchExpression(string $booleanQuery): string
+	{
+		$connection = Application::getConnection();
+		$sqlHelper = $connection->getSqlHelper();
+		$escapedQuery = $sqlHelper->forSql($booleanQuery);
+
+		if (DbType::getByConnectionType($connection->getType()) === DbType::PostgreSql)
+		{
+			return "ts_rank(to_tsvector('english', %s), to_tsquery('english', '{$escapedQuery}'))";
+		}
+
+		return $sqlHelper->getMatchFunction('%s', "'$escapedQuery'");
+	}
+
+	private function runRanked(
+		string $booleanQuery,
+		int $limit,
+		int $offset,
+		?array $allowedCollectionIds,
+		array $snippetTokens,
+		array $titleBoostTokens,
+		callable $applyScope,
+	): SearchResultCollection
+	{
+		$collection = new SearchResultCollection();
+		if ($booleanQuery === '' || $limit <= 0)
+		{
+			return $collection;
+		}
+
+		$sqlHelper = Application::getConnection()->getSqlHelper();
+		$matchExpression = $this->buildMatchExpression($booleanQuery);
+
+		$withSnippets = $snippetTokens !== [];
+		$select = [
+			'DOCUMENT_ID',
+			'DOC_TITLE' => 'DOCUMENT.TITLE',
+			'DOC_COLLECTION_ID' => 'DOCUMENT.COLLECTION_ID',
+		];
+		if ($withSnippets)
+		{
+			$select[] = 'BODY';
+		}
+
+		$query = NoteDocumentSearchTable::query()
+			->setSelect($select)
+			->registerRuntimeField(
+				'SCORE',
+				(new ExpressionField('SCORE', $matchExpression, ['BODY']))
+					->configureValueType(FloatField::class),
+			)
+			->addSelect('SCORE')
+			->whereMatch('BODY', $booleanQuery)
+			->where('DOCUMENT.IS_ARCHIVED', 'N')
+			->where('DOCUMENT.IS_MAIN', DocumentTable::IS_MAIN_NO)
+		;
+
+		if (!$applyScope($query))
+		{
+			return $collection;
+		}
+
+		$order = ['SCORE' => 'DESC', 'DOCUMENT_ID' => 'DESC'];
+		if ($titleBoostTokens !== [])
+		{
+			$this->registerTitleMatchField($query, $sqlHelper, $titleBoostTokens);
+			$order = ['TITLE_MATCH' => 'DESC'] + $order;
+		}
+
+		$rows = $query
+			->setOrder($order)
+			->setLimit($limit)
+			->setOffset(max(0, $offset))
+			->fetchAll()
+		;
+
+		foreach ($rows as $row)
+		{
+			$snippet = '';
+			if ($withSnippets)
+			{
+				$snippet = $this->snippetExtractor->extract(
+					Emoji::decode((string)($row['BODY'] ?? '')),
+					$snippetTokens,
+				);
+			}
+			$documentCollectionId = (int)($row['DOC_COLLECTION_ID'] ?? 0);
+			// A viewer whose reach is the whole portal shares nothing with anybody: every base is theirs.
+			$sharedAccess = $allowedCollectionIds !== null
+				&& $documentCollectionId > 0
+				&& !in_array($documentCollectionId, $allowedCollectionIds, true);
+			$collection->add(SearchResultMapper::convertFromOrm($row, $snippet, $sharedAccess));
+		}
+
+		return $collection;
+	}
+
+	/**
 	 * Registers a 0/1 runtime field that flags rows whose DOCUMENT.TITLE contains any of the
 	 * boost tokens (substring match). Used as the primary ORDER BY key to lift title matches
 	 * above body-only matches without changing the SCORE semantics.
@@ -311,5 +753,38 @@ class DocumentSearchRepository implements RepositoryInterface
 			(new ExpressionField('TITLE_MATCH', $titleMatchSql, $buildFrom))
 				->configureValueType(IntegerField::class),
 		);
+	}
+
+	/**
+	 * The OR-condition of the sectioned reads: a document is visible if it lives in an accessible
+	 * collection, or the caller holds a positive grant on the document itself. Deny is scoped to
+	 * explicit rows only, so inheritance stays hard; the grant predicate comes from
+	 * {@see DocumentAccessService::buildDocumentGrantFilter()}.
+	 *
+	 * The state of the base is NOT part of it: the sectioned reads gate the whole query by
+	 * {@see DocumentAccessService::buildCollectionStateFilter()} before they branch, so every branch
+	 * carries it, not just this one.
+	 *
+	 * @param int[] $allowedCollectionIds
+	 * @param string[] $accessCodes
+	 */
+	private function buildAclCondition(array $allowedCollectionIds, array $accessCodes): ConditionTree
+	{
+		$codesPersonal = DocumentAccessService::personalCodes($accessCodes);
+
+		$tree = new ConditionTree();
+		$tree->logic('or');
+
+		if (!empty($allowedCollectionIds))
+		{
+			$tree->whereIn('DOCUMENT.COLLECTION_ID', $allowedCollectionIds);
+		}
+
+		if (!empty($codesPersonal))
+		{
+			$tree->where(DocumentAccessService::buildDocumentGrantFilter('DOCUMENT_ID', $codesPersonal));
+		}
+
+		return $tree;
 	}
 }

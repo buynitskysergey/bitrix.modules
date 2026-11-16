@@ -7,6 +7,7 @@ namespace Bitrix\Note\Public\Command;
 use Bitrix\Main\Application;
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Entity\History\DocumentVersion;
 use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
@@ -154,6 +155,10 @@ class OverwriteDocumentContentCommand extends AbstractCommand
 		{
 			throw new DocumentArchivedException();
 		}
+
+		// Archiving a base does not touch its documents, so their own flags say nothing about it:
+		// the ban lives on the state of the base and has to be asked for separately.
+		CollectionAccessService::assertCollectionAcceptsWrites((int)$document->getCollectionId());
 
 		$format = (string)$document->getContentFormat();
 		$isCollaborative = $format === DocumentTable::CONTENT_FORMAT_YJS

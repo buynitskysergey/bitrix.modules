@@ -23,12 +23,17 @@ use Bitrix\Note\Internal\Service\Search\SearchIndexService;
  * Bulk restore of a selection, for both the
  * archive and recycle sections. Owner of the API-03 contract.
  *
- * Only the selected nodes are restored (withNested=false): no ancestor chain is rebuilt. A
- * selected node whose selected parent is restored first re-attaches under it; a node whose
- * parent is not restored (not selected, still archived/trashed, or gone) falls to the
- * collection root — exactly single-restore placement. The single guarantee bulk adds is the
- * top-down apply order (RestoreOrderer via orderAllowedIds), without which a jointly selected
- * subtree would scatter to the root.
+ * With $withNested the server expands each selected node into its branch - every
+ * descendant in the same state, including the ones that went there earlier and by a separate
+ * action. It has to be the server: after a branch collapses into one card its composition is
+ * loaded lazily, so the client does not have the list at the moment of the click and cannot
+ * send it. Membership in a past deletion is not stored and this does not restore it.
+ *
+ * Without it only the selected nodes are restored and no ancestor chain is rebuilt. A selected
+ * node whose selected parent is restored first re-attaches under it; a node whose parent is not
+ * restored (not selected, still archived/trashed, or gone) falls to the collection root - exactly
+ * single-restore placement. Either way the apply order is top-down (RestoreOrderer via
+ * orderAllowedIds), without which a jointly selected subtree would scatter to the root.
  *
  * Placement is delegated to the canonical single-restore paths:
  *  - archive  -> RestoreDocumentCommand per document (MANAGE-gated upstream by BulkAccessAggregator)
@@ -64,6 +69,7 @@ class BulkRestoreDocumentsCommand extends AbstractBulkCommand
 		array $documentIds,
 		string $section = SelectionResolver::SECTION_ARCHIVE,
 		private readonly ?int $targetCollectionId = null,
+		bool $withNested = false,
 		?DocumentRepository $repository = null,
 		?RecycleBinRepository $recycleBinRepository = null,
 		?RestoreFromRecycleBinService $restoreService = null,
@@ -78,7 +84,7 @@ class BulkRestoreDocumentsCommand extends AbstractBulkCommand
 			$userId,
 			$documentIds,
 			$section,
-			false, // restore only the selected nodes; never expand subtrees
+			$withNested,
 			$selectionResolver ?? new SelectionResolver(),
 			$accessAggregator ?? new BulkAccessAggregator(),
 		);
@@ -209,7 +215,7 @@ class BulkRestoreDocumentsCommand extends AbstractBulkCommand
 				$processedIds[] = $documentId;
 
 				$data = $result->getData();
-				if (($data['wasArchivedBeforeTrash'] ?? false) !== true)
+				if (($data['restoredArchived'] ?? false) !== true)
 				{
 					$collectionId = (int)($data['collectionId'] ?? 0);
 					if ($collectionId > 0)

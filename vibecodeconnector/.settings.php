@@ -43,6 +43,7 @@ use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Sharing\CatalogSharingServ
 use Bitrix\Vibecodeconnector\Internal\Service\Catalog\Vibecode\CatalogItemSender;
 use Bitrix\Vibecodeconnector\Internal\Service\Diagnostic\CloudSharedKeyLog;
 use Bitrix\Vibecodeconnector\Internal\Service\Diagnostic\IncomingJwtLog;
+use Bitrix\Vibecodeconnector\Internal\Service\Embed\EmbedCoworkAdminSettings;
 use Bitrix\Vibecodeconnector\Internal\Service\Embed\EmbedCreateGuard;
 use Bitrix\Vibecodeconnector\Internal\Service\Embed\EmbedCreateSettings;
 use Bitrix\Vibecodeconnector\Internal\Service\Embed\EmbedOpenPayloadBuilder;
@@ -51,6 +52,7 @@ use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\CloudEndpointProvider;
 use Bitrix\Vibecodeconnector\Internal\Service\Endpoint\EndpointUrlGuard;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Receiver\AppChatDeletionReceiver;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Receiver\AppChatMembershipReceiver;
+use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Receiver\BalancePullReceiver;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Receiver\UserEventReceiver;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Receiver\UserListPullReceiver;
 use Bitrix\Vibecodeconnector\Internal\Service\Messenger\Storage\VibecodeMessengerMessageTable;
@@ -104,6 +106,18 @@ return [
 				],
 			],
 			'queues' => [
+				'vibecodeconnector.balance_pull' => [
+					'handler' => BalancePullReceiver::class,
+					'broker' => 'vibecodeconnector',
+					'limit' => 1,
+					'total_processing_limit' => 10,
+					'retry_strategy' => [
+						'max_retries' => 10,
+						'delay' => 5,
+						'multiplier' => 2,
+						'max_delay' => 86400,
+					],
+				],
 				'vibecodeconnector.user_list_pull' => [
 					'handler' => UserListPullReceiver::class,
 					'broker' => 'vibecodeconnector',
@@ -146,6 +160,9 @@ return [
 	],
 	'services' => [
 		'value' => [
+			BalancePullReceiver::class => [
+				'className' => BalancePullReceiver::class,
+			],
 			AppChatBackfillService::class => [
 				'constructor' => static function () {
 					return new AppChatBackfillService(
@@ -454,6 +471,13 @@ return [
 					);
 				},
 			],
+			EmbedCoworkAdminSettings::class => [
+				'constructor' => static function () {
+					return new EmbedCoworkAdminSettings(
+						ServiceLocator::getInstance()->get(ModuleOptions::class),
+					);
+				},
+			],
 			EmbedCreateGuard::class => [
 				'constructor' => static function () {
 					return new EmbedCreateGuard(
@@ -480,6 +504,7 @@ return [
 						ServiceLocator::getInstance()->get(EmbedCreateSettings::class),
 						ServiceLocator::getInstance()->get(EmbedOpenPayloadBuilder::class),
 						new SignedFormRenderer('embed-create'),
+						ServiceLocator::getInstance()->get(EmbedCoworkAdminSettings::class),
 					);
 				},
 			],

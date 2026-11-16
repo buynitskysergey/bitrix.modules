@@ -2,6 +2,7 @@
 
 namespace Bitrix\Sign\Controllers\V1;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Error;
 use Bitrix\Main\Loader;
@@ -43,6 +44,19 @@ class Document extends Controller
 	private TemplateService $templateService;
 	private AccessService $templateAccessService;
 	private BlankRepository $blankRepository;
+
+	public function configureActions(): array
+	{
+		$actions = parent::configureActions();
+		foreach (['getPlaceholderValidationStatus', 'validatePlaceholders'] as $actionName)
+		{
+			$actions[$actionName]['+prefilters'][] = new \Bitrix\Main\Engine\ActionFilter\HttpMethod([
+				\Bitrix\Main\Engine\ActionFilter\HttpMethod::METHOD_POST,
+			]);
+		}
+
+		return $actions;
+	}
 
 	public function __construct(Request $request = null)
 	{
@@ -99,6 +113,17 @@ class Document extends Controller
 		$createdById = (int)CurrentUser::get()->getId();
 		if (!$this->validateBlankAccess($blankId, $createdById))
 		{
+			return [];
+		}
+
+		if (
+			$asTemplate
+			&& $templateFolderId !== 0
+			&& !$this->templateAccessService->hasAccessToEditFolderById($templateFolderId)
+		)
+		{
+			$this->addErrorByMessage('No access rights to edit target folder');
+
 			return [];
 		}
 
@@ -207,6 +232,7 @@ class Document extends Controller
 		string $uid,
 		int $blankId,
 		bool $copyBlocksFromPreviousBlank = false,
+		bool $autoDetectType = false,
 	): array
 	{
 		if (!$this->validateBlankAccess($blankId, (int)CurrentUser::get()->getId()))
@@ -218,6 +244,7 @@ class Document extends Controller
 			$uid,
 			$blankId,
 			$copyBlocksFromPreviousBlank,
+			$autoDetectType,
 		);
 		if (!$result->isSuccess())
 		{
@@ -234,6 +261,8 @@ class Document extends Controller
 
 			return [];
 		}
+
+		$this->precomputeRawPlaceholders($document);
 
 		$template = Service\Container::instance()
 			->getDocumentTemplateService()
@@ -310,7 +339,65 @@ class Document extends Controller
 			return [];
 		}
 
+		$document = $result->getData()['document'] ?? null;
+		if ($document instanceof Item\Document)
+		{
+			$this->precomputeRawPlaceholders($document);
+		}
+
 		return [];
+	}
+
+	/**
+	 * Warms the raw placeholder code cache while the file has just reached the safe service, so that
+	 * validating the inserted codes later needs no synchronous external call.
+	 *
+	 * The warmup itself is a second round trip to the safe service, and the answer of the action owes
+	 * it nothing, so it runs after the hit is over: keeping it here would let a slow safe service hold
+	 * the worker for the whole request timeout. A skipped warmup leaves validation fail-open for raw
+	 * codes; it never adds an external call to the synchronous send path.
+	 *
+	 * Every action that replaces the body calls this, not the upload alone: the key holds the blank,
+	 * and the online editor as well as a file replacement move the document to a new blank, so the
+	 * entry of the previous body can never answer for the new one. Moving the call down into
+	 * DocumentService::upload() would cover them all at once, but that is also what the mass paths
+	 * call - copy, template import, fill and send, crm integration - and none of them wants a
+	 * background job and an external call per created document.
+	 */
+	private function precomputeRawPlaceholders(Item\Document $document, ?Application $application = null): void
+	{
+		if (!Storage::instance()->isPlaceholderRestrictionEnabled())
+		{
+			return;
+		}
+
+		if ($document->uid === null || $document->id === null || $document->blankId === null)
+		{
+			return;
+		}
+
+		$documentUid = $document->uid;
+		$documentId = $document->id;
+		$blankId = $document->blankId;
+		$groupId = $document->groupId ?? 0;
+		($application ?? Application::getInstance())->addBackgroundJob(
+			static function () use (
+				$documentUid,
+				$documentId,
+				$blankId,
+				$groupId,
+			): void {
+				Service\Container::instance()->getDocumentAgentService()->scheduleRawPlaceholderWarmup(
+					$groupId,
+					new Item\Document(
+						id: $documentId,
+						uid: $documentUid,
+						blankId: $blankId,
+						groupId: $groupId > 0 ? $groupId : null,
+					),
+				);
+			},
+		);
 	}
 
 	/**
@@ -347,6 +434,120 @@ class Document extends Controller
 		}
 
 		return (new \Bitrix\Sign\Ui\ViewModel\Wizard\Document($document))->toArray();
+	}
+
+	/**
+	 * Reports the codes already inserted into the document that its signing scenario does not
+	 * support, grouped by the reason. Informational only: nothing is blocked or removed.
+	 *
+	 * @return array{hasUnsupported: bool, reasons: array<string, list<string>>}
+	 */
+	#[Attribute\Access\LogicOr(
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_DOCUMENT_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_B2E_TEMPLATE_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+	)]
+	public function validatePlaceholdersAction(string $uid): array
+	{
+		$document = Service\Container::instance()->getDocumentRepository()->getByUid($uid);
+
+		if (!$document)
+		{
+			$this->addError(new Error(Loc::getMessage('SIGN_CONTROLLER_DOCUMENT_NOT_FOUND')));
+
+			return [];
+		}
+
+		$operation = new Operation\Placeholder\ValidateDocumentPlaceholders($document);
+		$result = $operation->launch();
+
+		if (!$result->isSuccess())
+		{
+			$this->addErrors($result->getErrors());
+
+			return [];
+		}
+
+		$unsupportedCodesByReason = $operation->getUnsupportedCodesByReason();
+
+		return [
+			'hasUnsupported' => $unsupportedCodesByReason !== [],
+			'reasons' => $unsupportedCodesByReason,
+		];
+	}
+
+	/**
+	 * @return array{ready: bool}
+	 */
+	#[Attribute\Access\LogicOr(
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_DOCUMENT_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_B2E_DOCUMENT_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+		new Attribute\ActionAccess(
+			permission: ActionDictionary::ACTION_B2E_TEMPLATE_EDIT,
+			itemType: AccessibleItemType::DOCUMENT,
+			itemIdOrUidRequestKey: 'uid',
+		),
+	)]
+	public function getPlaceholderValidationStatusAction(string $uid): array
+	{
+		$container = Service\Container::instance();
+		$document = $container->getDocumentRepository()->getByUid($uid);
+		if (!$document)
+		{
+			$this->addError(new Error(Loc::getMessage('SIGN_CONTROLLER_DOCUMENT_NOT_FOUND')));
+
+			return [];
+		}
+
+		if (
+			!Storage::instance()->isPlaceholderRestrictionEnabled()
+			|| $document->id === null
+			|| $document->uid === null
+			|| $document->blankId === null
+		)
+		{
+			return ['ready' => true];
+		}
+
+		$cacheService = $container->getDocumentPlaceholderCacheService();
+		if ($cacheService->getRawPlaceholders($document->id, $document->blankId) !== null)
+		{
+			return ['ready' => true];
+		}
+
+		$groupId = (int)$document->groupId;
+		$agentService = $container->getDocumentAgentService();
+		if (!$agentService->hasRawPlaceholderWarmupChainForDocument(
+			$groupId,
+			$document->uid,
+			$document->id,
+			$document->blankId,
+		))
+		{
+			$agentService->scheduleRawPlaceholderWarmup($groupId, $document);
+		}
+
+		return ['ready' => false];
 	}
 
 	/**
@@ -479,7 +680,19 @@ class Document extends Controller
 			return [];
 		}
 
-		return ['blankId' => $result->getData()['blankId']];
+		$data = $result->getData();
+		$document = $data['document'] ?? null;
+		// The service falls back to the document of the previous body when the blank change gives none
+		// back, and the codes of the new body would then be warmed under the key of the old one.
+		if ($document instanceof Item\Document && $document->blankId === $data['blankId'])
+		{
+			$this->precomputeRawPlaceholders($document);
+		}
+
+		return [
+			'blankId' => $data['blankId'],
+			'hasPlaceholders' => $this->blankRepository->hasPlaceholdersById($data['blankId']),
+		];
 	}
 
 	#[Attribute\ActionAccess(

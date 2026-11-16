@@ -121,6 +121,10 @@ return [
 			Rest\V3\Idempotency\IdempotencyKeyResolver::class => [
 				'className' => Rest\V3\Idempotency\IdempotencyKeyResolver::class,
 			],
+			Rest\V3\Limiter\LimiterChainFactory::class => [
+				'className' => Rest\V3\Limiter\LimiterChainFactory::class,
+				'singleton' => true,
+			],
 		],
 		'readonly' => true,
 	],

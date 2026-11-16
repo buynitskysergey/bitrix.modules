@@ -79,6 +79,7 @@ class TaskQueryBuilder implements QueryBuilderInterface
 	public const ALIAS_TASK_OPTION = 'TUO';
 	public const ALIAS_TASK_ELAPSED_TIME = 'TE';
 	public const ALIAS_CHAT_TASK = 'CTT';
+	private const ALIAS_PERSONAL_KANBAN_STAGE = 'PKUN_STAGE';
 
 	// scrum tables can be joined several times
 	public const ALIAS_SCRUM_ITEM = 'TSI';
@@ -89,6 +90,9 @@ class TaskQueryBuilder implements QueryBuilderInterface
 	public const ALIAS_TASK_SCENARIO = 'SCR';
 	public const ALIAS_TASK_REGULAR = 'REG';
 	public const ALIAS_TASK_CHAT_ID = 'TCID';
+	private const FIELD_PERSONAL_KANBAN_LINKED = 'PERSONAL_KANBAN_LINKED';
+	private const FIELD_PERSONAL_KANBAN_NULL_SORTING = 'PERSONAL_KANBAN_NULL_SORTING';
+	private const FIELD_PERSONAL_KANBAN_SORTING = 'PERSONAL_KANBAN_SORTING';
 
 	/**
 	 * Column => "has value" field used to keep rows without a value at the end.
@@ -114,6 +118,7 @@ class TaskQueryBuilder implements QueryBuilderInterface
 	private array $scrumEntityItemJoins = [];
 	private ?array $roles;
 	private ?array $permissions = null;
+	private ?PersonalKanbanUnplannedFilter $personalKanbanUnplannedFilter = null;
 	private static string $lastBuiltSql;
 
 	/**
@@ -422,7 +427,10 @@ class TaskQueryBuilder implements QueryBuilderInterface
 	 */
 	private function buildOrder(): self
 	{
-		foreach ($this->taskQuery->getOrderBy() as $column => $order)
+		$orderBy = $this->taskQuery->getOrderBy();
+		$this->addPersonalKanbanLinkedOrder($orderBy);
+
+		foreach ($orderBy as $column => $order)
 		{
 			$this->addOrder($column, $order);
 		}
@@ -434,6 +442,80 @@ class TaskQueryBuilder implements QueryBuilderInterface
 		}
 
 		return $this;
+	}
+
+	private function addPersonalKanbanLinkedOrder(array $orderBy): void
+	{
+		$filter = $this->taskQuery->getWhere();
+		$personalFilter = $filter[TaskFilterBuilder::FILTER_PERSONAL_KANBAN_UNPLANNED] ?? null;
+		$orderFields = array_map(
+			static fn ($field): string => strtoupper((string)$field),
+			array_keys($orderBy)
+		);
+		if (
+			!in_array('SORTING_ORDER', $orderFields, true)
+			|| !$personalFilter instanceof PersonalKanbanUnplannedFilter
+		)
+		{
+			return;
+		}
+		$this->personalKanbanUnplannedFilter = $personalFilter;
+
+		$this->registerRuntimeField(
+			self::ALIAS_PERSONAL_KANBAN_STAGE,
+			(new ReferenceField(
+				self::ALIAS_PERSONAL_KANBAN_STAGE,
+				TaskStageTable::getEntity(),
+				Join::on('this.ID', 'ref.TASK_ID')
+					->where('ref.STAGE_ID', $personalFilter->newStageId)
+			))->configureJoinType(Join::TYPE_LEFT)
+		);
+
+		$this->taskQuery->addSelect([
+			new ExpressionField(
+				self::FIELD_PERSONAL_KANBAN_LINKED,
+				'CASE WHEN %s IS NULL THEN 1 ELSE 0 END',
+				[self::ALIAS_PERSONAL_KANBAN_STAGE . '.ID']
+			),
+		]);
+		$this->query->addOrder(
+			self::FIELD_PERSONAL_KANBAN_LINKED,
+			TaskQueryInterface::SORT_ASC
+		);
+	}
+
+	private function addPersonalKanbanSortingOrder(string $order): bool
+	{
+		if ($this->personalKanbanUnplannedFilter === null)
+		{
+			return false;
+		}
+
+		$this->taskQuery->addSelect([
+			new ExpressionField(
+				self::FIELD_PERSONAL_KANBAN_NULL_SORTING,
+				'CASE WHEN %s IS NOT NULL AND %s IS NULL THEN 1 ELSE 0 END',
+				[
+					self::ALIAS_PERSONAL_KANBAN_STAGE . '.ID',
+					self::ALIAS_TASK_SORT . '.SORT',
+				]
+			),
+		]);
+		$this->taskQuery->addSelect([
+			new ExpressionField(
+				self::FIELD_PERSONAL_KANBAN_SORTING,
+				'CASE WHEN %s IS NOT NULL THEN %s ELSE NULL END',
+				[
+					self::ALIAS_PERSONAL_KANBAN_STAGE . '.ID',
+					self::ALIAS_TASK_SORT . '.SORT',
+				]
+			),
+		]);
+		$this->query->addOrder(self::FIELD_PERSONAL_KANBAN_NULL_SORTING, $order);
+		$this->query->addOrder(self::FIELD_PERSONAL_KANBAN_SORTING, $order);
+		$this->registerRuntimeField(self::ALIAS_TASK_SORT);
+
+		return true;
 	}
 
 	/**
@@ -583,6 +665,11 @@ class TaskQueryBuilder implements QueryBuilderInterface
 				break;
 
 			case 'SORTING_ORDER':
+				if ($this->addPersonalKanbanSortingOrder($order))
+				{
+					break;
+				}
+
 				$this->query->addOrder('NULL_SORTING', $order);
 				$this->query->addOrder(self::ALIAS_TASK_SORT . '.SORT', $order);
 				$this->taskQuery->addSelect('SORTING');

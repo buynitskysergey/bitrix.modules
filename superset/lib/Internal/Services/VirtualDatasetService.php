@@ -6,6 +6,7 @@ use Bitrix\Main;
 use Bitrix\Superset\Internal\Api;
 use Bitrix\Superset\Internal\HttpStatus;
 use Bitrix\Superset\Internal\Support\AbstractSupersetContext;
+use Bitrix\Superset\Internal\Support\RequestRejection;
 use Bitrix\Superset\Internal\Support\SqlReadOnlyClassifier;
 
 final class VirtualDatasetService extends AbstractSupersetContext
@@ -21,6 +22,7 @@ final class VirtualDatasetService extends AbstractSupersetContext
 	 * @param string[] $columns Columns to project from the source table.
 	 * @param int $ownerId Superset owner id.
 	 * @param string|null $sourceSchema Schema of the source table (defaults to bitrix24).
+	 * @param string|null $actAsLogin When set, Superset creates the dataset as this user (act-as).
 	 * @return Main\Result
 	 */
 	public function create(
@@ -29,8 +31,14 @@ final class VirtualDatasetService extends AbstractSupersetContext
 		array $columns,
 		int $ownerId,
 		?string $sourceSchema = null,
+		?string $actAsLogin = null,
 	): Main\Result
 	{
+		if ($actAsLogin === '')
+		{
+			return $this->createInvalidActAsLoginResult();
+		}
+
 		$datasetName = trim($datasetName);
 		$sourceTable = trim($sourceTable);
 		$sourceSchema = trim($sourceSchema ?? self::SCHEMA);
@@ -88,13 +96,18 @@ final class VirtualDatasetService extends AbstractSupersetContext
 			'is_managed_externally' => false,
 		];
 
-		$requestResult = $this->getDatasetApi()->createDataset($payload);
+		$requestResult = $this->getDatasetApi($actAsLogin)->createDataset($payload);
 		if (
 			!$requestResult->isSuccess()
 			|| $requestResult->getHttpStatus() !== HttpStatus::CREATED
 		)
 		{
-			return $this->createRequestErrorResult($requestResult, 'Adding virtual dataset');
+			return $this->createDatasetRequestErrorResult($requestResult, 'Adding virtual dataset');
+		}
+		$notApplied = $this->checkActAsApplied($requestResult, $actAsLogin);
+		if ($notApplied !== null)
+		{
+			return $notApplied;
 		}
 
 		$decoded = $this->decode($requestResult->getAnswer());
@@ -118,10 +131,21 @@ final class VirtualDatasetService extends AbstractSupersetContext
 	 * @param string $datasetName Display name of the dataset (1..250).
 	 * @param string $sql Raw SQL SELECT used as the dataset source.
 	 * @param int $ownerId Superset owner id.
+	 * @param string|null $actAsLogin When set, Superset creates the dataset as this user (act-as).
 	 * @return Main\Result
 	 */
-	public function createFromSql(string $datasetName, string $sql, int $ownerId): Main\Result
+	public function createFromSql(
+		string $datasetName,
+		string $sql,
+		int $ownerId,
+		?string $actAsLogin = null,
+	): Main\Result
 	{
+		if ($actAsLogin === '')
+		{
+			return $this->createInvalidActAsLoginResult();
+		}
+
 		$datasetName = trim($datasetName);
 		$sql = trim($sql);
 
@@ -144,9 +168,8 @@ final class VirtualDatasetService extends AbstractSupersetContext
 		$classification = (new SqlReadOnlyClassifier())->classify($sql);
 		if (!$classification->isReadOnly)
 		{
-			return $this->createErrorResult(
+			return RequestRejection::create(
 				(string)$classification->reason,
-				null,
 				HttpStatus::UNPROCESSABLE_ENTITY,
 			);
 		}
@@ -167,13 +190,18 @@ final class VirtualDatasetService extends AbstractSupersetContext
 			'is_managed_externally' => false,
 		];
 
-		$requestResult = $this->getDatasetApi()->createDataset($payload);
+		$requestResult = $this->getDatasetApi($actAsLogin)->createDataset($payload);
 		if (
 			!$requestResult->isSuccess()
 			|| $requestResult->getHttpStatus() !== HttpStatus::CREATED
 		)
 		{
-			return $this->createRequestErrorResult($requestResult, 'Adding virtual dataset from SQL');
+			return $this->createDatasetRequestErrorResult($requestResult, 'Adding virtual dataset from SQL');
+		}
+		$notApplied = $this->checkActAsApplied($requestResult, $actAsLogin);
+		if ($notApplied !== null)
+		{
+			return $notApplied;
 		}
 
 		$decoded = $this->decode($requestResult->getAnswer());
@@ -230,8 +258,8 @@ final class VirtualDatasetService extends AbstractSupersetContext
 		return new DatabaseService($this->server, $this->connector);
 	}
 
-	private function getDatasetApi(): Api\Dataset
+	private function getDatasetApi(?string $actAsLogin = null): Api\Dataset
 	{
-		return new Api\Dataset($this->connector);
+		return new Api\Dataset($this->getConnectorFor($actAsLogin));
 	}
 }

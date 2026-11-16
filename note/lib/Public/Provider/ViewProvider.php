@@ -42,7 +42,11 @@ final class ViewProvider
 			throw new DocumentNotFoundException();
 		}
 
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($documentId, $ownership['collectionId']);
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$ownership['collectionId'],
+			allowStates: [DocumentAccessService::STATE_ARCHIVED],
+		);
 		if (!$snapshot['canView'])
 		{
 			throw new AccessDeniedException();

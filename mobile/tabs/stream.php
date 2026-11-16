@@ -5,9 +5,7 @@ namespace Bitrix\Mobile\AppTabs;
 use Bitrix\Intranet\Settings\Tools\ToolsManager;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\ModuleManager;
 use Bitrix\Mobile\Tab\Tabable;
-use Bitrix\Mobile\Tab\Preset\Service\ActiveTabProvider;
 use Bitrix\MobileApp\Janative\Manager;
 use Bitrix\Socialnetwork\Helper\Path;
 use Bitrix\Mobile\Menu\Analytics;
@@ -109,68 +107,6 @@ class Stream implements Tabable
 
 		$calendarWebPath = str_replace([ '#ID#', '#USER_ID#', '#user_id#' ], $this->context->userId, $calendarWebPathTemplate);
 
-		$isExtranetUser = (Loader::includeModule('extranet') && !\CExtranet::isIntranetUser());
-
-		$allowedFeatures = $this->getAllowedFeatures();
-
-		$tabs = [
-			[
-				'id' => 'stream',
-				'title' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM2'),
-				'component' => [
-					'name' => 'JSStackComponent',
-					'componentCode' => 'web: ' . $newsWebPath,
-					'rootWidget' => [
-						'name' => 'web',
-						'settings' => [
-							'titleParams' => [
-								'useLargeTitleMode' => true,
-								'text' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM2'),
-							],
-							'page' => [
-								'preload' => false,
-								'url' => $newsWebPath,
-								'useSearchBar' => true,
-							],
-						],
-					],
-				],
-			],
-		];
-
-		if (
-			!$isExtranetUser
-			&& ModuleManager::isModuleInstalled('bizproc')
-		)
-		{
-			$this->pushBizprocTab($tabs);
-		}
-
-/*
-		if (
-			in_array('calendar', $allowedFeatures, true)
-			&& ModuleManager::isModuleInstalled('calendar')
-			&& !$isExtranetUser
-		)
-		{
-			$tabs[] = [
-				'id' => 'calendar',
-				'title' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_CALENDAR'),
-				'selectable' => false,
-			];
-		}
-*/
-/*
-		if (!$isExtranetUser)
-		{
-			$tabs[] = [
-				'id' => 'video',
-				'title' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_VIDEO'),
-				'selectable' => false,
-			];
-		}
-*/
-
 		return [
 			'sort' => 200,
 			'imageName' => $this->getIconId(),
@@ -182,23 +118,26 @@ class Stream implements Tabable
 				'componentCode' => 'stream.tabs',
 				'scriptPath' => Manager::getComponentPath('stream.tabs'),
 				'rootWidget' => [
-					'name' => 'tabs',
+					'name' => 'web',
 					'settings' => [
 						'objectName' => 'tabs',
 						'titleParams' => [
 							'useLargeTitleMode' => true,
-							'text' => Loc::getMessage('TAB_STREAM_NAVIGATION_HEADER2'),
+							'text' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_STREAM2'),
 						],
 						'grabTitle' => false,
 						'grabButtons' => true,
 						'grabSearch' => true,
-						'tabs' => [
-							'items' => $tabs,
+						'page' => [
+							'preload' => false,
+							'url' => $newsWebPath,
+							'useSearchBar' => true,
 						],
 					],
 				],
 				'params' => [
 					'COMPONENT_CODE' => 'stream.tabs',
+					'SINGLE_FEED' => true,
 					'USER_ID' => $this->context->userId,
 					'SITE_ID' => $this->context->siteId,
 					'CALENDAR_WEB_PATH' => $calendarWebPath,
@@ -298,35 +237,4 @@ class Stream implements Tabable
 		return 'newsfeed';
 	}
 
-	private function pushBizprocTab(array &$tabs): void
-	{
-		$context = $this->context ?? new \Bitrix\Mobile\Context();
-		$activeTabProvider = ActiveTabProvider::forContext($context);
-		$manager = $activeTabProvider->getManager();
-		$activeTabs = $activeTabProvider->getActiveTabs();
-
-		if (isset($activeTabs['bizproc']))
-		{
-			return;
-		}
-
-		$bizprocTab = $manager->getTabInstance('bizproc');
-		if ($bizprocTab)
-		{
-			$bizprocTabData = $bizprocTab->getData();
-			if ($bizprocTabData)
-			{
-				$component = $bizprocTabData['component'];
-				$component['params'] = [
-					'analyticsSection' => 'stream',
-				];
-
-				$tabs[] = [
-					'id' => 'bp2',
-					'title' => Loc::getMessage('TAB_STREAM_NAVIGATION_TAB_BP'),
-					'component' => $component,
-				];
-			}
-		}
-	}
 }

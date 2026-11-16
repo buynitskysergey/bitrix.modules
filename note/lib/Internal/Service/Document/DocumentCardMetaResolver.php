@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Service\Document;
 
 use Bitrix\Main\ORM\Fields\ExpressionField;
+use Bitrix\Main\Text\Emoji;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Service\Search\MarkdownStripper;
 use Bitrix\Note\Internal\Service\Search\SnippetExtractor;
@@ -22,9 +23,15 @@ final class DocumentCardMetaResolver
 	public const DEFAULT_PREVIEW_MAX_LINES = 3;
 	public const DEFAULT_PREVIEW_LINE_MAX_LEN = 160;
 
-	// Cap raw MARKDOWN per row; SUBSTRING() counts characters (not bytes). Preview budget is
-	// ~3*160 = 480 plain chars; 2048 chars covers ~4x markdown bloat (headings, links, fences).
+	// Cap raw MARKDOWN per row; SUBSTRING() counts characters (not bytes) of the stored value.
+	// Preview budget is ~3*160 = 480 plain chars; 2048 chars covers ~4x markdown bloat (headings,
+	// links, fences) and the 10-chars-per-emoji cost of the stored :hex: form.
 	private const MARKDOWN_FETCH_LIMIT = 2048;
+
+	// A :hex: shortcode opener left dangling by the SUBSTRING cut: a colon followed by up to 8 hex
+	// digits with no closing colon. The first byte of a 4-byte UTF-8 sequence is F0..F4, so the
+	// first digit pair narrows the match and keeps ordinary trailing colons intact.
+	private const DANGLING_EMOJI_TAIL = '/:[Ff](?:[0-4][0-9A-Fa-f]{0,6})?$/';
 
 	public function __construct(
 		private readonly MarkdownStripper $markdownStripper = new MarkdownStripper(),
@@ -143,11 +150,24 @@ final class DocumentCardMetaResolver
 			}
 			$out[$id] = $this->composeBody(
 				(string)($row['TITLE'] ?? ''),
-				(string)($row['MARKDOWN_HEAD'] ?? ''),
+				$this->decodeHead((string)($row['MARKDOWN_HEAD'] ?? '')),
 			);
 		}
 
 		return $out;
+	}
+
+	/**
+	 * MARKDOWN is stored emoji-encoded, and the fetch goes through an expression (SUBSTRING), which
+	 * carries no fetch modifier of the field it reads - so this head arrives raw and has to be decoded
+	 * here, or the preview prints :hex: shortcodes instead of emoji. The cut is made on the encoded
+	 * value and can land inside a shortcode, so the dangling opener is dropped before decoding.
+	 */
+	private function decodeHead(string $markdownHead): string
+	{
+		$trimmed = preg_replace(self::DANGLING_EMOJI_TAIL, '', $markdownHead) ?? $markdownHead;
+
+		return Emoji::decode($trimmed) ?? $trimmed;
 	}
 
 	/**

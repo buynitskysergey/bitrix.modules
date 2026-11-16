@@ -15,7 +15,9 @@ class Mobile
 	private const MENU_ITEM_ID = 'note';
 	private const MENU_ITEM_SORT = 800;
 	private const TARGET_SECTION_CODE = 'teamwork';
-	private const ENTRY_URL = '/mobile/note/';
+	// The shell is opened by the background context of the app, which alone knows the version of the
+	// component; the name of the event is spelled the same in note/kb/background.
+	private const OPEN_EVENT = 'note:kb:open';
 	private const ICON_NAME = 'library_base';
 	private const ICON_COLOR = '#7a7adc';
 
@@ -100,10 +102,22 @@ class Mobile
 			'color' => self::ICON_COLOR,
 			'tag' => 'new',
 			'params' => [
-				'url' => self::ENTRY_URL,
-				'cache' => false,
-				'useSearchBar' => false,
+				'onclick' => self::buildOpenShellScript(),
 			],
 		];
+	}
+
+	/**
+	 * The menu item opens the shell the same way every other opener does — by the event the background
+	 * context listens to. Opening it here instead would bake the version of the component into a script
+	 * the app caches for weeks: an update that raises the version would keep opening the old one.
+	 */
+	private static function buildOpenShellScript(): string
+	{
+		$event = \CUtil::JSEscape(self::OPEN_EVENT);
+
+		return <<<JS
+			BX.postComponentEvent('{$event}', [{ entryPath: '' }], 'background');
+			JS;
 	}
 }

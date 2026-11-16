@@ -167,27 +167,66 @@ final class DocumentLinkExtractor
 	}
 
 	/**
-	 * @return int[]
+	 * Every mention token of the text, of every type, in the order it is written and without
+	 * repetitions. The same parse the link index runs, only nothing is thrown away by type: a
+	 * mention of an employee is not a link between documents, but it is still a mention someone has
+	 * to be told about.
+	 *
+	 * The link index keeps reading this through mentionTargets() below, and its answer is unchanged.
+	 *
+	 * @return array<int, array{type: string, id: int}>
 	 */
-	private function mentionTargets(string $markdown): array
+	public function extractMentions(string $markdown): array
 	{
-		if (!preg_match_all(self::MENTION_TOKEN_PATTERN, $markdown, $matches, PREG_SET_ORDER))
+		if ($markdown === '')
 		{
 			return [];
 		}
 
-		$ids = [];
+		return $this->mentionsIn($this->withoutCode($markdown));
+	}
+
+	/**
+	 * The same parse over text whose code context is already blanked out. Kept apart from
+	 * extractMentions() because withoutCode() is not idempotent: a second pass reads what the first
+	 * left behind - an inline span removed from "`x` ~~~" leaves a line that opens a fenced block -
+	 * and everything after it disappears. Each input text is cleaned exactly once, by whoever holds it.
+	 *
+	 * @return array<int, array{type: string, id: int}>
+	 */
+	private function mentionsIn(string $scannable): array
+	{
+		if (!preg_match_all(self::MENTION_TOKEN_PATTERN, $scannable, $matches, PREG_SET_ORDER))
+		{
+			return [];
+		}
+
+		$mentions = [];
 		foreach ($matches as $match)
 		{
-			if ($match[1] !== self::MENTION_TYPE_DOCUMENT)
+			$id = (int)$match[2];
+			if ($id <= 0)
 			{
 				continue;
 			}
 
-			$id = (int)$match[2];
-			if ($id > 0)
+			$mentions[$match[1] . ':' . $id] = ['type' => $match[1], 'id' => $id];
+		}
+
+		return array_values($mentions);
+	}
+
+	/**
+	 * @return int[]
+	 */
+	private function mentionTargets(string $markdown): array
+	{
+		$ids = [];
+		foreach ($this->mentionsIn($markdown) as $mention)
+		{
+			if ($mention['type'] === self::MENTION_TYPE_DOCUMENT)
 			{
-				$ids[] = $id;
+				$ids[] = $mention['id'];
 			}
 		}
 

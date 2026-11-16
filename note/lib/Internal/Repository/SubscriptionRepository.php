@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace Bitrix\Note\Internal\Repository;
 
 use Bitrix\Main\Application;
+use Bitrix\Main\ORM\Fields\Relations\Reference;
+use Bitrix\Main\ORM\Query\Filter\ConditionTree;
+use Bitrix\Main\ORM\Query\Join;
+use Bitrix\Main\ORM\Query\Query;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Note\Internal\Model\DocumentTable;
 use Bitrix\Note\Internal\Model\SubscriptionTable;
 
 /**
  * b_note_subscription access: upsert/remove on the colocated bell
- * control, subscriber lookups for SubscriptionResolver (P6.T2), and hard-delete
- * cascades.
+ * control, subscriber lookups for SubscriptionResolver (P6.T2), the keyset page of one user's
+ * deliverable subscriptions, and hard-delete cascades.
  */
 class SubscriptionRepository
 {
@@ -63,28 +67,139 @@ class SubscriptionRepository
 	}
 
 	/**
-	 * Deletes the caller's own row only if its MODE is one of $modes, and reports whether such a row
-	 * was there. The mode goes into the DELETE filter instead of a preceding read, so a concurrent
-	 * mode change between "which mode is it" and "delete it" can neither drop the wrong row nor miss
-	 * the right one.
+	 * One keyset window of the user's own subscriptions list, ordered (ID DESC) over
+	 * IX_NOTE_SUB_PAGE. The cursor is the ID of the last returned row: a single column is enough,
+	 * since ID is unique.
 	 *
-	 * @param string[] $modes
+	 * Scope and mode are fixed: the list shows the articles the user subscribed to themselves, so a
+	 * row of another scope, of `subtree` or a `muted` override never belongs to it. The document
+	 * behind the row has to be alive and listable as well, which is why it is joined here and judged
+	 * in the WHERE rather than after the fetch.
+	 *
+	 * $visibility, when given, is the caller's ACL predicate over the joined DOCUMENT alias; null
+	 * means "no filtering": the portal-admin path.
+	 *
+	 * @return array<int, array{id: int, entityId: int}>
 	 */
-	public function removeByModes(int $userId, string $scope, int $entityId, array $modes): bool
+	public function pageAfter(
+		int $userId,
+		?int $afterId,
+		int $limit,
+		?ConditionTree $visibility = null,
+	): array
 	{
-		if (empty($modes))
+		if ($userId <= 0 || $limit <= 0)
+		{
+			return [];
+		}
+
+		$query = $this->buildDeliverablePageQuery($userId, $visibility)
+			->addOrder('ID', 'DESC')
+			->setLimit($limit)
+		;
+
+		if ($afterId !== null && $afterId > 0)
+		{
+			$query->where('ID', '<', $afterId);
+		}
+
+		return array_map(static fn(array $row): array => [
+			'id' => (int)$row['ID'],
+			'entityId' => (int)$row['ENTITY_ID'],
+		], $query->fetchAll());
+	}
+
+	/**
+	 * True when at least one row the page above would return exists. Backs the sidebar's decision to
+	 * offer the notifications mode at all, so it asks for existence and not for a count: the answer
+	 * is a bool and the query stops at the first matching row.
+	 */
+	public function hasDeliverableSubscription(int $userId, ?ConditionTree $visibility = null): bool
+	{
+		if ($userId <= 0)
 		{
 			return false;
 		}
 
-		SubscriptionTable::deleteByFilter([
-			'=USER_ID' => $userId,
-			'=SCOPE' => $scope,
-			'=ENTITY_ID' => $entityId,
-			'@MODE' => $modes,
-		]);
+		return $this->buildDeliverablePageQuery($userId, $visibility)
+			->setLimit(1)
+			->fetch() !== false
+		;
+	}
 
-		return Application::getConnection()->getAffectedRowsCount() > 0;
+	/**
+	 * Whether the user has written a single `document:self` subscription, whatever became of the
+	 * document since. Deliberately blind to rights, the recycle bin and the archive: this is the cheap
+	 * half of the existence question above - one lookup on the row's own index, no join and no access
+	 * codes - and it answers "no" for everyone who follows nothing at all, which is most of the portal.
+	 * A "yes" settles nothing and the deliverable question is still asked.
+	 */
+	public function hasOwnDocumentSubscription(int $userId): bool
+	{
+		if ($userId <= 0)
+		{
+			return false;
+		}
+
+		return SubscriptionTable::query()
+			->setSelect(['ID'])
+			->where('USER_ID', $userId)
+			->where('SCOPE', SubscriptionTable::SCOPE_DOCUMENT)
+			->where('MODE', SubscriptionTable::MODE_SELF)
+			->setLimit(1)
+			->fetch() !== false
+		;
+	}
+
+	/**
+	 * The shared body of the two reads above: the user's own `document:self` rows whose document is
+	 * alive, listable and, when a predicate is given, visible to them.
+	 */
+	private function buildDeliverablePageQuery(int $userId, ?ConditionTree $visibility): Query
+	{
+		$query = SubscriptionTable::query()
+			->setSelect(['ID', 'ENTITY_ID'])
+			->where('USER_ID', $userId)
+			->where('SCOPE', SubscriptionTable::SCOPE_DOCUMENT)
+			->where('MODE', SubscriptionTable::MODE_SELF)
+		;
+
+		$this->joinDocument($query);
+
+		// The main document is the hidden carrier of the knowledge base description, and a trashed or
+		// archived one has no place in the sidebar.
+		$query
+			->whereNull('DOCUMENT.RECYCLE_BIN.ID')
+			->where('DOCUMENT.IS_MAIN', DocumentTable::IS_MAIN_NO)
+			->where('DOCUMENT.IS_ARCHIVED', 'N')
+		;
+
+		if ($visibility !== null)
+		{
+			$query->where($visibility);
+		}
+
+		return $query;
+	}
+
+	/**
+	 * Attaches the subscribed document as the DOCUMENT alias, so its collection, main flag and
+	 * recycle-bin state read as ordinary columns of the row. Unlike
+	 * {@see FavoriteRepository::joinDocument()}, whose list is mixed and whose collection rows have
+	 * to survive finding no document, this one joins INNER: the selection is `document` rows only,
+	 * and a row whose document is gone has nothing to show in the sidebar.
+	 */
+	private function joinDocument(Query $query): void
+	{
+		$query->registerRuntimeField(
+			new Reference(
+				'DOCUMENT',
+				DocumentTable::class,
+				Join::on('this.ENTITY_ID', 'ref.ID')
+					->where('this.SCOPE', SubscriptionTable::SCOPE_DOCUMENT),
+				['join_type' => 'INNER'],
+			),
+		);
 	}
 
 	/**

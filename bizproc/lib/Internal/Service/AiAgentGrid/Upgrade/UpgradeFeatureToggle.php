@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Bizproc\Internal\Service\AiAgentGrid\Upgrade;
 
-use Bitrix\Main\Config\Option;
+use Bitrix\Bizproc\Public\Feature\AiAgent\AgentUpgradeFlag;
 
 /**
  * The single source of the dark-launch flag of the AI-agent upgrade: the row action and the
@@ -18,13 +18,8 @@ use Bitrix\Main\Config\Option;
  */
 final class UpgradeFeatureToggle
 {
-	public const MODULE_ID = 'bizproc';
-	public const OPTION_NAME = 'ai_agent_upgrade_enabled';
-
-	private const DEFAULT_VALUE = 'N';
-
 	public static function isEnabled(): bool
 	{
-		return Option::get(self::MODULE_ID, self::OPTION_NAME, self::DEFAULT_VALUE) === 'Y';
+		return \Bitrix\Main\Config\Feature::isEnabled(AgentUpgradeFlag::class);
 	}
 }

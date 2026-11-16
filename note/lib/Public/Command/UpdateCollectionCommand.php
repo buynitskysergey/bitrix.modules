@@ -6,6 +6,7 @@ namespace Bitrix\Note\Public\Command;
 
 use Bitrix\Main\Command\AbstractCommand;
 use Bitrix\Main\Result;
+use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Service\Collaboration\PushNotificationService;
 use Bitrix\Note\Internal\Service\Collection\CollectionService;
 
@@ -38,6 +39,10 @@ class UpdateCollectionCommand extends AbstractCommand
 
 	protected function execute(): Result
 	{
+		// Renaming is a write to the base itself, so the state of the base decides it: an archived one
+		// is read-only. Hiding the field is not enough - the id alone is enough to call the endpoint.
+		CollectionAccessService::assertCollectionAcceptsWrites($this->id);
+
 		$collection = $this->collectionService->update($this->id, $this->name, $this->userId);
 
 		if ($collection !== null)

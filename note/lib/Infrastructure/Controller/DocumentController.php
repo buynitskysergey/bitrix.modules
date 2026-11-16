@@ -12,10 +12,10 @@ use Bitrix\Main\Localization\Loc;
 use Bitrix\Main\SystemException;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
 use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
-use Bitrix\Note\Internal\Configuration;
 use Bitrix\Note\Internal\Entity\Document\BreadcrumbAncestor;
 use Bitrix\Note\Internal\Exceptions\AccessDeniedException;
 use Bitrix\Note\Internal\Exceptions\CollectionNotFoundException;
+use Bitrix\Note\Internal\Exceptions\CollectionNotWritableException;
 use Bitrix\Note\Internal\Exceptions\DocumentArchivedException;
 use Bitrix\Note\Internal\Exceptions\DocumentInRecycleBinException;
 use Bitrix\Note\Internal\Exceptions\DocumentNotFoundException;
@@ -36,21 +36,28 @@ use Bitrix\Note\Internal\Service\Document\DocumentLastChangeResolver;
 use Bitrix\Note\Internal\Service\Document\DocumentSubscriptionStateResolver;
 use Bitrix\Note\Internal\Service\Document\DocumentViewsSnapshotResolver;
 use Bitrix\Note\Internal\Service\Document\Position\PositionService;
+use Bitrix\Note\Internal\Service\File\DocumentFilesMapService;
 use Bitrix\Note\Internal\Service\Bulk\BulkAccessAggregator;
 use Bitrix\Note\Internal\Service\Bulk\SelectionResolver;
+use Bitrix\Note\Infrastructure\Agent\Document\OwnedMoveContinuationScheduler;
 use Bitrix\Note\Internal\Service\Sidebar\AccessibleAncestorResolver;
 use Bitrix\Note\Internal\Service\Sidebar\AccessibleTreeService;
 use Bitrix\Note\Internal\Service\Sidebar\DirectOpenContextService;
 use Bitrix\Note\Public\Command\ArchiveAllInCollectionCommand;
+use Bitrix\Note\Public\Command\ArchiveAllOwnedInCollectionCommand;
 use Bitrix\Note\Public\Command\ArchiveDocumentCommand;
 use Bitrix\Note\Public\Command\BulkArchiveDocumentsCommand;
 use Bitrix\Note\Public\Command\BulkDeleteDocumentsCommand;
 use Bitrix\Note\Public\Command\BulkMoveDocumentsCommand;
+use Bitrix\Note\Public\Command\MoveSelectedDocumentsCommand;
 use Bitrix\Note\Public\Command\BulkRestoreDocumentsCommand;
 use Bitrix\Note\Public\Command\CreateDocumentCommand;
 use Bitrix\Note\Public\Command\DeleteAllArchivedDocumentsCommand;
 use Bitrix\Note\Public\Command\DeleteAllInCollectionCommand;
+use Bitrix\Note\Public\Command\DeleteAllOwnedInCollectionCommand;
 use Bitrix\Note\Public\Command\DeleteDocumentCommand;
+use Bitrix\Note\Public\Command\MoveAllInCollectionCommand;
+use Bitrix\Note\Public\Command\MoveAllOwnedInCollectionCommand;
 use Bitrix\Note\Public\Command\MoveDocumentCommand;
 use Bitrix\Note\Public\Command\RestoreAllArchivedDocumentsCommand;
 use Bitrix\Note\Public\Command\RestoreDocumentCommand;
@@ -59,6 +66,10 @@ use Bitrix\Note\Public\Command\UpdateDocumentCommand;
 use Bitrix\Note\Public\Provider\BacklinkProvider;
 use Bitrix\Note\Public\Provider\CollaborationProvider;
 use Bitrix\Note\Public\Provider\CollectionProvider;
+use Bitrix\Note\Public\Provider\ContentList\CollectionStateResolver;
+use Bitrix\Note\Public\Provider\ContentList\LevelProvider;
+use Bitrix\Note\Public\Provider\ContentList\SectionLevelPreloader;
+use Bitrix\Note\Public\Provider\ContentList\SectionProvider;
 use Bitrix\Note\Public\Provider\DocumentProvider;
 use Bitrix\Note\Public\Provider\FeedProvider;
 use Bitrix\Note\Public\Provider\Param\Document\DocumentLimits;
@@ -68,6 +79,8 @@ use Bitrix\Note\Public\Provider\ViewProvider;
 
 class DocumentController extends Controller
 {
+	use LevelScopeTrait;
+
 	protected function getDefaultPreFilters(): array
 	{
 		return array_merge(
@@ -104,6 +117,33 @@ class DocumentController extends Controller
 		try
 		{
 			$result = (new CreateDocumentCommand($collectionId, $parentId, $title, $markdown, $userId, $contentFormat))->run();
+		}
+		catch (CommandException $e)
+		{
+			// The state of the base is a server-side ban, so a direct call by id gets a named
+			// refusal and not a generic failure.
+			if ($e->getPrevious() instanceof CollectionNotWritableException)
+			{
+				$this->addError(new Error(
+					(string)Loc::getMessage('NOTE_COLLECTION_READ_ONLY'),
+					'NOTE_COLLECTION_READ_ONLY',
+				));
+
+				return null;
+			}
+
+			$this->addError(new Error(Loc::getMessage('NOTE_DOCUMENT_CREATE_ERROR')));
+
+			return null;
+		}
+		catch (CollectionNotWritableException)
+		{
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_READ_ONLY'),
+				'NOTE_COLLECTION_READ_ONLY',
+			));
+
+			return null;
 		}
 		catch (SystemException $e)
 		{
@@ -197,6 +237,16 @@ class DocumentController extends Controller
 			if ($cause instanceof DocumentArchivedException)
 			{
 				$this->addError(new Error(Loc::getMessage('NOTE_DOCUMENT_ARCHIVED')));
+
+				return null;
+			}
+			if ($cause instanceof CollectionNotWritableException)
+			{
+				// The receiving base is read-only in its state.
+				$this->addError(new Error(
+					(string)Loc::getMessage('NOTE_COLLECTION_READ_ONLY'),
+					'NOTE_COLLECTION_READ_ONLY',
+				));
 
 				return null;
 			}
@@ -550,9 +600,13 @@ class DocumentController extends Controller
 	 * manage land in skippedByAccessCount, they are not an endpoint error. Jointly selected
 	 * parent/child pairs are restored top-down so the child re-attaches under its parent.
 	 *
+	 * The branch is what the interface offers, but withNested defaults to off all the same: the
+	 * parameter was added to an action that already existed, and a caller from before it has to keep
+	 * getting what it used to ask for. The client of this surface always sends the flag.
+	 *
 	 * @param int[] $documentIds
 	 */
-	public function restoreManyAction(array $documentIds): ?array
+	public function restoreManyAction(array $documentIds, bool $withNested = false): ?array
 	{
 		$userId = (int)$this->getCurrentUser()->getId();
 		if ($userId <= 0)
@@ -568,8 +622,16 @@ class DocumentController extends Controller
 			return null;
 		}
 
+		// A card in the archive stands for its branch, exactly as it did when it was
+		// archived; the composition is expanded on the server, the client does not hold it.
 		return $this->runBulkCommand(
-			new BulkRestoreDocumentsCommand($userId, $rootIds, SelectionResolver::SECTION_ARCHIVE),
+			new BulkRestoreDocumentsCommand(
+				$userId,
+				$rootIds,
+				SelectionResolver::SECTION_ARCHIVE,
+				null,
+				$withNested,
+			),
 		);
 	}
 
@@ -582,9 +644,20 @@ class DocumentController extends Controller
 	 * in the outcome as skipped (partial success). Only when every root's target sits inside its
 	 * own subtree is the request wholly unsatisfiable — that becomes NOTE_INVALID_TARGET.
 	 *
+	 * $selectedOnly picks the form of the move, not the right to make it: with it only the selected
+	 * documents travel and everything else stays in the source collection. It is not about authorship
+	 * and not tied to any one tab — "My articles" always sends it, "All documents" sends it whenever
+	 * the "with nested" toggle is off. A target inside the selection makes the whole request
+	 * unsatisfiable and is reported as NOTE_INVALID_TARGET.
+	 *
 	 * @param int[] $documentIds
 	 */
-	public function moveManyAction(array $documentIds, int $targetCollectionId, ?int $targetParentId = null): ?array
+	public function moveManyAction(
+		array $documentIds,
+		int $targetCollectionId,
+		?int $targetParentId = null,
+		bool $selectedOnly = false,
+	): ?array
 	{
 		$userId = (int)$this->getCurrentUser()->getId();
 		if ($userId <= 0)
@@ -623,10 +696,11 @@ class DocumentController extends Controller
 
 		try
 		{
-			$data = (new BulkMoveDocumentsCommand($userId, $rootIds, $targetCollectionId, $normalizedParentId))
-				->run()
-				->getData()
+			$command = $selectedOnly
+				? new MoveSelectedDocumentsCommand($userId, $rootIds, $targetCollectionId, $normalizedParentId)
+				: new BulkMoveDocumentsCommand($userId, $rootIds, $targetCollectionId, $normalizedParentId)
 			;
+			$data = $command->run()->getData();
 		}
 		catch (SystemException)
 		{
@@ -696,6 +770,18 @@ class DocumentController extends Controller
 			return null;
 		}
 
+		// The documents of a deleted base are already in the bin; archiving them from here would
+		// change what a restore brings back.
+		if (!DocumentAccessService::isCollectionAlive($collectionId))
+		{
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_IN_RECYCLE_BIN'),
+				'NOTE_COLLECTION_IN_RECYCLE_BIN',
+			));
+
+			return null;
+		}
+
 		if (!$this->assertCollectionManageAccess($collectionId))
 		{
 			return null;
@@ -707,6 +793,326 @@ class DocumentController extends Controller
 		;
 
 		return $this->runBulkCommand($command);
+	}
+
+	/**
+	 * "Select all" on the "My articles" tab: archive every live document of the collection the
+	 * calling user authored. The set is resolved on the server over the whole base, the rows the
+	 * client happened to load do not take part in it.
+	 */
+	public function archiveAllOwnedInCollectionAction(int $collectionId): ?array
+	{
+		return $this->runAllOwnedInCollection($collectionId, true);
+	}
+
+	/**
+	 * "Select all" on the "My articles" tab: soft-delete every live document of the collection the
+	 * calling user authored.
+	 */
+	public function deleteAllOwnedInCollectionAction(int $collectionId): ?array
+	{
+		return $this->runAllOwnedInCollection($collectionId, false);
+	}
+
+	/**
+	 * VIEW, not MANAGE: the tab belongs to everyone who sees the base, and whether a document may
+	 * actually be archived or deleted is decided per document inside the command. A user without
+	 * MANAGE gets an outcome with zeroes and a skippedByAccessCount — the partial success the whole
+	 * bulk pipeline answers with, not NOTE_ACCESS_DENIED.
+	 */
+	private function runAllOwnedInCollection(int $collectionId, bool $archive): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		if (!$this->collectionExists($collectionId))
+		{
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_NOT_FOUND'),
+				'NOTE_COLLECTION_NOT_FOUND',
+			));
+
+			return null;
+		}
+
+		if (!$this->assertCollectionViewAccess($collectionId))
+		{
+			return null;
+		}
+
+		$command = $archive
+			? new ArchiveAllOwnedInCollectionCommand($collectionId, $userId)
+			: new DeleteAllOwnedInCollectionCommand($collectionId, $userId)
+		;
+
+		return $this->runBulkCommand($command);
+	}
+
+	/**
+	 * How many documents "archive/delete all my articles" would touch in this base — the number the
+	 * confirmation dialog prints. VIEW is the threshold: the count answers whether the set is
+	 * visible, not whether the operation over it would go through.
+	 *
+	 * The shape is narrower than resolveBulkSelection's on purpose: a server-resolved set has no cap
+	 * to exceed and no "with nested" toggle to describe.
+	 */
+	public function countOwnedInCollectionAction(int $collectionId): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		if (!$this->assertCollectionViewAccess($collectionId))
+		{
+			return null;
+		}
+
+		return [
+			'affectedCount' => (new DocumentRepository())->countLiveOwnedCollectionDocuments($collectionId, $userId),
+		];
+	}
+
+	/**
+	 * "Move everything to another base": the whole knowledge base — its archive and its recycle bin
+	 * included — goes under one parent of the target base. The collection entity itself stays where
+	 * it is; only its documents travel.
+	 */
+	public function moveAllInCollectionAction(
+		int $collectionId,
+		int $targetCollectionId,
+		?int $targetParentId = null,
+	): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		if (!$this->assertMoveAllSource($collectionId, CollectionAccessService::LEVEL_MANAGE))
+		{
+			return null;
+		}
+
+		if ($targetCollectionId === $collectionId)
+		{
+			// The set would be the content of its own destination. Only here: the author-scoped move
+			// below takes "lift all my articles to the root of this base" as a legitimate request.
+			$this->addError(new Error(Loc::getMessage('NOTE_INVALID_TARGET'), 'NOTE_INVALID_TARGET'));
+
+			return null;
+		}
+
+		$normalizedParentId = $this->normalizeMoveTarget($targetCollectionId, $targetParentId);
+		if ($normalizedParentId === false)
+		{
+			return null;
+		}
+
+		return $this->runMoveAll(
+			new MoveAllInCollectionCommand($collectionId, $targetCollectionId, $normalizedParentId, $userId),
+			false,
+		);
+	}
+
+	/**
+	 * "Move all my articles to another base". VIEW on the source, for the same reason the rest of the
+	 * tab asks for VIEW: what may actually be moved is decided per document inside the command. The
+	 * target base may be the source one — lifting one's own articles to its root is a move like any
+	 * other.
+	 */
+	public function moveAllOwnedInCollectionAction(
+		int $collectionId,
+		int $targetCollectionId,
+		?int $targetParentId = null,
+	): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		if (!$this->assertMoveAllSource($collectionId, CollectionAccessService::LEVEL_VIEW))
+		{
+			return null;
+		}
+
+		$normalizedParentId = $this->normalizeMoveTarget($targetCollectionId, $targetParentId);
+		if ($normalizedParentId === false)
+		{
+			return null;
+		}
+
+		return $this->runMoveAll(
+			new MoveAllOwnedInCollectionCommand(
+				$collectionId,
+				$targetCollectionId,
+				$normalizedParentId,
+				$userId,
+				deferralSink: new OwnedMoveContinuationScheduler(),
+			),
+			true,
+		);
+	}
+
+	/**
+	 * How many documents the base holds — the number the confirmation of "move the whole base" prints.
+	 * Live ones: the archive and the recycle bin travel too, but the figure answers for what the user
+	 * sees and works with, and the text of the confirmation speaks for the rest.
+	 */
+	public function countInCollectionAction(int $collectionId): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		if (!$this->assertCollectionViewAccess($collectionId))
+		{
+			return null;
+		}
+
+		return ['affectedCount' => (new DocumentRepository())->countLiveInCollection($collectionId)];
+	}
+
+	private function assertMoveAllSource(int $collectionId, int $requiredLevel): bool
+	{
+		if (!$this->collectionExists($collectionId))
+		{
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_NOT_FOUND'),
+				'NOTE_COLLECTION_NOT_FOUND',
+			));
+
+			return false;
+		}
+
+		$granted = $requiredLevel === CollectionAccessService::LEVEL_MANAGE
+			? $this->assertCollectionManageAccess($collectionId)
+			: $this->assertCollectionViewAccess($collectionId)
+		;
+
+		// Carrying documents away is a write into the source base, so an archived one is refused with
+		// the same code an archived target is. The commands keep their own guard for other callers.
+		return $granted && $this->assertCollectionWritable($collectionId);
+	}
+
+	private function assertCollectionWritable(int $collectionId): bool
+	{
+		try
+		{
+			CollectionAccessService::assertCollectionAcceptsWrites($collectionId);
+		}
+		catch (CollectionNotWritableException)
+		{
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_READ_ONLY'),
+				'NOTE_COLLECTION_READ_ONLY',
+			));
+
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * The receiving end of a set move: a base that accepts writes, MANAGE on it, and a target parent
+	 * that is a document of that very base.
+	 *
+	 * @return int|null|false the normalized parent id, or false when the request was already refused
+	 */
+	private function normalizeMoveTarget(int $targetCollectionId, ?int $targetParentId): int|null|false
+	{
+		if (!$this->assertCollectionWritable($targetCollectionId))
+		{
+			return false;
+		}
+
+		if (!$this->hasCollectionLevel($targetCollectionId, CollectionAccessService::LEVEL_MANAGE))
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_ACCESS_DENIED'), 'NOTE_ACCESS_DENIED'));
+
+			return false;
+		}
+
+		$normalizedParentId = $targetParentId !== null && $targetParentId > 0 ? $targetParentId : null;
+		if ($normalizedParentId !== null)
+		{
+			$targetParent = (new DocumentProvider())->getMetaById($normalizedParentId);
+			if ($targetParent === null || (int)$targetParent->getCollectionId() !== $targetCollectionId)
+			{
+				$this->addError(new Error(Loc::getMessage('NOTE_INVALID_TARGET'), 'NOTE_INVALID_TARGET'));
+
+				return false;
+			}
+		}
+
+		return $normalizedParentId;
+	}
+
+	/**
+	 * Past runBulkCommand() on purpose: it reads nothing but ['outcome'] out of the command, and a set
+	 * move answers with more — the errors of its own guards and the flag that says a tail went to the
+	 * background.
+	 */
+	private function runMoveAll(\Bitrix\Main\Command\AbstractCommand $command, bool $withDeferredTail): ?array
+	{
+		try
+		{
+			$result = $command->run();
+		}
+		catch (SystemException)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_BULK_ERROR'), 'NOTE_BULK_ERROR'));
+
+			return null;
+		}
+
+		if (!$result->isSuccess())
+		{
+			foreach ($result->getErrors() as $error)
+			{
+				$this->addError($error);
+			}
+
+			return null;
+		}
+
+		$data = $result->getData();
+		$outcome = $data['outcome'] ?? null;
+		if (!is_array($outcome))
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_BULK_ERROR'), 'NOTE_BULK_ERROR'));
+
+			return null;
+		}
+
+		if (($outcome['limitExceeded'] ?? false) === true)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_BULK_LIMIT_EXCEEDED'), 'NOTE_BULK_LIMIT_EXCEEDED'));
+
+			return null;
+		}
+
+		if (($data['invalidTargetForAll'] ?? false) === true)
+		{
+			$this->addError(new Error(Loc::getMessage('NOTE_INVALID_TARGET'), 'NOTE_INVALID_TARGET'));
+
+			return null;
+		}
+
+		return $withDeferredTail
+			? ['outcome' => $outcome, 'deferredTail' => (bool)($data['deferredTail'] ?? false)]
+			: ['outcome' => $outcome]
+		;
 	}
 
 	/**
@@ -770,6 +1176,173 @@ class DocumentController extends Controller
 		return (new DocumentProvider())->getArchivedForUser($accessCodes, $userId, $limit, $afterCursor);
 	}
 
+	/**
+	 * Knowledge bases that hold anything in the archive, with their counters. Alphabetical:
+	 * freshness is not a task on this surface. The list of bases is paged like everything else here -
+	 * the answer names the base it stopped at, and the next page is asked for from there.
+	 *
+	 * @param array{title: string, collectionId: int}|null $cursor
+	 */
+	public function archiveSectionsAction(?array $cursor = null): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		$payload = (new SectionProvider())->getArchiveSections($userId, $cursor);
+		$payload['levels'] = SectionLevelPreloader::forArchive($userId, $payload['sections']);
+
+		return $payload;
+	}
+
+	/**
+	 * One level of the archive: the top level of a section, or the archived children of one
+	 * archived node.
+	 *
+	 * @param array{changedAt: string, id: int}|null $cursor
+	 */
+	public function archiveLevelAction(
+		?int $collectionId = null,
+		?int $parentId = null,
+		?array $cursor = null,
+		int $limit = LevelProvider::DEFAULT_LIMIT,
+	): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		$scopeCollectionId = $this->resolveLevelScopeCollectionId($collectionId, $parentId);
+		if (
+			$scopeCollectionId === self::LEVEL_SCOPE_CONFLICT
+			|| !(
+				$this->userCanViewCollection($userId, $scopeCollectionId)
+				|| $this->userReachesArchiveByGrant($userId, $scopeCollectionId, $parentId)
+			)
+		)
+		{
+			$this->addError(new Error((string)Loc::getMessage('NOTE_ACCESS_DENIED')));
+
+			return null;
+		}
+
+		return (new LevelProvider())->getArchiveLevel($userId, $scopeCollectionId, $parentId, $cursor, $limit);
+	}
+
+	/**
+	 * The top level of several archive sections at once - the sections the reader scrolled to, past
+	 * the ones whose content arrived with the list. Sections come up open, so asking for them one by
+	 * one is one request per section, each with a bootstrap of the core of its own.
+	 *
+	 * The answer carries `levels` in the shape the section list carries it, so the client reads both
+	 * with the same parser. A section it does not name is one there was nothing to answer for - see
+	 * {@see SectionLevelPreloader::forArchiveCollections()} - and is asked for the usual way.
+	 *
+	 * @param int[] $collectionIds no more than SectionLevelPreloader::MAX_BATCH_COLLECTIONS answer
+	 * @return array{levels: array<string, array{items: array, nextCursor: ?array}>}|null
+	 */
+	public function archiveLevelsAction(array $collectionIds, int $limit = LevelProvider::DEFAULT_LIMIT): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		return ['levels' => SectionLevelPreloader::forArchiveCollections($userId, $collectionIds, $limit)];
+	}
+
+	/**
+	 * One level of the live tree, in the shape the bin and the archive answer with: the rule
+	 * of the tree is one for every list, the live one included. The order here is POSITION and not a
+	 * date - in a live tree the order is the user's, set by dragging.
+	 *
+	 * @param array{position: int, id: int}|null $cursor
+	 */
+	public function levelAction(
+		?int $parentId = null,
+		?int $collectionId = null,
+		?array $cursor = null,
+		int $limit = LevelProvider::DEFAULT_LIMIT,
+	): ?array
+	{
+		$userId = (int)$this->getCurrentUser()->getId();
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		// Inside a node the caller knows only the node: the knowledge base is read off the parent.
+		$scopeCollectionId = $this->resolveLevelScopeCollectionId($collectionId, $parentId);
+		if (
+			$scopeCollectionId === self::LEVEL_SCOPE_CONFLICT
+			|| !$this->userCanViewCollection($userId, $scopeCollectionId)
+		)
+		{
+			$this->addError(new Error((string)Loc::getMessage('NOTE_ACCESS_DENIED')));
+
+			return null;
+		}
+
+		return (new LevelProvider())->getLiveLevel($userId, $scopeCollectionId, $parentId, $cursor, $limit);
+	}
+
+	/**
+	 * The other way into the archive of a knowledge base: a grant on something inside it. Archiving a
+	 * document does not take away the access somebody was given to it, so their archive holds such
+	 * documents as a section of their own base.
+	 *
+	 * The top level of that section is read by the grant itself, so asking for it is safe on its own -
+	 * the answer is empty when there is nothing granted. A node, on the other hand, is read by its id
+	 * alone, so the node itself has to be one the reader was granted.
+	 */
+	private function userReachesArchiveByGrant(int $userId, int $collectionId, ?int $parentId): bool
+	{
+		if ($collectionId <= 0 || $userId <= 0)
+		{
+			return false;
+		}
+
+		$codesPersonal = DocumentAccessService::personalCodes(
+			CollectionAccessService::buildUserAccessCodes($userId),
+		);
+		if (empty($codesPersonal))
+		{
+			return false;
+		}
+
+		if ($parentId === null || $parentId <= 0)
+		{
+			return DocumentAccessService::userHasAnyGrant($codesPersonal);
+		}
+
+		return DocumentAccessService::filterGrantedDocumentIds([$parentId], $codesPersonal) !== [];
+	}
+
+	/**
+	 * A base in the bin answers by the rule of the bin: its content is open to whoever may manage it
+	 * there and to nobody else, so a level left in its ACL is not a way in. A base that has no row at
+	 * all - the technical section, id 0 - is answered by the level as before.
+	 */
+	private function userCanViewCollection(int $userId, int $collectionId): bool
+	{
+		$state = DocumentAccessService::collectionState($collectionId);
+		if ($state !== null && $state['trashed'])
+		{
+			return DocumentAccessService::canManageCollectionInRecycleBin($userId, $collectionId);
+		}
+
+		return CollectionAccessService::userHasLevel(
+			$collectionId,
+			$userId,
+			CollectionAccessService::LEVEL_VIEW,
+		);
+	}
+
 	public function deleteAction(int $id, bool $withNested = true): ?bool
 	{
 		// A collection's main document is deleted only via the owning collection's cascade,
@@ -823,7 +1396,12 @@ class DocumentController extends Controller
 
 		$collectionId = (int)$document->getCollectionId();
 		$isArchived = (bool)$document->getIsArchived();
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($id, $collectionId, $isArchived);
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$id,
+			$collectionId,
+			$isArchived,
+			[DocumentAccessService::STATE_ARCHIVED],
+		);
 		if (!$snapshot['canView'])
 		{
 			$this->denyAccess();
@@ -834,8 +1412,17 @@ class DocumentController extends Controller
 		return $this->mapDocument($document, $snapshot);
 	}
 
+	/**
+	 * Opening a document also answers with where it sits and what lies inside it. That is
+	 * what feeds the screen inside a deleted or archived node and the "Documents inside" block on an
+	 * ordinary page: the path is given whole, without folding the middle away - only a search card
+	 * shortens it. The children counted are direct ones in the same state as the node itself, and a
+	 * deleted node also names both dates of its deletion - the client cannot derive the second one.
+	 */
 	public function getOpenContextAction(int $id): ?array
 	{
+		// The size of the level and the dates of a deletion come with the context itself, so the
+		// server-rendered page carries the same answer as this action.
 		return (new DirectOpenContextService())->resolve($id);
 	}
 
@@ -920,8 +1507,6 @@ class DocumentController extends Controller
 		return [
 			'documentId' => $id,
 			'permissions' => DocumentAccessService::getDocumentPermissions($id),
-			// Availability gate for the subtree-scope UI: the switcher stays hidden unless on.
-			'subtreeAvailable' => Configuration::isSubtreeInheritanceEnabled(),
 		];
 	}
 
@@ -968,6 +1553,7 @@ class DocumentController extends Controller
 
 			// Orphan-state mirrors mapTrashedDocument's logic — banner copy depends on it.
 			$rawCollectionId = (int)$document->getCollectionId();
+			// An orphan is a document with no base at all; a document of a deleted base is not one.
 			$isOrphan = $rawCollectionId <= 0 || !$this->collectionExists($rawCollectionId);
 
 			return [
@@ -990,13 +1576,26 @@ class DocumentController extends Controller
 			];
 		}
 
-		$snapshot = DocumentAccessService::getCurrentUserSnapshot($id, $collectionId);
+		$snapshot = DocumentAccessService::getCurrentUserSnapshot(
+			$id,
+			$collectionId,
+			(bool)$document->getIsArchived(),
+			[DocumentAccessService::STATE_ARCHIVED],
+		);
+
+		$canView = (bool)($snapshot['canView'] ?? false);
+		// The state of the base travels with the rights: the page has to say which notice it is
+		// showing, and without it the editor learns a new state only from a reload.
+		$collectionState = $canView
+			? (new CollectionStateResolver())->resolve($collectionId)->value
+			: null
+		;
 
 		return [
 			'documentId' => $id,
 			// Hide collection id when the user has no document access - same privacy rule as the REST read model.
-			'collectionId' => ($snapshot['canView'] ?? false) ? $collectionId : null,
-			'canView' => (bool)($snapshot['canView'] ?? false),
+			'collectionId' => $canView ? $collectionId : null,
+			'canView' => $canView,
 			'canEdit' => (bool)($snapshot['canEdit'] ?? false),
 			'canViewCollection' => (bool)($snapshot['canViewCollection'] ?? false),
 			'canEditCollection' => (bool)($snapshot['canEditCollection'] ?? false),
@@ -1007,6 +1606,7 @@ class DocumentController extends Controller
 			'canRestore' => false,
 			'canHardDelete' => false,
 			'isOrphan' => false,
+			'collectionState' => $collectionState,
 		];
 	}
 
@@ -1053,6 +1653,7 @@ class DocumentController extends Controller
 			// N-1 snapshot for the preview diff ('' when this is the first version).
 			'previousMarkdown' => $version['previousMarkdown'],
 			'previousTitle' => $version['previousTitle'],
+			'files' => (object)(new DocumentFilesMapService())->build($documentId),
 		];
 	}
 
@@ -1182,11 +1783,6 @@ class DocumentController extends Controller
 	 */
 	public function getBacklinksAction(int $documentId, int $limit = 20, ?int $afterSourceId = null): ?array
 	{
-		if (!Configuration::isBacklinksUiEnabled())
-		{
-			return $this->denyBacklinks();
-		}
-
 		try
 		{
 			return (new BacklinkProvider())->getSources($documentId, $limit, $afterSourceId);
@@ -1202,11 +1798,6 @@ class DocumentController extends Controller
 	 */
 	public function getBacklinksCountAction(int $documentId): ?array
 	{
-		if (!Configuration::isBacklinksUiEnabled())
-		{
-			return $this->denyBacklinks();
-		}
-
 		try
 		{
 			return (new BacklinkProvider())->getCount($documentId);
@@ -1218,8 +1809,8 @@ class DocumentController extends Controller
 	}
 
 	/**
-	 * The single refusal of both backlink actions: no document, no right and a switched-off
-	 * feature are answered the same way, so the endpoints are as silent as the widget is invisible.
+	 * The single refusal of both backlink actions: no document and no right are answered the same
+	 * way, so the endpoints do not disclose whether the target exists.
 	 */
 	private function denyBacklinks(): ?array
 	{
@@ -1454,7 +2045,12 @@ class DocumentController extends Controller
 		$userId = (int)$this->getCurrentUser()->getId();
 		$isArchived = (bool)$document->getIsArchived();
 
-		$snapshot ??= DocumentAccessService::getCurrentUserSnapshot($documentId, $collectionId, $isArchived);
+		$snapshot ??= DocumentAccessService::getCurrentUserSnapshot(
+			$documentId,
+			$collectionId,
+			$isArchived,
+			[DocumentAccessService::STATE_ARCHIVED],
+		);
 		$canEdit = $snapshot['canEdit'];
 		$sharedAccess = $snapshot['sharedAccess'];
 		$canEditCollection = $snapshot['canEditCollection'];
@@ -1503,7 +2099,7 @@ class DocumentController extends Controller
 			// Star state, bundled next to the bell for the same reason: the header adopts it
 			// instead of asking for it on mount.
 			'isFavorite' => $this->isFavorite($documentId, $userId),
-			// Backlinks counter - same bundling; neutral while the feature flag is off.
+			// Backlinks counter - same bootstrap-bundling rationale as views above.
 			'backlinks' => (new DocumentBacklinksSnapshotResolver())->resolve($documentId),
 		];
 
@@ -1514,6 +2110,9 @@ class DocumentController extends Controller
 			$collectionTitle = trim($collection->getName());
 		}
 		$payload['collectionTitle'] = $collectionTitle;
+		// State of the base itself, not of the document: the path above the text names the base
+		// wherever the document is read, but opens it only while the base is live.
+		$payload['collectionState'] = (new CollectionStateResolver())->resolve($collectionId)->value;
 
 		if (!$sharedAccess)
 		{
@@ -1554,6 +2153,9 @@ class DocumentController extends Controller
 			$payload['collaboration'] = $collabMeta;
 		}
 
+		// An object even when empty: the client reads it as a map by file id.
+		$payload['files'] = (object)(new DocumentFilesMapService())->build($documentId);
+
 		return $payload;
 	}
 
@@ -1565,7 +2167,9 @@ class DocumentController extends Controller
 	): array
 	{
 		$rawCollectionId = (int)$document->getCollectionId();
-		$collectionAlive = false;
+		// Presence of the base, not its state: an archived base is named in the bin on purpose,
+		// and its documents are not orphans.
+		$hasCollection = false;
 		$collectionTitle = '';
 		if ($rawCollectionId > 0)
 		{
@@ -1576,13 +2180,13 @@ class DocumentController extends Controller
 			;
 			if ($row !== false)
 			{
-				$collectionAlive = true;
+				$hasCollection = true;
 				$collectionTitle = (string)($row['NAME'] ?? '');
 			}
 		}
 
-		$exposedCollectionId = $collectionAlive ? $rawCollectionId : 0;
-		$exposedCollectionTitle = $collectionAlive ? $collectionTitle : '';
+		$exposedCollectionId = $hasCollection ? $rawCollectionId : 0;
+		$exposedCollectionTitle = $hasCollection ? $collectionTitle : '';
 
 		$payload = [
 			'id' => (int)$document->getId(),
@@ -1599,7 +2203,7 @@ class DocumentController extends Controller
 			'isTrashed' => true,
 			'recycleBinId' => (int)$record->getId(),
 			'trashedAt' => $record->getTrashedAt()->format('c'),
-			'isOrphan' => !$collectionAlive,
+			'isOrphan' => !$hasCollection,
 			'canRestore' => $canRestore,
 			'canHardDelete' => $canHardDelete,
 			'createdBy' => $document->getCreatedBy(),
@@ -1633,8 +2237,29 @@ class DocumentController extends Controller
 		return $payload;
 	}
 
+	/**
+	 * A base in the bin is governed by one right, and it is not the right to read: its content is
+	 * open to whoever may manage the bin and to nobody else, so a reader holding VIEW alone is
+	 * answered as for a base that is not there.
+	 */
 	private function assertCollectionViewAccess(int $collectionId): bool
 	{
+		if (!DocumentAccessService::isCollectionAlive($collectionId))
+		{
+			$userId = (int)$this->getCurrentUser()->getId();
+			if (DocumentAccessService::canManageCollectionInRecycleBin($userId, $collectionId))
+			{
+				return true;
+			}
+
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_NOT_FOUND'),
+				'COLLECTION_NOT_FOUND',
+			));
+
+			return false;
+		}
+
 		if ($this->hasCollectionLevel($collectionId, CollectionAccessService::LEVEL_VIEW))
 		{
 			return true;
@@ -1716,21 +2341,13 @@ class DocumentController extends Controller
 		$this->addError(new Error((string)(Loc::getMessage('NOTE_ACCESS_DENIED'))));
 	}
 
+	/**
+	 * Presence of the base row, which is what an orphan is the absence of: a base in the recycle bin
+	 * keeps its row and its documents go back with it.
+	 */
 	private function collectionExists(int $collectionId): bool
 	{
-		if ($collectionId <= 0)
-		{
-			return false;
-		}
-
-		$row = CollectionTable::query()
-			->setSelect(['ID'])
-			->where('ID', $collectionId)
-			->setLimit(1)
-			->fetch()
-		;
-
-		return $row !== false;
+		return DocumentAccessService::collectionState($collectionId) !== null;
 	}
 
 	/**

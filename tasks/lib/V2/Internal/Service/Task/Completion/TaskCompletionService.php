@@ -43,6 +43,14 @@ class TaskCompletionService
 
 		$userId = $config->getUserId();
 		$isFinalStatus = $task->status?->isCompleted() === true;
+		if (!$isFinalStatus && !$this->canCompleteWithChecklist($taskId, $userId))
+		{
+			$isFinalStatus = $this->hasFinalStatus($taskId);
+			if (!$isFinalStatus)
+			{
+				return $result->addError($this->getAccessError());
+			}
+		}
 
 		if ($isFinalStatus)
 		{
@@ -55,10 +63,6 @@ class TaskCompletionService
 			{
 				return $result;
 			}
-		}
-		elseif (!$this->canCompleteWithChecklist($taskId, $userId))
-		{
-			return $result->addError($this->getAccessError());
 		}
 
 		if ($withCheckList)

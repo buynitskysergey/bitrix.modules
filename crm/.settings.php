@@ -189,6 +189,12 @@ $uiEntitySelectorConfig = [
 
 
 return [
+	'feature-flags' => [
+		'value' => [
+			'defaultNamespace' => '\\Bitrix\\Crm\\Public\\Features',
+		],
+		'readonly' => true,
+	],
 	'controllers' => [
 		'value' => [
 			'defaultNamespace' => '\\Bitrix\\Crm\\Controller',
@@ -204,6 +210,7 @@ return [
 				'\\Bitrix\\Crm\\Controller\\Mobile' => 'mobile',
 				'\\Bitrix\\Crm\\Controller\\Mail' => 'mail',
 				'\\Bitrix\\Crm\\Controller\\Timeline' => 'timeline',
+				'\\Bitrix\\Crm\\V2\\Infrastructure\\Controller' => 'v2',
 			],
 			'restIntegration' => [
 				'enabled' => true,
@@ -427,6 +434,9 @@ return [
 			],
 			'crm.service.lastActivity' => [
 				'className' => '\\Bitrix\\Crm\\Service\\LastActivity',
+			],
+			'crm.service.deferredSearchIndexer' => [
+				'className' => '\\Bitrix\\Crm\\Search\\DeferredSearchIndexer',
 			],
 			'crm.kanban.entity.lead' => [
 				'className' => '\\Bitrix\\Crm\\Kanban\\Entity\\Lead',
@@ -944,6 +954,7 @@ return [
 				Bitrix\Crm\Integration\AiAssistant\Agents\CrmExecutorAgent::class,
 				Bitrix\Crm\Integration\AiAssistant\Agents\CrmExecutorPlannerAgent::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\Agent\Mail\CrmMailAgent::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\Agent\Summary\CrmSummaryAgent::class,
 			],
 			'scenarios' => [
 				Bitrix\Crm\Integration\AiAssistant\Scenario\EmptyCrmSetupScenario::class,
@@ -954,9 +965,11 @@ return [
 				OpenLineToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\Mail\MailToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\Summary\SummaryToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DealRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\LeadRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ContactRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ContactBindingRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\CompanyRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SmartProcessRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\QuoteRestToolSet::class,
@@ -971,6 +984,7 @@ return [
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\FormRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\DetailPageLayoutRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\ActivityRestToolSet::class,
+				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\SettingsRestToolSet::class,
 				Bitrix\Crm\V2\Internal\Integration\AiAssistant\Mcp\ToolSet\TrackingRestToolSet::class,
 			],
 			'profileDataProviders' => [

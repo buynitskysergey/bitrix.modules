@@ -160,6 +160,34 @@ final class StorageActivityService
 		return self::getReturnableSystemFields() + $fieldsMap;
 	}
 
+	/**
+	 * Types a column of a storage may be created with, as the field editor offers them: its allow-list
+	 * intersected with the field types the runtime actually carries, keyed by type id and named the way the
+	 * editor names them.
+	 *
+	 * One reading for the two authors of a column - the person filling the editor form and the AI schema of
+	 * `createstoragenode` - so a type offered to one of them is a type the other may use as well.
+	 *
+	 * @return array<string, string> type id => localized name
+	 */
+	public static function getFieldTypes(): array
+	{
+		$allowedTypes = \Bitrix\Bizproc\Public\Service\StorageField\FieldService::EDITABLE_TYPES;
+
+		$documentTypes = \CBPHelper::GetDocumentFieldTypes();
+
+		$fieldTypes = [];
+		foreach ($allowedTypes as $type)
+		{
+			if (isset($documentTypes[$type]))
+			{
+				$fieldTypes[$type] = (string)$documentTypes[$type]['Name'];
+			}
+		}
+
+		return $fieldTypes;
+	}
+
 	public static function getSystemFields(?array $supportedFields = null): array
 	{
 		$fieldService = new FieldService();

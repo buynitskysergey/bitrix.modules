@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Internal\Integration\Main;
 
 use Bitrix\Main\UserTable;
+use Bitrix\Vibecodeconnector\Internal\Exception\LiveDepartmentAccessUnavailableException;
+use Bitrix\Vibecodeconnector\Internal\Integration\HumanResources\DepartmentCodesCache;
 use Bitrix\Vibecodeconnector\Internal\Integration\HumanResources\StructureGate;
+use Bitrix\Vibecodeconnector\Internal\Repository\Catalog\AccessRepository;
 use CAccess;
 
 /**
@@ -19,30 +22,112 @@ class AccessCodes
 	private const AUDIT_TYPE_UNSUPPORTED_CODES = 'VIBECODECONNECTOR_UNSUPPORTED_ACCESS_CODES';
 
 	private ?StructureGate $structureGate = null;
+	private ?DepartmentCodesCache $departmentCodesCache = null;
 	/** @var array<string, true> */
 	private array $reportedUnsupported = [];
+
+	public function __construct(?DepartmentCodesCache $departmentCodesCache = null)
+	{
+		$this->departmentCodesCache = $departmentCodesCache;
+	}
 
 	/**
 	 * @return string[]
 	 */
 	public function getUserCodes(int $userId): array
 	{
-		if ($userId <= 0)
+		return $this->getUserCodeResult($userId)->codes;
+	}
+
+	public function getUserCodeResult(int $userId): UserCodeResult
+	{
+		return $this->assembleUserCodes(
+			$userId,
+			fn (): array => $this->confirmedDepartmentCodes($userId),
+		);
+	}
+
+	public function getUserCodesForItems(int $userId, array $catalogItemIds): array
+	{
+		$catalogItemIds = $this->normalizeUserIds($catalogItemIds);
+
+		return $this->assembleUserCodes($userId, function () use ($userId, $catalogItemIds): array {
+			if ($catalogItemIds === [] || !$this->structureGate()->isAvailable())
+			{
+				return [];
+			}
+
+			$codesByItem = (new AccessRepository())->getCodesByItemIds($catalogItemIds);
+			$candidates = array_values(array_unique(array_merge([], ...array_values($codesByItem))));
+			$nodes = $this->structureGate()->mapDepartmentCodesToNodes($candidates);
+
+			return $this->structureGate()->confirmDepartmentCodes($userId, $nodes);
+		})->codes;
+	}
+
+	private function assembleUserCodes(int $userId, callable $resolveLiveCodes): UserCodeResult
+	{
+		$codes = $this->prepareStoredUserCodes($userId);
+		if ($codes === null)
 		{
-			return [];
+			return new UserCodeResult([], false);
 		}
 
-		// b_user_access may hold duplicates until CAccess::deleteDuplicatesAgent() has run.
-		$codes = array_values(array_unique($this->fetchStoredCodes($userId)));
-		if ($codes === [])
+		$degraded = false;
+		try
 		{
-			return $this->filterExistingUsers([$userId]) === [] ? [] : [self::ACCESS_CODE_AUTHORIZED];
+			$liveCodes = $resolveLiveCodes();
+		}
+		catch (LiveDepartmentAccessUnavailableException)
+		{
+			$liveCodes = [];
+			$degraded = true;
 		}
 
-		// `AU` has no row in b_user_access, see \CUser::GetAccessCodes()
+		$knownCodes = array_fill_keys($codes, true);
+		foreach ($liveCodes as $code)
+		{
+			if (!isset($knownCodes[$code]))
+			{
+				$codes[] = $code;
+				$knownCodes[$code] = true;
+			}
+		}
+
 		$codes[] = self::ACCESS_CODE_AUTHORIZED;
 
-		return $codes;
+		return new UserCodeResult($codes, $degraded);
+	}
+
+	public function getStoredUserCodes(int $userId): array
+	{
+		$codes = $this->prepareStoredUserCodes($userId);
+
+		return $codes === null ? [] : array_merge($codes, [self::ACCESS_CODE_AUTHORIZED]);
+	}
+
+	public function filterLiveDepartmentMembers(array $userIds, array $codes): array
+	{
+		return $this->structureGate()->filterDepartmentMembers($userIds, $codes);
+	}
+
+	private function prepareStoredUserCodes(int $userId): ?array
+	{
+		if ($userId <= 0)
+		{
+			return null;
+		}
+
+		$codes = array_values(array_unique($this->fetchStoredCodes($userId)));
+		if ($codes === [] && $this->filterExistingUsers([$userId]) === [])
+		{
+			return null;
+		}
+
+		return array_values(array_filter(
+			$codes,
+			static fn (string $code): bool => $code !== self::ACCESS_CODE_AUTHORIZED,
+		));
 	}
 
 	public static function grantsEveryone(array $codes): bool
@@ -72,8 +157,7 @@ class AccessCodes
 		}
 
 		$holders = array_fill_keys($audience->userIds, true)
-			+ array_fill_keys($this->structureGate()->filterMembers($userIds, $audience), true)
-		;
+			+ array_fill_keys($this->structureGate()->filterMembers($userIds, $audience), true);
 
 		return new CodeHolders(
 			array_values(array_filter($userIds, static fn (int $userId): bool => isset($holders[$userId]))),
@@ -144,6 +228,33 @@ class AccessCodes
 	protected function structureGate(): StructureGate
 	{
 		return $this->structureGate ??= new StructureGate();
+	}
+
+	/**
+	 * @return array<string, int[]>
+	 */
+	protected function departmentCodeNodes(): array
+	{
+		$this->departmentCodesCache ??= new DepartmentCodesCache();
+
+		return $this->structureGate()->mapDepartmentCodesToNodes(
+			$this->departmentCodesCache->remember(
+				fn (): array => (new AccessRepository())->getDistinctDepartmentCodes(),
+			),
+		);
+	}
+
+	/**
+	 * @return string[]
+	 */
+	private function confirmedDepartmentCodes(int $userId): array
+	{
+		if (!$this->structureGate()->isAvailable())
+		{
+			return [];
+		}
+
+		return $this->structureGate()->confirmDepartmentCodes($userId, $this->departmentCodeNodes());
 	}
 
 	/**

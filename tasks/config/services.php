@@ -52,6 +52,8 @@ use Bitrix\Tasks\V2\Internal\Repository\CheckListRevisionRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListRevisionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListUserOptionRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListUserOptionRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\CheckListViewOptionRepository;
+use Bitrix\Tasks\V2\Internal\Repository\CheckListViewOptionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CounterRepository;
 use Bitrix\Tasks\V2\Internal\Repository\CounterRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\DeadlineChangeLogRepository;
@@ -154,6 +156,8 @@ use Bitrix\Tasks\V2\Internal\Repository\UserOptionRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\UserRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ViewedAbsenceRepository;
 use Bitrix\Tasks\V2\Internal\Repository\ViewedAbsenceRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\InteractionLogRepository;
+use Bitrix\Tasks\V2\Internal\Repository\InteractionLogRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ViewedUserRepository;
 use Bitrix\Tasks\V2\Internal\Repository\ViewedUserRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ViewRepository;
@@ -304,6 +308,9 @@ return [
 		PlannerRepositoryInterface::class => [
 			'className' => PlannerRepository::class,
 		],
+		CheckListViewOptionRepositoryInterface::class => [
+			'className' => CheckListViewOptionRepository::class,
+		],
 		ElapsedTimeRepositoryInterface::class => [
 			'className' => ElapsedTimeRepository::class,
 		],
@@ -438,6 +445,9 @@ return [
 		],
 		ViewedAbsenceRepositoryInterface::class => [
 			'className' => ViewedAbsenceRepository::class,
+		],
+		InteractionLogRepositoryInterface::class => [
+			'className' => InteractionLogRepository::class,
 		],
 		AbsenceService::class => [
 			'className' => AbsenceService::class,

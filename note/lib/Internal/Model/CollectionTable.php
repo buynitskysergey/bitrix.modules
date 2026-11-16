@@ -129,6 +129,14 @@ class CollectionTable extends DataManager
 					'default_value' => 'N',
 				],
 			),
+			// A knowledge base in the recycle bin: the row stays, TRASHED_AT tells it apart from a live
+			// one. Null on every base that was never deleted, so no data migration is needed.
+			new DatetimeField('TRASHED_AT'),
+			new IntegerField('TRASHED_BY'),
+			// Destruction for good has begun on this base: written before the first chunk of documents
+			// is destroyed and never cleared - the row itself goes away when the purge finishes. Such
+			// a base stays in the bin but is not restorable: part of its documents is already gone.
+			new DatetimeField('PURGE_STARTED_AT'),
 			new Reference(
 				'CREATED_BY_USER',
 				\Bitrix\Main\UserTable::class,
@@ -139,6 +147,12 @@ class CollectionTable extends DataManager
 				'UPDATED_BY_USER',
 				\Bitrix\Main\UserTable::class,
 				['=this.UPDATED_BY' => 'ref.ID'],
+				['join_type' => 'LEFT'],
+			),
+			new Reference(
+				'TRASHED_BY_USER',
+				\Bitrix\Main\UserTable::class,
+				['=this.TRASHED_BY' => 'ref.ID'],
 				['join_type' => 'LEFT'],
 			),
 		];

@@ -6,6 +6,7 @@ namespace Bitrix\Note\Infrastructure\Rest\V3\Read;
 
 use Bitrix\Note\Infrastructure\Rest\V3\Access\DocumentIntent;
 use Bitrix\Note\Infrastructure\Rest\V3\Access\DocumentStateResolver;
+use Bitrix\Note\Infrastructure\Rest\V3\Access\EntityState;
 use Bitrix\Note\Infrastructure\Rest\V3\Access\ResolvedDocument;
 use Bitrix\Note\Internal\Model\Document;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
@@ -58,9 +59,10 @@ class DocumentReader
 			updatedBy: (int)$document->getUpdatedBy(),
 			createdAt: $document->getCreatedAt(),
 			updatedAt: $document->getUpdatedAt(),
-			contentUpdatedAt: $document->getContentUpdatedAt(),
 			// A write only lands on a live document - the commands refuse an archived or trashed one -
-			// so the markers are what they are for every answer built here.
+			// so the state and the markers are what they are for every answer built here.
+			state: EntityState::Live->value,
+			contentUpdatedAt: $document->getContentUpdatedAt(),
 			isArchived: false,
 		);
 	}
@@ -87,6 +89,7 @@ class DocumentReader
 			updatedBy: (int)$meta->getUpdatedBy(),
 			createdAt: $meta->getCreatedAt(),
 			updatedAt: $meta->getUpdatedAt(),
+			state: EntityState::fromDocumentState($resolved->state)->value,
 			contentUpdatedAt: $meta->getContentUpdatedAt(),
 			isArchived: $resolved->isArchived(),
 			isTrashed: $resolved->isTrashed(),

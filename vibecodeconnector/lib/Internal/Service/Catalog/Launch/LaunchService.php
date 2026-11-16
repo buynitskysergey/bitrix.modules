@@ -49,7 +49,7 @@ final class LaunchService
 		if (!$this->repository->isAccessibleToUser(
 			$catalogItemId,
 			$userId,
-			$this->accessCodes->getUserCodes($userId),
+			$this->accessCodes->getUserCodesForItems($userId, [$catalogItemId]),
 		))
 		{
 			throw new AccessDeniedException('User has no access to this catalog item');

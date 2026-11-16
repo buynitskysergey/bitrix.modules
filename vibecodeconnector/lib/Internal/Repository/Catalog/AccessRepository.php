@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Bitrix\Vibecodeconnector\Internal\Repository\Catalog;
 
 use Bitrix\Main\Type\DateTime;
+use Bitrix\Vibecodeconnector\Internal\Integration\Main\AudienceCodeSet;
 use Bitrix\Vibecodeconnector\Internal\Model\Catalog\AccessTable;
 
 final class AccessRepository
@@ -48,6 +49,27 @@ final class AccessRepository
 			->fetchAll();
 
 		return array_map(static fn (array $row) => (string)$row['ACCESS_CODE'], $rows);
+	}
+
+	/**
+	 * @return string[]
+	 */
+	public function getDistinctDepartmentCodes(): array
+	{
+		$rows = AccessTable::query()
+			->setSelect(['ACCESS_CODE'])
+			->setDistinct()
+			->whereLike('ACCESS_CODE', 'D%')
+			->fetchAll()
+		;
+
+		$codes = array_values(array_unique(array_filter(
+			array_map(static fn (array $row): string => (string)$row['ACCESS_CODE'], $rows),
+			static fn (string $code): bool => str_starts_with($code, 'D') && AudienceCodeSet::isSupported($code),
+		)));
+		sort($codes, SORT_STRING);
+
+		return $codes;
 	}
 
 	/**

@@ -3,6 +3,7 @@
 namespace Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service;
 
 use Bitrix\Bizproc\Activity\ActivityDescription;
+use Bitrix\Bizproc\Activity\Dto\NodeSettings;
 use Bitrix\Bizproc\Activity\Enum\ActivityNodeType;
 use Bitrix\Bizproc\FieldType;
 use Bitrix\Bizproc\Internal\AI\Agent\Generator\TemplateBuilder\ActivityRegistry;
@@ -11,6 +12,7 @@ use Bitrix\Bizproc\Internal\Service\Container as BizprocContainer;
 use Bitrix\Bizproc\Public\Service\Activity\ActivityNameGeneratorService;
 use Bitrix\Bizproc\Runtime\ActivitySearcher\Searcher;
 use Bitrix\Bizproc\Workflow\Template\Entity\WorkflowTemplateTable;
+use Bitrix\Bizproc\Workflow\Template\WorkflowTemplateDraftTable;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\PortRuleDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\Rule\ActionExpressionDto;
 use Bitrix\BizprocDesigner\Infrastructure\Dto\Activity\Complex\Rule\ConditionExpression\FieldDto;
@@ -47,7 +49,9 @@ use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Entity\Draft;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Layout\AgentBlockGeometry;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Layout\FrameGeometry;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Layout\TopologyLayoutEngine;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\BlockIdGrammar;
 use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\FrameBlockMatcher;
+use Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\ValidationProfile;
 use Bitrix\BizprocDesigner\Internal\Service\Container;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Diag\LoggerFactory;
@@ -61,8 +65,6 @@ final class AiAssistantDraftConverterService
 {
 	use AgentBlockNamingTrait;
 
-	private const BLOCK_WIDTH = 200;
-	private const BLOCK_HEIGHT = 50;
 	private const PORT_POSITION = 1;
 	/**
 	 * Titles the complex node's dynamic ports the same way the manual editor does (shared frontend
@@ -83,6 +85,7 @@ final class AiAssistantDraftConverterService
 
 	private string $uniqueBlockSalt;
 	private ?ActivityRegistry $activityRegistry = null;
+	private ?NodeTopologyResolver $nodeTopologyResolver = null;
 	private readonly AgentBlockMetadataResolver $metadataResolver;
 	private ?ComplexActivityService $complexActivityService = null;
 	private ?ActivityNameGeneratorService $nameGeneratorService = null;
@@ -96,8 +99,21 @@ final class AiAssistantDraftConverterService
 	private array $passthroughSettingNamesCache = [];
 	/** @var array<string, array<string, mixed>> enforced setting values per (normalized code, document type) */
 	private array $enforcedSettingValuesCache = [];
+	/**
+	 * Whether the identifiers of the graph being converted were judged by the grammar on the way in
+	 * ({@see self::makeActivityId}). Read from the profile of the entry rather than from the source itself, so
+	 * the converter asks the very question the check asks ({@see ValidationProfile::enforcesBlockIdGrammar()}).
+	 */
+	private bool $idsHeldToGrammar = false;
 	/** Bound template of the graph being converted; 0 when the caller has none ({@see self::getBaselineActivities}). */
 	private int $baselineTemplateId = 0;
+	/** Draft the graph being converted was read from; 0 when the caller names none ({@see self::carriesSourceName}). */
+	private int $sourceDraftId = 0;
+	/**
+	 * @var array<string, array{Type: string, Properties: array}>|null names of the source graph, read at most once
+	 *      per conversion ({@see self::readSourceNames})
+	 */
+	private ?array $sourceNames = null;
 	/** @var array<int, array|null> published TEMPLATE per id, read lazily and at most once per id */
 	private array $baselineTemplateById = [];
 	/** @var array<int, array<string, array{Type: string, Properties: array}>> published nodes by name, per id */
@@ -112,6 +128,13 @@ final class AiAssistantDraftConverterService
 		);
 	}
 
+	/**
+	 * @param array<string, array{
+	 *     type: string,
+	 *     presetId: string|null,
+	 *     dimensions: array{width: int|null, height: int|null}
+	 * }> $boundBlocks
+	 */
 	public function covertFromAgentInput(
 		int $draftId,
 		int $templateId,
@@ -120,17 +143,25 @@ final class AiAssistantDraftConverterService
 		AgentConnectionCollection $connections,
 		array $documentType = [],
 		RequestSource $source = RequestSource::Marta,
+		array $boundBlocks = [],
 	): Draft
 	{
 		// The bound template is the baseline a derived value is restored from when its dialog refuses to answer
-		// ({@see self::applyAdditionalResult}); it is read only in that case, never on the ordinary path.
+		// ({@see self::applyAdditionalResult}), and one of the two source graphs a name is judged against
+		// ({@see self::carriesSourceName}); nothing else on the ordinary path reads it.
 		$this->baselineTemplateId = $templateId;
+		$this->idsHeldToGrammar = ValidationProfile::fromSource($source)->enforcesBlockIdGrammar();
+
+		// The graph the caller was given, which a name is judged against when the grammar was not asked for one
+		// ({@see self::carriesSourceName}). Dropped per call: one instance of this service converts many graphs.
+		$this->sourceDraftId = $draftId;
+		$this->sourceNames = null;
 
 		return new Draft(
 			draftId: $draftId,
 			templateId: $templateId,
 			userId: $userId,
-			blocks: $this->makeBlocks($blocks, $connections, $documentType, $source),
+			blocks: $this->makeBlocks($blocks, $connections, $documentType, $source, $boundBlocks),
 			connections: $this->makeConnections($connections),
 		);
 	}
@@ -140,6 +171,7 @@ final class AiAssistantDraftConverterService
 		AgentConnectionCollection $connections,
 		array $documentType = [],
 		RequestSource $source = RequestSource::Marta,
+		array $boundBlocks = [],
 	): BlockCollection
 	{
 		$iconMap = $this->metadataResolver->getIconMap();
@@ -180,6 +212,7 @@ final class AiAssistantDraftConverterService
 			}
 
 			$isComplex = $nodeType === NodeType::Complex && $block->rules !== null;
+			$dimensions = $this->resolveBlockDimensions($block, $activityId, $boundBlocks);
 
 			$collection->add(
 				new Block(
@@ -187,8 +220,8 @@ final class AiAssistantDraftConverterService
 					type: $nodeType,
 					x: $pos['x'],
 					y: $pos['y'],
-					width: self::BLOCK_WIDTH,
-					height: self::BLOCK_HEIGHT,
+					width: $dimensions['width'],
+					height: $dimensions['height'],
 					title: $systemName,
 					icon: $iconEntry['icon'] ?? '',
 					ports: $isComplex ? $this->makeComplexPorts($block) : $this->makePortsByBlock($block),
@@ -342,16 +375,12 @@ final class AiAssistantDraftConverterService
 		return $collection;
 	}
 
-	/**
-	 * Builds the block ports from the activity description (NODE_SETTINGS.ports via ActivityRegistry),
-	 * so the draft carries the same N-port topology as the node editor. Triggers keep output ports only.
-	 */
 	private function makePortsByBlock(AgentBlock $block): PortCollection
 	{
 		$ports = new PortCollection();
-		$isTrigger = $this->makeNodeType($block->type) === NodeType::Trigger;
+		$isTrigger = $this->makeNodeType($block->type, $block->presetId) === NodeType::Trigger;
 
-		foreach ($this->getActivityRegistry()->getDefaultPorts($block->type) as $port)
+		foreach ($this->getNodeTopology($block)->ports?->toArray() ?? [] as $port)
 		{
 			$direction = PortDirection::tryFrom((string)($port['type'] ?? ''));
 			if ($direction === null)
@@ -364,16 +393,65 @@ final class AiAssistantDraftConverterService
 				continue;
 			}
 
+			$title = (string)($port['title'] ?? '');
 			$ports->add(
 				new Port(
 					id: (string)($port['id'] ?? ''),
 					direction: $direction,
 					position: self::PORT_POSITION,
+					title: $title !== '' ? $title : null,
 				),
 			);
 		}
 
 		return $ports;
+	}
+
+	/**
+	 * @param array<string, array{
+	 *     type: string,
+	 *     presetId: string|null,
+	 *     dimensions: array{width: int|null, height: int|null}
+	 * }> $boundBlocks
+	 * @return array{width: int|null, height: int|null}
+	 */
+	private function resolveBlockDimensions(AgentBlock $block, string $activityId, array $boundBlocks): array
+	{
+		$prev = $boundBlocks[$activityId] ?? null;
+		if (
+			$prev !== null
+			&& $this->canonicalActivityCode((string)$prev['type']) === $this->canonicalActivityCode($block->type)
+			&& $this->normalizePresetId($prev['presetId'] ?? null) === $this->normalizePresetId($block->presetId)
+		)
+		{
+			return $prev['dimensions'];
+		}
+
+		$topology = $this->getNodeTopology($block);
+
+		return ['width' => $topology->width, 'height' => $topology->height];
+	}
+
+	private function canonicalActivityCode(string $activityType): string
+	{
+		return $this->getSearcher()->normalizeActivityCode($activityType);
+	}
+
+	private function getNodeTopology(AgentBlock $block): NodeSettings
+	{
+		return $this->getNodeTopologyResolver()->resolveNodeSettings(
+			$this->describeActivity($block->type, $block->presetId),
+		);
+	}
+
+	private function describeActivity(string $activityType, ?string $presetId): ?ActivityDescription
+	{
+		return $this->getNodeTopologyResolver()->describe($activityType, $presetId);
+	}
+
+	private function getNodeTopologyResolver(): NodeTopologyResolver
+	{
+		return $this->nodeTopologyResolver ??= new NodeTopologyResolver();
 	}
 
 	private function getActivityRegistry(): ActivityRegistry
@@ -1018,9 +1096,34 @@ final class AiAssistantDraftConverterService
 		}
 
 		$map = $this->applyEnforcedSettingValues($map, $activityType, $documentType);
+		$map = $this->applyServerOwnedProperties($map, $activityId, $activityType);
 		$map = $this->applyNodeNaming($map, $block->title, $block->description, $systemName);
 
 		return $this->applyAdditionalResult($map, $activityId, $activityType, $documentType);
+	}
+
+	/**
+	 * The editor's own state that the reverse projection never hands the agent
+	 * ({@see AiAssistantWorkflowTemplateConverterService::EDITOR_SERVICE_PROPERTY_NAMES}). Not being handed it,
+	 * the agent cannot send it back, so a name dropped on the read side and left alone here is a value lost on
+	 * the first agent write: a loop a person folded on the canvas would come back unfolded.
+	 *
+	 * Dropped from the input first and restored from the published template only, never from what arrived: the
+	 * value is the server's whether or not a published one exists, so a forged one stays out either way and a
+	 * newly authored block simply has none. The derived descriptors an activity declares through its
+	 * `ADDITIONAL_RESULT` marker are not handled here - they reach the agent and come back, and what happens to
+	 * them is {@see self::applyAdditionalResult()}.
+	 */
+	private function applyServerOwnedProperties(array $properties, string $activityId, string $activityType): array
+	{
+		$names = AiAssistantWorkflowTemplateConverterService::EDITOR_SERVICE_PROPERTY_NAMES;
+
+		foreach ($names as $name)
+		{
+			unset($properties[$name]);
+		}
+
+		return $this->restoreBaselineSettingValues($properties, $activityId, $activityType, $names);
 	}
 
 	/**
@@ -1295,8 +1398,9 @@ final class AiAssistantDraftConverterService
 	}
 
 	/**
-	 * The published template flattened to `name => {normalized type, properties}`, built at most once per id. Walks
-	 * the tree by the same rule as the by-name lookup of the dialog entry
+	 * The published template flattened to `name => {normalized type, properties}`, built at most once per id and
+	 * read by the value restore and by {@see self::readSourceNames}. Walks the tree by the same rule as the
+	 * by-name lookup of the dialog entry
 	 * ({@see \CBPWorkflowTemplateLoader::findActivityByName}): depth-first, a node before its children, the first
 	 * node of a name winning - so a nested node is found exactly as a top-level one. Flattening it once is what
 	 * spares that lookup, which takes the template by reference, a copy of the tree per node: a dialog refuses for
@@ -1352,8 +1456,10 @@ final class AiAssistantDraftConverterService
 	}
 
 	/**
-	 * The published TEMPLATE of the bound template, read at most once per id and only from a refused dialog - the
-	 * ordinary path never touches the database here.
+	 * The published TEMPLATE of the bound template, read at most once per id and only by the two readers that
+	 * cannot answer without it: a refused dialog restoring a derived value, and a name outside the grammar being
+	 * told apart from one the source graph carries ({@see self::carriesSourceName}). The second never arises on
+	 * the entry held to the grammar, so the external contour still reaches no database here.
 	 */
 	private function getBaselineTemplate(): ?array
 	{
@@ -1525,17 +1631,6 @@ final class AiAssistantDraftConverterService
 		return is_array($activity['Properties'] ?? null) ? $activity['Properties'] : null;
 	}
 
-	/**
-	 * Resolves the node type from the activity description (NODE_TYPE / complex-wrapper class), not from
-	 * the class-name suffix: complex nodes (NODE_TYPE=COMPLEX, a BaseComplexActivity subclass) become
-	 * {@see NodeType::Complex}; triggers and everything else keep their previous Trigger/Simple mapping.
-	 *
-	 * A frame overlay is recognised first, but only for the REST agent ($source) and by the shared
-	 * {@see FrameBlockMatcher} predicate (EmptyBlockActivity + preset FRAME) - the exact identity the input
-	 * validator uses, so the converter and the validator never disagree on what a frame is. Matching by that
-	 * predicate rather than by the raw NODE_TYPE is deliberate: EmptyBlockActivity's NODE_TYPE=frame is
-	 * collapsed to SIMPLE by ActivityRegistry::getNodeType, and only the FRAME-preset variant is a real frame.
-	 */
 	private function makeNodeType(
 		string $agentBlockType,
 		?string $presetId = null,
@@ -1547,23 +1642,127 @@ final class AiAssistantDraftConverterService
 			return NodeType::Frame;
 		}
 
-		$registry = $this->getActivityRegistry();
-
-		if ($registry->isComplexWrapper($agentBlockType))
+		if ($this->getActivityRegistry()->isComplexWrapper($agentBlockType))
 		{
 			return NodeType::Complex;
 		}
 
-		return match ($registry->getNodeType($agentBlockType))
+		$nodeType = $this->getNodeTopologyResolver()->resolveNodeType(
+			$this->describeActivity($agentBlockType, $presetId),
+		);
+
+		return match (ActivityNodeType::tryFrom($nodeType ?? ''))
 		{
 			ActivityNodeType::TRIGGER => NodeType::Trigger,
+			ActivityNodeType::COMPLEX => NodeType::Complex,
+			ActivityNodeType::OPERATORS => NodeType::Operators,
+			ActivityNodeType::SERVICE => NodeType::Services,
+			ActivityNodeType::TOOL => NodeType::Tool,
 			default => NodeType::Simple,
 		};
 	}
 
+	/**
+	 * The system name the block is saved under, which is what a connection addresses and what a `{=id:Output}`
+	 * substitution written in another block resolves by (BRIEF § 4.3).
+	 *
+	 * The rename belongs to the one entry that is NOT held to the grammar, and there it reaches what the assistant
+	 * AUTHORS. The internal assistant is asked for a numeric identifier by the contract of its own tool, and a
+	 * numeric name is the one shape an array of activities keyed by name loses, so a name outside the grammar it
+	 * composed itself is composed anew here
+	 * ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Tool\SaveWorkflowTool::getInputSchema()}).
+	 * The composed name is itself within the grammar, so a block Marta wrote can be sent back by the external
+	 * agent that reads the same draft.
+	 *
+	 * A name the SOURCE graph already carries is kept even there ({@see self::carriesSourceName}): the assistant is
+	 * handed the template as it stands ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\LastWorkflowService::getAgentTemplate()}),
+	 * and a name it merely sent back is not one it authored. Those are the names this very converter wrote before
+	 * the grammar existed - `MartaGeneratedId-{salt}-{n}`, composed with a separator - and renaming them costs the
+	 * template the same round trip a rename costs on the external contour, with no check on this entry to notice.
+	 *
+	 * On the entry that IS held to it, every identifier reaching this point has already been judged by the very
+	 * same grammar ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Validator\AgentBlockValidator})
+	 * and is written as it arrived: it either fits the grammar, or it is one the published version - or the graph
+	 * the agent was handed - already carries at this very point, which the check accepts as it stands (ALG-02).
+	 * Renaming that second kind is what this rule exists against: the expressions addressing such a name live in
+	 * the settings of other blocks and are rewritten nowhere, so the graph would be saved addressing a node that
+	 * no longer carries the name, and silently (AC-35).
+	 */
 	private function makeActivityId(string $agentBlockId): string
 	{
-		return is_numeric($agentBlockId) ? "MartaGeneratedId-{$this->uniqueBlockSalt}-{$agentBlockId}" : $agentBlockId;
+		$keptAsItArrived = $this->idsHeldToGrammar
+			|| BlockIdGrammar::isAccepted($agentBlockId)
+			|| $this->carriesSourceName($agentBlockId)
+		;
+
+		return $keptAsItArrived
+			? $agentBlockId
+			: "MartaGeneratedId_{$this->uniqueBlockSalt}_{$agentBlockId}"
+		;
+	}
+
+	/**
+	 * Whether the graph the caller was handed already carries this very name - the published version of the bound
+	 * template, or the draft the caller read it from, whichever the assistant was given
+	 * ({@see \Bitrix\BizprocDesigner\Internal\Integration\AiAssistant\Service\LastWorkflowService::getAgentTemplate()}
+	 * answers with the newer of the two, so both are read here and neither is assumed).
+	 *
+	 * The name alone, without the type the check pairs it with on the external contour (ALG-02): there the
+	 * exemption lifts a REFUSAL, and pairing it with the type is what keeps an old name off a new block. Here
+	 * nothing is refused - the entry is not held to the grammar at all - so a pair would buy no strictness and
+	 * would cost the round trip of a node whose type the assistant legitimately changed, whose neighbours go on
+	 * addressing it by name.
+	 */
+	private function carriesSourceName(string $agentBlockId): bool
+	{
+		$this->sourceNames ??= $this->readSourceNames();
+
+		return array_key_exists($agentBlockId, $this->sourceNames);
+	}
+
+	/**
+	 * The names of the source graph, flattened by {@see self::indexBaselineActivities} exactly as the baseline is,
+	 * so a nested node counts the same as a top-level one: an expression resolves a name at any depth.
+	 *
+	 * Read at most once per conversion and only once a name outside the grammar has to be judged, which on the
+	 * entry held to the grammar never happens at all.
+	 *
+	 * @return array<string, array{Type: string, Properties: array}>
+	 */
+	private function readSourceNames(): array
+	{
+		$names = $this->getBaselineActivities();
+		$this->indexBaselineActivities($this->loadDraftTemplate($this->sourceDraftId) ?? [], $names);
+
+		return $names;
+	}
+
+	/** The TEMPLATE of a draft as stored, read the same failure-tolerant way the published one is. */
+	private function loadDraftTemplate(int $draftId): ?array
+	{
+		if ($draftId <= 0)
+		{
+			return null;
+		}
+
+		try
+		{
+			$templateData = WorkflowTemplateDraftTable::query()
+				->where('ID', $draftId)
+				->setSelect(['TEMPLATE_DATA'])
+				->setLimit(1)
+				->fetchObject()
+				?->getTemplateData()
+			;
+		}
+		catch (\Throwable)
+		{
+			return null;
+		}
+
+		$template = is_array($templateData) ? ($templateData['TEMPLATE'] ?? null) : null;
+
+		return is_array($template) ? $template : null;
 	}
 
 	public function convertDraftToAgentTemplate(Draft $draft): AgentTemplate

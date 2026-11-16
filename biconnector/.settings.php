@@ -87,6 +87,82 @@ return [
 	'rest' => [
 		'value' => [
 			'defaultNamespace' => '\\Bitrix\\BIConnector\\Infrastructure\\Rest\\Controller',
+			'documentation' => [
+				'methods' => [
+					'biconnector.builder.dashboard.list' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardListMethodProvider',
+					'biconnector.builder.dashboard.get' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardGetMethodProvider',
+					'biconnector.builder.dashboard.add' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardAddMethodProvider',
+					'biconnector.builder.dashboard.update' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardUpdateMethodProvider',
+					'biconnector.builder.dashboard.content.set' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardContentSetMethodProvider',
+					'biconnector.builder.dashboard.delete' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardDeleteMethodProvider',
+					'biconnector.builder.dashboard.copy' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardCopyMethodProvider',
+					'biconnector.builder.dashboard.filter.values' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardFilterValuesMethodProvider',
+					'biconnector.builder.dashboard.parameters.search' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DashboardParametersSearchMethodProvider',
+					'biconnector.builder.chart.list' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartListMethodProvider',
+					'biconnector.builder.chart.get' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartGetMethodProvider',
+					'biconnector.builder.chart.add' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartAddMethodProvider',
+					'biconnector.builder.chart.update' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartUpdateMethodProvider',
+					'biconnector.builder.chart.config.set' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartConfigSetMethodProvider',
+					'biconnector.builder.chart.delete' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartDeleteMethodProvider',
+					'biconnector.builder.chart.data.get' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'ChartDataGetMethodProvider',
+					'biconnector.builder.dataset.list' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DatasetListMethodProvider',
+					'biconnector.builder.dataset.get' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DatasetGetMethodProvider',
+					'biconnector.builder.dataset.add' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DatasetAddMethodProvider',
+					'biconnector.builder.dataset.addfromtable' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DatasetAddFromTableMethodProvider',
+					'biconnector.builder.dataset.update' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DatasetUpdateMethodProvider',
+					'biconnector.builder.dataset.delete' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'DatasetDeleteMethodProvider',
+					'biconnector.builder.table.list' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'TableListMethodProvider',
+					'biconnector.builder.table.schema.get' => 'Bitrix\\BIConnector\\'
+						. 'Infrastructure\\Rest\\Documentation\\Builder\\Method\\'
+							. 'TableSchemaGetMethodProvider',
+				],
+			],
 		],
 		'readonly' => true,
 	],

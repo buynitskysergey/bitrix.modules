@@ -250,6 +250,25 @@ final class StorageReferenceGuard
 		;
 	}
 
+	/**
+	 * The code with the per-template token expanded for the bound template - the text the runtime addresses
+	 * storage by, and therefore the only form a lookup by CODE can be made with. Null when the code carries a
+	 * substitution this class does not read whole, so a caller can never search by a text the runtime would
+	 * have expanded differently.
+	 *
+	 * Public because the reverse pipeline of another module resolves the columns of the storage a node writes
+	 * into, and the one reading of the token this class owns has to answer there as well.
+	 */
+	public static function expandTemplateIdToken(mixed $code, int $templateId): ?string
+	{
+		if (!self::isFullyInterpretableCode($code))
+		{
+			return null;
+		}
+
+		return self::replaceTemplateIdTokens((string)$code, (string)$templateId);
+	}
+
 	private function isPureTokenCode(string $code): bool
 	{
 		return self::carriesTemplateIdToken($code) && self::isFullyInterpretableCode($code);

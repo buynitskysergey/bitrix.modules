@@ -25,10 +25,27 @@ class DocumentMapper extends Mapper
 		'createdAt',
 		'updatedAt',
 		'contentUpdatedAt',
+		'state',
 		'isArchived',
 		'isTrashed',
 		'isOrphan',
 	];
+
+	/**
+	 * Every field of the answer but the named ones.
+	 *
+	 * A select decides the answer field by field, and a caller who names nothing is given the whole
+	 * of it - which is right for one document and wrong for a page of them, where a single field can
+	 * cost more than everything else together. Whoever answers with a page says here what it leaves
+	 * out ({@see \Bitrix\Note\Infrastructure\Rest\V3\Read\DocumentListQuery::HEAVY_FIELDS}).
+	 *
+	 * @param string[] $withheld
+	 * @return string[]
+	 */
+	public static function fieldsWithout(array $withheld): array
+	{
+		return array_values(array_diff(self::FIELDS, $withheld));
+	}
 
 	/**
 	 * @param DocumentReadModel[] $items

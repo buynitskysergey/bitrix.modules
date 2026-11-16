@@ -11,6 +11,7 @@ use Bitrix\Note\Internal\Exceptions\FileTooLargeException;
 use Bitrix\Note\Internal\Exceptions\FileTypeNotAllowedException;
 use Bitrix\Note\Internal\Repository\DocumentFileLinkRepository;
 use Bitrix\Note\Internal\Repository\DocumentRepository;
+use Bitrix\Note\Internal\Service\File\ImagePreviewService;
 use Bitrix\Note\Internal\Util\IdNormalizer;
 
 class DocumentFileService
@@ -177,31 +178,76 @@ class DocumentFileService
 	 * Builds the client payload for a note file (URLs, name, size, mime, viewer attrs).
 	 * Single source of truth shared by upload / resolve / adopt. Returns null when the
 	 * file has no resolvable show URL (deleted/unknown).
+	 *
+	 * The addresses may be supplied by the caller, and one caller does: the public circuit serves the
+	 * same file through its own token-less actions. Everything else about the payload - the
+	 * name, the size, the viewer attributes - is identical there, and building a second copy of it
+	 * would mean a client parsing two shapes of one thing.
+	 *
+	 * The dimensions are those of b_file as they are, 0 where it has none. A picture large enough to
+	 * have a reduced copy also gets the address of the copy and its largest side.
+	 *
+	 * @param array<string, mixed> $fallback used only where the row of b_file carries nothing
+	 * @param array<string, mixed>|null $fileData the row of b_file the caller has already read
 	 */
-	public function buildFilePayload(int $fileId, array $fallback = []): ?array
+	public function buildFilePayload(
+		int $fileId,
+		array $fallback = [],
+		?string $showUrl = null,
+		?string $downloadUrl = null,
+		?array $fileData = null,
+		?string $previewUrl = null,
+	): ?array
 	{
-		$fileData = \CFile::GetFileArray($fileId) ?: [];
-		$showUrl = NoteFileUrlService::createShowUrl($fileId);
+		// The row of b_file may come from the caller: one that read a whole set at once already holds
+		// it, and reading it again per file is exactly what the batch reader exists to avoid. The
+		// fallback stays what it was - values used only where the row says nothing.
+		$fileData ??= \CFile::GetFileArray($fileId) ?: [];
+		// The address of the copy defaults to the ordinary circuit only with the show address: a caller
+		// that serves the file elsewhere and names no copy gets none rather than a link of another circuit.
+		$isOrdinaryCircuit = $showUrl === null;
+		$showUrl ??= NoteFileUrlService::createShowUrl($fileId);
 		if ($showUrl === '')
 		{
 			return null;
 		}
 
+		$downloadUrl = ($downloadUrl === null || $downloadUrl === '') ? $showUrl : $downloadUrl;
+
 		$fileName = (string)($fileData['ORIGINAL_NAME'] ?? $fallback['name'] ?? '');
-		$viewerAttributes = ItemAttributes::tryBuildByFileId($fileId, $showUrl)
+		// The row in hand is the row the viewer attributes are built from: asking by id reads b_file
+		// again, once per file, which is the very thing a batch reader exists to avoid.
+		$viewerAttributes = ($fileData === []
+			? ItemAttributes::tryBuildByFileId($fileId, $showUrl)
+			: ItemAttributes::tryBuildByFileData($fileData, $showUrl)
+		)
 			->setTitle($fileName)
 		;
 
-		return [
+		$payload = [
 			'id' => $fileId,
 			'fileId' => $fileId,
 			'name' => $fileName,
 			'size' => (int)($fileData['FILE_SIZE'] ?? $fallback['size'] ?? 0),
 			'type' => (string)($fileData['CONTENT_TYPE'] ?? $fallback['type'] ?? ''),
-			'downloadUrl' => $showUrl,
+			'downloadUrl' => $downloadUrl,
 			'showUrl' => $showUrl,
 			'viewerAttrs' => $viewerAttributes->toDataSet(),
+			'width' => (int)($fileData['WIDTH'] ?? 0),
+			'height' => (int)($fileData['HEIGHT'] ?? 0),
 		];
+
+		if ((new ImagePreviewService())->needsPreview($fileData))
+		{
+			$previewUrl ??= $isOrdinaryCircuit ? NoteFileUrlService::createShowUrl($fileId, preview: true) : null;
+			if ($previewUrl !== null)
+			{
+				$payload['previewUrl'] = $previewUrl;
+				$payload['previewWidth'] = ImagePreviewService::MAX_SIDE;
+			}
+		}
+
+		return $payload;
 	}
 
 	/**
@@ -319,10 +365,9 @@ class DocumentFileService
 			return false;
 		}
 
-		return DocumentAccessService::currentUserHasLevel(
+		return DocumentAccessService::currentUserCanViewDocumentContent(
 			$documentId,
 			(int)$document->getCollectionId(),
-			DocumentAccessService::LEVEL_VIEW,
 		);
 	}
 

@@ -147,8 +147,13 @@ class BlockDescriptionService
 	 * (fail-closed), matching the Marta-only direct caller; the cache passes its source in.
 	 *
 	 * @param array<string, true> $baselineBlockTypes block types of the published bound template, keyed lowercase.
-	 *        Lifting the EXCLUDED barrier is judged against them, so a reverse read-back of a published disabled
-	 *        block passes while authoring a new one does not. Empty (the default) lifts nothing.
+	 *        Lifting the EXCLUDED and the deprecated barrier is judged against them, so a reverse read-back of a
+	 *        published disabled or deprecated block passes while authoring a new one does not. Empty (the
+	 *        default) lifts nothing.
+	 * @param array<string, mixed> $contextProperties values the block is described in the context of, applied
+	 *        over the ones its preset pins. Already resolved by the caller: what reaches this service is what
+	 *        the server decided to describe the block with, never a submitted value that has not been judged
+	 *        ({@see AgentBlockContextResolver} is where a value from an agent is admitted).
 	 *
 	 * @throws LoaderException
 	 */
@@ -158,6 +163,7 @@ class BlockDescriptionService
 		RequestSource $source = RequestSource::Marta,
 		array $baselineBlockTypes = [],
 		?string $presetId = null,
+		array $contextProperties = [],
 	): Result|BlockSettingsResult
 	{
 		if (!Loader::includeModule('bizproc'))
@@ -198,14 +204,32 @@ class BlockDescriptionService
 			return (new Result())->addError(new Error(Loc::getMessage('BIZPROCDESIGNER_BLOCK_DESCRIPTION_ERR_BLOCK_NOT_FOUND')));
 		}
 
+		// A deprecated type is out of the REST catalog (AgentBlockCatalogService offers neither its listing
+		// nor its detail), so writing one into a graph is refused on the same profile - otherwise the agent
+		// could not read the block it is nevertheless allowed to write. The published baseline is the one
+		// exception the source profile keeps: a block the bound template already published is read back
+		// verbatim (BRIEF § 7.2), so an unchanged graph still passes get -> validate -> save. Marta is left
+		// as it is: the barrier belongs to the profile of the external contour, not to the shared schema.
+		if (
+			$source === RequestSource::Rest
+			&& ActivityVisibilityFilter::isDeprecatedFromRaw($activity)
+			&& !isset($baselineBlockTypes[mb_strtolower($blockType)])
+		)
+		{
+			return (new Result())->addError(new Error(Loc::getMessage('BIZPROCDESIGNER_BLOCK_DESCRIPTION_ERR_BLOCK_NOT_FOUND')));
+		}
+
 		// Describing the block pinned to its preset is what fills its option lists: without them a CRM trigger
 		// cannot say which fields it allows. They are only there for a block the caller sent a presetId with;
 		// without one they stay empty and AgentSettingValueValidator::validateAgainstOptions returns at once.
+		// The preset is applied first and the context refines it: the context names values of this very block,
+		// so where both speak about one property the block is described as it actually stands.
 		$presetProperties = $this->metadataResolver->presetProperties($blockType, $presetId);
+		$describedProperties = array_replace($presetProperties, $contextProperties);
 		$result = $this->getActivityAiDescription(
 			$blockType,
 			$documentType,
-			$presetProperties === [] ? [] : ['Properties' => $presetProperties],
+			$describedProperties === [] ? [] : ['Properties' => $describedProperties],
 		);
 		if (!$result instanceof ActivityAiDescriptionResult)
 		{
@@ -232,6 +256,8 @@ class BlockDescriptionService
 			returnFields: $this->getReturnFields($activity),
 			describedTypes: (new BlockDescribedTypesResolver())->resolve($result->settings, $complexDetail),
 			skippedSettings: $result->skippedSettings,
+			carriedSettings: $result->carriedSettings,
+			settingConstraints: $result->settingConstraints,
 			nodeSettings: $this->resolveNodeSettings($activity),
 			complexDetail: $complexDetail,
 		));

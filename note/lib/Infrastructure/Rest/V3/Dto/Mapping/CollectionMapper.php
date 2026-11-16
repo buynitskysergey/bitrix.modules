@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Rest\V3\Dto\Mapping;
 
+use Bitrix\Note\Infrastructure\Rest\V3\Access\EntityState;
 use Bitrix\Note\Infrastructure\Rest\V3\Dto\CollectionItemDto;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Note\Internal\Access\PortalAdmin;
@@ -24,6 +25,7 @@ class CollectionMapper extends Mapper
 		'position',
 		'policyLevel',
 		'accessLevel',
+		'state',
 		'isArchived',
 		'createdBy',
 		'createdAt',
@@ -95,6 +97,7 @@ class CollectionMapper extends Mapper
 				'policyLevel' => $policies[(int)$entity->getId()] ?? CollectionPolicyResolver::POLICY_PRIVATE,
 				// A collection the caller cannot see never reaches the mapper, so the floor here is view.
 				'accessLevel' => $accessLevels[(int)$entity->getId()] ?? CollectionAccessService::ACCESS_CODE_VIEW,
+				'state' => $this->stateOf($entity)->value,
 				'isArchived' => (bool)$entity->getIsArchived(),
 				'createdBy' => (int)$entity->getCreatedBy(),
 				'createdAt' => $entity->getCreatedAt(),
@@ -109,6 +112,20 @@ class CollectionMapper extends Mapper
 		}
 
 		return $dto;
+	}
+
+	/**
+	 * Deletion outranks the archive: a base can be archived first and deleted afterwards, and what the
+	 * caller is holding then is a base in the recycle bin.
+	 */
+	private function stateOf(Collection $entity): EntityState
+	{
+		if ($entity->getTrashedAt() !== null)
+		{
+			return EntityState::Trashed;
+		}
+
+		return $entity->getIsArchived() ? EntityState::Archived : EntityState::Live;
 	}
 
 	/**

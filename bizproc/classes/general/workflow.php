@@ -291,7 +291,7 @@ class CBPWorkflow
 	public function reload(CBPActivity $rootActivity)
 	{
 		$this->rootActivity = $rootActivity;
-		$rootActivity->setWorkflow($this);
+		$this->goOnInOwnTestRunSession(fn() => $rootActivity->setWorkflow($this));
 
 		switch ($this->getWorkflowStatus())
 		{
@@ -350,7 +350,61 @@ class CBPWorkflow
 			throw new Exception("CanNotResumeInstance");
 		}
 
-		$this->run();
+		$this->goOnInOwnTestRunSession($this->run(...));
+	}
+
+	/**
+	 * A test run is loaded and goes on in a later hit - an event, a timer - where its session is not the current
+	 * one, so it traces into its own session only while it goes, and the session of the hit is given back.
+	 */
+	private function goOnInOwnTestRunSession(callable $continuation): void
+	{
+		$runSession = $this->findOwnTestRunSessionToRestore();
+		if ($runSession === null)
+		{
+			$continuation();
+
+			return;
+		}
+
+		$debugger = $this->runtime->makeDebugger();
+		$outerSession = $debugger->findDebugSession();
+		$debugger->restoreSession($runSession);
+
+		try
+		{
+			$continuation();
+		}
+		finally
+		{
+			$debugger->restoreSession($outerSession);
+			Bizproc\Internal\Container::getDebugSessionService()?->saveSession($runSession);
+		}
+	}
+
+	private function findOwnTestRunSessionToRestore(): ?Bizproc\Internal\Entity\Debugger\DebugSession
+	{
+		if ($this->rootActivity->getOwnTestRunContext() === null)
+		{
+			return null;
+		}
+
+		$currentSession = $this->runtime->getDebugSessionService()?->findDebugSession();
+		if ($currentSession?->getWorkflowId() === $this->getInstanceId())
+		{
+			return null;
+		}
+
+		$sessions = Bizproc\Internal\Container::getDebugSessionRepository()?->getByWorkflowId($this->getInstanceId()) ?? [];
+		foreach ($sessions as $session)
+		{
+			if ($session->isTestRun() && !$session->isEnded())
+			{
+				return $session;
+			}
+		}
+
+		return null;
 	}
 
 	public function save()
@@ -509,6 +563,11 @@ class CBPWorkflow
 	 * @param array $eventParameters - Event parameters.
 	 */
 	public function sendExternalEvent(string $eventName, array $eventParameters = []): void
+	{
+		$this->goOnInOwnTestRunSession(fn() => $this->receiveExternalEvent($eventName, $eventParameters));
+	}
+
+	private function receiveExternalEvent(string $eventName, array $eventParameters): void
 	{
 		$debugSessionService = $this->runtime->getDebugSessionService();
 
@@ -1082,7 +1141,9 @@ class CBPWorkflow
 			$this->publishNodeFilterResults($activity);
 
 			// After the document: the condition of a node may read a field of the very document it names.
-			if (!$this->isNodeConditionMet($activity))
+			// The picked node of a test run is not judged by a condition written for an event that never happened.
+			$isTestRunStartNode = $activity->getTestRunContext()?->isStartNode($activity) ?? false;
+			if (!$isTestRunStartNode && !$this->isNodeConditionMet($activity))
 			{
 				$skipReason = self::SKIP_REASON_CONDITION;
 			}
@@ -1208,6 +1269,13 @@ class CBPWorkflow
 	 * Fails closed: `MixedCondition` is a condition of the module, not an activity of the template, and a
 	 * portal missing it can evaluate no condition at all - running the node would ignore what the user
 	 * configured.
+	 *
+	 * A node that names a record of its own has its condition decided on that record here too, by the code the
+	 * check before the start decides it by ({@see Bizproc\Internal\Service\Activity\NodeConditionEvaluator}):
+	 * the document of the process is a pseudo-document carrying no field of the record, so the two verdicts
+	 * would otherwise diverge and an accepted node be skipped without publishing a single return. The
+	 * condition is decided again rather than remembered - the record may have changed since the start was
+	 * accepted, and the node then answers to it as it is now.
 	 */
 	private function isNodeConditionMet(CBPActivity $activity): bool
 	{
@@ -1219,9 +1287,30 @@ class CBPWorkflow
 			return true;
 		}
 
-		return $this->runtime->includeActivityFile('MixedCondition')
-			&& (new CBPMixedCondition($condition))->evaluate($activity)
-		;
+		if (!$this->runtime->includeActivityFile('MixedCondition'))
+		{
+			return false;
+		}
+
+		$mixedCondition = new CBPMixedCondition($condition);
+		if (!Bizproc\Internal\Service\Activity\ComplexActivityService::declaresConditionDocumentChannel($activity))
+		{
+			return $mixedCondition->evaluate($activity);
+		}
+
+		// Read off the root of the process before the evaluator puts the stub of the record in its place
+		// ({@see Bizproc\Activity\BaseTrigger::getEventData()} reads the very same property).
+		$parameters = new Bizproc\Activity\Trigger\TriggerParameters(
+			$this->rootActivity->{CBPDocument::PARAM_TRIGGER_EVENT_DATA} ?? [],
+		);
+
+		return (new Bizproc\Internal\Service\Activity\NodeConditionEvaluator())->isMet(
+			$mixedCondition,
+			$activity,
+			$parameters,
+			$this->getTemplateId(),
+			$this->getDocumentId(),
+		);
 	}
 
 	/**

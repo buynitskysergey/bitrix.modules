@@ -84,7 +84,10 @@ class PermissionsController extends Controller
 		// Tariff/tool gate before ACL: same denial as an ACL failure.
 		if ($this->createLicenseService()->isAccessBlocked())
 		{
-			$this->addError(new Error((string)(Loc::getMessage('NOTE_ACCESS_DENIED'))));
+			$this->addError(new Error(
+				(string)(Loc::getMessage('NOTE_ACCESS_DENIED')),
+				ErrorCodeDictionary::LICENSE_BLOCKED,
+			));
 
 			return false;
 		}
@@ -94,7 +97,10 @@ class PermissionsController extends Controller
 			return true;
 		}
 
-		$this->addError(new Error((string)(Loc::getMessage('NOTE_ACCESS_DENIED'))));
+		$this->addError(new Error(
+			(string)(Loc::getMessage('NOTE_ACCESS_DENIED')),
+			ErrorCodeDictionary::ACCESS_DENIED,
+		));
 
 		return false;
 	}

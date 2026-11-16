@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Bitrix\Note\Infrastructure\Controller;
 
+use Bitrix\Main\Command\Exception\CommandException;
 use Bitrix\Main\Engine\Controller;
 use Bitrix\Main\Error;
 use Bitrix\Main\Localization\Loc;
@@ -12,9 +13,12 @@ use Bitrix\Note\Infrastructure\Controller\ActionFilter;
 use Bitrix\Note\Internal\Access\AccessController;
 use Bitrix\Note\Internal\Access\ActionDictionary;
 use Bitrix\Note\Internal\Access\Service\CollectionAccessService;
+use Bitrix\Note\Internal\Access\Service\DocumentAccessService;
+use Bitrix\Note\Internal\Exceptions\CollectionNotWritableException;
 use Bitrix\Note\Internal\Model\Collection;
 use Bitrix\Note\Internal\Model\FavoriteTable;
 use Bitrix\Note\Internal\Repository\FavoriteRepository;
+use Bitrix\Note\Internal\Service\Collection\CollectionRestoreService;
 use Bitrix\Note\Public\Command\ArchiveCollectionCommand;
 use Bitrix\Note\Public\Command\CreateCollectionCommand;
 use Bitrix\Note\Public\Command\DeleteCollectionCommand;
@@ -135,9 +139,31 @@ class CollectionController extends Controller
 		return (new CollectionProvider())->getManageableShort($normalizedLimit);
 	}
 
-	public function moveAction(int $id, ?int $position = null): ?array
+	public function moveAction(
+		int $id,
+		?int $position = null,
+		?int $targetId = null,
+		?string $placement = null,
+	): ?array
 	{
 		if (!$this->assertGlobalCollectionCreateAccess())
+		{
+			return null;
+		}
+
+		// The order is portal-wide and guarded by the global right, but only bases the person sees
+		// may take part in it - the one being dragged and the neighbour it lands next to.
+		if (!$this->assertCollectionViewAccess($id))
+		{
+			return null;
+		}
+
+		if ($targetId !== null && !$this->assertCollectionViewAccess($targetId))
+		{
+			return null;
+		}
+
+		if (!$this->assertCollectionIsLive($id))
 		{
 			return null;
 		}
@@ -145,7 +171,11 @@ class CollectionController extends Controller
 		$userId = (int)$this->getCurrentUser()->getId();
 		try
 		{
-			$result = (new MoveCollectionCommand($id, $position, $userId))->run();
+			$command = $targetId === null || $placement === null
+				? new MoveCollectionCommand($id, $position, $userId)
+				: MoveCollectionCommand::nextTo($id, $targetId, $placement, $userId)
+			;
+			$result = $command->run();
 		}
 		catch (SystemException $e)
 		{
@@ -164,10 +194,42 @@ class CollectionController extends Controller
 			return null;
 		}
 
+		if (!$this->assertCollectionIsLive($id))
+		{
+			return null;
+		}
+
 		$userId = (int)$this->getCurrentUser()->getId();
 		try
 		{
 			$result = (new UpdateCollectionCommand($id, $name, $userId))->run();
+		}
+		catch (CommandException $e)
+		{
+			// The state of the base is a server-side ban, so a direct call by id gets a named
+			// refusal and not a generic failure.
+			if ($e->getPrevious() instanceof CollectionNotWritableException)
+			{
+				$this->addError(new Error(
+					(string)Loc::getMessage('NOTE_COLLECTION_UPDATE_READ_ONLY'),
+					'NOTE_COLLECTION_READ_ONLY',
+				));
+
+				return null;
+			}
+
+			$this->addError(new Error(Loc::getMessage('NOTE_COLLECTION_UPDATE_ERROR')));
+
+			return null;
+		}
+		catch (CollectionNotWritableException)
+		{
+			$this->addError(new Error(
+				(string)Loc::getMessage('NOTE_COLLECTION_UPDATE_READ_ONLY'),
+				'NOTE_COLLECTION_READ_ONLY',
+			));
+
+			return null;
 		}
 		catch (SystemException $e)
 		{
@@ -216,6 +278,11 @@ class CollectionController extends Controller
 			return false;
 		}
 
+		if (!$this->assertCollectionIsLive($id))
+		{
+			return false;
+		}
+
 		$userId = (int)$this->getCurrentUser()->getId();
 		try
 		{
@@ -231,9 +298,59 @@ class CollectionController extends Controller
 		return (bool)($result->getData()['success'] ?? false);
 	}
 
+	/**
+	 * The mirror of archiveAction, which had no pair: the header of an archived section offers
+	 * "open" and "unarchive", and the second had nothing to call. The lift itself is the one the
+	 * unarchiving of a document already goes through - a second path to the same state is exactly
+	 * what would eventually diverge.
+	 *
+	 * A base that was not archived is a success without an action, exactly as a repeated delete is.
+	 */
+	public function unarchiveAction(int $id): bool
+	{
+		if (!$this->assertCollectionModerateAccess($id))
+		{
+			return false;
+		}
+
+		// A base can be archived and trashed at once. Lifting it out of the archive while it lies in
+		// the bin would hand back a base nobody can reach: the way out of the bin is its own action.
+		if (!$this->assertCollectionIsLive($id))
+		{
+			return false;
+		}
+
+		$userId = (int)$this->getCurrentUser()->getId();
+		try
+		{
+			$result = (new CollectionRestoreService())->restore($id, $userId);
+		}
+		catch (SystemException)
+		{
+			$this->addError(new Error((string)Loc::getMessage('NOTE_COLLECTION_UNARCHIVE_ERROR')));
+
+			return false;
+		}
+
+		$collection = $result->getData()['collection'] ?? null;
+		if (!$collection instanceof Collection)
+		{
+			$this->addError(new Error((string)Loc::getMessage('NOTE_COLLECTION_UNARCHIVE_ERROR')));
+
+			return false;
+		}
+
+		return true;
+	}
+
 	public function getPermissionsAction(int $id): array
 	{
 		if (!$this->assertCollectionPermissionsAccess($id))
+		{
+			return [];
+		}
+
+		if (!$this->assertCollectionIsLive($id))
 		{
 			return [];
 		}
@@ -273,6 +390,11 @@ class CollectionController extends Controller
 			return null;
 		}
 
+		if (!$this->assertCollectionIsLive($id))
+		{
+			return null;
+		}
+
 		$result = CollectionAccessService::replaceCollectionPermissions(
 			$id,
 			$permissions,
@@ -298,6 +420,18 @@ class CollectionController extends Controller
 	private function assertGlobalCollectionCreateAccess(): bool
 	{
 		if (AccessController::getCurrent()->check(ActionDictionary::ACTION_NOTE_CREATE_COLLECTIONS))
+		{
+			return true;
+		}
+
+		$this->denyAccess();
+
+		return false;
+	}
+
+	private function assertCollectionViewAccess(int $collectionId): bool
+	{
+		if (CollectionAccessService::currentUserHasLevel($collectionId, CollectionAccessService::LEVEL_VIEW))
 		{
 			return true;
 		}
@@ -339,6 +473,31 @@ class CollectionController extends Controller
 		}
 
 		$this->denyAccess();
+
+		return false;
+	}
+
+	/**
+	 * Every action here belongs to the screen of a live knowledge base. A base in the recycle bin keeps
+	 * its access rows, so the level checks above go on passing for the people who moderate it - and
+	 * without this they would let a deleted base be renamed, reordered, archived or given a new access
+	 * list from a screen that is simply out of date. What the bin allows is decided in its own
+	 * controller, by its own right.
+	 */
+	private function assertCollectionIsLive(int $collectionId): bool
+	{
+		$state = DocumentAccessService::collectionState($collectionId);
+		// Only the bin is answered here. A base with no row at all is left to the action below, which
+		// already has its own answer for a name that points at nothing.
+		if ($state === null || !$state['trashed'])
+		{
+			return true;
+		}
+
+		$this->addError(new Error(
+			(string)Loc::getMessage('NOTE_COLLECTION_IN_RECYCLE_BIN'),
+			'NOTE_COLLECTION_IN_RECYCLE_BIN',
+		));
 
 		return false;
 	}
