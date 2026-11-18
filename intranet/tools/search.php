@@ -89,6 +89,14 @@ class CIntranetSearchConverters
 					case ".xlsx":
 						$parser = new CIntranetSearchConverter_xlsx;
 						$result = CIntranetSearchConverters::ProcessZipEntry($fs_absolute_path, "#^xl/sharedStrings.xml\$#", $parser);
+						$worksheets = CIntranetSearchConverters::ProcessZipEntry(
+							$fs_absolute_path,
+							"#^xl/worksheets/(.+)\\.xml\$#",
+							$parser,
+							"ParseWorksheetZip"
+						);
+						if($worksheets <> '')
+							$result .= "\n".$worksheets;
 						if($result)
 							$tags = CIntranetSearchConverters::ProcessZipEntry($fs_absolute_path, "#^docProps/core\\.xml\$#", $parser, "ParseTagsZip");
 						break;
@@ -289,6 +297,11 @@ class CIntranetSearchConverter_docx extends CIntranetSearchConverter
 
 class CIntranetSearchConverter_xlsx extends CIntranetSearchConverter
 {
+	const WORKSHEET_MAX_SIZE = 4194304;
+	const WORKSHEETS_MAX_SIZE = 8388608;
+
+	var $worksheets_size = 0;
+
 	function ParseDocZip($entry)
 	{
 		$content = "";
@@ -304,6 +317,77 @@ class CIntranetSearchConverter_xlsx extends CIntranetSearchConverter
 		}
 
 		return $content;
+	}
+
+	function ParseWorksheetZip($entry)
+	{
+		// The declared uncompressed size bounds the read, so oversized sheets are skipped before decompression.
+		$size = zip_entry_filesize($entry);
+		if($size > self::WORKSHEET_MAX_SIZE || $this->worksheets_size + $size > self::WORKSHEETS_MAX_SIZE)
+			return "";
+		$this->worksheets_size += $size;
+
+		$content = array();
+		$data = zip_entry_read($entry, $size);
+		if($data)
+		{
+			$this->Check_pcre_limit(strlen($data));
+			$cell_pattern = "#<(?:[\\w.-]+:)?c(?:\\s([^>]*?))?(?:/>|>(.*?)</(?:[\\w.-]+:)?c\\s*>)#s";
+			$offset = 0;
+			// Cells are matched one by one, so only the current cell is held besides the sheet itself.
+			while(preg_match($cell_pattern, $data, $cell, PREG_OFFSET_CAPTURE, $offset))
+			{
+				$offset = $cell[0][1] + strlen($cell[0][0]);
+				$text = $this->ParseWorksheetCell(
+					isset($cell[1]) ? $cell[1][0] : "",
+					isset($cell[2]) ? $cell[2][0] : ""
+				);
+				if($text !== null)
+					$content[] = $text;
+			}
+		}
+
+		return implode("\n", $content).($content ? "\n" : "");
+	}
+
+	function ParseWorksheetCell($attributes, $body)
+	{
+		if($body === "")
+			return null;
+
+		$type = "";
+		if(preg_match("#(?:^|\\s)t\\s*=\\s*(['\"])(.*?)\\1#s", $attributes, $type_match))
+			$type = $type_match[2];
+
+		if($type === "s")
+			return null;
+
+		if($type === "inlineStr")
+		{
+			if(preg_match_all($this->GetElementPattern("t"), $body, $texts))
+				return $this->DecodeXmlText(implode("", $texts[1]));
+		}
+		elseif(preg_match($this->GetElementPattern("v"), $body, $value))
+		{
+			return $this->DecodeXmlText($value[1]);
+		}
+
+		return null;
+	}
+
+	function GetElementPattern($name)
+	{
+		return "#<(?:[\\w.-]+:)?".$name."(?:\\s[^>]*)?(?<!/)>(.*?)</(?:[\\w.-]+:)?".$name."\\s*>#s";
+	}
+
+	function DecodeXmlText($text)
+	{
+		// Search consumers strip tags before decoding entities, so markup characters must stay escaped.
+		return htmlspecialchars(
+			html_entity_decode($text, ENT_QUOTES | ENT_XML1, "UTF-8"),
+			ENT_NOQUOTES | ENT_XML1 | ENT_SUBSTITUTE,
+			"UTF-8"
+		);
 	}
 
 	function ParseTagsZip($entry)

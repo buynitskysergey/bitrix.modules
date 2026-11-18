@@ -2,7 +2,7 @@
 
 return [
 	'value' => [
-		'task.add' => 'transaction',
+		'task.add' => 'task-add-transaction',
 		'task.update' => 'transaction',
 		'task.delete' => 'transaction',
 		'task.watch' => 'transaction',

@@ -1,0 +1,7 @@
+{
+    "defaultTableName": "b_transformer_command",
+    "installDirectoriesMapping": {
+        "install/components": "components",
+        "install/tools": "tools"
+    }
+}

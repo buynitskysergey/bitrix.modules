@@ -22,6 +22,7 @@ use Bitrix\Tasks\Internals\UserOption\Service\AutoMuteService;
 use Bitrix\Tasks\Onboarding\Promo\Repository\Cache\CacheInviteToMobileRepository;
 use Bitrix\Tasks\Onboarding\Promo\Repository\InviteToMobileRepositoryInterface;
 use Bitrix\Tasks\Replication\Replicator\RegularTemplateTaskReplicator;
+use Bitrix\Tasks\Scrum\Service\EntityService;
 use Bitrix\Tasks\V2\Internal\Access\Factory\ControllerFactory;
 use Bitrix\Tasks\V2\Internal\Access\Factory\ControllerFactoryInterface;
 use Bitrix\Tasks\V2\Internal\DI\Container;
@@ -32,6 +33,7 @@ use Bitrix\Tasks\V2\Internal\Integration\Disk\Repository\InMemoryDiskFileReposit
 use Bitrix\Tasks\V2\Internal\Integration\HumanResources\Repository\StructureRepository;
 use Bitrix\Tasks\V2\Internal\Integration\HumanResources\Repository\StructureRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Integration\Intranet\Service\AbsenceService;
+use Bitrix\Tasks\V2\Internal\Integration\Intranet\Service\UserRoleChecker;
 use Bitrix\Tasks\V2\Internal\Integration\Im\ChatNotification;
 use Bitrix\Tasks\V2\Internal\Integration\Im\ChatNotificationInterface;
 use Bitrix\Tasks\V2\Internal\Integration\Im\MessageSender;
@@ -105,6 +107,8 @@ use Bitrix\Tasks\V2\Internal\Repository\ReminderReadRepository;
 use Bitrix\Tasks\V2\Internal\Repository\ReminderReadRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\ReminderRepository;
 use Bitrix\Tasks\V2\Internal\Repository\ReminderRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\Mapper\StageMapper;
+use Bitrix\Tasks\V2\Internal\Repository\StageRepository;
 use Bitrix\Tasks\V2\Internal\Repository\StageRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\CheckListEntityRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\SubTaskRepositoryInterface;
@@ -131,8 +135,11 @@ use Bitrix\Tasks\V2\Internal\Repository\TaskStageRepository;
 use Bitrix\Tasks\V2\Internal\Repository\TaskStageRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\TaskTagRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\TaskUserOptionRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\Template\List\AccessCheckerFactory;
 use Bitrix\Tasks\V2\Internal\Repository\Template\ParentTemplateRepository;
 use Bitrix\Tasks\V2\Internal\Repository\Template\ParentTemplateRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\Template\ReadableTemplateRepository;
+use Bitrix\Tasks\V2\Internal\Repository\Template\ReadableTemplateRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\Template\RelatedTaskTemplateRepository;
 use Bitrix\Tasks\V2\Internal\Repository\Template\RelatedTaskTemplateRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\Template\SubTemplateRepository;
@@ -141,6 +148,8 @@ use Bitrix\Tasks\V2\Internal\Repository\Template\TemplateParameterRepository;
 use Bitrix\Tasks\V2\Internal\Repository\Template\TemplateParameterRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\Template\TemplatePermissionRepository;
 use Bitrix\Tasks\V2\Internal\Repository\Template\TemplatePermissionRepositoryInterface;
+use Bitrix\Tasks\V2\Internal\Repository\Template\TemplatePermissionCleanupRepository;
+use Bitrix\Tasks\V2\Internal\Repository\Template\TemplatePermissionCleanupRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\Template\TemplateReadRepository;
 use Bitrix\Tasks\V2\Internal\Repository\Template\TemplateReadRepositoryInterface;
 use Bitrix\Tasks\V2\Internal\Repository\Template\TemplateRecentRepository;
@@ -170,6 +179,8 @@ use Bitrix\Tasks\V2\Internal\Service\Esg\EgressInterface;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Ping\ChatMessagePing;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Ping\ForumCommentPing;
 use Bitrix\Tasks\V2\Internal\Service\Task\Action\Ping\PingActionInterface;
+use Bitrix\Tasks\V2\Internal\Service\Task\Stage\StageCompatibilityService;
+use Bitrix\Tasks\V2\Internal\Service\UserRoleCheckerInterface;
 
 return [
 	'value' => [
@@ -241,6 +252,12 @@ return [
 		],
 		StageRepositoryInterface::class => [
 			'className' => InMemoryStageRepository::class,
+		],
+		StageCompatibilityService::class => [
+			'constructor' => static fn (): StageCompatibilityService => new StageCompatibilityService(
+				new StageRepository(new StageMapper()),
+				new EntityService(),
+			),
 		],
 		TemplateRepositoryInterface::class => [
 			'className' => InMemoryTemplateRepository::class,
@@ -401,17 +418,26 @@ return [
 		TemplateReadRepositoryInterface::class => [
 			'className' => TemplateReadRepository::class,
 		],
+		AccessCheckerFactory::class => [
+			'className' => AccessCheckerFactory::class,
+		],
 		TemplateTagRepositoryInterface::class => [
 			'className' => TemplateTagRepository::class,
 		],
 		TemplatePermissionRepositoryInterface::class => [
 			'className' => TemplatePermissionRepository::class,
 		],
+		TemplatePermissionCleanupRepositoryInterface::class => [
+			'className' => TemplatePermissionCleanupRepository::class,
+		],
 		TemplateRecentRepositoryInterface::class => [
 			'className' => TemplateRecentRepository::class,
 		],
 		SubTemplateRepositoryInterface::class => [
 			'className' => SubTemplateRepository::class,
+		],
+		ReadableTemplateRepositoryInterface::class => [
+			'className' => ReadableTemplateRepository::class,
 		],
 		AccessEntityRepositoryInterface::class => [
 			'className' => AccessEntityRepository::class,
@@ -451,6 +477,9 @@ return [
 		],
 		AbsenceService::class => [
 			'className' => AbsenceService::class,
+		],
+		UserRoleCheckerInterface::class => [
+			'className' => UserRoleChecker::class,
 		],
 		// endregion
 

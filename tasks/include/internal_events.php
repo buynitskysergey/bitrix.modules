@@ -13,6 +13,7 @@ use Bitrix\Tasks\Onboarding\Event\OnboardingCounterListener;
 use Bitrix\Tasks\Onboarding\Event\ExpiredSoonEventListener;
 use Bitrix\Tasks\Onboarding\Event\UpdateTaskEventListener;
 use Bitrix\Tasks\Onboarding\Event\ViewTaskEventListener;
+use Bitrix\Tasks\Replication\EventHandler\OnTaskCompleted\AfterCompletionReplicationHandler;
 use Bitrix\Tasks\V2\Internal\EventHandler\AccessRequest;
 use Bitrix\Tasks\V2\Internal\EventHandler\Reminder;
 
@@ -105,6 +106,20 @@ $eventManager->addEventHandler(
 		$after = $event->getParameter('after');
 
 		Reminder::onTaskUpdate($before, $after);
+	}
+);
+// endregion
+
+// region regular after_completion
+$eventManager->addEventHandler(
+	'tasks',
+	'onTaskUpdateInternal',
+	static function (Event $event): void
+	{
+		$before = $event->getParameter('before');
+		$after = $event->getParameter('after');
+
+		AfterCompletionReplicationHandler::onTaskUpdate($before, $after);
 	}
 );
 // endregion

@@ -18,6 +18,7 @@ use Bitrix\Mail\Integration\UI\EntitySelector\MassConnectUserProvider;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailUserRecipientAppearanceFilter;
 use Bitrix\Mail\Integration\UI\EntitySelector\MailCrmRecipientAppearanceFilter;
 use Bitrix\Mail\Integration\UI\EntitySelector\DiscussInChatAppearanceFilter;
+use Bitrix\Mail\Public\Features\Bitrix24MailFeature;
 use Bitrix\Mail\Public\Features\MailboxAvatarFeature;
 use Bitrix\Mail\Public\Features\MobileMessageDarkThemeFeature;
 use Bitrix\Mail\Public\Features\SenderAvatarFeature;
@@ -50,6 +51,7 @@ return array(
 			MailboxAvatarFeature::class,
 			MobileMessageDarkThemeFeature::class,
 			SenderAvatarFeature::class,
+			Bitrix24MailFeature::class,
 		],
 		'readonly' => true,
 	],

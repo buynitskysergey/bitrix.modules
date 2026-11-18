@@ -293,7 +293,8 @@ $arJSCoreConfig = array(
 			return array(
 				'lang_additional' => array(
 					'phone_number_default_country' => \Bitrix\Main\PhoneNumber\Parser::getDefaultCountry(),
-					'user_default_country' => \Bitrix\Main\PhoneNumber\Parser::getUserDefaultCountry()
+					'user_default_country' => \Bitrix\Main\PhoneNumber\Parser::getUserDefaultCountry(),
+					'phone_number_metadata_url' => \CUtil::GetAdditionalFileURL('/bitrix/js/main/phonenumber/metadata.json'),
 				)
 			);
 		},
@@ -438,7 +439,7 @@ $arJSCoreConfig = array(
 		'/bitrix/js/main/pageobject/dist/pageobject.bundle.js',
 		'/bitrix/js/main/core/core.js',
 		'/bitrix/js/main/core/core_tooltip.js',
-		'/bitrix/js/main/date/main.date.js',
+		'/bitrix/js/main/date/dist/main.date.bundle.js',
 		'/bitrix/js/main/core/core_date.js',
 		'/bitrix/js/main/core/core_timer.js',
 		'/bitrix/js/main/core/core_window.js',

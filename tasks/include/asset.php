@@ -3,7 +3,12 @@
 use Bitrix\Main\Page\Asset;
 
 $assetRoot = '/bitrix/js/tasks/';
-$langRoot = BX_ROOT . '/modules/tasks/lang/' . LANGUAGE_ID . '/';
+
+$deferLanguageFile = static function (string $moduleRelativePath): callable {
+	$languageFile = BX_ROOT . '/modules/tasks/' . $moduleRelativePath;
+
+	return static fn (): array => ['lang' => $languageFile];
+};
 
 $assets = [
 	// basic asset, contains widely used phrases and js-stuff required everywhere
@@ -20,7 +25,7 @@ $assets = [
 		'css' => [
 			$assetRoot . 'css/media.css',
 		],
-		'lang' => $langRoot . 'include.php',
+		'oninit' => $deferLanguageFile('include.php'),
 		'rel' => ['ui.design-tokens'],
 		'bundle_js' => 'tasks',
 	],
@@ -42,7 +47,7 @@ $assets = [
 			$assetRoot . 'css/media.css',
 		],
 		'rel' => ['core', 'ui.design-tokens'],
-		'lang' => $langRoot . 'include.php',
+		'oninit' => $deferLanguageFile('include.php'),
 	],
 	// widget asset, allows creating widget-based js-controls
 	[
@@ -75,7 +80,7 @@ $assets = [
 			$assetRoot . 'util/query.js',
 		],
 		'rel' => ['tasks_util_base', 'ajax'],
-		'lang' => $langRoot . '/include/assets/query.php',
+		'oninit' => $deferLanguageFile('include/assets/query.php'),
 	],
 	// asset that implements an interface for page rounting
 	[
@@ -187,7 +192,7 @@ $assets = [
 			$assetRoot . 'scheduler/printer.js',
 			$assetRoot . 'scheduler/print-settings.js',
 		],
-		'lang' => $langRoot . 'scheduler/timeline.php',
+		'oninit' => $deferLanguageFile('scheduler/timeline.php'),
 		'css' => [
 			$assetRoot . 'css/gantt.css',
 			$assetRoot . 'scheduler/css/print-settings.css',
@@ -227,7 +232,7 @@ $assets = [
 			'dnd',
 			'task_scheduler',
 		],
-		'lang' => $langRoot . 'gantt.php',
+		'oninit' => $deferLanguageFile('gantt.php'),
 		'bundle_js' => 'tasks_gantt',
 		'bundle_css' => 'tasks_gantt',
 	],
@@ -254,7 +259,7 @@ $assets = [
 			'date',
 			'tasks_integration_socialnetwork',
 		],
-		'lang' => $langRoot . 'kanban.php',
+		'oninit' => $deferLanguageFile('kanban.php'),
 		'bundle_js' => 'tasks_kanban',
 		'bundle_css' => 'tasks_kanban',
 	],
@@ -287,7 +292,7 @@ $assets = [
 			$assetRoot . 'css/task-info-popup.css',
 		],
 		'rel' => ['ui.design-tokens', 'popup', 'tasks_util'],
-		'lang' => $langRoot . 'task-info-popup.php',
+		'oninit' => $deferLanguageFile('task-info-popup.php'),
 	],
 	[
 		'code' => 'task_popups',
@@ -298,7 +303,14 @@ $assets = [
 			$assetRoot . 'css/task-popups.css',
 		],
 		'rel' => ['ui.design-tokens', 'popup', 'ui.a11y'],
-		'lang' => $langRoot . 'task-popups.php',
+		'oninit' => $deferLanguageFile('task-popups.php'),
+	],
+	[
+		'code' => 'task-popups',
+		'js' => $assetRoot . 'task-popups.js',
+		'css' => $assetRoot . 'css/task-popups.css',
+		'rel' => ['ui.design-tokens', 'popup', 'ui.a11y'],
+		'oninit' => $deferLanguageFile('task-popups.php'),
 	],
 	[
 		'code' => 'CJSTask',
@@ -340,3 +352,5 @@ foreach ($assets as $asset)
 		$asset
 	);
 }
+
+return $assets;

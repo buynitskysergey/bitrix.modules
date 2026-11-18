@@ -5,6 +5,8 @@ IncludeModuleLangFile(__FILE__);
 // Compose string in compliance with selected type of condition
 function ConditionCompose($arRequest, $type)
 {
+	global $USER;
+
 	if ($type == 'folder' && $arRequest['CONDITION_folder'] <> '')
 	{
 		$cond = 'CSite::InDir(\'' . addslashes($arRequest['CONDITION_folder']) . '\')';
@@ -33,7 +35,7 @@ function ConditionCompose($arRequest, $type)
 	{
 		$cond = 'false';
 	}
-	elseif ($type == 'php')
+	elseif ($type === 'php' && $USER->CanDoOperation('edit_php'))
 	{
 		$cond = $arRequest['CONDITION_php'];
 	}

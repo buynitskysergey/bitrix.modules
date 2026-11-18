@@ -64,6 +64,11 @@ return [
 			'intranet.service.otp.scenario' => [
 				'className' => \Bitrix\Intranet\Public\Service\Otp\OtpScenarioService::class,
 			],
+			'intranet.service.otp.messenger_confirmation' => [
+				'constructor' => static function () {
+					return \Bitrix\Intranet\Internal\Factory\Otp\MessengerConfirmationFactory::create();
+				},
+			],
 			'intranet.repository.iblock.department' => [
 				'className' => \Bitrix\Intranet\Repository\IblockDepartmentRepository::class,
 			],

@@ -6,6 +6,7 @@ use Bitrix\Disk\Document\DocumentHandlersManager;
 use Bitrix\Disk\Document\Flipchart\DualMode;
 use Bitrix\Disk\Document\OnlyOffice;
 use Bitrix\Disk\Document\Vibeoffice;
+use Bitrix\Disk\Document\Vibeoffice\Logging\SafeEventLogger;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\CapabilitiesGetMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\ChangesListMethodProvider;
 use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\ContentGetMethodProvider;
@@ -16,9 +17,13 @@ use Bitrix\Disk\Infrastructure\Rest\V3\Documentation\Sync\StateCheckMethodProvid
 use Bitrix\Disk\Integration\Bitrix24Manager;
 use Bitrix\Disk\Integration\HumanResources\TeamDirectory;
 use Bitrix\Disk\Integration\Ui\EntitySelector\FileProvider;
+use Bitrix\Disk\Integration\Collab\CollabDocumentCreationService;
+use Bitrix\Disk\Integration\Collab\CollabService;
 use Bitrix\Disk\Integration\Ui\EntitySelector\SpecialAccessProvider;
 use Bitrix\Disk\Internal\Entity\CustomServers\OnlyOfficeCustomServer;
 use Bitrix\Disk\Internal\Entity\CustomServers\R7CustomServer;
+use Bitrix\Disk\Internal\Integration\Bizproc\ManualStartCapabilities;
+use Bitrix\Disk\Internal\Integration\Bizproc\PilotStartFormParameters;
 use Bitrix\Disk\Internal\Interface\CustomServerDataRepositoryInterface;
 use Bitrix\Disk\Internal\Interface\TeamDirectoryInterface;
 use Bitrix\Disk\Internal\Messenger\Audit\AuditReceiver;
@@ -92,7 +97,9 @@ use Bitrix\Disk\Internals\DeletedLogManager;
 use Bitrix\Disk\Internals\DeletionNotifyManager;
 use Bitrix\Disk\Integration\AiAssistant\ToolSet\DiskToolSet;
 use Bitrix\Disk\Internals\Runtime\StorageRuntimeCache;
+use Bitrix\Disk\Public\Contract\FormatPolicy\UploadFormatPolicyInterface;
 use Bitrix\Disk\Public\Provider\RestrictionsAvailabilityProvider;
+use Bitrix\Disk\Public\Provider\UploadFormatPolicyProvider;
 use Bitrix\Disk\QuickAccess;
 use Bitrix\Disk\QuickAccess\Config\ConfigInterface;
 use Bitrix\Disk\QuickAccess\FileInfo\DiskProvider;
@@ -108,11 +115,16 @@ use Bitrix\Disk\UrlManager;
 use Bitrix\Disk\TrackedObjectManager;
 use Bitrix\Main\Application;
 use Bitrix\Main\Data\ManagedCache;
+use Bitrix\Main\Config;
 use Bitrix\Main\Data\Storage\PersistentStorageInterface;
 use Bitrix\Main\DI\ServiceLocator;
 use Bitrix\Main\Engine\CurrentUser;
 use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\Diag\EventLogger;
+use Bitrix\Main\Diag\FileLogger;
+use Bitrix\Main\Diag\Logger;
 use Bitrix\Main\Diag\LoggerFactory;
+use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
 $supportedOnlyOfficeVersions = [
@@ -125,6 +137,91 @@ $supportedR7Versions = [
 ];
 
 $supportedOnlyOfficeAndR7Versions = array_merge($supportedOnlyOfficeVersions, $supportedR7Versions);
+
+$vibeofficeLoggers = [];
+$vibeofficeLoggerServices = [];
+foreach ([
+	'open' => 'OPEN',
+	'webhook' => 'WEBHOOK',
+	'state' => 'STATE',
+	'protocol' => 'PROTOCOL',
+	'finalizer' => 'FINALIZER',
+	'editslot' => 'EDITSLOT',
+	'component' => 'COMPONENT',
+	'maintenance' => 'MAINTENANCE',
+] as $area => $auditType)
+{
+	$id = 'disk.vibeoffice.' . $area;
+	$vibeofficeLoggers[$id] = [
+		'constructor' => static function() use ($auditType): LoggerInterface {
+			if (defined('LOG_FILENAME') && is_string(LOG_FILENAME) && trim(LOG_FILENAME) !== '')
+			{
+				return new FileLogger(LOG_FILENAME, 0);
+			}
+
+			return new SafeEventLogger('disk', 'DISK_VIBEOFFICE_' . $auditType);
+		},
+		'level' => defined('LOG_FILENAME') && is_string(LOG_FILENAME) && trim(LOG_FILENAME) !== ''
+			? 'info'
+			: 'warning',
+	];
+	$vibeofficeLoggerServices[$id] = [
+		'constructor' => static function() use ($id, $auditType): LoggerInterface {
+			try
+			{
+				$module = Config\Configuration::getInstance('disk')->get('loggers');
+				$global = Config\Configuration::getValue('loggers');
+				$config = is_array($module) ? ($module[$id] ?? null) : null;
+				$override = is_array($global) ? ($global[$id] ?? []) : [];
+				$override = is_array($override) ? $override : [];
+				if (!is_array($config)
+					|| ($config['enabled'] ?? true) === false
+					|| ($override['enabled'] ?? true) === false)
+				{
+					return new NullLogger();
+				}
+
+				$sinkOverridden = isset($override['className']) || isset($override['constructor']);
+				if ($sinkOverridden)
+				{
+					unset($config['className'], $config['constructor'], $config['constructorParams']);
+				}
+				$config = array_replace($config, $override);
+				if ($sinkOverridden && !isset($override['level']))
+				{
+					unset($config['level']);
+				}
+				$logger = (new LoggerFactory(false, configuration: [$id => $config]))->createById(
+					$id,
+					isCheckEnabledFromRegistry: false,
+					returnDefaultLoggerIfNotExists: false,
+				);
+				if ($sinkOverridden && !isset($override['level']) && $logger instanceof Logger)
+				{
+					if ($logger instanceof EventLogger)
+					{
+						$logger->setLevel('warning');
+					}
+					elseif ($logger instanceof FileLogger)
+					{
+						$logger->setLevel('info');
+					}
+				}
+
+				if ($logger instanceof EventLogger)
+				{
+					return SafeEventLogger::fromEventLogger($logger, 'DISK_VIBEOFFICE_' . $auditType);
+				}
+
+				return $logger instanceof LoggerInterface ? $logger : new NullLogger();
+			}
+			catch (\Throwable)
+			{
+				return new NullLogger();
+			}
+		},
+	];
+}
 
 return [
 	'aiassistant.marta' => [
@@ -171,6 +268,7 @@ return [
 	],
 	'services' => [
 		'value' => [
+			...$vibeofficeLoggerServices,
 			'disk.onlyofficeConfiguration' => [
 				'className' => OnlyOffice\Configuration::class,
 			],
@@ -289,6 +387,16 @@ return [
 				'constructor' => static function() {
 					return new PresenceService(
 						presenceAccessService: ServiceLocator::getInstance()->get(PresenceAccessService::class),
+					);
+				},
+			],
+			CollabService::class => [
+				'className' => CollabService::class,
+			],
+			CollabDocumentCreationService::class => [
+				'constructor' => static function() {
+					return new CollabDocumentCreationService(
+						collabService: ServiceLocator::getInstance()->get(CollabService::class),
 					);
 				},
 			],
@@ -449,6 +557,9 @@ return [
 				'constructor' => static function () {
 					return ServiceLocator::getInstance()->get(FormatPolicyService::class);
 				},
+			],
+			UploadFormatPolicyInterface::class => [
+				'className' => UploadFormatPolicyProvider::class,
 			],
 			// One index per hit: it keeps the rules it has read for the rest of the request.
 			FormatPolicyRuleIndex::class => [
@@ -653,7 +764,22 @@ return [
 					);
 				},
 			],
+			// What the installed bizproc offers to a manual start from disk; a test replaces it to play an older one.
+			ManualStartCapabilities::class => [
+				'className' => ManualStartCapabilities::class,
+			],
+			PilotStartFormParameters::class => [
+				'constructor' => static function () {
+					return new PilotStartFormParameters(
+						ServiceLocator::getInstance()->get(ManualStartCapabilities::class),
+					);
+				},
+			],
 		],
+		'readonly' => true,
+	],
+	'loggers' => [
+		'value' => $vibeofficeLoggers,
 		'readonly' => true,
 	],
 	'b24documents' => [

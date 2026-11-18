@@ -18,6 +18,9 @@ return array(
 			'documentgenerator.integration.intranet.binding.codeBuilder' => [
 				'className' => '\\Bitrix\\DocumentGenerator\\Integration\\Intranet\\Binding\\CodeBuilder',
 			],
+			'documentgenerator.dataProviderManager.pressurePolicy' => [
+				'className' => '\\Bitrix\\DocumentGenerator\\Retention\\MemoryLimitPressurePolicy',
+			],
 		],
 		'readonly' => true,
 	],

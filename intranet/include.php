@@ -2,6 +2,11 @@
 
 use Bitrix\Main\ModuleManager;
 
+if (is_dir(__DIR__ . '/dev'))
+{
+	\Bitrix\Main\Loader::registerNamespace('Bitrix\\Intranet\\Controller\\Dev', __DIR__ . '/dev');
+}
+
 if (!ModuleManager::isModuleInstalled('iblock'))
 {
 	return false;

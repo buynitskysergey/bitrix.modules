@@ -1,15 +1,18 @@
 <?php
 
 use Bitrix\Disk\Configuration;
+use Bitrix\Disk\Config\Feature\VibeofficeAdministrationFlag;
 use Bitrix\Disk\Document\BoardsHandler;
 use Bitrix\Disk\Document\DocumentHandlersManager;
 use Bitrix\Disk\Document\OnlyOffice;
 use Bitrix\Disk\Document\Flipchart;
 use Bitrix\Disk\Document\OnlyOffice\OnlyOfficeHandler;
+use Bitrix\Disk\Document\Vibeoffice;
 use Bitrix\Disk\Internal\Entity\CustomServers\CustomServerCollection;
 use Bitrix\Disk\Public\Command\ChangeDefaultViewerServiceCommand;
 use Bitrix\Disk\Public\Provider\CustomServerAvailabilityProvider;
 use Bitrix\Main\DI\ServiceLocator;
+use Bitrix\Main\Config\Feature;
 use Bitrix\Main\Localization\Loc;
 use Bitrix\Disk\ZipNginx;
 use Bitrix\Main\ModuleManager;
@@ -25,6 +28,7 @@ IncludeModuleLangFile(__FILE__);
 Extension::load([
 	'popup',
 	'loader',
+	'main.date',
 	'disk.b24-documents-client-registration',
 	'disk.b24-boards-client-registration',
 	'disk.admin-custom-servers',
@@ -62,28 +66,24 @@ if(\Bitrix\Main\Loader::includeModule('disk'))
 	$arDefaultValues['default']['default_viewer_service'] = Configuration::getDefaultViewerServiceCode();
 	$noticeBlock['default_viewer_service'] = Loc::getMessage("DISK_TRANSFORM_FILES_EXTERNAL_SERVICES_NOTICE");
 
-	if (!OnlyOfficeHandler::isEnabled(true))
+	$cloudConfiguration = new OnlyOffice\Configuration();
+	$storedCloudRegistrationData = $cloudConfiguration->getStoredCloudRegistrationData();
+	if (!$storedCloudRegistrationData && !OnlyOfficeHandler::isEnabled(true))
 	{
 		$labelButton = Loc::getMessage('DISK_SETTINGS_B24_DOCS_REGISTER_BUTTON', ['#NAME#' => OnlyOfficeHandler::getName()]);
 		$notices['default_viewer_service'] = '<input type="button" id="registerBitrix24Docs" name="registerBitrix24Docs" value="' . $labelButton . '" class="adm-btn-save">';
 	}
-	else
+	elseif ($storedCloudRegistrationData)
 	{
-		$limitValue = null;
-		$cloudConfiguration = new OnlyOffice\Configuration();
-		$cloudRegistrationData = $cloudConfiguration->getCloudRegistrationData();
+		$labelButton = Loc::getMessage('DISK_SETTINGS_B24_DOCS_UNREGISTER_BUTTON', ['#NAME#' => OnlyOfficeHandler::getName()]);
+		$notices['default_viewer_service'] = '<input type="button" id="unregisterBitrix24Docs" name="unregisterBitrix24Docs" value="' . $labelButton . '" class="adm-btn">';
+	}
 
-		if ($cloudRegistrationData)
-		{
-			$labelButton = Loc::getMessage('DISK_SETTINGS_B24_DOCS_UNREGISTER_BUTTON', ['#NAME#' => OnlyOfficeHandler::getName()]);
-			$notices['default_viewer_service'] = '<input type="button" id="unregisterBitrix24Docs" name="unregisterBitrix24Docs" value="' . $labelButton . '" class="adm-btn">';
-			$limitValueResult = (new OnlyOffice\Cloud\LimitInfo($cloudRegistrationData['serverHost']))->getClientLimit();
-			if ($limitValueResult->isSuccess())
-			{
-				$limitValue = $limitValueResult->getData()['limit'] ?? null;
-			}
-		}
-
+	$cloudRegistrationData = $cloudConfiguration->getCloudRegistrationData();
+	if ($cloudRegistrationData)
+	{
+		$limitValueResult = (new OnlyOffice\Cloud\LimitInfo($cloudRegistrationData['serverHost']))->getClientLimit();
+		$limitValue = $limitValueResult->isSuccess() ? ($limitValueResult->getData()['limit'] ?? null) : null;
 		if ($limitValue)
 		{
 			$noticeBlock['default_viewer_service'] = Loc::getMessage('DISK_SETTINGS_B24_DOCS_LIMIT_INFO', ['#limit#' => $limitValue]) . "<br> " . $noticeBlock['default_viewer_service'];
@@ -243,6 +243,17 @@ if($_SERVER["REQUEST_METHOD"]=="POST" && ($_POST['Update'] || $_POST['Apply'] ||
 }
 
 
+$vibeofficeState = class_exists(Feature::class) && Feature::isEnabled(VibeofficeAdministrationFlag::class)
+	? (new Vibeoffice\Box\ConnectionService())->getState()
+	: null
+;
+$showVibeofficeConnection = $vibeofficeState !== null && $vibeofficeState['box'];
+$manualVibeofficeCredentialsReadable = $showVibeofficeConnection
+	&& !$vibeofficeState['managed']
+	&& (new Vibeoffice\Configuration())->hasReadableCredentials()
+;
+
+
 $tabControl->Begin();
 ?>
 <form
@@ -338,6 +349,14 @@ HTML;
 		</tr>
 	<? endif; ?>
 	<?endforeach?>
+<?php if ($showVibeofficeConnection): ?>
+	<tr class="heading">
+		<td colspan="2"><?= htmlspecialcharsbx(Loc::getMessage('DISK_SETTINGS_VIBEOFFICE_BOX_TITLE')) ?></td>
+	</tr>
+	<tr>
+		<td colspan="2"><div id="disk-vibeoffice-box-connection"></div></td>
+	</tr>
+<?php endif; ?>
 <?php
 if ($isCustomServersAvailable)
 {
@@ -415,6 +434,28 @@ if ($isCustomServersAvailable)
 
 		BX.Disk.Admin.CustomServers.init(<?= Json::encode($isCustomServersAvailableForEdit) ?>);
 		BX.UI.Hint.init(BX('settingsForm'));
+
+		<?php if ($showVibeofficeConnection): ?>
+		const vibeofficeState = <?= Json::encode($vibeofficeState) ?>;
+		const renderVibeofficePanel = servers => {
+			new BX.Disk.B24Documents.VibeofficeConnectionPanel({
+				container: BX('disk-vibeoffice-box-connection'),
+				initialState: vibeofficeState,
+				manualCredentialsReadable: <?= Json::encode($manualVibeofficeCredentialsReadable) ?>,
+				servers,
+			}).render();
+		};
+		if (vibeofficeState.hasStoredRegistration)
+		{
+			renderVibeofficePanel([]);
+		}
+		else
+		{
+			BX.ajax.runAction('disk.api.integration.b24documents.listAllowedServers')
+				.then(response => renderVibeofficePanel(response.data.servers))
+				.catch(() => renderVibeofficePanel([]));
+		}
+		<?php endif; ?>
 	});
 
 </script>
